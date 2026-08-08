@@ -71,9 +71,9 @@ shipment rules below.
 JOB 2 is the re-check list above (empty if none). Combine JOB 1 and JOB 2 entries into "items".
 
 SHIPMENT RULES (apply to every order-details page):
-- An order can split into multiple fulfillment groups. Physical shipments are labeled "Shipment One",
-  "Shipment Two", "Shipment Three", etc. Each has its OWN status, tracking number, tracking link, and
-  estimated/actual delivery date.
+- An order can split into multiple fulfillment groups. Each physical shipment has its OWN status,
+  tracking number, tracking link, and estimated/actual delivery date. Whatever heading Best Buy prints
+  above a group (if any), ignore it and use the numbering rule below instead.
 - IGNORE digital items entirely — do NOT output any entry for them. A group is digital if it is labeled
   "Digital Item ..." or shows "Digital Delivery" / "Ready to Redeem" / a redemption key/code, or the
   line shows $0.00 as a digital delivery. Digital items are never resold, so skip them completely.
@@ -81,15 +81,20 @@ SHIPMENT RULES (apply to every order-details page):
   appears more than once inside ONE shipment, do NOT create duplicate rows — output a single entry for
   it with quantity = the total count in that shipment. Two shipments each containing the same product
   are still TWO separate entries (one per shipment), each with its own shipment label and tracking.
-- Set the shipment field to that group's label exactly as shown (e.g. "Shipment Two"). Every physical
-  entry for the order gets the tracking_number / tracking_url / delivery_date / status of ITS shipment.
+- Label EVERY physical shipment "Shipment 1", "Shipment 2", "Shipment 3", ... in top-to-bottom order,
+  INCLUDING a single-shipment order (its one shipment is "Shipment 1"). Do NOT copy Best Buy's own
+  wording — always use this numbering, so the same shipment gets the same label on every re-check and
+  updates its existing row instead of creating a duplicate. Skipped digital groups do not consume a
+  number: number only the physical shipments you actually output.
+- Every physical entry for the order gets the tracking_number / tracking_url / delivery_date / status
+  of ITS shipment.
 
 Fields for each entry:
 - retailer: "Best Buy"
 - order_id: the Best Buy order number (e.g. "BBY01-806123456789")
 - order_date: the date the order was placed, formatted exactly as YYYY-MM-DD
-- shipment: the fulfillment group's label for a physical shipment (e.g. "Shipment One"); if the order
-  has only a single physical shipment still record its label (e.g. "Shipment One")
+- shipment: "Shipment 1" / "Shipment 2" / ... — this shipment's number in top-to-bottom order (a
+  single-shipment order is "Shipment 1"). Never Best Buy's own wording.
 - status: judged from THIS shipment's status text:
     * "delivered" — the shipment says "Delivered" / "Delivered <date>"
     * "shipped"   — a tracking number/carrier is shown and it says "Shipped" / "Arriving <date>" /
@@ -110,11 +115,33 @@ Fields for each entry:
 - total_cost: order grand total, a number
 - card_last4: last 4 digits of the payment card, else ""
 
-For JOB 2 re-check entries ONLY, fill just order_id, order_date, item_name, shipment, status,
+For JOB 2 re-check entries ONLY, fill just retailer, order_id, order_date, item_name, shipment, status,
 tracking_number, tracking_url, delivery_date and leave the rest empty ("") — do not re-read
-address/costs.
+address/costs. Copy order_date and item_name EXACTLY as already recorded; they identify the existing
+row, so re-wording an item name creates a duplicate instead of updating it. A JOB 2 entry looks like
+this (note the empty fields — this shape, not the full one below):
 
-Respond with ONLY a single raw JSON object (no markdown code fences, no commentary) matching this shape:
+{{
+  "retailer": "Best Buy",
+  "order_id": "...",
+  "order_date": "YYYY-MM-DD",
+  "shipment": "Shipment 1",
+  "status": "ordered | shipped | delivered",
+  "order_url": "",
+  "tracking_number": "...",
+  "tracking_url": "...",
+  "delivery_date": "YYYY-MM-DD",
+  "delivery_address": "",
+  "item_name": "...",
+  "quantity": null,
+  "cost_per_item": null,
+  "shipping": null,
+  "total_cost": null,
+  "card_last4": ""
+}}
+
+Respond with ONLY a single raw JSON object (no markdown code fences, no commentary). JOB 1 entries use
+the full shape below; JOB 2 entries use the trimmed shape above:
 
 {{
   "logged_out": false,
@@ -123,7 +150,7 @@ Respond with ONLY a single raw JSON object (no markdown code fences, no commenta
       "retailer": "Best Buy",
       "order_id": "...",
       "order_date": "YYYY-MM-DD",
-      "shipment": "Shipment One",
+      "shipment": "Shipment 1",
       "status": "ordered | shipped | delivered",
       "order_url": "...",
       "tracking_number": "...",

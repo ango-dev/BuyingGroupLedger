@@ -75,11 +75,12 @@ part of the key so the *same* product in two different shipments stays on two di
 colliding. It's the last column so adding it doesn't disturb existing rows; older sheets are migrated
 automatically on the next sync.
 
-- **Best Buy** uses the page's own labels (`Shipment One`, `Shipment Two`, …), single shipment included.
-- **Amazon** numbers every shipment `Shipment 1`, `Shipment 2`, … (a single shipment is `Shipment 1`).
-  Amazon starts an order as one shipment and often **splits it into several when it ships**, so numbering
-  from the start means the original row updates in place (`Shipment 1`) and the newly-split shipments are
-  added as new rows.
+**Both retailers number shipments** `Shipment 1`, `Shipment 2`, … top-to-bottom, a single shipment
+included. Amazon starts an order as one shipment and often **splits it into several when it ships**, so
+numbering from the start means the original row updates in place (`Shipment 1`) and the newly-split
+shipments are added as new rows. Best Buy uses the same scheme deliberately: the label is part of the
+upsert key, so a label that varies between runs (the page's own wording isn't guaranteed to be stable,
+or present) would append a duplicate row instead of updating the existing one.
 
 **Re-check routing.** Both retailers re-check open orders through the **agent**, which re-reads the whole
 order-details page and reports every shipment. Amazon can add a shipment (with its own later delivery
@@ -143,6 +144,20 @@ Fill a profile's `proxy` in `profiles.json` (leave `profile_id` blank), then:
 
 It opens a live browser URL — log into the retailer(s) there, press Enter, and it saves the
 `profile_id` back into `profiles.json`. Re-run it any time to log back in if a session expires.
+
+### Tests
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest            # Windows: .venv\Scripts\python -m pytest
+```
+
+Fully offline and free — no credentials, no network, no Browser-Use run. They cover the parts that
+fail *silently* rather than loudly: column drift between `FIELDNAMES`/`HEADER` (rows are written
+positionally, so drift misaligns every row), the blank-preserving upsert, the delivered rollup, agent
+JSON parsing, status normalization, and prompt instructions that data integrity depends on. Behavior
+that only a real page can prove — selector accuracy, whether an order actually splits — still needs a
+live run.
 
 ---
 
@@ -239,15 +254,23 @@ scheduler on the new host. No re-login or re-sharing needed.
 
 **Open questions / smaller items**
 
-- `delivery_date` still stores the raw promise text ("Arriving Monday") rather than a `YYYY-MM-DD`
-  date — decide between parsing it or splitting it into two columns.
-- More retailers: Amazon Business, Walmart, Costco.
+- `delivery_date`: the prompts ask for `YYYY-MM-DD`, but the dormant CDP path writes the raw promise
+  text ("Arriving Monday") into the same field. No live exposure while that path stays disabled —
+  revisit only if it's ever re-enabled.
+- More retailers: Amazon Business (shares Amazon's tracking page), Walmart, Costco.
 - Optional delivery-watch cost optimization: revive the dormant CDP fast-path, or use a REST tracking
   API (17TRACK / TrackingMore) — verify Amazon Logistics TBA coverage before committing to one.
+  Currently shelved: reliability beat the saving once already.
 
 **Known wrinkle.** A *legacy* Amazon row written before the Shipment column existed (blank shipment)
 will orphan once if that order later splits: the agent emits `Shipment 1…` and the blank row goes stale
 and stays perpetually open. Only affects pre-migration rows; clear the test sheet if it shows up.
+
+**Recently done.** Offline test suite (`pytest`); `sync_csv_to_sheet` now derives its row from
+`FIELDNAMES` instead of a second hand-maintained copy, with a drift guard test; `status` is normalized
+to the known vocabulary (unknown values log a warning and fall back to `ordered` rather than aborting
+the run); Best Buy numbers shipments like Amazon instead of copying page wording; both prompts show a
+trimmed JOB 2 example so re-checks don't re-fill identity fields.
 
 ---
 
@@ -266,6 +289,7 @@ sheets/ledger_sync.py   Google Sheet upsert (safe partial refresh) + order-state
 output/csv_writer.py    per-run CSV
 alerts/notifier.py      email + Discord alerts
 buying_groups/          BFMR / MaxOutDeals API clients (placeholders)
+tests/                  offline pytest suite (no credentials/network needed)
 run.sh / run.ps1        scheduler entry points
 scripts/                create_profile, install_cron, install_task_windows
 Dockerfile / docker-compose.yml / docker/entrypoint.sh   containerized, self-scheduling

@@ -146,11 +146,34 @@ Fields for each entry:
 - card_last4: last 4 digits of the payment card, else ""
 
 For JOB 2 re-check entries ONLY, go to the order's details page, re-read EVERY shipment, and output one
-entry per (shipment x distinct physical item) with just order_id, order_date, item_name, shipment,
-status, tracking_number, tracking_url and delivery_date filled — leave the rest empty ("") and do not
-re-read address/costs. A single-shipment order is "Shipment 1".
+entry per (shipment x distinct physical item) with just retailer, order_id, order_date, item_name,
+shipment, status, tracking_number, tracking_url and delivery_date filled — leave the rest empty ("") and
+do not re-read address/costs. A single-shipment order is "Shipment 1". Copy order_date and item_name
+EXACTLY as already recorded; they identify the existing row, so re-wording an item name creates a
+duplicate instead of updating it. A JOB 2 entry looks like this (note the empty fields — this shape, not
+the full one below):
 
-Respond with ONLY a single raw JSON object (no markdown code fences, no commentary) matching this shape:
+{{
+  "retailer": "Amazon",
+  "order_id": "...",
+  "order_date": "YYYY-MM-DD",
+  "shipment": "Shipment 1",
+  "status": "ordered | shipped | delivered",
+  "order_url": "",
+  "tracking_number": "...",
+  "tracking_url": "...",
+  "delivery_date": "YYYY-MM-DD",
+  "delivery_address": "",
+  "item_name": "...",
+  "quantity": null,
+  "cost_per_item": null,
+  "shipping": null,
+  "total_cost": null,
+  "card_last4": ""
+}}
+
+Respond with ONLY a single raw JSON object (no markdown code fences, no commentary). JOB 1 entries use
+the full shape below; JOB 2 entries use the trimmed shape above:
 
 {{
   "logged_out": false,

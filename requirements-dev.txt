@@ -1,0 +1,5 @@
+# Test-only dependencies. Deliberately NOT in requirements.txt: the Docker image installs only
+# runtime deps, and nothing here is imported by the app.
+#   .venv\Scripts\pip install -r requirements-dev.txt   (Windows)
+#   .venv/bin/pip install -r requirements-dev.txt       (Linux)
+pytest>=8.0

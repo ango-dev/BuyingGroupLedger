@@ -6,11 +6,15 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 from config.settings import settings
+from models.order import FIELDNAMES
 
 log = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
+# Display names for the sheet's header row, positionally 1:1 with models.order.FIELDNAMES — rows are
+# written positionally from column A, so the two lists must stay the same length and order. Adding a
+# column means appending to BOTH, never inserting. tests/test_schema.py enforces this.
 HEADER = [
     "Retailer",
     "Profile",
@@ -102,29 +106,11 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     appends: list[list] = []
     with csv_path.open(newline="", encoding="utf-8") as f:
         for record in csv.DictReader(f):
-            sheet_row = [
-                _coerce(field, record[field])
-                for field in [
-                    "retailer",
-                    "profile_label",
-                    "order_id",
-                    "order_date",
-                    "status",
-                    "order_url",
-                    "tracking_number",
-                    "tracking_url",
-                    "delivery_date",
-                    "delivery_address",
-                    "item_name",
-                    "quantity",
-                    "cost_per_item",
-                    "shipping",
-                    "total_cost",
-                    "card_last4",
-                    "last_scraped_at",
-                    "shipment",
-                ]
-            ]
+            # Driven off FIELDNAMES (the same list csv_writer writes) rather than a second literal
+            # copy, so a new column can't land in one place and not the other. .get() tolerates
+            # re-syncing an older CSV written before a column was added — the missing value arrives
+            # blank, which _merge_row then refuses to write over existing data.
+            sheet_row = [_coerce(field, record.get(field, "")) for field in FIELDNAMES]
             key = (
                 record["order_id"],
                 record["order_date"],
