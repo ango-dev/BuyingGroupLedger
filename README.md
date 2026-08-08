@@ -217,6 +217,40 @@ scheduler on the new host. No re-login or re-sharing needed.
 
 ---
 
+## Roadmap / TODO
+
+**Next up**
+
+- **BFMR + MaxOutDeals integration.** `buying_groups/bfmr.py` and `maxoutdeals.py` are placeholders with
+  guessed endpoints and payload shapes — they need real API docs, keys, and auth. Then build
+  `sync_tracking.py`: read the ledger for rows that have a tracking number but aren't posted yet, match
+  by Order ID, POST the tracking to each platform, and mark the row posted.
+- **Event-driven re-checks from retailer emails.** Ingest Amazon / Best Buy shipped + delivered +
+  order-update emails (Gmail API or IMAP) to trigger a targeted re-check of just that order, instead of
+  or alongside the 6-hour poll. Faster status, fewer wasted agent runs.
+
+**Needs live validation**
+
+- **Best Buy**, against a real order — the scraper is written but has never run for real, because no
+  profile has `bestbuy` in its `retailers` list yet.
+- **The Amazon split lifecycle** — a single `Shipment 1` order, an agent re-check that catches the
+  ship-time split, `Shipment 1` updating in place while `Shipment 2/3` append, and the order staying
+  open until every shipment is delivered.
+
+**Open questions / smaller items**
+
+- `delivery_date` still stores the raw promise text ("Arriving Monday") rather than a `YYYY-MM-DD`
+  date — decide between parsing it or splitting it into two columns.
+- More retailers: Amazon Business, Walmart, Costco.
+- Optional delivery-watch cost optimization: revive the dormant CDP fast-path, or use a REST tracking
+  API (17TRACK / TrackingMore) — verify Amazon Logistics TBA coverage before committing to one.
+
+**Known wrinkle.** A *legacy* Amazon row written before the Shipment column existed (blank shipment)
+will orphan once if that order later splits: the agent emits `Shipment 1…` and the blank row goes stale
+and stays perpetually open. Only affects pre-migration rows; clear the test sheet if it shows up.
+
+---
+
 ## Project layout
 
 ```
