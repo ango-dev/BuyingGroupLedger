@@ -8,3 +8,6 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+
+# Claude Code personal permission allowlist (machine-local, not project config)
+.claude/settings.local.json
