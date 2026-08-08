@@ -34,30 +34,40 @@ flowchart TD
 Browser-Use bills mostly by **input tokens** — every agent step ships the whole page to the model.
 Because both jobs share one agent call per profile, more open orders add *steps*, not extra runs.
 
+Work is split by what each tool is actually good at. The **agent** sees *structure* — how many
+shipments an order has, which changes when it splits. **CDP + CSS selectors** read a known page
+cheaply — the tracking number, which Amazon shows only on a separate tracking page.
+
 ```mermaid
 flowchart LR
-    subgraph Per order over its lifetime
-      N[New order] -->|agent, first full extraction| O[ordered]
-      O -->|agent re-check| S[shipped / maybe split into shipments]
-      S -->|agent re-check| DEL[every shipment delivered]
+    subgraph Per shipment over its lifetime
+      N[New order] -->|agent: full extraction| O[ordered, no tracking #]
+      O -->|agent: re-read order details| O
+      O -->|CDP: read its tracking page| S[shipped, has tracking #]
+      S -->|CDP only - agent no longer involved| DEL[delivered]
       DEL -->|skipped forever| X[done]
     end
 ```
 
 - **New-order discovery + first extraction** → agent. A silently-broken selector here would mean a
   *permanently missed order* (missed reimbursement), so adaptability wins.
-- **Re-checking open orders** → also the agent, for **both** retailers. It re-reads each order's
-  details page and reports every shipment's current status / tracking / delivery date. This is
-  required because an order can **split into multiple shipments at ship time** (each with its own
-  delivery date), sometimes revealing a shipment late — a single cached tracking page can't see that.
+- **Re-checking whether an order split** → agent, but **only while some shipment still has no
+  tracking number**. Amazon splits an order into its final shipments *at ship time*, so once every
+  shipment is tracked the structure is settled and the agent stops being asked about that order.
+  It re-reads the order-details page only — it never opens tracking pages.
+- **Reading tracking numbers and watching for delivery** → CDP + selectors, **per shipment**. A split
+  order has one tracking page per shipment; each is read on its own. An empty selector escalates that
+  order to the agent rather than being reported as "not shipped".
 - **Delivered orders** → skipped entirely; an order counts as delivered only once **every** shipment
   row is delivered.
 
-> A cheap **CDP + CSS-selector** fast-path exists in the code (`scrapers/cdp.py`, `read_tracking_page`)
-> for narrow, stable delivery-watches, but it's **currently unused**: Amazon disables it
-> (`cdp_recheck_enabled = False`) because its orders can gain shipments after they look shipped, and
-> Best Buy hands off to carrier sites. It's retained for future retailers (e.g. Amazon Business, which
-> shares Amazon's tracking page).
+> **Best Buy uses no CDP**: it shows the tracking number on the order-details page, so the agent
+> already has it and a selector adds nothing. Only Amazon has the "number lives on another page"
+> problem, which is exactly what selectors are for.
+
+The next cheaper tier is a **REST tracking API** (17TRACK bills ~$0.024 per shipment *once*, then
+status polling is free) to replace the CDP delivery-watch. Gated on confirming it actually covers
+Amazon Logistics `TBA…` numbers — test that against the free quota before building it.
 
 ### Data model / Sheet columns
 

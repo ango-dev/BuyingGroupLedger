@@ -162,55 +162,65 @@ class BaseRetailerScraper(abc.ABC):
                 self._stop_underlying_browser(agent_session_id)
 
     def _recheck_via_cdp(self, open_orders: list[dict]) -> tuple[list[OrderItem], list[dict]]:
-        """Re-check undelivered orders cheaply via CDP + selectors (no LLM). Returns
-        (recheck_items, fallback_orders) — fallback_orders are ones CDP couldn't read, to be
-        handed to the agent. If this retailer doesn't implement read_tracking_page or CDP setup
-        fails, everything falls back to the agent.
+        """Read every open shipment's tracking page via CDP + selectors (no LLM).
+
+        Returns (items, agent_orders). `items` are per-shipment status/tracking rows.
+        `agent_orders` are orders the agent must still re-read: ones whose structure can change
+        (needs_agent — some shipment hasn't shipped, so the order can still split), plus any
+        order where a selector came back empty.
+
+        Iterates SHIPMENTS, not orders: an order that split has one tracking page per shipment,
+        each with its own status and delivery date. The previous version had a single URL per
+        order and so had to skip multi-shipment orders entirely.
         """
+        agent_orders = [o for o in open_orders if o.get("needs_agent")]
+        agent_ids = {o["order_id"] for o in agent_orders}
+
+        def to_agent(order: dict) -> None:
+            if order["order_id"] not in agent_ids:
+                agent_orders.append(order)
+                agent_ids.add(order["order_id"])
+
+        # Retailers with no cheap reader (no read_tracking_page override, or opted out) re-check
+        # entirely through the agent.
         if (
             not open_orders
             or not self.cdp_recheck_enabled
             or type(self).read_tracking_page is BaseRetailerScraper.read_tracking_page
         ):
-            return [], open_orders
+            return [], list(open_orders)
+
+        targets = [
+            (o, s)
+            for o in open_orders
+            for s in o.get("shipments", [])
+            if s["status"] != "delivered" and s.get("tracking_url")
+        ]
+        if not targets:
+            return [], agent_orders
 
         from scrapers.cdp import CdpBrowser
 
         items: list[OrderItem] = []
-        fallback: list[dict] = []
-        processed: set[str] = set()
+        done: set[tuple[str, str]] = set()
         try:
             with CdpBrowser(self.profile) as page:
-                for o in open_orders:
-                    processed.add(o["order_id"])
-                    shipments = o.get("shipments") or []
-                    # Only a single shipment that is already 'shipped' is safe for the cheap CDP
-                    # delivery-watch. Send everything else to the agent (which re-reads the whole
-                    # order-details page): multi-shipment orders need a per-shipment status, and a
-                    # still-'ordered' order can still SPLIT into several shipments when it ships —
-                    # CDP polling one tracking page would silently miss those new shipments.
-                    if len(shipments) > 1 or o.get("status") != "shipped":
-                        fallback.append(o)
-                        continue
-                    # Stamp the row with its known shipment label so the upsert updates in place
-                    # ("Shipment 1" for a labeled single order; "" for legacy pre-Shipment-column rows).
-                    shipment_label = shipments[0] if len(shipments) == 1 else ""
-                    url = o.get("tracking_url") or o.get("order_url")
-                    names = o.get("item_names") or []
-                    if not url or not names:
-                        fallback.append(o)
-                        continue
+                for o, s in targets:
+                    done.add((o["order_id"], s["shipment"]))
                     try:
-                        page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                        page.goto(s["tracking_url"], wait_until="domcontentloaded", timeout=90000)
                         page.wait_for_timeout(3000)
                         info = self.read_tracking_page(page)
                     except Exception:
-                        log.warning("CDP re-check failed for order %s; will fall back to agent.", o["order_id"], exc_info=True)
+                        log.warning(
+                            "CDP read failed for %s / %s; falling back to agent.",
+                            o["order_id"], s["shipment"], exc_info=True,
+                        )
                         info = None
                     if info is None:
-                        fallback.append(o)
+                        to_agent(o)
                         continue
-                    for name in names:
+                    for name in s["item_names"]:
                         items.append(
                             OrderItem(
                                 retailer=self.retailer_name,
@@ -219,25 +229,38 @@ class BaseRetailerScraper(abc.ABC):
                                 order_date=o.get("order_date", ""),
                                 status=info["status"],
                                 tracking_number=info["tracking_number"],
-                                tracking_url=url,
-                                delivery_date=info.get("delivery_promise", ""),
+                                tracking_url=s["tracking_url"],
+                                # Deliberately blank: the tracking page states a promise in prose
+                                # ("Arriving Monday"), not a date. Writing that here would clobber
+                                # the agent's YYYY-MM-DD with un-parseable text; blank preserves it
+                                # (see _merge_row).
+                                delivery_date="",
                                 item_name=name,
-                                shipment=shipment_label,
+                                shipment=s["shipment"],
                             )
                         )
-                    log.info("CDP re-check %s -> %s", o["order_id"], info["status"])
+                    log.info("CDP read %s / %s -> %s", o["order_id"], s["shipment"], info["status"])
         except Exception:
             log.warning("CDP browser unavailable; falling back to agent for open orders.", exc_info=True)
-            # anything not yet processed goes to the agent
-            return items, [o for o in open_orders if o["order_id"] not in processed] + fallback
-        return items, fallback
+            for o, s in targets:
+                if (o["order_id"], s["shipment"]) not in done:
+                    to_agent(o)
+            return items, agent_orders
+        return items, agent_orders
 
     def _load_order_state(self) -> dict:
-        """Recorded order state from the sheet for this profile (delivered ids + open orders). Fails soft."""
+        """Recorded order state from the sheet for this profile (delivered ids + open orders). Fails soft.
+
+        Delivered orders are trimmed to the discovery window: they exist only to tell the agent
+        "skip these", the agent never scans back past the window, and the skip list is re-sent on
+        every agent step — so carrying every order ever delivered would grow the per-step prompt
+        without bound.
+        """
         try:
             from sheets.ledger_sync import load_order_state
 
-            return load_order_state(self.profile.label)
+            _, earliest, _ = self._date_window()
+            return load_order_state(self.profile.label, since=earliest)
         except Exception:
             log.warning("Could not load order state; treating all orders as new.", exc_info=True)
             return {"delivered_ids": [], "open_orders": []}

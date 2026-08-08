@@ -95,11 +95,11 @@ Fields for each entry:
 - order_date: the date the order was placed, formatted exactly as YYYY-MM-DD
 - shipment: "Shipment 1" / "Shipment 2" / ... — this shipment's number in top-to-bottom order (a
   single-shipment order is "Shipment 1"). Never Best Buy's own wording.
-- status: judged from THIS shipment's status text:
+- status: judged from THIS shipment's status text on the order-details page:
     * "delivered" — the shipment says "Delivered" / "Delivered <date>"
-    * "shipped"   — a tracking number/carrier is shown and it says "Shipped" / "Arriving <date>" /
-      "Out for delivery" but not yet delivered
-    * "ordered"   — no tracking yet (e.g. "Preparing", "Order received", ready for pickup not shipped)
+    * "shipped"   — it says "Shipped" / "Arriving <date>" / "Out for delivery" but not yet delivered
+    * "ordered"   — not shipped yet (e.g. "Preparing", "Order received", or an in-store-pickup order
+      that is only ready for pickup)
 - order_url: the full URL of this order's details page (address bar URL while viewing it) — same for
   every shipment of the order
 - tracking_number: the carrier tracking number shown for THIS shipment; "" if not shipped yet
@@ -107,7 +107,7 @@ Fields for each entry:
   it EVEN IF not shipped yet when a link exists; leave "" if there is genuinely none.
 - delivery_date: estimated arrival date if "shipped", actual delivery date if "delivered" (YYYY-MM-DD);
   "" if only ordered
-- delivery_address: the shipping address for this shipment (for in-store pickup, the store address)
+- delivery_address: the shipping address for THIS shipment (for in-store pickup, the store address)
 - item_name: the product name/title of this line item
 - quantity: integer quantity of this product IN THIS SHIPMENT (preserve the count; see shipment rules)
 - cost_per_item: price per unit, a number (no currency symbol)

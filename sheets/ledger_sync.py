@@ -146,23 +146,48 @@ def _merge_row(existing_row: list, new_row: list) -> list:
     return merged
 
 
-def load_order_state(profile_label: str | None = None) -> dict:
+def _rollup_status(statuses: list[str]) -> str:
+    """Collapse several row statuses into one. Delivered only when everything is."""
+    if statuses and all(s == "delivered" for s in statuses):
+        return "delivered"
+    if any(s in ("shipped", "delivered") for s in statuses):
+        return "shipped"
+    return "ordered"
+
+
+def load_order_state(profile_label: str | None = None, since: str | None = None) -> dict:
     """Read the sheet and return, for this profile:
 
         {
-          "delivered_ids": [order_id, ...],   # terminal — skip entirely
-          "open_orders": [                     # undelivered (any age) — re-check directly
-            {order_id, order_date, order_url, tracking_url, item_names: [...], status},
+          "delivered_ids": [order_id, ...],    # terminal — skip entirely
+          "open_orders": [
+            {
+              order_id, order_date, order_url,
+              status,        # rolled up across shipments (display only)
+              needs_agent,   # some shipment has no tracking number yet -> it can still SPLIT,
+                             # so the agent must re-read the order-details page
+              shipments: [
+                {shipment, status, tracking_number, tracking_url, delivery_date, item_names: [...]},
+                ...
+              ],
+            },
             ...
           ],
         }
 
-    Lets a scrape skip delivered orders, do a tracking-only re-check of every undelivered
-    order (jumping straight to its saved link regardless of age), and full-scrape only new
-    orders. A multi-item order rolls up to 'delivered' only if every recorded row is delivered.
+    Each sheet row IS one (shipment x item), so shipments are recovered by grouping an order's
+    rows on the Shipment column. Keeping them separate is what lets the caller re-check each
+    shipment's own tracking page — an order with several shipments has several tracking links,
+    and collapsing them to one would silently drop all but the first.
+
+    `since` (YYYY-MM-DD) drops delivered orders older than the discovery window from
+    delivered_ids. They're only used to tell the agent "skip these", and the agent never scans
+    back past the window — so without this the skip list grows forever and is re-sent on every
+    single agent step.
+
     Fails soft (empty state) if the sheet isn't configured/readable → treat all as new.
     """
-    empty = {"delivered_ids": [], "open_orders": []}
+    empty: dict = {"delivered_ids": [], "open_orders": []}
     try:
         worksheet = _get_worksheet()
         existing = worksheet.get_all_values()
@@ -173,12 +198,15 @@ def load_order_state(profile_label: str | None = None) -> dict:
     if not existing or not any(cell.strip() for cell in existing[0]):
         return empty
     header = existing[0]
-    needed = ("Order ID", "Order Date", "Status", "Profile", "Order Link", "Tracking Link", "Item Name")
+    needed = (
+        "Order ID", "Order Date", "Status", "Profile", "Order Link",
+        "Tracking Number", "Tracking Link", "Delivery Date", "Item Name",
+    )
     if any(c not in header for c in needed):
         return empty
     idx = {c: header.index(c) for c in needed}
-    # Shipment is optional (older sheets predate it); read it when present so we can flag
-    # multi-shipment orders — those must re-check via the agent, not the single-page CDP reader.
+    # Optional: sheets written before the Shipment column exist. Those rows group under "",
+    # which behaves like any other single shipment.
     shipment_idx = header.index("Shipment") if "Shipment" in header else None
 
     orders: dict[str, dict] = {}
@@ -191,31 +219,49 @@ def load_order_state(profile_label: str | None = None) -> dict:
         if not oid:
             continue
         o = orders.setdefault(
-            oid,
-            {
-                "order_id": oid, "order_date": "", "order_url": "", "tracking_url": "",
-                "item_names": [], "statuses": [], "shipments": [],
-            },
+            oid, {"order_id": oid, "order_date": "", "order_url": "", "_groups": {}}
         )
         o["order_date"] = o["order_date"] or row[idx["Order Date"]].strip()
         o["order_url"] = o["order_url"] or row[idx["Order Link"]].strip()
-        o["tracking_url"] = o["tracking_url"] or row[idx["Tracking Link"]].strip()
+
+        label = row[shipment_idx].strip() if shipment_idx is not None and shipment_idx < len(row) else ""
+        s = o["_groups"].setdefault(
+            label,
+            {
+                "shipment": label, "tracking_number": "", "tracking_url": "",
+                "delivery_date": "", "item_names": [], "_statuses": [],
+            },
+        )
+        # First non-blank wins within a shipment: every row of one shipment carries the same
+        # tracking/delivery values, so any non-blank one is that shipment's value.
+        s["tracking_number"] = s["tracking_number"] or row[idx["Tracking Number"]].strip()
+        s["tracking_url"] = s["tracking_url"] or row[idx["Tracking Link"]].strip()
+        s["delivery_date"] = s["delivery_date"] or row[idx["Delivery Date"]].strip()
         name = row[idx["Item Name"]].strip()
-        if name and name not in o["item_names"]:
-            o["item_names"].append(name)
-        if shipment_idx is not None and shipment_idx < len(row):
-            ship = row[shipment_idx].strip()
-            if ship and ship not in o["shipments"]:
-                o["shipments"].append(ship)
-        o["statuses"].append((row[idx["Status"]].strip() or "ordered").lower())
+        if name and name not in s["item_names"]:
+            s["item_names"].append(name)
+        s["_statuses"].append((row[idx["Status"]].strip() or "ordered").lower())
 
     delivered_ids: list[str] = []
     open_orders: list[dict] = []
     for oid, o in orders.items():
-        statuses = o.pop("statuses")
-        if all(s == "delivered" for s in statuses):
-            delivered_ids.append(oid)
-        else:
-            o["status"] = "shipped" if any(s == "shipped" for s in statuses) else "ordered"
-            open_orders.append(o)
+        shipments = []
+        for s in o.pop("_groups").values():
+            s["status"] = _rollup_status(s.pop("_statuses"))
+            shipments.append(s)
+
+        if all(s["status"] == "delivered" for s in shipments):
+            if since is None or not o["order_date"] or o["order_date"] >= since:
+                delivered_ids.append(oid)
+            continue
+
+        o["shipments"] = shipments
+        o["status"] = _rollup_status([s["status"] for s in shipments])
+        # A shipment without a tracking number hasn't shipped yet, and Amazon splits an order
+        # into its final shipments AT ship time — so the structure can still change and only a
+        # fresh read of the order-details page can see that.
+        o["needs_agent"] = any(
+            s["status"] != "delivered" and not s["tracking_number"] for s in shipments
+        )
+        open_orders.append(o)
     return {"delivered_ids": delivered_ids, "open_orders": open_orders}

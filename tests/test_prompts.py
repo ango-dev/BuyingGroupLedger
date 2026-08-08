@@ -91,7 +91,11 @@ def test_job2_shows_a_trimmed_example_not_just_the_full_one(scraper_cls):
     trimmed = json.loads(objects[0])
     assert trimmed["delivery_address"] == "", "JOB 2 example should show address blank"
     assert trimmed["quantity"] is None, "JOB 2 example should show numerics null"
-    assert trimmed["tracking_number"] == "...", "JOB 2 example should still fill tracking"
+    assert trimmed["tracking_url"] == "...", "JOB 2 example should still capture the tracking link"
+    # Amazon's tracking number lives on a separate page and is read by the selector reader, so the
+    # agent leaves it blank. Best Buy shows it on the order-details page, so the agent fills it.
+    expected = "" if scraper_cls is AmazonScraper else "..."
+    assert trimmed["tracking_number"] == expected
 
 
 @SCRAPERS
@@ -118,4 +122,30 @@ def test_bestbuy_ignores_page_wording_for_labels():
 
 def test_amazon_captures_tracking_url_even_before_shipping():
     # The tracking page is where the number appears later; losing the link costs an extra hop.
-    assert "EVEN IF the shipment isn't shipped yet" in build(AmazonScraper)
+    assert "IF the shipment hasn't shipped yet" in build(AmazonScraper)
+
+
+def test_amazon_does_not_open_tracking_pages():
+    """The single biggest token cost was the agent opening one tracking page per shipment. That
+    work belongs to the CDP selector reader now; the agent only captures the link."""
+    prompt = build(AmazonScraper, recheck=[{"order_id": "A1", "status": "shipped"}])
+    assert "do NOT open it" in prompt
+    assert "do NOT open any tracking page" in prompt
+
+
+def test_amazon_leaves_tracking_number_to_the_selector_reader():
+    assert 'tracking_number: leave ""' in build(AmazonScraper)
+
+
+@SCRAPERS
+def test_status_is_read_from_the_order_details_page(scraper_cls):
+    """Both retailers judge status from the shipment's status text on the order-details page, so
+    a row means the same thing whichever retailer wrote it."""
+    prompt = build(scraper_cls)
+    assert "status text on the order-details page" in prompt
+    assert '* "delivered" — the shipment says "Delivered"' in prompt
+
+
+@SCRAPERS
+def test_delivery_address_is_per_shipment(scraper_cls):
+    assert "the shipping address for THIS shipment" in build(scraper_cls)

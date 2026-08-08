@@ -196,9 +196,9 @@ class TestLoadOrderState:
         sheet.rows = [
             list(HEADER),
             row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
-                status="delivered", profile_label="p1"),
+                status="delivered", tracking_number="1Z1", profile_label="p1"),
             row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 2",
-                status="shipped", profile_label="p1"),
+                status="shipped", tracking_number="1Z2", profile_label="p1"),
         ]
 
         state = load_order_state("p1")
@@ -221,19 +221,114 @@ class TestLoadOrderState:
         assert state["delivered_ids"] == ["A1"]
         assert state["open_orders"] == []
 
-    def test_shipment_labels_are_collected(self, sheet):
+    def test_each_shipment_keeps_its_own_tracking_and_items(self, sheet):
+        """The core of the per-shipment shape: a split order has one tracking page per shipment,
+        and collapsing them to one URL is what forced the old code to skip multi-shipment orders."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="shipped", tracking_number="1Z-ONE", tracking_url="http://t/1",
+                profile_label="p1"),
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
+                status="ordered", tracking_url="http://t/2", profile_label="p1"),
+        ]
+
+        shipments = load_order_state("p1")["open_orders"][0]["shipments"]
+
+        assert [s["shipment"] for s in shipments] == ["Shipment 1", "Shipment 2"]
+        assert shipments[0]["tracking_number"] == "1Z-ONE"
+        assert shipments[0]["tracking_url"] == "http://t/1"
+        assert shipments[0]["item_names"] == ["W"]
+        assert shipments[0]["status"] == "shipped"
+        assert shipments[1]["tracking_number"] == ""
+        assert shipments[1]["tracking_url"] == "http://t/2"
+        assert shipments[1]["item_names"] == ["X"]
+        assert shipments[1]["status"] == "ordered"
+
+    def test_items_in_the_same_shipment_group_together(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="shipped", tracking_number="1Z1", profile_label="p1"),
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 1",
+                status="shipped", tracking_number="1Z1", profile_label="p1"),
+        ]
+
+        shipments = load_order_state("p1")["open_orders"][0]["shipments"]
+
+        assert len(shipments) == 1
+        assert shipments[0]["item_names"] == ["W", "X"]
+
+    def test_needs_agent_true_while_a_shipment_lacks_tracking(self, sheet):
+        # An untracked shipment hasn't shipped, so the order can still split — only a fresh read
+        # of the order-details page can see that.
         sheet.rows = [
             list(HEADER),
             row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
                 status="ordered", profile_label="p1"),
-            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
-                status="ordered", profile_label="p1"),
         ]
 
-        state = load_order_state("p1")
+        assert load_order_state("p1")["open_orders"][0]["needs_agent"] is True
 
-        assert state["open_orders"][0]["shipments"] == ["Shipment 1", "Shipment 2"]
-        assert state["open_orders"][0]["item_names"] == ["W", "X"]
+    def test_needs_agent_false_once_everything_is_tracked(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="shipped", tracking_number="1Z1", profile_label="p1"),
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
+                status="shipped", tracking_number="1Z2", profile_label="p1"),
+        ]
+
+        assert load_order_state("p1")["open_orders"][0]["needs_agent"] is False
+
+    def test_delivered_shipment_without_tracking_does_not_force_the_agent(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="delivered", profile_label="p1"),
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
+                status="shipped", tracking_number="1Z2", profile_label="p1"),
+        ]
+
+        assert load_order_state("p1")["open_orders"][0]["needs_agent"] is False
+
+    def test_legacy_blank_shipment_groups_like_any_other(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="",
+                status="shipped", tracking_number="1Z1", profile_label="p1"),
+        ]
+
+        shipments = load_order_state("p1")["open_orders"][0]["shipments"]
+
+        assert len(shipments) == 1
+        assert shipments[0]["shipment"] == ""
+
+    def test_since_drops_old_delivered_orders_from_the_skip_list(self, sheet):
+        """The skip list rides in the prompt on every agent step; the agent never scans back
+        past the window, so old delivered orders are pure dead weight."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="OLD", order_date="2026-01-01", item_name="W", shipment="Shipment 1",
+                status="delivered", profile_label="p1"),
+            row(order_id="NEW", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="delivered", profile_label="p1"),
+        ]
+
+        assert set(load_order_state("p1")["delivered_ids"]) == {"OLD", "NEW"}
+        assert load_order_state("p1", since="2026-08-07")["delivered_ids"] == ["NEW"]
+
+    def test_since_never_drops_open_orders(self, sheet):
+        # Open orders are re-checked regardless of age — only delivered ones get trimmed.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="OLD", order_date="2026-01-01", item_name="W", shipment="Shipment 1",
+                status="shipped", tracking_number="1Z1", profile_label="p1"),
+        ]
+
+        state = load_order_state("p1", since="2026-08-07")
+
+        assert [o["order_id"] for o in state["open_orders"]] == ["OLD"]
 
     def test_other_profiles_are_filtered_out(self, sheet):
         sheet.rows = [
