@@ -1,0 +1,21 @@
+# One service = one instance. Run more instances by copying this with different mounted
+# profiles.json / .env (e.g. per proxy pool). Secrets are injected at runtime, never baked in.
+services:
+  ledger:
+    build: .
+    image: buying-group-ledger
+    container_name: buying-group-ledger
+    restart: unless-stopped
+    # .env is read from the host and injected as environment variables (settings.py reads them
+    # via os.getenv; no .env file is copied into the image).
+    env_file:
+      - .env
+    environment:
+      RUN_INTERVAL_HOURS: "6"     # every 6h = 4x/day; change to taste
+      RUN_ON_START: "false"       # set "true" to also run once when the container starts
+      # TZ: "America/New_York"    # optional: align the cron schedule to your local time
+    volumes:
+      - ./profiles.json:/app/profiles.json:ro
+      - ./service_account.json:/app/service_account.json:ro
+      - ./data:/app/data          # generated CSVs (optional; Sheet is source of truth)
+      - ./logs:/app/logs          # run.log + the overlap lock

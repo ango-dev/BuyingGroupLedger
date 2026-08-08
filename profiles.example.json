@@ -1,0 +1,24 @@
+[
+  {
+    "label": "profile-1",
+    "profile_id": "REPLACE_WITH_BROWSER_USE_PROFILE_ID",
+    "proxy": {
+      "host": "proxy.example.com",
+      "port": 10000,
+      "username": "REPLACE_WITH_PROXY_USERNAME",
+      "password": "REPLACE_WITH_PROXY_PASSWORD"
+    },
+    "retailers": ["amazon", "bestbuy", "walmart"]
+  },
+  {
+    "label": "profile-2",
+    "profile_id": "REPLACE_WITH_BROWSER_USE_PROFILE_ID",
+    "proxy": {
+      "host": "proxy.example.com",
+      "port": 10001,
+      "username": "REPLACE_WITH_PROXY_USERNAME",
+      "password": "REPLACE_WITH_PROXY_PASSWORD"
+    },
+    "retailers": ["amazon", "costco"]
+  }
+]

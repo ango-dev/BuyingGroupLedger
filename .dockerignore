@@ -1,0 +1,12 @@
+# Never bake secrets or local env into the image — these are provided at runtime
+# (env_file / mounted volumes). See docker-compose.yml.
+.env
+service_account.json
+profiles.json
+.venv/
+__pycache__/
+*.pyc
+data/
+logs/
+.git/
+.gitignore

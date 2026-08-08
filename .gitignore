@@ -1,0 +1,9 @@
+.env
+service_account.json
+profiles.json
+data/
+logs/
+__pycache__/
+*.pyc
+.venv/
+venv/
