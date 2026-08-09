@@ -25,25 +25,37 @@ class AmazonScraper(BaseRetailerScraper):
     def read_tracking_page(self, page) -> dict | None:
         """Read status/tracking#/delivery-promise from a loaded Amazon tracking page via selectors.
 
-        Returns None if the page doesn't look like a tracking page (missing the promise headline),
-        signalling the caller to fall back to the agent rather than assume "not shipped".
+        Returns None to tell the caller to fall back to the agent. That happens when the page
+        doesn't look like a tracking page (the promise headline is missing) OR when the
+        tracking-number CONTAINER is absent entirely — a selector MISS, meaning the page structure
+        changed under us.
+
+        A missing container is deliberately distinguished from a container that is present but
+        EMPTY. Empty is a real "no tracking number yet": the package hasn't been handed to a carrier,
+        so the tracking page shows an "Arriving <x>" estimate with the progress stepper still at
+        "Ordered" and the number slot rendered-but-blank (verified live). That is a legitimate
+        'ordered', not a failure. Conflating the two would let a stale selector silently read every
+        shipment as 'ordered' forever, so no order would ever reach 'shipped'.
         """
         promise_el = page.query_selector(self.promise_selector)
         if promise_el is None:
             return None  # unexpected layout / not the tracking page → agent fallback
         promise = promise_el.inner_text().strip()
+        lowered = promise.lower()
 
         tn_el = page.query_selector(self.tracking_number_selector)
-        tracking_number = tn_el.inner_text().strip() if tn_el else ""
 
-        lowered = promise.lower()
+        # Delivered is stated by the promise headline and is terminal — record it even if the number
+        # container is gone (delivered layouts may drop it); no number is needed to know it arrived.
         if "delivered" in lowered:
-            status = "delivered"
-        elif tracking_number:
-            status = "shipped"
-        else:
-            status = "ordered"
+            tracking_number = tn_el.inner_text().strip() if tn_el is not None else ""
+            return {"status": "delivered", "tracking_number": tracking_number, "delivery_promise": promise}
 
+        if tn_el is None:
+            return None  # selector MISS (container gone), not an empty container → agent fallback
+
+        tracking_number = tn_el.inner_text().strip()
+        status = "shipped" if tracking_number else "ordered"
         return {"status": status, "tracking_number": tracking_number, "delivery_promise": promise}
 
     def task_prompt(self, skip_order_ids: list[str], recheck_orders: list[dict]) -> str:

@@ -76,6 +76,67 @@ READ_OK = lambda page: {"status": "shipped", "tracking_number": "1ZREAD", "deliv
 READ_NONE = lambda page: None
 
 
+class FakeEl:
+    def __init__(self, text):
+        self._text = text
+
+    def inner_text(self):
+        return self._text
+
+
+class SelectorPage:
+    """Fake Playwright page: a selector present in `elements` resolves to an element with that
+    text (possibly ""); a selector absent from the map resolves to None (a real DOM miss)."""
+
+    def __init__(self, elements):
+        self._elements = elements
+
+    def query_selector(self, sel):
+        return FakeEl(self._elements[sel]) if sel in self._elements else None
+
+
+class TestReadTrackingPage:
+    """The null-vs-empty rule read_tracking_page hinges on (validated against the live pt page):
+    an EMPTY tracking-number container = no number yet = 'ordered'; a MISSING container (null) =
+    selector miss = fall back to the agent (return None)."""
+
+    scraper = AmazonScraper(ProfileConfig(label="p1", profile_id="x", retailers=["amazon"]))
+    P = AmazonScraper.promise_selector
+    T = AmazonScraper.tracking_number_selector
+
+    def read(self, elements):
+        return AmazonScraper.read_tracking_page(self.scraper, SelectorPage(elements))
+
+    def test_no_promise_element_falls_back_to_agent(self):
+        assert self.read({}) is None
+
+    def test_number_present_is_shipped(self):
+        info = self.read({self.P: "Arriving Monday", self.T: "TBA303123456789"})
+        assert info["status"] == "shipped"
+        assert info["tracking_number"] == "TBA303123456789"
+
+    def test_empty_number_container_is_ordered_not_agent(self):
+        # The live case: element rendered but blank because the package hasn't shipped yet.
+        info = self.read({self.P: "Arriving tomorrow", self.T: ""})
+        assert info is not None, "an empty container is a real 'no number yet', not a selector miss"
+        assert info["status"] == "ordered"
+        assert info["tracking_number"] == ""
+
+    def test_missing_number_container_escalates_to_agent(self):
+        # Container absent (selector went stale) -> None so the caller re-reads via the agent.
+        assert self.read({self.P: "Arriving tomorrow"}) is None
+
+    def test_delivered_recorded_even_without_number_container(self):
+        info = self.read({self.P: "Delivered Aug 5"})
+        assert info["status"] == "delivered"
+        assert info["tracking_number"] == ""
+
+    def test_delivered_keeps_its_number_when_present(self):
+        info = self.read({self.P: "Delivered", self.T: "TBA303999"})
+        assert info["status"] == "delivered"
+        assert info["tracking_number"] == "TBA303999"
+
+
 class TestRouting:
     def test_every_shipment_gets_its_own_page_read(self, monkeypatch, cdp):
         """The whole point of the reshape — a split order has one tracking page per shipment."""
