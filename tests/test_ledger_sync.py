@@ -116,7 +116,9 @@ class TestSyncUpsert:
         updated = sheet.data_rows()[0]
         assert updated[FIELDNAMES.index("status")] == "shipped"
         assert updated[FIELDNAMES.index("tracking_number")] == "1Z999"
-        assert updated[FIELDNAMES.index("cost_per_item")] == "189.99", "blank must not clobber cost"
+        # Preserved and re-coerced back to a number (not the string "189.99"), so Sheets stores it
+        # numerically rather than as apostrophe-prefixed text.
+        assert updated[FIELDNAMES.index("cost_per_item")] == 189.99
         assert updated[FIELDNAMES.index("delivery_address")] == "123 Main St"
 
     def test_same_item_in_two_shipments_are_two_rows(self, sheet, tmp_path):
@@ -361,4 +363,88 @@ class TestLoadOrderState:
 
         # Must not raise: a transient Sheets outage should degrade to "treat everything as new",
         # not abort the run.
-        assert load_order_state("p1") == {"delivered_ids": [], "open_orders": []}
+        assert load_order_state("p1") == {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
+
+
+class TestCancelledOrders:
+    def test_cancelled_order_is_terminal_and_skipped(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="cancelled", profile_label="p1"),
+        ]
+
+        state = load_order_state("p1")
+
+        assert state["cancelled_ids"] == ["A1"]
+        assert state["delivered_ids"] == []
+        assert state["open_orders"] == [], "a cancelled order must not be re-checked"
+
+    def test_cancelled_order_id_reaches_the_skip_list(self, sheet, monkeypatch):
+        # base.py combines delivered + cancelled + open into the agent's discovery skip list.
+        from models.profile import ProfileConfig
+        from scrapers.bestbuy import BestBuyScraper
+
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="CANCELLED1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="cancelled", profile_label="p1"),
+        ]
+        scraper = BestBuyScraper(ProfileConfig(label="p1", profile_id="x", retailers=["bestbuy"]))
+
+        state = scraper._load_order_state()
+        skip = (list(state["delivered_ids"]) + list(state["cancelled_ids"])
+                + [o["order_id"] for o in state["open_orders"]])
+
+        assert "CANCELLED1" in skip
+
+    def test_since_trims_old_cancelled_orders(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="OLD", order_date="2026-01-01", item_name="W", shipment="Shipment 1",
+                status="cancelled", profile_label="p1"),
+            row(order_id="NEW", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="cancelled", profile_label="p1"),
+        ]
+
+        assert load_order_state("p1", since="2026-08-07")["cancelled_ids"] == ["NEW"]
+
+    def test_partial_cancel_with_delivered_rest_is_terminal(self, sheet):
+        # One shipment cancelled, the other delivered -> nothing left to track.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="delivered", profile_label="p1"),
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
+                status="cancelled", profile_label="p1"),
+        ]
+
+        state = load_order_state("p1")
+
+        assert state["open_orders"] == []
+        assert "A1" in state["delivered_ids"]
+
+
+class TestNumericCoercionOnMerge:
+    def test_preserved_quantity_is_written_back_as_a_number(self, sheet, tmp_path):
+        """The '1-as-text bug: a re-check leaves quantity blank, so _merge_row preserves the value
+        read from the sheet (a string). It must be re-coerced to a number before writing, or Sheets
+        stores it as text and shows a leading apostrophe."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                status="ordered", quantity="1", cost_per_item="899.99"),
+        ]
+        # Re-check: quantity/cost blank, only status changes.
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+                 status="shipped"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        written = sheet.data_rows()[0]
+        assert written[FIELDNAMES.index("quantity")] == 1, "preserved quantity must be int, not '1'"
+        assert isinstance(written[FIELDNAMES.index("quantity")], int)
+        assert written[FIELDNAMES.index("cost_per_item")] == 899.99

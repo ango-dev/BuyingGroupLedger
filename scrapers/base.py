@@ -9,7 +9,7 @@ from browser_use_sdk.v4 import BrowserUse, CustomProxy, RunBrowserSettings
 
 from alerts.notifier import alert
 from config.settings import settings
-from models.order import OrderExtractionResult, OrderItem
+from models.order import TERMINAL_STATUSES, OrderExtractionResult, OrderItem
 from models.profile import ProfileConfig
 
 log = logging.getLogger(__name__)
@@ -86,8 +86,13 @@ class BaseRetailerScraper(abc.ABC):
         # Cheap path first: re-check open orders via CDP + selectors (near-free, deterministic).
         recheck_items, fallback_orders = self._recheck_via_cdp(open_orders)
 
-        # Agent skips every known order in its new-order scan; only re-checks CDP misses.
-        skip_ids = list(order_state.get("delivered_ids", [])) + list(open_ids)
+        # Agent skips every known order in its new-order scan (terminal + still-open); it only
+        # re-checks CDP misses. Cancelled orders are terminal, so they stay skipped for good.
+        skip_ids = (
+            list(order_state.get("delivered_ids", []))
+            + list(order_state.get("cancelled_ids", []))
+            + list(open_ids)
+        )
 
         client = BrowserUse()
         agent_session_id: UUID | None = None
@@ -194,7 +199,7 @@ class BaseRetailerScraper(abc.ABC):
             (o, s)
             for o in open_orders
             for s in o.get("shipments", [])
-            if s["status"] != "delivered" and s.get("tracking_url")
+            if s["status"] not in TERMINAL_STATUSES and s.get("tracking_url")
         ]
         if not targets:
             return [], agent_orders

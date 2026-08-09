@@ -1,13 +1,16 @@
 import logging
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 log = logging.getLogger(__name__)
 
-# The only status values the ledger understands. sheets.ledger_sync.load_order_state rolls an order
-# up to "delivered" only when EVERY shipment row says "delivered", and treats anything unrecognized
-# as still-open — so an out-of-vocabulary status silently keeps an order open forever.
-STATUSES = ("ordered", "shipped", "delivered")
+# The status values the ledger understands. load_order_state treats delivered and cancelled as
+# TERMINAL (the order drops out of future runs) and anything unrecognized as still-open — so an
+# out-of-vocabulary status silently keeps an order open forever. "cancelled" only ever appears via a
+# re-check: an order first seen as "ordered" that the order page later shows as cancelled. Brand-new
+# orders that are already cancelled are ignored at discovery and never recorded.
+STATUSES = ("ordered", "shipped", "delivered", "cancelled")
+TERMINAL_STATUSES = ("delivered", "cancelled")
 
 # CSV/Sheet column order — keep in sync with output/csv_writer.py and sheets/ledger_sync.py
 FIELDNAMES = [
@@ -42,7 +45,7 @@ class OrderItem(BaseModel):
     profile_label: str = ""
     order_id: str
     order_date: str  # YYYY-MM-DD, the date the order was placed
-    status: str = "ordered"  # ordered | shipped | delivered (from the tracking page)
+    status: str = "ordered"  # ordered | shipped | delivered | cancelled
     order_url: str = ""  # direct URL to the order details page (for fast re-visits)
     tracking_number: str = ""
     tracking_url: str = ""  # direct URL to the tracking page (for fast re-visits)
@@ -54,7 +57,7 @@ class OrderItem(BaseModel):
     quantity: int | None = None
     cost_per_item: float | None = None
     shipping: float | None = None
-    total_cost: float | None = None
+    total_cost: float | None = None  # computed = quantity * cost_per_item (this row/shipment line)
     card_last4: str = ""
     shipment: str = ""  # "Shipment 1" / "Shipment 2" / ...; "" only on pre-Shipment-column rows
 
@@ -86,6 +89,19 @@ class OrderItem(BaseModel):
             return "ordered"
         log.warning("Unrecognized status %r from agent; treating as 'ordered'.", v)
         return "ordered"
+
+    @model_validator(mode="after")
+    def _compute_total_cost(self):
+        """total_cost is the line total for THIS shipment row = quantity * cost_per_item.
+
+        Computed here rather than trusted from the agent, which used to report the ORDER grand total
+        on every row (so the column couldn't be summed). Left untouched when either factor is absent
+        — e.g. a tracking-only re-check sends both blank, and _merge_row then preserves whatever was
+        already recorded. Shipping is a separate column and is not folded in.
+        """
+        if self.quantity is not None and self.cost_per_item is not None:
+            self.total_cost = round(self.quantity * self.cost_per_item, 2)
+        return self
 
 
 class OrderExtractionResult(BaseModel):

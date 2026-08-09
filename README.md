@@ -79,6 +79,12 @@ status/tracking/date/last-scraped **without clobbering** the item name, cost, ad
 Delivery Date · Delivery Address · Item Name · Quantity · Cost Per Item · Shipping · Total Cost ·
 Card Last 4 · Last Scraped At · Shipment`
 
+**Total Cost is per row** = `Quantity × Cost Per Item` for that shipment line (computed in code, not
+trusted from the agent), so the column sums to the order total. **Status** is one of `ordered`,
+`shipped`, `delivered`, `cancelled`. `delivered` and `cancelled` are terminal — the order drops out of
+future runs. A `cancelled` order is only ever recorded via a re-check (an order first seen as `ordered`
+that the order page later shows cancelled); brand-new already-cancelled orders are ignored at discovery.
+
 **Multiple shipments per order:** when an order splits across shipments, each shipment gets its own
 row(s) with that shipment's own status, tracking number and delivery date. The **Shipment** column is
 part of the key so the *same* product in two different shipments stays on two distinct rows instead of

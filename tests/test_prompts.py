@@ -47,6 +47,36 @@ def test_digital_items_are_skipped(scraper_cls):
 
 
 @SCRAPERS
+def test_cancelled_orders_are_skipped_but_not_a_stopping_point(scraper_cls):
+    """A cancelled order between two valid ones must not halt discovery — the suspected cause of
+    the missed 08/02 and 08/05 orders in the first Best Buy run."""
+    prompt = build(scraper_cls)
+    assert "KEEP scanning" in prompt
+    assert "NOT a stopping point" in prompt
+
+
+@SCRAPERS
+def test_cancelled_is_a_valid_status(scraper_cls):
+    prompt = build(scraper_cls)
+    assert "ordered | shipped | delivered | cancelled" in prompt
+
+
+@SCRAPERS
+def test_discovery_scans_the_whole_window(scraper_cls):
+    prompt = build(scraper_cls)
+    assert "Do NOT stop early after the first order" in prompt
+
+
+@SCRAPERS
+def test_total_cost_is_computed_not_order_grand_total(scraper_cls):
+    # The agent used to be told "order grand total"; now it leaves total_cost blank and the model
+    # computes quantity * cost_per_item per row.
+    prompt = build(scraper_cls)
+    assert "order grand total" not in prompt
+    assert "computed as quantity x cost_per_item" in prompt
+
+
+@SCRAPERS
 def test_quantity_is_preserved_not_exploded_into_rows(scraper_cls):
     prompt = build(scraper_cls)
     assert "do NOT create duplicate rows" in prompt

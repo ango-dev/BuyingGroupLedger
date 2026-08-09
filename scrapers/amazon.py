@@ -96,10 +96,15 @@ class AmazonScraper(BaseRetailerScraper):
 
 JOB 1 — find NEW orders. Go to {self.order_history_url} and wait for it to load. If you land on a
 sign-in / login page, the session is logged out: report that (see output format) and stop immediately;
-do not attempt to log in. Today is {today}. Record ONLY orders placed on or after {earliest}
-({window_phrase}). Amazon lists orders newest-first, so check from the top; the moment you reach an
-order dated before {earliest}, stop scanning — everything below it is older.{new_scan_skip}
-For each qualifying order, open its order-details page and extract it per the SHIPMENT RULES below.
+do not attempt to log in. Today is {today}. Record EVERY order placed on or after {earliest}
+({window_phrase}) — there may be several. Amazon lists orders newest-first, so work down from the top
+and check EACH order's date; if the page shows a time-period filter, make sure it covers back to
+{earliest}, and page/scroll through all orders in the window. Only stop once you reach an order dated
+before {earliest} (everything below it is older). Do NOT stop early after the first order.
+CANCELLED orders: if an order shows as Cancelled, SKIP it — do not record it — but KEEP scanning older
+orders; a cancelled order is NOT a stopping point.{new_scan_skip}
+For each qualifying (non-cancelled) order, open its order-details page and extract it per the SHIPMENT
+RULES below.
 
 IGNORE digital items entirely — do NOT output any entry for them. Digital items are things with no
 shipment: gift cards, Kindle eBooks, digital downloads/software, Prime Video / digital rentals,
@@ -132,6 +137,8 @@ Fields for each entry:
     * "delivered" — the shipment says "Delivered" / "Delivered <date>"
     * "shipped"   — it says "Arriving <date>" / "Out for delivery" / "Shipped" but not yet delivered
     * "ordered"   — not shipped yet (e.g. "Preparing for shipment", "Not yet shipped")
+    * "cancelled" — the whole order (or this shipment) shows Cancelled. Only use this on a re-check of
+      an order already recorded; a brand-new cancelled order is skipped in JOB 1, not recorded.
 - order_url: the full URL of this order's details page (address bar URL while viewing it) — same for
   every shipment of the order
 - tracking_number: leave "" — the tracking number lives on the tracking page and is read separately
@@ -149,7 +156,8 @@ Fields for each entry:
 - quantity: integer quantity of this product IN THIS SHIPMENT (preserve the count; see shipment rules)
 - cost_per_item: price per unit, a number (no currency symbol)
 - shipping: order shipping cost, a number (0 if free)
-- total_cost: order grand total, a number
+- total_cost: leave "" — it is computed as quantity x cost_per_item for this line. Fill it only if
+  you cannot determine cost_per_item but can read this line's own subtotal.
 - card_last4: last 4 digits of the payment card, else ""
 
 For JOB 2 re-check entries ONLY, go to the order's details page, re-read EVERY shipment WITHOUT opening
@@ -165,7 +173,7 @@ the full one below):
   "order_id": "...",
   "order_date": "YYYY-MM-DD",
   "shipment": "Shipment 1",
-  "status": "ordered | shipped | delivered",
+  "status": "ordered | shipped | delivered | cancelled",
   "order_url": "",
   "tracking_number": "",
   "tracking_url": "...",
@@ -190,7 +198,7 @@ the full shape below; JOB 2 entries use the trimmed shape above:
       "order_id": "...",
       "order_date": "YYYY-MM-DD",
       "shipment": "Shipment 1",
-      "status": "ordered | shipped | delivered",
+      "status": "ordered | shipped | delivered | cancelled",
       "order_url": "...",
       "tracking_number": "...",
       "tracking_url": "...",

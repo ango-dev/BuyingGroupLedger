@@ -61,10 +61,14 @@ class BestBuyScraper(BaseRetailerScraper):
 
 JOB 1 — find NEW orders. Go to {self.order_history_url} and wait for it to load. If you land on a
 sign-in / login page, the session is logged out: report that (see output format) and stop immediately;
-do not attempt to log in. Today is {today}. Record ONLY orders placed on or after {earliest}
-({window_phrase}). Best Buy lists purchases newest-first, so check from the top; the moment you reach an
-order dated before {earliest}, stop scanning — everything below it is older.{new_scan_skip}
-For each qualifying order, open its order-details page (click the order, or go to
+do not attempt to log in. Today is {today}. Record EVERY order placed on or after {earliest}
+({window_phrase}) — there may be several. Best Buy lists purchases newest-first, so work down from the
+top and check EACH order's date; scroll down and click any "Show more" / "Load more" / next-page control
+to reveal older orders until you have seen every order back to {earliest}. Only stop once you reach an
+order dated before {earliest} (everything below it is older). Do NOT stop early after the first order.
+CANCELLED orders: if an order shows as Cancelled, SKIP it — do not record it — but KEEP scanning older
+orders; a cancelled order is NOT a stopping point.{new_scan_skip}
+For each qualifying (non-cancelled) order, open its order-details page (click the order, or go to
 https://www.bestbuy.com/profile/ss/orders/order-details/<order-id>/view) and extract it per the
 shipment rules below.
 {skip_line}{recheck_block}
@@ -97,9 +101,12 @@ Fields for each entry:
   single-shipment order is "Shipment 1"). Never Best Buy's own wording.
 - status: judged from THIS shipment's status text on the order-details page:
     * "delivered" — the shipment says "Delivered" / "Delivered <date>"
-    * "shipped"   — it says "Shipped" / "Arriving <date>" / "Out for delivery" but not yet delivered
-    * "ordered"   — not shipped yet (e.g. "Preparing", "Order received", or an in-store-pickup order
-      that is only ready for pickup)
+    * "shipped"   — a tracking number IS shown and it says "Shipped" / "Out for delivery" / "Arriving
+      <date>" but not yet delivered. An arrival estimate with NO tracking number is still "ordered".
+    * "ordered"   — not shipped yet: no tracking number (e.g. "Preparing", "Order received", an arrival
+      estimate only, or an in-store-pickup order that is merely ready for pickup)
+    * "cancelled" — the whole order (or this shipment) shows Cancelled. Only use this on a re-check of
+      an order already recorded; a brand-new cancelled order is skipped in JOB 1, not recorded.
 - order_url: the full URL of this order's details page (address bar URL while viewing it) — same for
   every shipment of the order
 - tracking_number: the carrier tracking number shown for THIS shipment; "" if not shipped yet
@@ -112,7 +119,8 @@ Fields for each entry:
 - quantity: integer quantity of this product IN THIS SHIPMENT (preserve the count; see shipment rules)
 - cost_per_item: price per unit, a number (no currency symbol)
 - shipping: order shipping cost, a number (0 if free)
-- total_cost: order grand total, a number
+- total_cost: leave "" — it is computed as quantity x cost_per_item for this line. Fill it only if
+  you cannot determine cost_per_item but can read this line's own subtotal.
 - card_last4: last 4 digits of the payment card, else ""
 
 For JOB 2 re-check entries ONLY, fill just retailer, order_id, order_date, item_name, shipment, status,
@@ -126,7 +134,7 @@ this (note the empty fields — this shape, not the full one below):
   "order_id": "...",
   "order_date": "YYYY-MM-DD",
   "shipment": "Shipment 1",
-  "status": "ordered | shipped | delivered",
+  "status": "ordered | shipped | delivered | cancelled",
   "order_url": "",
   "tracking_number": "...",
   "tracking_url": "...",
@@ -151,7 +159,7 @@ the full shape below; JOB 2 entries use the trimmed shape above:
       "order_id": "...",
       "order_date": "YYYY-MM-DD",
       "shipment": "Shipment 1",
-      "status": "ordered | shipped | delivered",
+      "status": "ordered | shipped | delivered | cancelled",
       "order_url": "...",
       "tracking_number": "...",
       "tracking_url": "...",

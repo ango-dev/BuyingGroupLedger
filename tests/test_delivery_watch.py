@@ -134,6 +134,17 @@ class TestRouting:
 
         assert cdp.last.page.visited == ["http://track/2"]
 
+    def test_cancelled_shipments_are_not_read(self, monkeypatch, cdp):
+        scraper = amazon(monkeypatch, READ_OK)
+        o = order(shipments=[
+            shipment("Shipment 1", status="cancelled", url="http://track/1"),
+            shipment("Shipment 2", url="http://track/2"),
+        ])
+
+        scraper._recheck_via_cdp([o])
+
+        assert cdp.last.page.visited == ["http://track/2"]
+
     def test_shipment_without_a_link_is_skipped_not_guessed(self, monkeypatch, cdp):
         scraper = amazon(monkeypatch, READ_OK)
         o = order(needs_agent=True, shipments=[shipment("Shipment 1", number="", url="")])

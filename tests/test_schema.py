@@ -48,4 +48,4 @@ def test_csv_writer_emits_exactly_fieldnames(tmp_path):
 
 def test_statuses_vocabulary_is_what_the_rollup_expects():
     # load_order_state's rollup keys off these exact lowercase strings.
-    assert STATUSES == ("ordered", "shipped", "delivered")
+    assert STATUSES == ("ordered", "shipped", "delivered", "cancelled")

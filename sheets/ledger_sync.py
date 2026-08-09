@@ -6,7 +6,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 from config.settings import settings
-from models.order import FIELDNAMES
+from models.order import FIELDNAMES, TERMINAL_STATUSES
 
 log = logging.getLogger(__name__)
 
@@ -120,6 +120,10 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             if key in key_to_existing:
                 row_number, existing_row = key_to_existing[key]
                 merged = _merge_row(existing_row, sheet_row)
+                # Preserved cells come back as strings from get_all_values(); re-coerce so a kept
+                # numeric (e.g. a quantity carried over from a prior run) is written as a number,
+                # not text — otherwise Sheets stores it as text and shows a leading-apostrophe '1.
+                merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
                 worksheet.update(range_name=f"A{row_number}", values=[merged])
                 updates += 1
             else:
@@ -147,8 +151,14 @@ def _merge_row(existing_row: list, new_row: list) -> list:
 
 
 def _rollup_status(statuses: list[str]) -> str:
-    """Collapse several row statuses into one. Delivered only when everything is."""
-    if statuses and all(s == "delivered" for s in statuses):
+    """Collapse several shipment statuses into one for display.
+
+    Cancelled is order-level in practice (the whole order is cancelled), so it wins outright.
+    Otherwise delivered only when everything is; shipped if anything has shipped; else ordered.
+    """
+    if statuses and all(s == "cancelled" for s in statuses):
+        return "cancelled"
+    if statuses and all(s in ("delivered", "cancelled") for s in statuses):
         return "delivered"
     if any(s in ("shipped", "delivered") for s in statuses):
         return "shipped"
@@ -159,7 +169,8 @@ def load_order_state(profile_label: str | None = None, since: str | None = None)
     """Read the sheet and return, for this profile:
 
         {
-          "delivered_ids": [order_id, ...],    # terminal — skip entirely
+          "delivered_ids": [order_id, ...],    # all shipments delivered — terminal, skip
+          "cancelled_ids": [order_id, ...],    # cancelled — terminal, skip
           "open_orders": [
             {
               order_id, order_date, order_url,
@@ -180,14 +191,14 @@ def load_order_state(profile_label: str | None = None, since: str | None = None)
     shipment's own tracking page — an order with several shipments has several tracking links,
     and collapsing them to one would silently drop all but the first.
 
-    `since` (YYYY-MM-DD) drops delivered orders older than the discovery window from
-    delivered_ids. They're only used to tell the agent "skip these", and the agent never scans
-    back past the window — so without this the skip list grows forever and is re-sent on every
-    single agent step.
+    Terminal orders (all delivered, or cancelled) drop out of re-checks entirely and only feed
+    the agent's discovery skip list. `since` (YYYY-MM-DD) trims terminal orders older than the
+    discovery window from those lists — the agent never scans back past the window, so without
+    this the skip list grows forever and is re-sent on every single agent step.
 
     Fails soft (empty state) if the sheet isn't configured/readable → treat all as new.
     """
-    empty: dict = {"delivered_ids": [], "open_orders": []}
+    empty: dict = {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
     try:
         worksheet = _get_worksheet()
         existing = worksheet.get_all_values()
@@ -243,6 +254,7 @@ def load_order_state(profile_label: str | None = None, since: str | None = None)
         s["_statuses"].append((row[idx["Status"]].strip() or "ordered").lower())
 
     delivered_ids: list[str] = []
+    cancelled_ids: list[str] = []
     open_orders: list[dict] = []
     for oid, o in orders.items():
         shipments = []
@@ -250,18 +262,30 @@ def load_order_state(profile_label: str | None = None, since: str | None = None)
             s["status"] = _rollup_status(s.pop("_statuses"))
             shipments.append(s)
 
-        if all(s["status"] == "delivered" for s in shipments):
-            if since is None or not o["order_date"] or o["order_date"] >= since:
+        in_window = since is None or not o["order_date"] or o["order_date"] >= since
+
+        # Terminal orders drop out of re-checks; they only remain to tell the agent "skip these"
+        # during discovery, so trim ones older than the window.
+        if all(s["status"] == "cancelled" for s in shipments):
+            if in_window:
+                cancelled_ids.append(oid)
+            continue
+        if all(s["status"] in TERMINAL_STATUSES for s in shipments):
+            if in_window:
                 delivered_ids.append(oid)
             continue
 
         o["shipments"] = shipments
         o["status"] = _rollup_status([s["status"] for s in shipments])
-        # A shipment without a tracking number hasn't shipped yet, and Amazon splits an order
-        # into its final shipments AT ship time — so the structure can still change and only a
-        # fresh read of the order-details page can see that.
+        # A shipment that is still open (not delivered or cancelled) and has no tracking number
+        # hasn't shipped yet, and Amazon splits an order into its final shipments AT ship time —
+        # so the structure can still change and only a fresh read of order details can see that.
         o["needs_agent"] = any(
-            s["status"] != "delivered" and not s["tracking_number"] for s in shipments
+            s["status"] not in TERMINAL_STATUSES and not s["tracking_number"] for s in shipments
         )
         open_orders.append(o)
-    return {"delivered_ids": delivered_ids, "open_orders": open_orders}
+    return {
+        "delivered_ids": delivered_ids,
+        "cancelled_ids": cancelled_ids,
+        "open_orders": open_orders,
+    }
