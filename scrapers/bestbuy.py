@@ -61,16 +61,27 @@ class BestBuyScraper(BaseRetailerScraper):
             if auth.google_email
             else "your Google account (there should be only one signed in)"
         )
+        # Keep this FAST: every browser step re-sends the whole page (~28K tokens), and a lapsed
+        # session is hit on essentially every scheduled run, so wandering on the sign-in page is the
+        # single biggest avoidable cost. The instructions below pin the shortest click path and ban
+        # page reads / dead-end flows (email/password, guest) that burn steps.
         return (
             "\nIf you land on a sign-in / login page, the Best Buy web session has lapsed — LOG BACK "
-            'IN via Google instead of stopping: click "Sign in with Google" / "Continue with Google" '
-            "(this may fully redirect to accounts.google.com or open a popup — handle either). If an "
-            f"account chooser appears, pick {pick}, then click through any "
-            '"Continue"/consent screen. You should return to Best Buy already signed in; then go to '
-            f"{self.order_history_url} and carry on with the jobs below. The Google session is "
-            "long-lived, so this normally needs no password. ONLY if Google itself now asks for a "
-            "password or a verification/2FA code (its session has also expired, which is rare) do NOT "
-            'attempt it — report the logged-out result ({"logged_out": true, "items": []}) and stop.\n'
+            "IN via Google, as FEW steps as possible. Do this and nothing else on these pages:\n"
+            '  1. Find and click the "Sign in with Google" / "Continue with Google" button. If you do '
+            'not see it immediately, click "See all ways to sign in" / "Other ways to sign in" ONCE '
+            "to reveal it, then click it. Do NOT type an email or password on Best Buy, and do NOT "
+            "use guest checkout.\n"
+            f"  2. Google opens (redirect or popup). If an account chooser appears, click {pick} "
+            "once; click through a single \"Continue\"/consent screen if shown.\n"
+            f"  3. You are now back on Best Buy, signed in — go straight to {self.order_history_url} "
+            "and carry on with the jobs below.\n"
+            "Do NOT read, scroll, or run page-content evaluations on the sign-in or Google pages — "
+            "just click the buttons above; extracting page text there wastes steps. The Google "
+            "session is long-lived, so this normally needs no password. ONLY if Google itself now "
+            "asks for a password or a verification/2FA code (its session has also expired, which is "
+            'rare) do NOT attempt it — report the logged-out result ({"logged_out": true, "items": '
+            "[]}) and stop.\n"
         )
 
     def _password_signin_block(self, auth) -> str:
