@@ -96,12 +96,14 @@ class SelectorPage:
 
 
 class TestReadTrackingPage:
-    """The null-vs-empty rule read_tracking_page hinges on (validated against the live pt page):
-    an EMPTY tracking-number container = no number yet = 'ordered'; a MISSING container (null) =
-    selector miss = fall back to the agent (return None)."""
+    """read_tracking_page's shipped/ordered/agent logic, validated against the live pt page. The
+    carrier number sits in a "Delivery Info" card that renders only after shipping, so the card's
+    presence is the "has shipped" signal: no card = not shipped = 'ordered'; card + number =
+    'shipped'; card present but no extractable number = stale selector = agent fallback (None)."""
 
     scraper = AmazonScraper(ProfileConfig(label="p1", profile_id="x", retailers=["amazon"]))
     P = AmazonScraper.promise_selector
+    C = AmazonScraper.delivery_card_selector
     T = AmazonScraper.tracking_number_selector
 
     def read(self, elements):
@@ -110,29 +112,38 @@ class TestReadTrackingPage:
     def test_no_promise_element_falls_back_to_agent(self):
         assert self.read({}) is None
 
-    def test_number_present_is_shipped(self):
-        info = self.read({self.P: "Arriving Monday", self.T: "TBA303123456789"})
-        assert info["status"] == "shipped"
-        assert info["tracking_number"] == "TBA303123456789"
-
-    def test_empty_number_container_is_ordered_not_agent(self):
-        # The live case: element rendered but blank because the package hasn't shipped yet.
-        info = self.read({self.P: "Arriving tomorrow", self.T: ""})
-        assert info is not None, "an empty container is a real 'no number yet', not a selector miss"
+    def test_not_shipped_has_no_card_and_is_ordered(self):
+        # Only the "Arriving" estimate; the Delivery Info card hasn't rendered yet.
+        info = self.read({self.P: "Arriving tomorrow"})
+        assert info is not None, "no card is a real 'not shipped yet', not a selector miss"
         assert info["status"] == "ordered"
         assert info["tracking_number"] == ""
 
-    def test_missing_number_container_escalates_to_agent(self):
-        # Container absent (selector went stale) -> None so the caller re-reads via the agent.
-        assert self.read({self.P: "Arriving tomorrow"}) is None
+    def test_shipped_card_with_number_is_shipped(self):
+        info = self.read({self.P: "Arriving tomorrow", self.C: "Delivery Info",
+                          self.T: "Tracking ID: TBA999000000001"})
+        assert info["status"] == "shipped"
+        assert info["tracking_number"] == "TBA999000000001"
 
-    def test_delivered_recorded_even_without_number_container(self):
+    def test_tracking_id_label_prefix_is_stripped(self):
+        info = self.read({self.P: "Arriving Monday", self.C: "x", self.T: "Tracking ID:   1Z999AA  "})
+        assert info["tracking_number"] == "1Z999AA"
+
+    def test_number_without_a_label_is_kept_as_is(self):
+        info = self.read({self.P: "Arriving Monday", self.C: "x", self.T: "TBA303111"})
+        assert info["tracking_number"] == "TBA303111"
+
+    def test_shipped_card_but_no_extractable_number_escalates_to_agent(self):
+        # Card present (shipped) but the number selector is stale/empty -> agent.
+        assert self.read({self.P: "Arriving tomorrow", self.C: "Delivery Info"}) is None
+
+    def test_delivered_is_terminal_even_without_a_number(self):
         info = self.read({self.P: "Delivered Aug 5"})
         assert info["status"] == "delivered"
         assert info["tracking_number"] == ""
 
     def test_delivered_keeps_its_number_when_present(self):
-        info = self.read({self.P: "Delivered", self.T: "TBA303999"})
+        info = self.read({self.P: "Delivered", self.C: "x", self.T: "Tracking ID: TBA303999"})
         assert info["status"] == "delivered"
         assert info["tracking_number"] == "TBA303999"
 

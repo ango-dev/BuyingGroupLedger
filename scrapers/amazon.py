@@ -14,28 +14,41 @@ class AmazonScraper(BaseRetailerScraper):
     # after which no further split can appear.
     cdp_recheck_enabled = True
 
-    # Stable selectors on Amazon's package-tracking ("pt") page. Also reusable by Amazon Business,
-    # which shares the same tracking page.
-    tracking_number_selector = (
-        "#pt-page-container-inner > div.a-row.pt-main-container > div.pt-map-outer-container"
-        ".pt-map-type-static > div.pt-floating-map-card > section > div > div:nth-child(1) > div"
-    )
+    # Stable, semantically-named selectors on Amazon's package-tracking ("pt") page. Also reusable
+    # by Amazon Business, which shares the same tracking page. The carrier tracking number lives in
+    # a "Delivery Info" card that Amazon renders ONLY once the shipment has shipped — so the card's
+    # presence is the "has shipped" signal and the number sits in a labelled child of it. (These
+    # replace an earlier deep nth-child path that pointed at an always-empty node and never read a
+    # number, which is why a shipped order kept reading as 'ordered'.)
     promise_selector = "h1.pt-promise-main-slot"
+    delivery_card_selector = ".pt-delivery-card-wrapper"
+    tracking_number_selector = ".pt-delivery-card-trackingId"  # text reads "Tracking ID: <number>"
+
+    def _read_tracking_number(self, page) -> str:
+        """The carrier number from the delivery card, or "" if that element isn't present.
+
+        The element's text reads like "Tracking ID: TBA999000000001"; strip the label and keep the
+        number. Kept separate so read_tracking_page can tell "no number element" from "no number".
+        """
+        el = page.query_selector(self.tracking_number_selector)
+        if el is None:
+            return ""
+        raw = el.inner_text().strip()
+        return raw.split(":", 1)[1].strip() if ":" in raw else raw
 
     def read_tracking_page(self, page) -> dict | None:
         """Read status/tracking#/delivery-promise from a loaded Amazon tracking page via selectors.
 
         Returns None to tell the caller to fall back to the agent. That happens when the page
-        doesn't look like a tracking page (the promise headline is missing) OR when the
-        tracking-number CONTAINER is absent entirely — a selector MISS, meaning the page structure
-        changed under us.
+        doesn't look like a tracking page (the promise headline is missing), OR when the shipment
+        HAS shipped (the Delivery Info card is present) but no tracking number can be pulled out of
+        it — a selector that has gone stale under us. Escalating rather than silently reporting
+        'ordered' keeps a shipped order from looking unshipped forever.
 
-        A missing container is deliberately distinguished from a container that is present but
-        EMPTY. Empty is a real "no tracking number yet": the package hasn't been handed to a carrier,
-        so the tracking page shows an "Arriving <x>" estimate with the progress stepper still at
-        "Ordered" and the number slot rendered-but-blank (verified live). That is a legitimate
-        'ordered', not a failure. Conflating the two would let a stale selector silently read every
-        shipment as 'ordered' forever, so no order would ever reach 'shipped'.
+        Crucially, a shipment that simply hasn't shipped yet has NO delivery card at all (the page
+        shows only an "Arriving <x>" estimate with the stepper at "Ordered"); that is a legitimate
+        'ordered', not a failure, and must not escalate — otherwise every un-shipped order would
+        wastefully hit the agent every run.
         """
         promise_el = page.query_selector(self.promise_selector)
         if promise_el is None:
@@ -43,20 +56,23 @@ class AmazonScraper(BaseRetailerScraper):
         promise = promise_el.inner_text().strip()
         lowered = promise.lower()
 
-        tn_el = page.query_selector(self.tracking_number_selector)
+        card = page.query_selector(self.delivery_card_selector)
+        tracking_number = self._read_tracking_number(page) if card is not None else ""
 
-        # Delivered is stated by the promise headline and is terminal — record it even if the number
-        # container is gone (delivered layouts may drop it); no number is needed to know it arrived.
+        # Delivered is stated by the promise headline and is terminal; record it with whatever number
+        # is present (blank is fine — a prior run usually captured it and _merge_row preserves it).
         if "delivered" in lowered:
-            tracking_number = tn_el.inner_text().strip() if tn_el is not None else ""
             return {"status": "delivered", "tracking_number": tracking_number, "delivery_promise": promise}
 
-        if tn_el is None:
-            return None  # selector MISS (container gone), not an empty container → agent fallback
+        if card is None:
+            # Not shipped yet — no delivery card, so no number. Legitimate 'ordered', not a miss.
+            return {"status": "ordered", "tracking_number": "", "delivery_promise": promise}
 
-        tracking_number = tn_el.inner_text().strip()
-        status = "shipped" if tracking_number else "ordered"
-        return {"status": status, "tracking_number": tracking_number, "delivery_promise": promise}
+        if not tracking_number:
+            # Shipped (card present) but the number selector came back empty → it went stale → agent.
+            return None
+
+        return {"status": "shipped", "tracking_number": tracking_number, "delivery_promise": promise}
 
     def task_prompt(self, skip_order_ids: list[str], recheck_orders: list[dict]) -> str:
         # Cost is driven by number of steps (browser-use sends the whole page each step), not prompt
