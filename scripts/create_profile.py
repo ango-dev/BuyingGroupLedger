@@ -90,6 +90,18 @@ def main() -> None:
         retailers = ", ".join(pending_retailers) if pending_retailers else "(none listed yet in profiles.json)"
         print(f"Open that URL in your own browser and log into: {retailers}")
         print("You can log into more than one retailer in the same session if this profile covers several.")
+
+        # Retailers set to auto-auth via Google (see models.profile.RetailerAuth) re-log-in by
+        # riding this profile's long-lived Google session, so that Google login must exist here.
+        google_retailers = [r for r, a in profile.auth.items() if a.method in ("google", "apple")]
+        if google_retailers:
+            print()
+            print(
+                f"IMPORTANT: {', '.join(sorted(google_retailers))} auto-auth via Google in this profile — "
+                "ALSO log into your Google/Gmail account in this same session, and verify 'Sign in with "
+                "Google' on that retailer lands in the account holding your orders. Auto-auth rides this "
+                "Google session; without it the agent can't self-heal a lapsed retailer session."
+            )
         print()
         input("Press Enter here once you're done logging in (this stops the session and saves cookies)... ")
     finally:

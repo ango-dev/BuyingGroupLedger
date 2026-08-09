@@ -161,6 +161,36 @@ Fill a profile's `proxy` in `profiles.json` (leave `profile_id` blank), then:
 It opens a live browser URL — log into the retailer(s) there, press Enter, and it saves the
 `profile_id` back into `profiles.json`. Re-run it any time to log back in if a session expires.
 
+**Auto-auth for Best Buy (Sign in with Google).** Best Buy web sessions die in ~20–25 min, which
+would break hands-off scheduling. To let the agent log itself back in, give the profile an `auth`
+block keyed by retailer and log into Gmail in the same `create_profile` session:
+
+```json
+"auth": { "bestbuy": { "method": "google", "google_email": "you@gmail.com" } }
+```
+
+The agent then clicks "Continue with Google" whenever it hits the Best Buy sign-in page, riding the
+profile's long-lived Google session — no Best Buy password or 2FA/TOTP is stored (passkeys aren't
+usable: Browser-Use's cloud agent has no WebAuthn support). Verify once that "Sign in with Google"
+lands in the Best Buy account holding your orders. If the Google session is *also* dead, the agent
+reports logged-out and alerts, as before. Without an `auth` block, a profile behaves the same as
+before (reports logged-out, doesn't log in).
+
+**Password + 2FA fallback** (for accounts not linked to Google):
+
+```json
+"auth": { "bestbuy": { "method": "password", "username": "you@example.com",
+                       "password": "…", "totp_secret": "BASE32SEED" } }
+```
+
+The agent enters the credentials and, if 2-step verification is requested, computes the current
+authenticator code **in the browser at that moment** (Web Crypto — a code baked into the prompt would
+be expired by the time the agent reaches the field). `totp_secret` is the base32 seed shown when you
+set up the authenticator app; it only covers authenticator-app 2FA, not SMS/email codes. ⚠️ Because
+Browser-Use v4 has no secret-injection channel, the password **and** the TOTP secret go into the
+agent's task prompt and Browser-Use's cloud run history — so `method: "google"` (no stored secret) is
+preferred where the account supports it.
+
 ### Tests
 
 ```bash

@@ -8,7 +8,10 @@
       "username": "REPLACE_WITH_PROXY_USERNAME",
       "password": "REPLACE_WITH_PROXY_PASSWORD"
     },
-    "retailers": ["amazon", "bestbuy", "walmart"]
+    "retailers": ["amazon", "bestbuy", "walmart"],
+    "auth": {
+      "bestbuy": { "method": "google", "google_email": "you@gmail.com" }
+    }
   },
   {
     "label": "profile-2",

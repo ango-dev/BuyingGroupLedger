@@ -1,5 +1,25 @@
 from scrapers.base import BaseRetailerScraper
 
+# In-browser TOTP generator for the password+2FA fallback. The task prompt is built ONCE at run
+# start, but the agent doesn't reach the 2FA field until a minute or two later — a code generated in
+# Python here would already be expired. So instead the agent runs this in the page at the moment the
+# code is asked for, always yielding a fresh RFC 6238 code (SHA-1, 6 digits, 30s step) via Web Crypto.
+# __SECRET__ is replaced with the base32 authenticator seed. The whole thing is a body you can pass to
+# `new Function` / an async IIFE. Verified against RFC 6238 test vectors in tests/test_bestbuy_totp_js.py.
+_TOTP_JS = (
+    "async function bbTotp(secret){"
+    "const A='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';"
+    "secret=secret.replace(/=+$/,'').replace(/\\s/g,'').toUpperCase();"
+    "let bits='';for(const c of secret){const v=A.indexOf(c);if(v<0)continue;bits+=v.toString(2).padStart(5,'0');}"
+    "const bytes=[];for(let i=0;i+8<=bits.length;i+=8)bytes.push(parseInt(bits.substr(i,8),2));"
+    "const buf=new ArrayBuffer(8);const dv=new DataView(buf);dv.setUint32(4,Math.floor(Date.now()/30000));"
+    "const k=await crypto.subtle.importKey('raw',new Uint8Array(bytes),{name:'HMAC',hash:'SHA-1'},false,['sign']);"
+    "const s=new Uint8Array(await crypto.subtle.sign('HMAC',k,buf));const o=s[19]&15;"
+    "const n=((s[o]&127)<<24)|((s[o+1]&255)<<16)|((s[o+2]&255)<<8)|(s[o+3]&255);"
+    "return (n%1000000).toString().padStart(6,'0');}"
+    "return await bbTotp('__SECRET__');"
+)
+
 
 class BestBuyScraper(BaseRetailerScraper):
     retailer_name = "Best Buy"
@@ -14,6 +34,71 @@ class BestBuyScraper(BaseRetailerScraper):
     # on the agent (base read_tracking_page returns None -> _recheck_via_cdp routes open orders to the
     # agent without opening a CDP session). To add cheap re-checks later, mirror amazon.py: define the
     # tracking-page selectors + override read_tracking_page() once a live order lets us confirm them.
+
+    def _signin_block(self) -> str:
+        """Sign-in instructions injected into JOB 1 when this profile has auto-auth for Best Buy.
+
+        Empty when no `auth` is configured (then the agent reports logged_out instead of logging in —
+        the pre-auto-auth behavior). Two methods:
+          - "google": ride the profile's long-lived Google session — one "Continue with Google" click,
+            no Best Buy password or TOTP stored.
+          - "password": username + password, and (if `totp_secret` is set) authenticator-app 2FA
+            computed in-browser at the moment the code is asked for (see _TOTP_JS).
+        See models.profile.RetailerAuth.
+        """
+        auth = self.profile.auth.get(self.retailer_key)
+        if auth is None:
+            return ""
+        if auth.method == "google":
+            return self._google_signin_block(auth)
+        if auth.method == "password":
+            return self._password_signin_block(auth)
+        return ""
+
+    def _google_signin_block(self, auth) -> str:
+        pick = (
+            f'the "{auth.google_email}" account'
+            if auth.google_email
+            else "your Google account (there should be only one signed in)"
+        )
+        return (
+            "\nIf you land on a sign-in / login page, the Best Buy web session has lapsed — LOG BACK "
+            'IN via Google instead of stopping: click "Sign in with Google" / "Continue with Google" '
+            "(this may fully redirect to accounts.google.com or open a popup — handle either). If an "
+            f"account chooser appears, pick {pick}, then click through any "
+            '"Continue"/consent screen. You should return to Best Buy already signed in; then go to '
+            f"{self.order_history_url} and carry on with the jobs below. The Google session is "
+            "long-lived, so this normally needs no password. ONLY if Google itself now asks for a "
+            "password or a verification/2FA code (its session has also expired, which is rare) do NOT "
+            'attempt it — report the logged-out result ({"logged_out": true, "items": []}) and stop.\n'
+        )
+
+    def _password_signin_block(self, auth) -> str:
+        totp = ""
+        if auth.totp_secret:
+            js = _TOTP_JS.replace("__SECRET__", auth.totp_secret)
+            totp = (
+                " If Best Buy then asks for a 2-step verification / authenticator code, get a FRESH "
+                "code by running EXACTLY this JavaScript in the page at that moment (it returns the "
+                "current 6-digit time-based code — the code changes every 30 seconds, so run it right "
+                "when the code field is shown, do NOT reuse an earlier value), then type the returned "
+                f"6 digits into the code field and submit:\n(async () => {{ {js} }})()\n"
+            )
+        else:
+            totp = (
+                " If Best Buy asks for a 2-step verification code (SMS/email/authenticator), you "
+                "cannot complete it — report the logged-out result and stop.\n"
+            )
+        return (
+            "\nIf you land on a sign-in / login page, the Best Buy web session has lapsed — LOG BACK "
+            f'IN instead of stopping: enter the email/username "{auth.username}" and the password '
+            f'"{auth.password}", check any "Keep me signed in" / "Remember me" / "Trust this device" '
+            "box if one is offered (it makes future runs need this less often), and submit." + totp +
+            f" Once signed in, go to {self.order_history_url} and carry on with the jobs below. If "
+            "the credentials are rejected, the account is locked, or you otherwise cannot get in, do "
+            'NOT keep retrying — report the logged-out result ({"logged_out": true, "items": []}) and '
+            "stop.\n"
+        )
 
     def task_prompt(self, skip_order_ids: list[str], recheck_orders: list[dict]) -> str:
         # Cost is driven by number of steps (browser-use sends the whole page each step), not prompt
@@ -57,6 +142,13 @@ class BestBuyScraper(BaseRetailerScraper):
                 "orders NOT in that list."
             )
 
+        # When this profile has Google auto-auth for Best Buy, the agent logs itself back in on a
+        # lapsed session; otherwise it reports logged-out and stops (do not attempt to log in).
+        signin_instructions = self._signin_block() or (
+            "\nIf you land on a sign-in / login page, the session is logged out: report that (see "
+            "output format) and stop immediately; do not attempt to log in.\n"
+        )
+
         return f"""You have TWO jobs on Best Buy. Do both, then return one combined JSON result.
 
 WORK EFFICIENTLY — READ THIS FIRST. Input tokens dominate cost and every step re-sends the whole page,
@@ -73,9 +165,7 @@ so keep the number of browser actions small and never dump the full page repeate
   UI — and read that order's shipments in ONE evaluate. Target roughly one read per page; dozens of
   browser actions for a handful of orders means you are exploring too much.
 
-JOB 1 — find NEW orders. Go to {self.order_history_url} and wait for it to load. If you land on a
-sign-in / login page, the session is logged out: report that (see output format) and stop immediately;
-do not attempt to log in. Today is {today}. Record EVERY order placed on or after {earliest}
+JOB 1 — find NEW orders. Go to {self.order_history_url} and wait for it to load.{signin_instructions}Today is {today}. Record EVERY order placed on or after {earliest}
 ({window_phrase}) — there may be several. Best Buy lists purchases newest-first; after loading the full
 list (see the lazy-load note above), take every order dated on or after {earliest} and ignore those
 dated before it. Do NOT stop early after the first order.
