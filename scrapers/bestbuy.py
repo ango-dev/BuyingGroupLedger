@@ -59,17 +59,30 @@ class BestBuyScraper(BaseRetailerScraper):
 
         return f"""You have TWO jobs on Best Buy. Do both, then return one combined JSON result.
 
+WORK EFFICIENTLY — READ THIS FIRST. Input tokens dominate cost and every step re-sends the whole page,
+so keep the number of browser actions small and never dump the full page repeatedly:
+- Each extraction should run ONE JavaScript evaluate that returns COMPACT JSON (only the fields you
+  need), not document.body.innerText of the whole page. Read the page in structured pieces, not blobs.
+- The purchase-history list LAZY-LOADS: only the newest order or two render at first. Scroll to the
+  bottom in a loop (e.g. window.scrollTo(0, document.body.scrollHeight) a few times, pausing briefly)
+  until the oldest visible order is dated before {earliest} or the list stops growing — THEN read the
+  whole list in one pass. Do not read-scroll-read-scroll one order at a time.
+- Get the list of order_id + date + top-level status for every in-window order in that single read.
+  Then for each qualifying order, navigate DIRECTLY to its details URL
+  (https://www.bestbuy.com/profile/ss/orders/order-details/<order-id>/view) — do NOT click through the
+  UI — and read that order's shipments in ONE evaluate. Target roughly one read per page; dozens of
+  browser actions for a handful of orders means you are exploring too much.
+
 JOB 1 — find NEW orders. Go to {self.order_history_url} and wait for it to load. If you land on a
 sign-in / login page, the session is logged out: report that (see output format) and stop immediately;
 do not attempt to log in. Today is {today}. Record EVERY order placed on or after {earliest}
-({window_phrase}) — there may be several. Best Buy lists purchases newest-first, so work down from the
-top and check EACH order's date; scroll down and click any "Show more" / "Load more" / next-page control
-to reveal older orders until you have seen every order back to {earliest}. Only stop once you reach an
-order dated before {earliest} (everything below it is older). Do NOT stop early after the first order.
-CANCELLED orders: if an order shows as Cancelled, SKIP it — do not record it — but KEEP scanning older
-orders; a cancelled order is NOT a stopping point.{new_scan_skip}
-For each qualifying (non-cancelled) order, open its order-details page (click the order, or go to
-https://www.bestbuy.com/profile/ss/orders/order-details/<order-id>/view) and extract it per the
+({window_phrase}) — there may be several. Best Buy lists purchases newest-first; after loading the full
+list (see the lazy-load note above), take every order dated on or after {earliest} and ignore those
+dated before it. Do NOT stop early after the first order.
+CANCELLED orders: if an order shows as Cancelled, SKIP it — do not record it — but KEEP scanning the
+other in-window orders; a cancelled order is NOT a stopping point.{new_scan_skip}
+For each qualifying (non-cancelled) order, go straight to its order-details page
+(https://www.bestbuy.com/profile/ss/orders/order-details/<order-id>/view) and extract it per the
 shipment rules below.
 {skip_line}{recheck_block}
 JOB 2 is the re-check list above (empty if none). Combine JOB 1 and JOB 2 entries into "items".

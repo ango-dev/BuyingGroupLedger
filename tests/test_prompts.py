@@ -150,6 +150,17 @@ def test_bestbuy_ignores_page_wording_for_labels():
     assert "ignore it and use the numbering rule" in prompt
 
 
+def test_bestbuy_prompt_gives_an_efficient_method():
+    """After a 65-step / 4.9M-token run, the prompt now tells the coding agent to work economically:
+    handle lazy-loading in one pass, read compact JSON not full-page blobs, navigate directly to
+    order-details rather than clicking through the UI."""
+    prompt = build(BestBuyScraper)
+    assert "WORK EFFICIENTLY" in prompt
+    assert "LAZY-LOAD" in prompt
+    assert "navigate DIRECTLY to its details URL" in prompt
+    assert "COMPACT JSON" in prompt
+
+
 def test_amazon_captures_tracking_url_even_before_shipping():
     # The tracking page is where the number appears later; losing the link costs an extra hop.
     assert "IF the shipment hasn't shipped yet" in build(AmazonScraper)
