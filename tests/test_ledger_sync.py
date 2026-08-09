@@ -193,6 +193,89 @@ class TestSyncUpsert:
             sync_csv_to_sheet(path)
 
 
+class TestSameKeyCollapse:
+    """A single sync can carry two rows for one shipment — the CDP tracking read and the agent's
+    re-read. They share an upsert key and must merge into one row, or the second clobbers the
+    first (both merge against the same pre-sync snapshot, last write wins)."""
+
+    def test_cdp_then_agent_rows_do_not_clobber_tracking(self, sheet, tmp_path):
+        # Run-2 shape: the order is already recorded as 'ordered' (downgraded at discovery). The
+        # sync carries CDP's read (shipped + tracking) and the agent's re-read (delivery date,
+        # blank tracking). The row must end up shipped WITH the tracking number, not clobbered.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                status="ordered", tracking_url="http://t/1", cost_per_item="189.99"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            # CDP read first (as scrape() orders recheck_items before agent_items)
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 status="shipped", tracking_number="1Z999"),
+            # agent re-read second: same shipment, no tracking, but a delivery date
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 status="shipped", delivery_date="2026-08-10"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 1, "the two half-rows must collapse to one"
+        r = sheet.data_rows()[0]
+        assert r[FIELDNAMES.index("status")] == "shipped"
+        assert r[FIELDNAMES.index("tracking_number")] == "1Z999", "CDP tracking must survive the agent row"
+        assert r[FIELDNAMES.index("delivery_date")] == "2026-08-10", "agent delivery date must survive too"
+        assert r[FIELDNAMES.index("cost_per_item")] == 189.99, "prior static data preserved"
+
+    def test_agent_row_order_does_not_matter(self, sheet, tmp_path):
+        # Same as above but agent row first — collapse must be order-independent for status.
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
+                 shipment="Shipment 1", status="ordered", delivery_date="2026-08-10"),
+            dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
+                 shipment="Shipment 1", status="shipped", tracking_number="1Z999"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 1
+        r = sheet.data_rows()[0]
+        assert r[FIELDNAMES.index("status")] == "shipped", "furthest-along status wins regardless of order"
+        assert r[FIELDNAMES.index("tracking_number")] == "1Z999"
+
+    def test_further_along_status_wins(self, sheet, tmp_path):
+        # delivered outranks shipped when one shipment's two reads disagree in a single sync.
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
+                 shipment="Shipment 1", status="shipped", tracking_number="1Z999"),
+            dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
+                 shipment="Shipment 1", status="delivered", delivery_date="2026-08-10"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        r = sheet.data_rows()[0]
+        assert r[FIELDNAMES.index("status")] == "delivered"
+        assert r[FIELDNAMES.index("tracking_number")] == "1Z999"
+
+    def test_distinct_shipments_are_not_collapsed(self, sheet, tmp_path):
+        # Different shipment labels are different keys — must stay two rows.
+        sheet.rows = [list(HEADER)]
+        common = dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget")
+        path = write_csv_file(
+            tmp_path,
+            dict(**common, shipment="Shipment 1", status="shipped", tracking_number="1Z1"),
+            dict(**common, shipment="Shipment 2", status="ordered"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 2
+
+
 class TestLoadOrderState:
     def test_order_is_delivered_only_when_every_shipment_is(self, sheet):
         sheet.rows = [

@@ -39,6 +39,49 @@ HEADER = [
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas.
 _NUMERIC_FIELDS = {"quantity", "cost_per_item", "shipping", "total_cost"}
 
+# Furthest-along status wins when two rows of ONE shipment are collapsed in a single sync (see
+# _collapse_records). Mirrors _rollup_status's spirit: cancelled overrides, then delivered, then
+# shipped, then ordered.
+_STATUS_RANK = {"ordered": 0, "shipped": 1, "delivered": 2, "cancelled": 3}
+
+
+def _collapse_records(records: list[dict]) -> list[dict]:
+    """Collapse CSV records that share an upsert key into one row before upserting.
+
+    A single sync can carry two rows for the same (order, order_date, item, shipment): the cheap
+    CDP tracking read (status 'shipped' + tracking number, blank delivery date) and the agent's
+    re-read of that same shipment (delivery date, but blank tracking — the Amazon agent never reads
+    the number). Upserting them independently would let the second clobber the first: each merges
+    against the same pre-sync snapshot and writes the row separately, so last-write-wins wipes CDP's
+    tracking number back to blank and the order never progresses. Merge them here first — non-blank
+    wins per field (so the two half-rows combine), and for the one field they can legitimately
+    disagree on, status, the furthest-along value wins. First-seen order is preserved.
+    """
+    collapsed: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    for rec in records:
+        key = (
+            rec.get("order_id", ""),
+            rec.get("order_date", ""),
+            rec.get("item_name", ""),
+            rec.get("shipment", ""),
+        )
+        if key not in collapsed:
+            collapsed[key] = dict(rec)
+            order.append(key)
+            continue
+        acc = collapsed[key]
+        for field, val in rec.items():
+            if field == "status":
+                continue  # status is not first-non-blank; it's resolved by rank below
+            if str(val).strip() and not str(acc.get(field, "")).strip():
+                acc[field] = val
+        new_status = (rec.get("status") or "").strip().lower()
+        cur_status = (acc.get("status") or "").strip().lower()
+        if _STATUS_RANK.get(new_status, -1) > _STATUS_RANK.get(cur_status, -1):
+            acc["status"] = rec.get("status")
+    return [collapsed[k] for k in order]
+
 
 def _get_worksheet() -> gspread.Worksheet:
     creds = Credentials.from_service_account_file(settings.google_service_account_file, scopes=SCOPES)
@@ -102,32 +145,36 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         key = tuple(row[i] if i < len(row) else "" for i in key_idx)
         key_to_existing[key] = (row_number, row)
 
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        records = list(csv.DictReader(f))
+
     updates = 0
     appends: list[list] = []
-    with csv_path.open(newline="", encoding="utf-8") as f:
-        for record in csv.DictReader(f):
-            # Driven off FIELDNAMES (the same list csv_writer writes) rather than a second literal
-            # copy, so a new column can't land in one place and not the other. .get() tolerates
-            # re-syncing an older CSV written before a column was added — the missing value arrives
-            # blank, which _merge_row then refuses to write over existing data.
-            sheet_row = [_coerce(field, record.get(field, "")) for field in FIELDNAMES]
-            key = (
-                record["order_id"],
-                record["order_date"],
-                record["item_name"],
-                record.get("shipment", ""),
-            )
-            if key in key_to_existing:
-                row_number, existing_row = key_to_existing[key]
-                merged = _merge_row(existing_row, sheet_row)
-                # Preserved cells come back as strings from get_all_values(); re-coerce so a kept
-                # numeric (e.g. a quantity carried over from a prior run) is written as a number,
-                # not text — otherwise Sheets stores it as text and shows a leading-apostrophe '1.
-                merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
-                worksheet.update(range_name=f"A{row_number}", values=[merged])
-                updates += 1
-            else:
-                appends.append(sheet_row)
+    # Collapse same-key rows (CDP read + agent re-read of one shipment) before upserting, so the
+    # two half-rows merge into one instead of the later overwriting the earlier's tracking number.
+    for record in _collapse_records(records):
+        # Driven off FIELDNAMES (the same list csv_writer writes) rather than a second literal
+        # copy, so a new column can't land in one place and not the other. .get() tolerates
+        # re-syncing an older CSV written before a column was added — the missing value arrives
+        # blank, which _merge_row then refuses to write over existing data.
+        sheet_row = [_coerce(field, record.get(field, "")) for field in FIELDNAMES]
+        key = (
+            record["order_id"],
+            record["order_date"],
+            record["item_name"],
+            record.get("shipment", ""),
+        )
+        if key in key_to_existing:
+            row_number, existing_row = key_to_existing[key]
+            merged = _merge_row(existing_row, sheet_row)
+            # Preserved cells come back as strings from get_all_values(); re-coerce so a kept
+            # numeric (e.g. a quantity carried over from a prior run) is written as a number,
+            # not text — otherwise Sheets stores it as text and shows a leading-apostrophe '1.
+            merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
+            worksheet.update(range_name=f"A{row_number}", values=[merged])
+            updates += 1
+        else:
+            appends.append(sheet_row)
 
     if appends:
         worksheet.append_rows(appends)
