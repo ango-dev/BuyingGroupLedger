@@ -33,12 +33,13 @@ class TestBlankToNone:
 class TestStatusNormalization:
     @pytest.mark.parametrize("value", ["ordered", "shipped", "delivered", "cancelled"])
     def test_known_statuses_pass_through(self, value):
-        assert _item(status=value).status == value
+        # tracking_number present so 'shipped' survives _shipped_requires_tracking (see that class).
+        assert _item(status=value, tracking_number="1Z999").status == value
 
     @pytest.mark.parametrize("value", ["Delivered", "SHIPPED", "  Ordered  ", "Cancelled"])
     def test_case_and_whitespace_are_normalized(self, value):
         # load_order_state compares against lowercase literals; "Delivered" would never roll up.
-        assert _item(status=value).status == value.strip().lower()
+        assert _item(status=value, tracking_number="1Z999").status == value.strip().lower()
 
     @pytest.mark.parametrize("value", ["processing", "returned", "out for delivery"])
     def test_unknown_status_coerces_to_ordered_and_warns(self, value, caplog):
@@ -56,6 +57,31 @@ class TestStatusNormalization:
 
     def test_default_status_is_ordered(self):
         assert _item().status == "ordered"
+
+
+class TestShippedRequiresTracking:
+    """A row can't claim 'shipped' without a tracking number. Amazon's agent marks a shipment
+    'shipped' from the "Arriving <date>" text while leaving the number blank (CDP reads it later),
+    which would otherwise assert shipped with no proof. The invariant downgrades that to 'ordered'
+    until the number lands, then the CDP re-check promotes it back to 'shipped'."""
+
+    @pytest.mark.parametrize("blank", ["", "   ", "\t"])
+    def test_shipped_without_tracking_downgrades_to_ordered(self, blank):
+        assert _item(status="shipped", tracking_number=blank).status == "ordered"
+
+    def test_shipped_with_tracking_stays_shipped(self):
+        assert _item(status="shipped", tracking_number="1Z999").status == "shipped"
+
+    def test_case_shipped_without_tracking_still_downgrades(self):
+        # Normalization runs first (SHIPPED -> shipped), then the invariant downgrades it.
+        assert _item(status="SHIPPED").status == "ordered"
+
+    def test_delivered_without_tracking_is_untouched(self):
+        # delivered is terminal and its own proof; only 'shipped' requires a number.
+        assert _item(status="delivered", tracking_number="").status == "delivered"
+
+    def test_ordered_without_tracking_is_untouched(self):
+        assert _item(status="ordered", tracking_number="").status == "ordered"
 
 
 class TestTotalCost:

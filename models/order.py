@@ -91,6 +91,24 @@ class OrderItem(BaseModel):
         return "ordered"
 
     @model_validator(mode="after")
+    def _shipped_requires_tracking(self):
+        """A row may only be 'shipped' if it actually carries a tracking number.
+
+        'shipped' is the claim that a package is in transit; with no tracking number there is no
+        proof of that, and nothing downstream (buying-group posting) can act on it. Amazon's agent
+        judges a shipment 'shipped' from the order-details "Arriving <date>" text but deliberately
+        leaves tracking_number blank — the number lives on the tracking page, read separately by the
+        cheaper CDP pass — which would otherwise land a 'shipped' row with no number. Downgrade to
+        'ordered' (the safe open state) until a number is present; the CDP re-check then promotes it
+        back to 'shipped' once it reads the number. delivered/cancelled are terminal and untouched.
+        Best Buy already enforces this via prompt wording; doing it here makes the rule uniform and
+        deterministic across every retailer and every path (agent, CDP) that builds an OrderItem.
+        """
+        if self.status == "shipped" and not self.tracking_number.strip():
+            self.status = "ordered"
+        return self
+
+    @model_validator(mode="after")
     def _compute_total_cost(self):
         """total_cost is the line total for THIS shipment row = quantity * cost_per_item.
 
