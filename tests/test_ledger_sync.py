@@ -24,10 +24,14 @@ class FakeWorksheet:
         return [list(r) for r in self.rows]
 
     def update(self, range_name, values):
-        row_number = int(range_name.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-        while len(self.rows) < row_number:
-            self.rows.append([])
-        self.rows[row_number - 1] = list(values[0])
+        # Real gspread writes the whole 2D `values` block starting at the range's top-left cell, so a
+        # multi-row block lands on consecutive rows (that's how ledger_sync now appends).
+        start = int(range_name.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+        for offset, value in enumerate(values):
+            idx = start - 1 + offset
+            while len(self.rows) <= idx:
+                self.rows.append([])
+            self.rows[idx] = list(value)
         self.update_calls += 1
 
     def append_rows(self, rows):
@@ -465,12 +469,18 @@ class TestCancelledOrders:
 
     def test_cancelled_order_id_reaches_the_skip_list(self, sheet, monkeypatch):
         # base.py combines delivered + cancelled + open into the agent's discovery skip list.
+        from datetime import datetime, timezone
+
         from models.profile import ProfileConfig
         from scrapers.bestbuy import BestBuyScraper
 
+        # Use today's date so the order stays inside the scraper's lookback window regardless of when
+        # the suite runs — _load_order_state() trims cancelled orders older than that window (`since`),
+        # so a hardcoded date silently falls out of range once the real clock passes it.
+        today = datetime.now(timezone.utc).date().isoformat()
         sheet.rows = [
             list(HEADER),
-            row(order_id="CANCELLED1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="CANCELLED1", order_date=today, item_name="W", shipment="Shipment 1",
                 status="cancelled", profile_label="p1"),
         ]
         # Wide lookback so the fixed order date can't fall outside the discovery window and get

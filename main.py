@@ -43,6 +43,7 @@ from output.csv_writer import write_csv  # noqa: E402
 from scrapers.amazon import AmazonScraper  # noqa: E402
 from scrapers.base import BaseRetailerScraper, LoggedOutError  # noqa: E402
 from scrapers.bestbuy import BestBuyScraper  # noqa: E402
+from scrapers.costco import CostcoScraper  # noqa: E402
 from sheets.ledger_sync import sync_csv_to_sheet  # noqa: E402
 
 log = logging.getLogger("main")
@@ -50,6 +51,7 @@ log = logging.getLogger("main")
 SCRAPERS: dict[str, type[BaseRetailerScraper]] = {
     "amazon": AmazonScraper,
     "bestbuy": BestBuyScraper,
+    "costco": CostcoScraper,
 }
 
 

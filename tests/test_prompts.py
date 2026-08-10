@@ -13,8 +13,13 @@ import pytest
 from models.profile import ProfileConfig, RetailerAuth
 from scrapers.amazon import AmazonScraper
 from scrapers.bestbuy import BestBuyScraper
+from scrapers.costco import CostcoScraper
 
-SCRAPERS = pytest.mark.parametrize("scraper_cls", [AmazonScraper, BestBuyScraper], ids=["amazon", "bestbuy"])
+SCRAPERS = pytest.mark.parametrize(
+    "scraper_cls",
+    [AmazonScraper, BestBuyScraper, CostcoScraper],
+    ids=["amazon", "bestbuy", "costco"],
+)
 
 
 def build(scraper_cls, skip_ids=None, recheck=None, auth=None):
@@ -254,6 +259,30 @@ def test_amazon_does_not_open_tracking_pages():
 
 def test_amazon_leaves_tracking_number_to_the_selector_reader():
     assert 'tracking_number: leave ""' in build(AmazonScraper)
+
+
+def test_costco_ignores_page_wording_for_labels():
+    prompt = build(CostcoScraper)
+    assert "Do NOT copy Costco's own" in prompt  # phrase wraps across lines in the prompt
+    assert "ignore it and use the numbering rule" in prompt
+
+
+def test_costco_prompt_gives_an_efficient_method():
+    """Costco has no cheap CDP path, so the whole re-check rides the agent — keep step count low the
+    same way Best Buy does: handle lazy-loading in one pass and read compact JSON, not full-page blobs."""
+    prompt = build(CostcoScraper)
+    assert "WORK EFFICIENTLY" in prompt
+    assert "LAZY-LOAD" in prompt
+    assert "COMPACT JSON" in prompt
+
+
+def test_costco_scopes_to_online_shipped_orders_only():
+    """Costco's Orders & Purchases page mixes shippable online orders with in-warehouse pickups and
+    Same-Day/Instacart grocery — only the first ships with carrier tracking, so the rest are skipped."""
+    prompt = build(CostcoScraper)
+    assert "ONLINE SHIPPED ORDERS ONLY" in prompt
+    assert "warehouse" in prompt.lower()
+    assert "Instacart" in prompt
 
 
 @SCRAPERS

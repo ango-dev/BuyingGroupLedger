@@ -1,6 +1,7 @@
 .env
 service_account.json
 profiles.json
+.costco/
 data/
 logs/
 __pycache__/

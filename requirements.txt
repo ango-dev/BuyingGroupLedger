@@ -4,3 +4,7 @@ pydantic>=2.7
 gspread>=6.1.0
 google-auth>=2.30.0
 requests>=2.32.0
+# Costco GraphQL path: curl_cffi impersonates a real Chrome TLS fingerprint (Costco's edge blocks
+# vanilla HTTP clients); PyJWT decodes the id_token to check its expiry before reusing it.
+curl_cffi>=0.7.0
+PyJWT>=2.8.0

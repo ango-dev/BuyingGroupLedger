@@ -177,7 +177,13 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             appends.append(sheet_row)
 
     if appends:
-        worksheet.append_rows(appends)
+        # Write at an explicit column-A range rather than worksheet.append_rows(): append_rows lets
+        # the Sheets API auto-detect the "table" to append after, which on some sheets anchors to the
+        # wrong column (observed shifting rows 10 columns right into K:AB). Positioning from column A
+        # of the first empty row keeps every row aligned to the header. `existing` was read before any
+        # updates and updates never add rows, so len(existing)+1 is the first free row.
+        start_row = len(existing) + 1
+        worksheet.update(range_name=f"A{start_row}", values=appends)
 
     log.info("Sheet sync: %d row(s) updated, %d row(s) appended.", updates, len(appends))
 

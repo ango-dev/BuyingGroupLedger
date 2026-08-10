@@ -1,7 +1,7 @@
 # Buying Group Ledger
 
-Automated order tracking for buying-group reselling. It logs into retailer accounts (Amazon and
-Best Buy today; Amazon Business / Walmart / Costco planned), captures new orders and their shipment status,
+Automated order tracking for buying-group reselling. It logs into retailer accounts (Amazon, Best Buy,
+and Costco today; Amazon Business / Walmart planned), captures new orders and their shipment status,
 and keeps a Google Sheet ledger up to date — cheaply and hands-off.
 
 It runs on **Browser-Use Cloud** (the browser runs in their cloud, not on your machine) and uses a
@@ -61,9 +61,10 @@ flowchart LR
 - **Delivered orders** → skipped entirely; an order counts as delivered only once **every** shipment
   row is delivered.
 
-> **Best Buy uses no CDP**: it shows the tracking number on the order-details page, so the agent
-> already has it and a selector adds nothing. Only Amazon has the "number lives on another page"
-> problem, which is exactly what selectors are for.
+> **Best Buy uses no CDP**: its tracking is on the order-details page, so re-checks stay on the agent.
+> **Costco skips the browser entirely** on its primary path — it reads orders from Costco's own
+> GraphQL API (no agent, no CDP), and only falls back to the agent if that API breaks. Only Amazon
+> has the "number lives on another in-site page" problem, which is exactly what selectors are for.
 
 The next cheaper tier is a **REST tracking API** (17TRACK bills ~$0.024 per shipment *once*, then
 status polling is free) to replace the CDP delivery-watch. Gated on confirming it actually covers
@@ -216,12 +217,36 @@ live run.
 # a specific retailer:
 .venv/bin/python main.py amazon
 .venv/bin/python main.py bestbuy
+.venv/bin/python main.py costco
 ```
 
 > Best Buy discovers orders from the purchase-history page
 > (`bestbuy.com/purchasehistory/purchases`), then opens each order's details page
-> (`.../profile/ss/orders/order-details/<order-id>/view`) to read per-shipment tracking. Both
-> retailers re-check open orders through the agent (see the cost model above).
+> (`.../profile/ss/orders/order-details/<order-id>/view`) to read per-shipment tracking; it re-checks
+> open orders through the agent (no CDP path). **Costco is different**: it reads orders from Costco's
+> private GraphQL API using a stored refresh token — no browser and no agent — and tracks **online
+> shipped orders only** (in-warehouse pickups and Same-Day/Instacart grocery are skipped). If that API
+> ever fails, Costco falls back to the agent automatically (and alerts). See "Costco API setup" below.
+> Amazon uses the agent/CDP split (see the cost model above).
+
+### Costco API setup (one-time)
+
+Costco's primary path uses its private GraphQL API instead of a browser, so it needs a **refresh
+token** grabbed once from a logged-in browser session (it's long-lived; redo only if revoked):
+
+1. Log into `costco.com`, open DevTools → Application → Local Storage → `https://signin.costco.com`,
+   and copy the `secret` of the key whose name contains `refreshtoken`.
+2. Save it against the profile that owns this membership (847 covers all US warehouses):
+   ```bash
+   python -m scripts.costco_token --label profile-2 --token "<REFRESH_TOKEN>" --warehouses 847
+   ```
+   (There's also a best-effort `--grab` that reads the token from a logged-in profile over CDP, but
+   Costco encrypts its stored token, so the manual `--token` copy above is the reliable path.)
+
+The token is written to `.costco/<label>.json` (gitignored — treat it like a password). This path
+also needs the extra deps in `requirements.txt` (`curl_cffi`, `PyJWT`); re-run the pip install if you
+set the project up before Costco was added. If the token is missing/expired or the API changes shape,
+Costco alerts and falls back to the Browser-Use agent for that run.
 
 Profiles with a blank `profile_id` are skipped. Output goes to `data/orders_*.csv` and the Sheet;
 logs to `logs/run.log`. A lock (`logs/.run.lock`, auto-expires after 3h) prevents overlapping runs.
@@ -294,6 +319,10 @@ scheduler on the new host. No re-login or re-sharing needed.
 
 - **Best Buy**, against a real order — the scraper is written but has never run for real, because no
   profile has `bestbuy` in its `retailers` list yet.
+- **Costco split lifecycle across runs** — the API path and agent fallback are both live-validated
+  end-to-end (discovery, detail fetch, mapping, and the agent extracting a real 2-shipment order all
+  match). Still worth watching over time: an order observed while still *unshipped* transitioning to
+  shipped/split on a later run, and the refresh-token rotation surviving many days of scheduled runs.
 - **The Amazon split lifecycle** — a single `Shipment 1` order, an agent re-check that catches the
   ship-time split, `Shipment 1` updating in place while `Shipment 2/3` append, and the order staying
   open until every shipment is delivered.
@@ -303,7 +332,7 @@ scheduler on the new host. No re-login or re-sharing needed.
 - `delivery_date`: the prompts ask for `YYYY-MM-DD`, but the dormant CDP path writes the raw promise
   text ("Arriving Monday") into the same field. No live exposure while that path stays disabled —
   revisit only if it's ever re-enabled.
-- More retailers: Amazon Business (shares Amazon's tracking page), Walmart, Costco.
+- More retailers: Amazon Business (shares Amazon's tracking page), Walmart.
 - Optional delivery-watch cost optimization: revive the dormant CDP fast-path, or use a REST tracking
   API (17TRACK / TrackingMore) — verify Amazon Logistics TBA coverage before committing to one.
   Currently shelved: reliability beat the saving once already.
