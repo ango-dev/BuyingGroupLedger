@@ -473,7 +473,12 @@ class TestCancelledOrders:
             row(order_id="CANCELLED1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
                 status="cancelled", profile_label="p1"),
         ]
-        scraper = BestBuyScraper(ProfileConfig(label="p1", profile_id="x", retailers=["bestbuy"]))
+        # Wide lookback so the fixed order date can't fall outside the discovery window and get
+        # trimmed as the real "today" advances — this test is about skip-list assembly, not date
+        # windowing (which its sibling tests cover with an explicit `since`).
+        scraper = BestBuyScraper(
+            ProfileConfig(label="p1", profile_id="x", retailers=["bestbuy"]), lookback_days=100_000
+        )
 
         state = scraper._load_order_state()
         skip = (list(state["delivered_ids"]) + list(state["cancelled_ids"])
