@@ -100,6 +100,25 @@ class TestSyncUpsert:
         assert len(sheet.data_rows()) == 1
         assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "ordered"
 
+    def test_blank_order_id_record_is_skipped_not_orphaned(self, sheet, tmp_path):
+        # A record with no Order ID can't form a valid upsert key, so writing it would append a
+        # permanent orphan/duplicate (observed: the agent dropped order_id on one shipment entry).
+        # It must be skipped; a valid record in the same sync still lands.
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(retailer="Best Buy", order_id="", order_date="2026-08-10", item_name="Laptop",
+                 shipment="Shipment 3", status="shipped", tracking_number="TRK1"),
+            dict(retailer="Best Buy", order_id="B1", order_date="2026-08-10", item_name="Laptop",
+                 shipment="Shipment 3", status="shipped", tracking_number="TRK1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert len(rows) == 1, "the blank-Order-ID record must not create a row"
+        assert rows[0][FIELDNAMES.index("order_id")] == "B1"
+
     def test_recheck_updates_in_place_without_clobbering(self, sheet, tmp_path):
         sheet.rows = [
             list(HEADER),

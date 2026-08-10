@@ -152,7 +152,21 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     appends: list[list] = []
     # Collapse same-key rows (CDP read + agent re-read of one shipment) before upserting, so the
     # two half-rows merge into one instead of the later overwriting the earlier's tracking number.
+    skipped_blank = 0
     for record in _collapse_records(records):
+        # A record with no Order ID can't form a valid upsert key (Order ID + Order Date + Item Name
+        # + Shipment), so it never matches an existing row and appends as a permanent orphan/duplicate
+        # — seen once when the agent dropped the order_id on a single shipment entry, leaving a stray
+        # blank-Order-ID row alongside the correct one. Skip it; the next run re-reads that order and
+        # writes the row with its real key.
+        if not str(record.get("order_id", "")).strip():
+            skipped_blank += 1
+            log.warning(
+                "Skipping a record with a blank Order ID (would orphan into a duplicate): "
+                "item=%r shipment=%r",
+                record.get("item_name", ""), record.get("shipment", ""),
+            )
+            continue
         # Driven off FIELDNAMES (the same list csv_writer writes) rather than a second literal
         # copy, so a new column can't land in one place and not the other. .get() tolerates
         # re-syncing an older CSV written before a column was added — the missing value arrives
@@ -185,7 +199,12 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         start_row = len(existing) + 1
         worksheet.update(range_name=f"A{start_row}", values=appends)
 
-    log.info("Sheet sync: %d row(s) updated, %d row(s) appended.", updates, len(appends))
+    log.info(
+        "Sheet sync: %d row(s) updated, %d row(s) appended%s.",
+        updates,
+        len(appends),
+        f", {skipped_blank} skipped (blank Order ID)" if skipped_blank else "",
+    )
 
 
 def _merge_row(existing_row: list, new_row: list) -> list:
