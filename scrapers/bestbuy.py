@@ -207,21 +207,32 @@ shipment rules below.
 JOB 2 is the re-check list above (empty if none). Combine JOB 1 and JOB 2 entries into "items".
 
 SHIPMENT RULES (apply to every order-details page):
-- An order can split into multiple fulfillment groups. Each physical shipment has its OWN status,
-  tracking number, tracking link, and estimated/actual delivery date. Whatever heading Best Buy prints
-  above a group (if any), ignore it and use the numbering rule below instead.
+- Best Buy shows each UNIT as its OWN block on the order-details page: a product bought in quantity 7
+  appears as SEVEN separate blocks, each with the same SKU and each labeled "Quantity: 1". Do NOT
+  output one row per block — group the blocks into shipments and COUNT them (see below).
+- A physical SHIPMENT is the set of blocks that share the SAME tracking number (for a not-yet-shipped
+  order with no tracking yet, the blocks Best Buy groups under one "Arriving …"/fulfillment group).
+  Blocks with the SAME tracking number are ONE shipment; blocks with DIFFERENT tracking numbers are
+  DIFFERENT shipments. Whatever heading Best Buy prints above a group (if any),
+  ignore it and use the numbering rule below instead. (This is why an order "splits": 5 units in one
+  group become 5 shipments once each unit ships under its own tracking number.)
 - IGNORE digital items entirely — do NOT output any entry for them. A group is digital if it is labeled
   "Digital Item ..." or shows "Digital Delivery" / "Ready to Redeem" / a redemption key/code, or the
   line shows $0.00 as a digital delivery. Digital items are never resold, so skip them completely.
-- Output ONE entry per (physical shipment x distinct product) within the order. If the SAME product
-  appears more than once inside ONE shipment, do NOT create duplicate rows — output a single entry for
-  it with quantity = the total count in that shipment. Two shipments each containing the same product
-  are still TWO separate entries (one per shipment), each with its own shipment label and tracking.
-- Label EVERY physical shipment "Shipment 1", "Shipment 2", "Shipment 3", ... in top-to-bottom order,
-  INCLUDING a single-shipment order (its one shipment is "Shipment 1"). Do NOT copy Best Buy's own
-  wording — always use this numbering, so the same shipment gets the same label on every re-check and
-  updates its existing row instead of creating a duplicate. Skipped digital groups do not consume a
-  number: number only the physical shipments you actually output.
+- Output ONE entry per (shipment x distinct product). Within one shipment, if the SAME product (same
+  SKU) appears in more than one block, do NOT create duplicate rows — output a single entry for it with
+  quantity = the total count of that product's blocks in that shipment (e.g. 7 identical ASUS blocks
+  under ONE tracking number = one entry with quantity 7, NOT seven rows and NOT quantity 1). If a
+  shipment contains SEVERAL DIFFERENT products, output a separate entry for EACH product, each with its
+  own quantity in that shipment. Two shipments each containing the same product are still TWO separate
+  entries (one per shipment). Read quantity FRESH from the page every time (including on re-checks) —
+  never default it to 1 when a shipment holds several blocks of the same product.
+- Label EVERY physical shipment "Shipment 1", "Shipment 2", "Shipment 3", ... in top-to-bottom order
+  (by where each shipment's first block appears), INCLUDING a single-shipment order (its one shipment
+  is "Shipment 1"). Do NOT copy Best Buy's own wording — always use this numbering, so the same
+  shipment gets the same label on every re-check and updates its existing row instead of creating a
+  duplicate. Skipped digital groups do not consume a number: number only the physical shipments you
+  actually output.
 - Every physical entry for the order gets the tracking_number / tracking_url / delivery_date / status
   of ITS shipment.
 
