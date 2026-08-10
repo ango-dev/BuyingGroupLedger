@@ -3,6 +3,7 @@
 .env
 service_account.json
 profiles.json
+.costco/
 .venv/
 __pycache__/
 *.pyc

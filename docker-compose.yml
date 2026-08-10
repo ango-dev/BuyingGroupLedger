@@ -17,5 +17,6 @@ services:
     volumes:
       - ./profiles.json:/app/profiles.json:ro
       - ./service_account.json:/app/service_account.json:ro
+      - ./.costco:/app/.costco:ro # Costco refresh tokens (.costco/<label>.json); omit if not using Costco
       - ./data:/app/data          # generated CSVs (optional; Sheet is source of truth)
       - ./logs:/app/logs          # run.log + the overlap lock

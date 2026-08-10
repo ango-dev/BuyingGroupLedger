@@ -278,7 +278,9 @@ the venv + Task Scheduler path is simpler.
 
 Prereqs on the host: `.env`, `service_account.json`, and `profiles.json` present in the project dir
 (they're mounted/injected at runtime and are excluded from the image via `.dockerignore` — secrets are
-never baked in).
+never baked in). If you use Costco, also have `.costco/<label>.json` present — it's mounted read-only so
+the container can use the GraphQL API path; without it, Costco falls back to the agent every run. (Not
+using Costco? Drop the `./.costco` volume line from `docker-compose.yml`.)
 
 ```bash
 docker compose up -d --build      # build + start; runs every RUN_INTERVAL_HOURS
