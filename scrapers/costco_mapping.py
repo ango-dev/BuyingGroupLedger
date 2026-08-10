@@ -35,6 +35,15 @@ from models.order import OrderItem
 RETAILER = "Costco"
 
 
+# Costco's order-details deep link. The UUID is Costco's web-app client id (same for every account,
+# == WCS_CLIENT_ID), so the link is derivable from the order number alone — no extra GraphQL field.
+ORDER_DETAILS_URL = "https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/{}"
+
+
+def _order_url(order_id: str) -> str:
+    return ORDER_DETAILS_URL.format(order_id) if order_id else ""
+
+
 def _num(value) -> float | None:
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
@@ -245,6 +254,7 @@ def _rows_for_group(
                 order_id=order_id,
                 order_date=order_date,
                 status=status,
+                order_url=_order_url(order_id),
                 delivery_address=group["address"],
                 item_name=name,
                 quantity=group["quantity"] or None,
@@ -266,6 +276,7 @@ def _rows_for_group(
                 order_id=order_id,
                 order_date=order_date,
                 status=package["status"],
+                order_url=_order_url(order_id),
                 tracking_number=package["tracking_number"],
                 tracking_url=package["tracking_url"],
                 delivery_date=package["delivery_date"],

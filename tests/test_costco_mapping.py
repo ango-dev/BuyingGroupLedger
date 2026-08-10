@@ -52,6 +52,18 @@ def test_single_shipment_delivered_order(details):
     assert row.delivery_date == "2026-07-23"
     assert row.card_last4 == "1111"
     assert "Testville" in row.delivery_address
+    # Order link is the derivable order-details deep link (built from the order number).
+    assert row.order_url == "https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/1399000006"
+
+
+def test_order_url_is_populated_on_every_row(details):
+    """The Order Link column should carry Costco's order-details deep link on every row, derived from
+    the order number alone (no extra GraphQL field)."""
+    items = build_order_items(details, "p", known_open_ids={"1399000001"})
+    assert items
+    for it in items:
+        assert it.order_url.endswith(f"/orderdetails/{it.order_id}")
+        assert it.order_url.startswith("https://www.costco.com/myaccount/")
 
 
 def test_line_split_across_packages_becomes_numbered_shipments(details):

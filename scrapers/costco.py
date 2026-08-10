@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from alerts.notifier import alert
 from scrapers.base import BaseRetailerScraper
-from scrapers.costco_mapping import build_order_items
+from scrapers.costco_mapping import ORDER_DETAILS_URL, build_order_items
 
 log = logging.getLogger(__name__)
 
@@ -15,9 +15,10 @@ class CostcoScraper(BaseRetailerScraper):
     # Costco account "Orders & Purchases" — only used by the AGENT FALLBACK below. The primary path
     # is Costco's GraphQL API (scrapers/costco_graphql.py), which needs no browser.
     order_history_url = "https://www.costco.com/OrderStatusCmd"
-    # Direct order-details deep link. The UUID is Costco's web-app client id (same for every account,
-    # == WCS_CLIENT_ID), not account-specific, so the agent can jump straight to an order.
-    order_details_url = "https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/{}"
+    # Direct order-details deep link (shared with the GraphQL mapping, which fills order_url from it).
+    # The UUID is Costco's web-app client id (same for every account), so the agent can jump straight
+    # to an order and the link is derivable from the order number alone.
+    order_details_url = ORDER_DETAILS_URL
 
     # PRIMARY PATH: Costco's private GraphQL API (deterministic, no browser, no agent) — see
     # scrape() -> _scrape_via_api. FALLBACK: if the API errors (auth dead, schema changed, network),
@@ -109,9 +110,14 @@ class CostcoScraper(BaseRetailerScraper):
                 "\nRE-CHECK these already-recorded, not-yet-delivered orders — do NOT re-scan the "
                 "whole order history for them. For each, open its order-details view and re-read "
                 "EVERY physical shipment on that page (see the shipment rules below). Output one entry "
-                "per (shipment x distinct physical item), filling ONLY shipment, status, "
-                "tracking_number, tracking_url and delivery_date, and leaving every other field empty "
-                '(""). Ignore digital items. These may be older than the window above; re-check anyway:\n'
+                "per (shipment x distinct physical item), filling ALL fields for each shipment just "
+                "like a new order — including THIS shipment's own quantity, cost_per_item, shipping, "
+                "card_last4, delivery_address and order_url. An order can SPLIT after it was recorded "
+                "(a single shipment of quantity N becomes N shipments of smaller quantity): each "
+                "split-off shipment is a brand-new row that needs its own full data, and the original "
+                "shipment's quantity drops accordingly — so re-read every shipment's quantity/cost "
+                "fresh, do NOT leave them blank. Ignore digital items. These may be older than the "
+                "window above; re-check anyway:\n"
                 + "\n".join(lines)
                 + "\n"
             )
@@ -158,17 +164,22 @@ instead of clicking through the list.
 JOB 2 is the re-check list above (empty if none). Combine JOB 1 and JOB 2 entries into "items".
 
 SHIPMENT RULES (apply to every order-details page):
-- An order can split into multiple shipments. Each physical shipment has its OWN status, tracking
-  number, tracking link, and estimated/actual delivery date. Whatever heading Costco prints above a
-  group (if any), ignore it and use the numbering rule below instead.
+- An order can split into multiple shipments. A physical SHIPMENT is the set of items that share the
+  SAME tracking number: items under the same tracking number are ONE shipment; items under DIFFERENT
+  tracking numbers are DIFFERENT shipments. That is what "splitting" means — units that ship in
+  separate boxes get separate tracking numbers. Each shipment has its OWN status, tracking number,
+  tracking link, and estimated/actual delivery date. Whatever heading Costco prints above a group (if
+  any), ignore it and use the numbering rule below instead.
 - IGNORE digital items entirely — do NOT output any entry for them. A group is digital if it is a gift
   card, membership, digital download/eBook, redemption code, or any non-shippable line (a Same-Day/
   Instacart grocery order also does not belong here — see SCOPE above). Digital items are never resold,
   so skip them completely.
 - Output ONE entry per (physical shipment x distinct product) within the order. If the SAME product
   appears more than once inside ONE shipment, do NOT create duplicate rows — output a single entry for
-  it with quantity = the total count in that shipment. Two shipments each containing the same product
-  are still TWO separate entries (one per shipment), each with its own shipment label and tracking.
+  it with quantity = the total count of that product in that shipment. Two shipments each containing
+  the same product are still TWO separate entries (one per shipment), each with its own shipment label
+  and tracking. Read quantity FRESH from the page every time, including on re-checks — never default
+  it to 1.
 - Label EVERY physical shipment "Shipment 1", "Shipment 2", "Shipment 3", ... in top-to-bottom order,
   INCLUDING a single-shipment order (its one shipment is "Shipment 1"). Do NOT copy Costco's own
   wording — always use this numbering, so the same shipment gets the same label on every re-check and
@@ -207,35 +218,19 @@ Fields for each entry:
 - shipping: order shipping cost, a number (0 if free)
 - total_cost: leave "" — it is computed as quantity x cost_per_item for this line. Fill it only if
   you cannot determine cost_per_item but can read this line's own subtotal.
-- card_last4: last 4 digits of the payment card, else ""
+- card_last4: last 4 digits of the payment card, else "". This is ORDER-LEVEL — Costco shows one
+  payment card for the whole order, so it is the SAME on every shipment. Read it once and put it on
+  EVERY shipment entry of the order, never blank on the 2nd+ shipment. (shipping is likewise
+  order-level — the same value on every shipment entry.)
 
-For JOB 2 re-check entries ONLY, fill just retailer, order_id, order_date, item_name, shipment, status,
-tracking_number, tracking_url, delivery_date and leave the rest empty ("") — do not re-read
-address/costs. Copy order_date and item_name EXACTLY as already recorded; they identify the existing
-row, so re-wording an item name creates a duplicate instead of updating it. A JOB 2 entry looks like
-this (note the empty fields — this shape, not the full one below):
+For JOB 2 re-check entries, use the SAME full shape as JOB 1 — read the order-details page and fill
+EVERY field for each physical shipment (its own status, tracking_number, tracking_url, delivery_date,
+delivery_address, quantity, cost_per_item, shipping, card_last4, order_url). The only exception:
+Copy order_date and item_name EXACTLY as already recorded; they identify the existing row, so
+re-wording an item name creates a duplicate instead of updating it.
 
-{{
-  "retailer": "Costco",
-  "order_id": "...",
-  "order_date": "YYYY-MM-DD",
-  "shipment": "Shipment 1",
-  "status": "ordered | shipped | delivered | cancelled",
-  "order_url": "",
-  "tracking_number": "...",
-  "tracking_url": "...",
-  "delivery_date": "YYYY-MM-DD",
-  "delivery_address": "",
-  "item_name": "...",
-  "quantity": null,
-  "cost_per_item": null,
-  "shipping": null,
-  "total_cost": null,
-  "card_last4": ""
-}}
-
-Respond with ONLY a single raw JSON object (no markdown code fences, no commentary). JOB 1 entries use
-the full shape below; JOB 2 entries use the trimmed shape above:
+Respond with ONLY a single raw JSON object (no markdown code fences, no commentary). Every entry (JOB 1
+and JOB 2) uses this full shape:
 
 {{
   "logged_out": false,

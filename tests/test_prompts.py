@@ -5,9 +5,6 @@ run still "succeeds", it just writes wrong rows. These assert the instructions t
 depends on are still present, in both retailers.
 """
 
-import json
-import re
-
 import pytest
 
 from models.profile import ProfileConfig, RetailerAuth
@@ -120,22 +117,24 @@ def test_recheck_entries_told_to_copy_identity_fields_exactly(scraper_cls):
     assert "EXACTLY as already recorded" in prompt
 
 
-@pytest.mark.parametrize("scraper_cls", [CostcoScraper], ids=["costco"])
-def test_job2_shows_a_trimmed_example_not_just_the_full_one(scraper_cls):
-    """Costco re-checks still emit a TRIMMED JOB 2 row (status/tracking/date only). Amazon and Best Buy
-    are intentionally excluded — they full-extract on re-check so split shipments get complete data
-    (see test_amazon_job2_is_full_extraction / test_bestbuy_job2_is_full_extraction). Both shapes must
-    be shown for the trimmed retailer."""
-    prompt = build(scraper_cls)
-    assert "this shape, not" in prompt
-    objects = re.findall(r"\{\s*\n\s*\"retailer\".*?\n\}", prompt, re.DOTALL)
-    assert len(objects) >= 1, "expected a standalone JOB 2 example object"
-    trimmed = json.loads(objects[0])
-    assert trimmed["delivery_address"] == "", "JOB 2 example should show address blank"
-    assert trimmed["quantity"] is None, "JOB 2 example should show numerics null"
-    assert trimmed["tracking_url"] == "...", "JOB 2 example should still capture the tracking link"
-    # Costco shows the tracking number on the order page, so the agent fills it.
-    assert trimmed["tracking_number"] == "..."
+def test_costco_job2_is_full_extraction():
+    """Costco agent-fallback re-checks now FULL-extract every shipment (not the trimmed form), so a
+    split order's new shipment rows get their own quantity/cost/card and Shipment 1's quantity updates.
+    Ported from the Best Buy split fix; the primary GraphQL path was already immune. Unlike Amazon,
+    Costco shows the tracking number on the order page, so the agent fills it (no CDP reader)."""
+    prompt = build(
+        CostcoScraper,
+        recheck=[{"order_id": "A1", "order_date": "2026-08-08", "status": "shipped"}],
+    )
+    # The trimmed form is gone for Costco (no retailer uses it anymore).
+    assert "leaving every other field empty" not in prompt
+    assert "this shape, not" not in prompt  # trimmed example object removed
+    # Re-check is told to fill the per-shipment cost/quantity/card fields, and why (splits).
+    assert "filling ALL fields for each shipment" in prompt
+    assert "quantity, cost_per_item, shipping" in prompt
+    assert "can SPLIT" in prompt
+    # Identity fields still copied verbatim so the row key still matches (no duplicate row).
+    assert "Copy order_date and item_name" in prompt
 
 
 def test_amazon_job2_is_full_extraction():
