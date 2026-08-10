@@ -152,9 +152,14 @@ class BestBuyScraper(BaseRetailerScraper):
                 "\nRE-CHECK these already-recorded, not-yet-delivered orders — do NOT re-scan the "
                 "purchase history for them. For each, go straight to its order-details link below and "
                 "re-read EVERY physical shipment on that page (see the shipment rules below). Output "
-                "one entry per (shipment x distinct physical item), filling ONLY shipment, status, "
-                "tracking_number, tracking_url and delivery_date, and leaving every other field empty "
-                '(""). Ignore digital items. These may be older than the window above; re-check anyway:\n'
+                "one entry per (shipment x distinct physical item), filling ALL fields for each shipment "
+                "just like a new order — including THIS shipment's own quantity, cost_per_item, shipping, "
+                "card_last4, delivery_address and order_url. An order can SPLIT after it was recorded (a "
+                "single shipment of quantity N becomes N shipments of smaller quantity): each split-off "
+                "shipment is a brand-new row that needs its own full data, and the original shipment's "
+                "quantity drops accordingly — so re-read every shipment's quantity/cost fresh, do NOT "
+                "leave them blank. Ignore digital items. These may be older than the window above; "
+                "re-check anyway:\n"
                 + "\n".join(lines)
                 + "\n"
             )
@@ -248,35 +253,19 @@ Fields for each entry:
 - shipping: order shipping cost, a number (0 if free)
 - total_cost: leave "" — it is computed as quantity x cost_per_item for this line. Fill it only if
   you cannot determine cost_per_item but can read this line's own subtotal.
-- card_last4: last 4 digits of the payment card, else ""
+- card_last4: last 4 digits of the payment card, else "". This is ORDER-LEVEL — Best Buy shows one
+  payment card for the whole order (in the order summary), so it is the SAME on every shipment. Read
+  it once and put it on EVERY shipment entry of the order, never blank on the 2nd+ shipment. (shipping
+  is likewise order-level — the same value on every shipment entry.)
 
-For JOB 2 re-check entries ONLY, fill just retailer, order_id, order_date, item_name, shipment, status,
-tracking_number, tracking_url, delivery_date and leave the rest empty ("") — do not re-read
-address/costs. Copy order_date and item_name EXACTLY as already recorded; they identify the existing
-row, so re-wording an item name creates a duplicate instead of updating it. A JOB 2 entry looks like
-this (note the empty fields — this shape, not the full one below):
+For JOB 2 re-check entries, use the SAME full shape as JOB 1 — read the order-details page and fill
+EVERY field for each physical shipment (its own status, tracking_number, tracking_url, delivery_date,
+delivery_address, quantity, cost_per_item, shipping, card_last4, order_url). The only exception:
+Copy order_date and item_name EXACTLY as already recorded; they identify the existing row, so
+re-wording an item name creates a duplicate instead of updating it.
 
-{{
-  "retailer": "Best Buy",
-  "order_id": "...",
-  "order_date": "YYYY-MM-DD",
-  "shipment": "Shipment 1",
-  "status": "ordered | shipped | delivered | cancelled",
-  "order_url": "",
-  "tracking_number": "...",
-  "tracking_url": "...",
-  "delivery_date": "YYYY-MM-DD",
-  "delivery_address": "",
-  "item_name": "...",
-  "quantity": null,
-  "cost_per_item": null,
-  "shipping": null,
-  "total_cost": null,
-  "card_last4": ""
-}}
-
-Respond with ONLY a single raw JSON object (no markdown code fences, no commentary). JOB 1 entries use
-the full shape below; JOB 2 entries use the trimmed shape above:
+Respond with ONLY a single raw JSON object (no markdown code fences, no commentary). Every entry (JOB 1
+and JOB 2) uses this full shape:
 
 {{
   "logged_out": false,

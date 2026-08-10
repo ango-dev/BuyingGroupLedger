@@ -120,10 +120,11 @@ def test_recheck_entries_told_to_copy_identity_fields_exactly(scraper_cls):
     assert "EXACTLY as already recorded" in prompt
 
 
-@SCRAPERS
+@pytest.mark.parametrize("scraper_cls", [AmazonScraper, CostcoScraper], ids=["amazon", "costco"])
 def test_job2_shows_a_trimmed_example_not_just_the_full_one(scraper_cls):
-    """The prose says 'fill only these fields' but the schema example used to show all 18, so the
-    agent had to infer scope from prose the example contradicted. Both shapes must now be shown."""
+    """Amazon and Costco re-checks emit a TRIMMED JOB 2 row (status/tracking/date only). Best Buy is
+    intentionally excluded — it full-extracts on re-check so split shipments get complete data
+    (see test_bestbuy_job2_is_full_extraction). Both shapes must be shown for the trimmed retailers."""
     prompt = build(scraper_cls)
     assert "this shape, not" in prompt
     objects = re.findall(r"\{\s*\n\s*\"retailer\".*?\n\}", prompt, re.DOTALL)
@@ -133,9 +134,28 @@ def test_job2_shows_a_trimmed_example_not_just_the_full_one(scraper_cls):
     assert trimmed["quantity"] is None, "JOB 2 example should show numerics null"
     assert trimmed["tracking_url"] == "...", "JOB 2 example should still capture the tracking link"
     # Amazon's tracking number lives on a separate page and is read by the selector reader, so the
-    # agent leaves it blank. Best Buy shows it on the order-details page, so the agent fills it.
+    # agent leaves it blank. Costco shows it on the order page, so the agent fills it.
     expected = "" if scraper_cls is AmazonScraper else "..."
     assert trimmed["tracking_number"] == expected
+
+
+def test_bestbuy_job2_is_full_extraction():
+    """Best Buy re-checks FULL-extract every shipment (not the trimmed form), so when an order splits
+    the new shipment rows get their own quantity/cost/card and Shipment 1's quantity updates. Regression
+    for the split bug where Shipments 2-5 landed blank and Shipment 1 kept its pre-split quantity."""
+    prompt = build(
+        BestBuyScraper,
+        recheck=[{"order_id": "A1", "order_date": "2026-08-08", "status": "shipped"}],
+    )
+    # The trimmed form is gone for Best Buy.
+    assert "leave the rest empty" not in prompt
+    assert "this shape, not" not in prompt  # trimmed example object removed
+    # Re-check is told to fill the per-shipment cost/quantity/card fields, and why (splits).
+    assert "filling ALL fields for each shipment" in prompt
+    assert "quantity, cost_per_item, shipping" in prompt
+    assert "can SPLIT" in prompt
+    # Identity fields still copied verbatim so the row key still matches (no duplicate row).
+    assert "Copy order_date and item_name" in prompt
 
 
 @SCRAPERS
