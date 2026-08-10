@@ -85,28 +85,41 @@ class BestBuyScraper(BaseRetailerScraper):
         )
 
     def _password_signin_block(self, auth) -> str:
-        totp = ""
+        # Best Buy's password login is a 3-screen flow the agent otherwise burns ~40 steps + expensive
+        # screenshots on, because the "Use password" choice is the LAST radio on the method chooser,
+        # below the fold (it flails with coordinate clicks trying to find it). These exact steps +
+        # ids were confirmed by CDP inspection of the live logged-out sign-in page (2026-08-09);
+        # naming them keeps the login cheap and reliable. Do NOT let it screenshot/scan pages here.
         if auth.totp_secret:
             js = _TOTP_JS.replace("__SECRET__", auth.totp_secret)
             totp = (
-                " If Best Buy then asks for a 2-step verification / authenticator code, get a FRESH "
+                "  4. If Best Buy then asks for a 2-step verification / authenticator code, get a FRESH "
                 "code by running EXACTLY this JavaScript in the page at that moment (it returns the "
                 "current 6-digit time-based code — the code changes every 30 seconds, so run it right "
-                "when the code field is shown, do NOT reuse an earlier value), then type the returned "
-                f"6 digits into the code field and submit:\n(async () => {{ {js} }})()\n"
+                "when the code field is shown, do NOT reuse an earlier value), then type the 6 digits "
+                f"into the code field and submit:\n(async () => {{ {js} }})()\n"
             )
         else:
             totp = (
-                " If Best Buy asks for a 2-step verification code (SMS/email/authenticator), you "
+                "  4. If Best Buy asks for a 2-step verification code (SMS/email/authenticator), you "
                 "cannot complete it — report the logged-out result and stop.\n"
             )
         return (
             "\nIf you land on a sign-in / login page, the Best Buy web session has lapsed — LOG BACK "
-            f'IN instead of stopping: enter the email/username "{auth.username}" and the password '
-            f'"{auth.password}", check any "Keep me signed in" / "Remember me" / "Trust this device" '
-            "box if one is offered (it makes future runs need this less often), and submit." + totp +
-            f" Once signed in, go to {self.order_history_url} and carry on with the jobs below. If "
-            "the credentials are rejected, the account is locked, or you otherwise cannot get in, do "
+            "IN with your password. Follow these EXACT steps; do NOT take screenshots or dump page "
+            "text (that is what wastes dozens of expensive steps):\n"
+            f'  1. Type "{auth.username}" into the "Email Address" field (id "fld-e"; actually type it '
+            'into the field, do not just set the value), leave "Keep me signed in" checked, and click '
+            'the blue "Continue" button — NOT "Sign in with a Passkey" / "Apple" / "Google".\n'
+            '  2. The next screen, "Choose a sign-in method", is a radio list: Text a code / Send a '
+            "code to my email / Email a sign-in link / Use your Google account / Use password. Select "
+            'the LAST one, "Use password" (its radio has id "password-radio") — SCROLL DOWN if it is '
+            "below the fold. Do NOT pick SMS, email code, email link, Google, or passkey.\n"
+            f'  3. A password field then appears — type "{auth.password}" into it and submit ("Sign In" '
+            "/ Continue).\n"
+            + totp +
+            f"  5. Once signed in, go to {self.order_history_url} and carry on with the jobs below.\n"
+            "If the credentials are rejected, the account is locked, or you otherwise cannot get in, do "
             'NOT keep retrying — report the logged-out result ({"logged_out": true, "items": []}) and '
             "stop.\n"
         )
