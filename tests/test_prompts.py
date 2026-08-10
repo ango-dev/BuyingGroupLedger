@@ -120,11 +120,12 @@ def test_recheck_entries_told_to_copy_identity_fields_exactly(scraper_cls):
     assert "EXACTLY as already recorded" in prompt
 
 
-@pytest.mark.parametrize("scraper_cls", [AmazonScraper, CostcoScraper], ids=["amazon", "costco"])
+@pytest.mark.parametrize("scraper_cls", [CostcoScraper], ids=["costco"])
 def test_job2_shows_a_trimmed_example_not_just_the_full_one(scraper_cls):
-    """Amazon and Costco re-checks emit a TRIMMED JOB 2 row (status/tracking/date only). Best Buy is
-    intentionally excluded — it full-extracts on re-check so split shipments get complete data
-    (see test_bestbuy_job2_is_full_extraction). Both shapes must be shown for the trimmed retailers."""
+    """Costco re-checks still emit a TRIMMED JOB 2 row (status/tracking/date only). Amazon and Best Buy
+    are intentionally excluded — they full-extract on re-check so split shipments get complete data
+    (see test_amazon_job2_is_full_extraction / test_bestbuy_job2_is_full_extraction). Both shapes must
+    be shown for the trimmed retailer."""
     prompt = build(scraper_cls)
     assert "this shape, not" in prompt
     objects = re.findall(r"\{\s*\n\s*\"retailer\".*?\n\}", prompt, re.DOTALL)
@@ -133,10 +134,32 @@ def test_job2_shows_a_trimmed_example_not_just_the_full_one(scraper_cls):
     assert trimmed["delivery_address"] == "", "JOB 2 example should show address blank"
     assert trimmed["quantity"] is None, "JOB 2 example should show numerics null"
     assert trimmed["tracking_url"] == "...", "JOB 2 example should still capture the tracking link"
-    # Amazon's tracking number lives on a separate page and is read by the selector reader, so the
-    # agent leaves it blank. Costco shows it on the order page, so the agent fills it.
-    expected = "" if scraper_cls is AmazonScraper else "..."
-    assert trimmed["tracking_number"] == expected
+    # Costco shows the tracking number on the order page, so the agent fills it.
+    assert trimmed["tracking_number"] == "..."
+
+
+def test_amazon_job2_is_full_extraction():
+    """Amazon re-checks FULL-extract every shipment (not the trimmed form), so when an order splits the
+    new shipment rows get their own quantity/cost/card and Shipment 1's quantity updates. The Amazon
+    twist vs Best Buy: tracking_number STAYS BLANK on re-check because the CDP selector reader owns
+    Amazon's number — filling it would clobber CDP. Regression for the latent split bug."""
+    prompt = build(
+        AmazonScraper,
+        recheck=[{"order_id": "A1", "order_date": "2026-08-08", "status": "shipped"}],
+    )
+    # The trimmed form is gone for Amazon.
+    assert "leave the rest empty" not in prompt
+    assert "leaving every other field empty" not in prompt
+    assert "this shape, not" not in prompt  # trimmed example object removed
+    # Re-check is told to fill the per-shipment cost/quantity/card fields, and why (splits).
+    assert "filling ALL fields for each shipment" in prompt
+    assert "quantity, cost_per_item, shipping" in prompt
+    assert "can SPLIT" in prompt
+    # ...but tracking_number stays blank (CDP owns it) and the agent must not open the tracking page.
+    assert 'leave tracking_number ""' in prompt
+    assert "do NOT open any tracking page" in prompt
+    # Identity fields still copied verbatim so the row key still matches (no duplicate row).
+    assert "Copy order_date and item_name" in prompt
 
 
 def test_bestbuy_job2_is_full_extraction():

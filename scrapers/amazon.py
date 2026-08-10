@@ -103,11 +103,16 @@ class AmazonScraper(BaseRetailerScraper):
                 "\nRE-CHECK these already-recorded, not-yet-delivered orders — do NOT re-scan the "
                 "order history for them. For each, go straight to its order-details link below and "
                 "re-read EVERY shipment listed on that page (see the shipment rules below). Stay on "
-                "the order-details page — do NOT open any tracking page. You are checking whether the "
-                "order has split into more shipments and what each one's status and tracking link is; "
-                "the tracking numbers are read separately by a cheaper process. Output one entry per "
-                "(shipment x distinct physical item), filling ONLY shipment, status, tracking_url and "
-                'delivery_date, and leaving every other field empty (""). Ignore digital items. These '
+                "the order-details page — do NOT open any tracking page. Output one entry per "
+                "(shipment x distinct physical item), filling ALL fields for each shipment just like a "
+                "new order — including THIS shipment's own quantity, cost_per_item, shipping, "
+                "card_last4, delivery_address, order_url and tracking_url. An order can SPLIT after it "
+                "was recorded (a single shipment of quantity N becomes N shipments of smaller "
+                "quantity): each split-off shipment is a brand-new row that needs its own full data, "
+                "and the original shipment's quantity drops accordingly — so re-read every shipment's "
+                "quantity/cost fresh, do NOT leave them blank. The ONE exception is tracking_number: "
+                'leave it "" — Amazon\'s number lives on the tracking page and is read separately by a '
+                "cheaper process, so filling it here would clobber that. Ignore digital items. These "
                 "may be older than the window above; re-check anyway:\n"
                 + "\n".join(lines)
                 + "\n"
@@ -186,37 +191,21 @@ Fields for each entry:
 - shipping: order shipping cost, a number (0 if free)
 - total_cost: leave "" — it is computed as quantity x cost_per_item for this line. Fill it only if
   you cannot determine cost_per_item but can read this line's own subtotal.
-- card_last4: last 4 digits of the payment card, else ""
+- card_last4: last 4 digits of the payment card, else "". This is ORDER-LEVEL — Amazon shows one
+  payment method for the whole order, so it is the SAME on every shipment. Read it once and put it on
+  EVERY shipment entry of the order, never blank on the 2nd+ shipment. (shipping is likewise
+  order-level — the same value on every shipment entry.)
 
-For JOB 2 re-check entries ONLY, go to the order's details page, re-read EVERY shipment WITHOUT opening
-any tracking page, and output one entry per (shipment x distinct physical item) with just retailer,
-order_id, order_date, item_name, shipment, status, tracking_url and delivery_date filled — leave the
-rest empty ("") and do not re-read address/costs. A single-shipment order is "Shipment 1". Copy order_date and item_name
+For JOB 2 re-check entries, use the SAME full shape as JOB 1 — read the order-details page WITHOUT
+opening any tracking page and fill EVERY field for each physical shipment (its own status, tracking_url,
+delivery_date, delivery_address, quantity, cost_per_item, shipping, card_last4, order_url). A
+single-shipment order is "Shipment 1". Two exceptions: (1) leave tracking_number "" — Amazon's number is
+read separately by a cheaper process, and filling it here would clobber that; (2) Copy order_date and item_name
 EXACTLY as already recorded; they identify the existing row, so re-wording an item name creates a
-duplicate instead of updating it. A JOB 2 entry looks like this (note the empty fields — this shape, not
-the full one below):
+duplicate instead of updating it.
 
-{{
-  "retailer": "Amazon",
-  "order_id": "...",
-  "order_date": "YYYY-MM-DD",
-  "shipment": "Shipment 1",
-  "status": "ordered | shipped | delivered | cancelled",
-  "order_url": "",
-  "tracking_number": "",
-  "tracking_url": "...",
-  "delivery_date": "YYYY-MM-DD",
-  "delivery_address": "",
-  "item_name": "...",
-  "quantity": null,
-  "cost_per_item": null,
-  "shipping": null,
-  "total_cost": null,
-  "card_last4": ""
-}}
-
-Respond with ONLY a single raw JSON object (no markdown code fences, no commentary). JOB 1 entries use
-the full shape below; JOB 2 entries use the trimmed shape above:
+Respond with ONLY a single raw JSON object (no markdown code fences, no commentary). Every entry (JOB 1
+and JOB 2) uses this full shape (JOB 2 entries leave tracking_number ""):
 
 {{
   "logged_out": false,
@@ -228,7 +217,7 @@ the full shape below; JOB 2 entries use the trimmed shape above:
       "shipment": "Shipment 1",
       "status": "ordered | shipped | delivered | cancelled",
       "order_url": "...",
-      "tracking_number": "...",
+      "tracking_number": "",
       "tracking_url": "...",
       "delivery_date": "YYYY-MM-DD",
       "delivery_address": "...",
