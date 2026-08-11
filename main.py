@@ -41,6 +41,7 @@ from alerts.notifier import alert  # noqa: E402
 from config.profiles import load_profiles_for_retailer  # noqa: E402
 from output.csv_writer import write_csv  # noqa: E402
 from scrapers.amazon import AmazonScraper  # noqa: E402
+from scrapers.amazon_business import AmazonBusinessScraper  # noqa: E402
 from scrapers.base import BaseRetailerScraper, LoggedOutError  # noqa: E402
 from scrapers.bestbuy import BestBuyScraper  # noqa: E402
 from scrapers.costco import CostcoScraper  # noqa: E402
@@ -50,6 +51,7 @@ log = logging.getLogger("main")
 
 SCRAPERS: dict[str, type[BaseRetailerScraper]] = {
     "amazon": AmazonScraper,
+    "amazon-business": AmazonBusinessScraper,
     "bestbuy": BestBuyScraper,
     "costco": CostcoScraper,
 }
