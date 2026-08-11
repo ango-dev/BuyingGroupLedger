@@ -61,10 +61,12 @@ flowchart LR
 - **Delivered orders** → skipped entirely; an order counts as delivered only once **every** shipment
   row is delivered.
 
-> **Best Buy uses no CDP**: its tracking is on the order-details page, so re-checks stay on the agent.
-> **Costco skips the browser entirely** on its primary path — it reads orders from Costco's own
-> GraphQL API (no agent, no CDP), and only falls back to the agent if that API breaks. Only Amazon
-> has the "number lives on another in-site page" problem, which is exactly what selectors are for.
+> **Best Buy and Costco both have a deterministic API primary path** (no agent, no CDP selectors) and
+> fall back to the agent only if that path breaks. Costco reads its own GraphQL API with a stored
+> token; Best Buy reads its own private order endpoints from inside a logged-in CDP browser (the order
+> list from the purchase-history page's embedded data, each order's detail from
+> `/profile/ss/api/v1/orders/<id>`). Only Amazon uses the agent/CDP split — it has the "tracking number
+> lives on another in-site page" problem, which is exactly what selectors are for.
 
 The next cheaper tier is a **REST tracking API** (17TRACK bills ~$0.024 per shipment *once*, then
 status polling is free) to replace the CDP delivery-watch. Gated on confirming it actually covers
@@ -220,10 +222,12 @@ live run.
 .venv/bin/python main.py costco
 ```
 
-> Best Buy discovers orders from the purchase-history page
-> (`bestbuy.com/purchasehistory/purchases`), then opens each order's details page
-> (`.../profile/ss/orders/order-details/<order-id>/view`) to read per-shipment tracking; it re-checks
-> open orders through the agent (no CDP path). **Costco is different**: it reads orders from Costco's
+> Best Buy uses a deterministic primary path like Costco (no agent): a CDP browser holds the profile's
+> logged-in cookie, discovers order ids from the purchase-history page's embedded data, and reads each
+> order's detail from Best Buy's own `/profile/ss/api/v1/orders/<id>` endpoint via an in-page fetch —
+> tracking numbers, per-item cost, card, and native shipment grouping all come structured. If that path
+> fails (login, page shape, network) it falls back to the Browser-Use agent automatically (and alerts).
+> **Costco is similar**: it reads orders from Costco's
 > private GraphQL API using a stored refresh token — no browser and no agent — and tracks **online
 > shipped orders only** (in-warehouse pickups and Same-Day/Instacart grocery are skipped). If that API
 > ever fails, Costco falls back to the agent automatically (and alerts). See "Costco API setup" below.
@@ -319,8 +323,10 @@ scheduler on the new host. No re-login or re-sharing needed.
 
 **Needs live validation**
 
-- **Best Buy**, against a real order — the scraper is written but has never run for real, because no
-  profile has `bestbuy` in its `retailers` list yet.
+- **Best Buy deterministic path over time** — the ss-api primary path is live-validated end-to-end
+  (discovery, detail fetch, mapping all correct on a real account), but only on a warm session and the
+  order states captured so far. Still worth watching: a cold scheduled run that must log itself back in,
+  and the agent fallback firing on a real API outage.
 - **Costco split lifecycle across runs** — the API path and agent fallback are both live-validated
   end-to-end (discovery, detail fetch, mapping, and the agent extracting a real 2-shipment order all
   match). Still worth watching over time: an order observed while still *unshipped* transitioning to
@@ -360,7 +366,10 @@ config/profiles.py      profiles.json loader + Sheet order-state reader
 models/                 OrderItem + ProfileConfig schemas
 scrapers/base.py        scrape(): CDP re-check + agent scan + merge/cleanup
 scrapers/amazon.py      Amazon prompt + tracking-page selectors/reader
-scrapers/bestbuy.py     Best Buy prompt (agent-only re-checks; no CDP selectors yet)
+scrapers/bestbuy.py     Best Buy: ss-api primary path + agent-fallback prompt (deterministic login)
+scrapers/bestbuy_api.py Best Buy client: CDP login + purchase-history flight discovery + ss-api fetch
+scrapers/bestbuy_mapping.py  pure ss-api payload -> OrderItem rows (offline-tested)
+scripts/bestbuy_capture.py   dev recon tool that captured the Best Buy endpoints/fixtures
 scrapers/cdp.py         Playwright-over-CDP browser helper (deterministic reads)
 sheets/ledger_sync.py   Google Sheet upsert (safe partial refresh) + order-state loader
 output/csv_writer.py    per-run CSV

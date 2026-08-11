@@ -1,0 +1,1319 @@
+[
+  {
+    "order": {
+      "userOrderId": "BBY01-809900000004",
+      "created": "2026-08-10T10:44:24-05:00",
+      "price": {
+        "orderTotal": 2099.93,
+        "shippingTotal": 0.0
+      },
+      "payments": [
+        {
+          "type": "creditCard",
+          "creditCardType": "AMEX",
+          "creditCardNumber": "XXXXXXXXXXXX4321"
+        }
+      ],
+      "user": {
+        "addresses": [
+          {
+            "id": "2026000000000000000001",
+            "type": "billing",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000001",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000004",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "100 Reship Rd",
+            "addressLine2": null,
+            "city": "Reshipburg",
+            "state": "DE",
+            "postalCode": "19700"
+          }
+        ]
+      },
+      "groups": {
+        "fulfillmentGroups": [
+          {
+            "groupId": "1",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000025"
+              },
+              {
+                "itemKey": "2026000000000000000028"
+              },
+              {
+                "itemKey": "2026000000000000000029"
+              },
+              {
+                "itemKey": "2026000000000000000030"
+              },
+              {
+                "itemKey": "2026000000000000000031"
+              },
+              {
+                "itemKey": "2026000000000000000032"
+              },
+              {
+                "itemKey": "2026000000000000000033"
+              }
+            ]
+          },
+          {
+            "groupId": "2",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item One"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000027"
+              }
+            ]
+          },
+          {
+            "groupId": "3",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item Two"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000026"
+              }
+            ]
+          }
+        ]
+      },
+      "items": [
+        {
+          "id": "2026000000000000000025",
+          "sku": "6669596",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "ASUS  Vivobook 15 156 FHD Laptop  Intel Core 3 100U 2024  8GB Memory  128GB Storage  Quiet Blue",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 299.99,
+            "unitRegularPrice": 499.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000007",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000007",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "MANIFEST",
+              "statusDesc": "Manifest scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000026",
+          "sku": "6548823",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Norton  360 3 Device with LifeLock Identity Advisor 1 Adult Internet Security + Scam Protection + VPN 6 Month Subscription  Android Apple iOS Mac OS Windows Digital",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.0,
+            "unitRegularPrice": 0.0
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000027",
+          "sku": "6549173",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Microsoft  XBOX Game Pass Ultimate 1 Month Membership  Activation Required Digital",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.01,
+            "unitRegularPrice": 0.01
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000028",
+          "sku": "6669596",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "ASUS  Vivobook 15 156 FHD Laptop  Intel Core 3 100U 2024  8GB Memory  128GB Storage  Quiet Blue",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 299.99,
+            "unitRegularPrice": 499.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000007",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000007",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "MANIFEST",
+              "statusDesc": "Manifest scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000029",
+          "sku": "6669596",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "ASUS  Vivobook 15 156 FHD Laptop  Intel Core 3 100U 2024  8GB Memory  128GB Storage  Quiet Blue",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 299.99,
+            "unitRegularPrice": 499.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000007",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000007",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "MANIFEST",
+              "statusDesc": "Manifest scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000030",
+          "sku": "6669596",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "ASUS  Vivobook 15 156 FHD Laptop  Intel Core 3 100U 2024  8GB Memory  128GB Storage  Quiet Blue",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 299.99,
+            "unitRegularPrice": 499.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000007",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000007",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "MANIFEST",
+              "statusDesc": "Manifest scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000031",
+          "sku": "6669596",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "ASUS  Vivobook 15 156 FHD Laptop  Intel Core 3 100U 2024  8GB Memory  128GB Storage  Quiet Blue",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 299.99,
+            "unitRegularPrice": 499.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000007",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000007",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "MANIFEST",
+              "statusDesc": "Manifest scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000032",
+          "sku": "6669596",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "ASUS  Vivobook 15 156 FHD Laptop  Intel Core 3 100U 2024  8GB Memory  128GB Storage  Quiet Blue",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 299.99,
+            "unitRegularPrice": 499.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000007",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000007",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "MANIFEST",
+              "statusDesc": "Manifest scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000033",
+          "sku": "6669596",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "ASUS  Vivobook 15 156 FHD Laptop  Intel Core 3 100U 2024  8GB Memory  128GB Storage  Quiet Blue",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 299.99,
+            "unitRegularPrice": 499.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000007",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000007",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "MANIFEST",
+              "statusDesc": "Manifest scan"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "order": {
+      "userOrderId": "BBY01-809900000006",
+      "created": "2026-08-10T14:27:15-05:00",
+      "price": {
+        "orderTotal": 1599.96,
+        "shippingTotal": 0.0
+      },
+      "payments": [
+        {
+          "type": "creditCard",
+          "creditCardType": "AMEX",
+          "creditCardNumber": "XXXXXXXXXXXX4321"
+        }
+      ],
+      "user": {
+        "addresses": [
+          {
+            "id": "2026000000000000000001",
+            "type": "billing",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000001",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000002",
+            "type": "SuggestedAddress",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "100 Reship Rd",
+            "city": "TESTVILLE",
+            "state": "NY",
+            "postalCode": "03050",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000003",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "100 Reship Rd",
+            "addressLine2": null,
+            "city": "Testville",
+            "state": "NH",
+            "postalCode": "03050"
+          }
+        ]
+      },
+      "groups": {
+        "fulfillmentGroups": [
+          {
+            "groupId": "1",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000034"
+              },
+              {
+                "itemKey": "2026000000000000000036"
+              },
+              {
+                "itemKey": "2026000000000000000037"
+              },
+              {
+                "itemKey": "2026000000000000000038"
+              }
+            ]
+          },
+          {
+            "groupId": "2",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000035"
+              }
+            ]
+          }
+        ]
+      },
+      "items": [
+        {
+          "id": "2026000000000000000034",
+          "sku": "6447128",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Samsung  870 EVO  2TB Internal SSD SATA",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 399.99,
+            "unitRegularPrice": 879.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000003",
+            "minArrivalDate": "2026-08-18",
+            "maxArrivalDate": "2026-08-18",
+            "tracking": {}
+          }
+        },
+        {
+          "id": "2026000000000000000035",
+          "sku": "6595292",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Discord 1Month of Discord Nitro free New and Returning Subscribers Only",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.0,
+            "unitRegularPrice": 0.0
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000036",
+          "sku": "6447128",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Samsung  870 EVO  2TB Internal SSD SATA",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 399.99,
+            "unitRegularPrice": 879.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000003",
+            "minArrivalDate": "2026-08-18",
+            "maxArrivalDate": "2026-08-18",
+            "tracking": {}
+          }
+        },
+        {
+          "id": "2026000000000000000037",
+          "sku": "6447128",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Samsung  870 EVO  2TB Internal SSD SATA",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 399.99,
+            "unitRegularPrice": 879.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000003",
+            "minArrivalDate": "2026-08-18",
+            "maxArrivalDate": "2026-08-18",
+            "tracking": {}
+          }
+        },
+        {
+          "id": "2026000000000000000038",
+          "sku": "6447128",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Samsung  870 EVO  2TB Internal SSD SATA",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 399.99,
+            "unitRegularPrice": 879.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000003",
+            "minArrivalDate": "2026-08-18",
+            "maxArrivalDate": "2026-08-18",
+            "tracking": {}
+          }
+        }
+      ]
+    }
+  },
+  {
+    "order": {
+      "userOrderId": "BBY01-809900000002",
+      "created": "2026-08-06T08:39:07-05:00",
+      "price": {
+        "orderTotal": 5201.98,
+        "shippingTotal": 0.0
+      },
+      "payments": [
+        {
+          "type": "creditCard",
+          "creditCardType": "AMEX",
+          "creditCardNumber": "XXXXXXXXXXXX4321"
+        }
+      ],
+      "user": {
+        "addresses": [
+          {
+            "id": "2026000000000000000001",
+            "type": "billing",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000001",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000004",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "100 Reship Rd",
+            "addressLine2": null,
+            "city": "Reshipburg",
+            "state": "DE",
+            "postalCode": "19700"
+          },
+          {
+            "id": "2026000000000000000017",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "100 Reship Rd",
+            "addressLine2": null,
+            "city": "Reshipburg",
+            "state": "DE",
+            "postalCode": "19700"
+          }
+        ]
+      },
+      "groups": {
+        "fulfillmentGroups": [
+          {
+            "groupId": "1",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment One"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000008"
+              },
+              {
+                "itemKey": "2026000000000000000014"
+              },
+              {
+                "itemKey": "2026000000000000000015"
+              }
+            ]
+          },
+          {
+            "groupId": "2",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment Two"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000013"
+              }
+            ]
+          },
+          {
+            "groupId": "3",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment Three"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000016"
+              }
+            ]
+          },
+          {
+            "groupId": "4",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item One"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000009"
+              }
+            ]
+          },
+          {
+            "groupId": "5",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item Two"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000010"
+              }
+            ]
+          },
+          {
+            "groupId": "6",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item Three"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000011"
+              }
+            ]
+          },
+          {
+            "groupId": "7",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item Four"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000012"
+              }
+            ]
+          }
+        ]
+      },
+      "items": [
+        {
+          "id": "2026000000000000000008",
+          "sku": "6397846",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Apple  MacBook Air 13inch Laptop  M5 chip with 10core CPU and 8core GPU  16GB Memory  512GB SSD  Midnight",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 1134.0,
+            "unitRegularPrice": 1299.0
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-07",
+            "maxArrivalDate": "2026-08-07",
+            "tracking": {
+              "trackingNumber": "529900000001",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000001",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "DELIVERED",
+              "statusDesc": "Delivered",
+              "carrierDeliveredDate": "2026-08-07"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000009",
+          "sku": "6617430",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Free Apple Arcade for up to 3 months new or returning subscribers only",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.0,
+            "unitRegularPrice": 0.0
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000010",
+          "sku": "6669995",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Free Apple News+ for up to 2 months new or returning subscribers only",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.0,
+            "unitRegularPrice": 0.0
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000011",
+          "sku": "6669989",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Free Apple TV for up to 1 month new or returning subscribers only",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.0,
+            "unitRegularPrice": 0.0
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000012",
+          "sku": "6562011",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Free Apple Music for up to 3 months new or returning subscribers only",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.0,
+            "unitRegularPrice": 0.0
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000013",
+          "sku": "6601524",
+          "quantity": 1,
+          "originalQuantity": 2,
+          "itemDesc": "PlayStation 5 Pro Console",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 899.99,
+            "unitRegularPrice": 899.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-13",
+            "maxArrivalDate": "2026-08-13",
+            "tracking": {}
+          }
+        },
+        {
+          "id": "2026000000000000000016",
+          "sku": "6601524",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "PlayStation 5 Pro Console",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 899.99,
+            "unitRegularPrice": 899.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000017",
+            "minArrivalDate": "2026-08-13",
+            "maxArrivalDate": "2026-08-13",
+            "tracking": {}
+          }
+        },
+        {
+          "id": "2026000000000000000014",
+          "sku": "6397846",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Apple  MacBook Air 13inch Laptop  M5 chip with 10core CPU and 8core GPU  16GB Memory  512GB SSD  Midnight",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 1134.0,
+            "unitRegularPrice": 1299.0
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-07",
+            "maxArrivalDate": "2026-08-07",
+            "tracking": {
+              "trackingNumber": "529900000001",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000001",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "DELIVERED",
+              "statusDesc": "Delivered",
+              "carrierDeliveredDate": "2026-08-07"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000015",
+          "sku": "6397846",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Apple  MacBook Air 13inch Laptop  M5 chip with 10core CPU and 8core GPU  16GB Memory  512GB SSD  Midnight",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 1134.0,
+            "unitRegularPrice": 1299.0
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-07",
+            "maxArrivalDate": "2026-08-07",
+            "tracking": {
+              "trackingNumber": "529900000001",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000001",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "DELIVERED",
+              "statusDesc": "Delivered",
+              "carrierDeliveredDate": "2026-08-07"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "order": {
+      "userOrderId": "BBY01-809900000005",
+      "created": "2026-08-10T10:29:13-05:00",
+      "price": {
+        "orderTotal": 3149.95,
+        "shippingTotal": 0.0
+      },
+      "payments": [
+        {
+          "type": "creditCard",
+          "creditCardType": "AMEX",
+          "creditCardNumber": "XXXXXXXXXXXX4321"
+        }
+      ],
+      "user": {
+        "addresses": [
+          {
+            "id": "2026000000000000000001",
+            "type": "billing",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000001",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000004",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "100 Reship Rd",
+            "addressLine2": null,
+            "city": "Reshipburg",
+            "state": "DE",
+            "postalCode": "19700"
+          }
+        ]
+      },
+      "groups": {
+        "fulfillmentGroups": [
+          {
+            "groupId": "1",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment One"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000018"
+              }
+            ]
+          },
+          {
+            "groupId": "2",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment Two"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000021"
+              }
+            ]
+          },
+          {
+            "groupId": "3",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment Three"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000022"
+              }
+            ]
+          },
+          {
+            "groupId": "4",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment Four"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000023"
+              }
+            ]
+          },
+          {
+            "groupId": "5",
+            "grouping": {
+              "type": "shipping",
+              "displayName": "Shipment Five"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000024"
+              }
+            ]
+          },
+          {
+            "groupId": "6",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item One"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000019"
+              }
+            ]
+          },
+          {
+            "groupId": "7",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item Two"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000020"
+              }
+            ]
+          }
+        ]
+      },
+      "items": [
+        {
+          "id": "2026000000000000000018",
+          "sku": "6672897",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "HP  OmniBook 3 173 Full HD Laptop  Intel Core Ultra 7 2025  16GB Memory  512GB SSD  Mica Silver",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 629.99,
+            "unitRegularPrice": 1199.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000003",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000003",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "INTRANSIT",
+              "statusDesc": "Intransit Scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000019",
+          "sku": "6549173",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Microsoft  XBOX Game Pass Ultimate 1 Month Membership  Activation Required Digital",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.01,
+            "unitRegularPrice": 0.01
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000020",
+          "sku": "6548823",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Norton  360 3 Device with LifeLock Identity Advisor 1 Adult Internet Security + Scam Protection + VPN 6 Month Subscription  Android Apple iOS Mac OS Windows Digital",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.0,
+            "unitRegularPrice": 0.0
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000021",
+          "sku": "6672897",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "HP  OmniBook 3 173 Full HD Laptop  Intel Core Ultra 7 2025  16GB Memory  512GB SSD  Mica Silver",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 629.99,
+            "unitRegularPrice": 1199.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000005",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000005",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "INTRANSIT",
+              "statusDesc": "Intransit Scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000022",
+          "sku": "6672897",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "HP  OmniBook 3 173 Full HD Laptop  Intel Core Ultra 7 2025  16GB Memory  512GB SSD  Mica Silver",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 629.99,
+            "unitRegularPrice": 1199.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000006",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000006",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "INTRANSIT",
+              "statusDesc": "Intransit Scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000023",
+          "sku": "6672897",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "HP  OmniBook 3 173 Full HD Laptop  Intel Core Ultra 7 2025  16GB Memory  512GB SSD  Mica Silver",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 629.99,
+            "unitRegularPrice": 1199.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000004",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000004",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "INTRANSIT",
+              "statusDesc": "Intransit Scan"
+            }
+          }
+        },
+        {
+          "id": "2026000000000000000024",
+          "sku": "6672897",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "HP  OmniBook 3 173 Full HD Laptop  Intel Core Ultra 7 2025  16GB Memory  512GB SSD  Mica Silver",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 629.99,
+            "unitRegularPrice": 1199.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-11",
+            "maxArrivalDate": "2026-08-11",
+            "tracking": {
+              "trackingNumber": "529900000002",
+              "trackingUrl": "https://www.fedex.com/fedextrack/?trknbr=529900000002",
+              "carrierDisplayName": "FedEx",
+              "milestoneCode": "INTRANSIT",
+              "statusDesc": "Intransit Scan"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "order": {
+      "userOrderId": "BBY01-809900000001",
+      "created": "2026-08-05T23:29:08-05:00",
+      "price": {
+        "orderTotal": 0.0,
+        "shippingTotal": 0.0
+      },
+      "payments": [
+        {
+          "type": "creditCard",
+          "creditCardType": "AMEX",
+          "creditCardNumber": "XXXXXXXXXXXX4321"
+        }
+      ],
+      "user": {
+        "addresses": [
+          {
+            "id": "2026000000000000000001",
+            "type": "billing",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000001",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "123 Test St",
+            "city": "Sampletown",
+            "state": "CA",
+            "postalCode": "90000",
+            "addressLine2": null
+          },
+          {
+            "id": "2026000000000000000004",
+            "type": "shipping",
+            "firstName": "Test",
+            "lastName": "User",
+            "addressLine1": "100 Reship Rd",
+            "addressLine2": null,
+            "city": "Reshipburg",
+            "state": "DE",
+            "postalCode": "19700"
+          }
+        ]
+      },
+      "groups": {
+        "fulfillmentGroups": [
+          {
+            "groupId": "1",
+            "grouping": {
+              "type": "email",
+              "displayName": "Digital Item"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000006"
+              }
+            ]
+          },
+          {
+            "groupId": "2",
+            "grouping": {
+              "type": "canceled",
+              "displayName": "Cancelled"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000007"
+              }
+            ]
+          },
+          {
+            "groupId": "3",
+            "grouping": {
+              "type": "canceled",
+              "displayName": "Cancelled"
+            },
+            "members": [
+              {
+                "itemKey": "2026000000000000000005"
+              }
+            ]
+          }
+        ]
+      },
+      "items": [
+        {
+          "id": "2026000000000000000005",
+          "sku": "6620352",
+          "quantity": 0,
+          "originalQuantity": 1,
+          "itemDesc": "PNY  GeForce RTX 5070 12GB OC GDDR7 PCI Express 50 Graphics Card with Triple Fan  Black",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 629.99,
+            "unitRegularPrice": 629.99
+          },
+          "fulfillment": {
+            "type": "shipping",
+            "addressId": "2026000000000000000004",
+            "minArrivalDate": "2026-08-09",
+            "maxArrivalDate": "2026-08-09",
+            "tracking": {}
+          }
+        },
+        {
+          "id": "2026000000000000000006",
+          "sku": "6595292",
+          "quantity": 1,
+          "originalQuantity": 1,
+          "itemDesc": "Discord 1Month of Discord Nitro free New and Returning Subscribers Only",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.0,
+            "unitRegularPrice": 0.0
+          },
+          "fulfillment": {
+            "type": "email",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        },
+        {
+          "id": "2026000000000000000007",
+          "sku": "6411155",
+          "quantity": 0,
+          "originalQuantity": 1,
+          "itemDesc": "Trend Micro  Internet Security + Antivirus 3Device 6Month Subscription with Auto Renewal  Android Apple iOS Mac OS Windows Digital",
+          "type": "physicalSku",
+          "price": {
+            "unitCurrentPrice": 0.0,
+            "unitRegularPrice": 0.0
+          },
+          "fulfillment": {
+            "type": "download",
+            "addressId": "2026000000000000000001",
+            "tracking": null
+          }
+        }
+      ]
+    }
+  }
+]

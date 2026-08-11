@@ -1,4 +1,10 @@
+import logging
+import os
+
+from alerts.notifier import alert
 from scrapers.base import BaseRetailerScraper
+
+log = logging.getLogger(__name__)
 
 # In-browser TOTP generator for the password+2FA fallback. The task prompt is built ONCE at run
 # start, but the agent doesn't reach the 2FA field until a minute or two later — a code generated in
@@ -28,12 +34,59 @@ class BestBuyScraper(BaseRetailerScraper):
     # https://www.bestbuy.com/profile/ss/orders/order-details/<order-id>/view
     order_history_url = "https://www.bestbuy.com/purchasehistory/purchases"
 
-    # NOTE: no CDP re-check yet for Best Buy. Amazon has a stable in-site tracking page we can read
-    # with fixed selectors; Best Buy's carrier tracking usually hands off to the carrier's own site
-    # (UPS/FedEx/etc.), which has no stable per-account selector we trust. So Best Buy re-checks stay
+    # PRIMARY PATH: Best Buy's own private endpoints (deterministic, no agent) — see scrape() ->
+    # _scrape_via_api and scrapers/bestbuy_api.py. A CDP browser holds the logged-in cookie; discovery
+    # reads the purchase-history page's embedded flight data and each order's detail comes from an
+    # in-page fetch of /profile/ss/api/v1/orders/<id>. FALLBACK: on ANY failure (login, page shape,
+    # network) scrape() alerts and defers to the Browser-Use agent (the base implementation, driven by
+    # task_prompt below), which has its own sign-in handling (_signin_block). No CDP re-check either
+    # way (read_tracking_page is not overridden), so agent-fallback re-checks route straight to the agent.
+
+    def scrape(self):
+        """Try the deterministic ss-api path first; fall back to the Browser-Use agent on ANY failure.
+
+        A successful API call that finds no orders returns [] (not an error), so the agent — which
+        costs money — only runs when the API path genuinely can't.
+        """
+        try:
+            return self._scrape_via_api()
+        except Exception as exc:  # noqa: BLE001 — any API failure must degrade to the agent, not crash
+            reason = f"{type(exc).__name__}: {exc}"
+            log.warning("Best Buy [%s]: API path failed (%s); falling back to the agent.",
+                        self.profile.label, reason, exc_info=True)
+            alert(
+                f"Best Buy [{self.profile.label}]: API path failed — using agent fallback",
+                f"The Best Buy deterministic path could not run, so this run used the Browser-Use "
+                f"agent instead.\n\nReason: {reason}\n\nIf this persists, check the sign-in flow / "
+                f"page shape (scripts/bestbuy_capture.py re-captures it).",
+            )
+            return super().scrape()
+
+    def _scrape_via_api(self):
+        from scrapers.bestbuy_api import BestBuyApiClient
+        from scrapers.bestbuy_mapping import build_order_items
+
+        # Test/ops hook: force the agent-fallback path (e.g. to validate it) without breaking anything.
+        if os.getenv("BESTBUY_FORCE_AGENT"):
+            raise RuntimeError("BESTBUY_FORCE_AGENT is set — forcing the agent fallback.")
+
+        state = self._load_order_state()
+        open_ids = {o["order_id"] for o in state.get("open_orders", [])}
+        terminal_ids = set(state.get("delivered_ids", [])) | set(state.get("cancelled_ids", []))
+        _, since, _ = self._date_window()
+
+        client = BestBuyApiClient(self.profile)
+        payloads = client.fetch_order_payloads(since, open_ids, terminal_ids)
+        items = build_order_items(payloads, self.profile.label, known_open_ids=frozenset(open_ids))
+        log.info("Best Buy [%s]: built %d ledger row(s) from the ss-api.", self.profile.label, len(items))
+        return items
+
+    # NOTE: no CDP re-check for Best Buy on the AGENT FALLBACK. Amazon has a stable in-site tracking
+    # page we can read with fixed selectors; Best Buy's carrier tracking hands off to the carrier's own
+    # site (UPS/FedEx/etc.), which has no stable per-account selector. So agent-fallback re-checks stay
     # on the agent (base read_tracking_page returns None -> _recheck_via_cdp routes open orders to the
-    # agent without opening a CDP session). To add cheap re-checks later, mirror amazon.py: define the
-    # tracking-page selectors + override read_tracking_page() once a live order lets us confirm them.
+    # agent). The PRIMARY ss-api path above reads tracking numbers directly, so this only matters when
+    # the API path is down.
 
     def _signin_block(self) -> str:
         """Sign-in instructions injected into JOB 1 when this profile has auto-auth for Best Buy.

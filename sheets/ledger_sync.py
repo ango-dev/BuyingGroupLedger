@@ -135,8 +135,13 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         )
     key_idx = [header.index(col) for col in key_cols]
     oid_idx = header.index("Order ID")
+    # Name-agnostic shipment-line index for the deferral below (Order ID + Order Date + Shipment).
+    skey_idx = [header.index(c) for c in ("Order ID", "Order Date", "Shipment")]
+    name_hdr_idx = header.index("Item Name")
+    name_field_idx = FIELDNAMES.index("item_name")
 
     key_to_existing: dict[tuple, tuple[int, list]] = {}
+    shipment_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     for row_number, row in enumerate(existing[1:], start=2):
         # Rows written before Shipment existed are shorter than key_idx; read missing cells as ""
         # (never skip them, or pre-migration rows would fail to match and duplicate on re-check).
@@ -144,16 +149,28 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             continue
         key = tuple(row[i] if i < len(row) else "" for i in key_idx)
         key_to_existing[key] = (row_number, row)
+        skey = tuple(row[i] if i < len(row) else "" for i in skey_idx)
+        shipment_to_existing.setdefault(skey, []).append((row_number, row))
 
     with csv_path.open(newline="", encoding="utf-8") as f:
         records = list(csv.DictReader(f))
 
-    updates = 0
-    appends: list[list] = []
     # Collapse same-key rows (CDP read + agent re-read of one shipment) before upserting, so the
     # two half-rows merge into one instead of the later overwriting the earlier's tracking number.
+    collapsed = _collapse_records(records)
+    # How many incoming rows target each shipment line — the deferral only fires in the unambiguous
+    # 1:1 case (see below), so a shipment carrying two distinct products doesn't mis-merge.
+    incoming_skey_count: dict[tuple, int] = {}
+    for rec in collapsed:
+        if str(rec.get("order_id", "")).strip():
+            sk = (rec.get("order_id", ""), rec.get("order_date", ""), rec.get("shipment", ""))
+            incoming_skey_count[sk] = incoming_skey_count.get(sk, 0) + 1
+
+    updates = 0
+    appends: list[list] = []
+    claimed_rows: set[int] = set()
     skipped_blank = 0
-    for record in _collapse_records(records):
+    for record in collapsed:
         # A record with no Order ID can't form a valid upsert key (Order ID + Order Date + Item Name
         # + Shipment), so it never matches an existing row and appends as a permanent orphan/duplicate
         # — seen once when the agent dropped the order_id on a single shipment entry, leaving a stray
@@ -180,15 +197,32 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         )
         if key in key_to_existing:
             row_number, existing_row = key_to_existing[key]
-            merged = _merge_row(existing_row, sheet_row)
-            # Preserved cells come back as strings from get_all_values(); re-coerce so a kept
-            # numeric (e.g. a quantity carried over from a prior run) is written as a number,
-            # not text — otherwise Sheets stores it as text and shows a leading-apostrophe '1.
-            merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
-            worksheet.update(range_name=f"A{row_number}", values=[merged])
-            updates += 1
         else:
-            appends.append(sheet_row)
+            # DEFER TO AN ALREADY-RECORDED SHIPMENT LINE. The exact key (…+ Item Name) didn't match,
+            # but a row for the SAME order+date+shipment may already exist under a differently-worded
+            # item name — e.g. the ss-api's `itemDesc` vs the agent fallback's page-title text. Update
+            # that row IN PLACE, keeping its recorded item name, instead of appending a divergent
+            # duplicate. Only in the unambiguous 1:1 case (exactly one incoming row and exactly one
+            # unclaimed existing row for the shipment line) — a shipment with two distinct products is
+            # left to append rather than risk mis-merging.
+            skey = (record["order_id"], record["order_date"], record.get("shipment", ""))
+            candidates = [c for c in shipment_to_existing.get(skey, []) if c[0] not in claimed_rows]
+            if incoming_skey_count.get(skey, 0) == 1 and len(candidates) == 1:
+                row_number, existing_row = candidates[0]
+                if name_hdr_idx < len(existing_row) and str(existing_row[name_hdr_idx]).strip():
+                    sheet_row[name_field_idx] = existing_row[name_hdr_idx]  # keep recorded identity
+            else:
+                appends.append(sheet_row)
+                continue
+
+        merged = _merge_row(existing_row, sheet_row)
+        # Preserved cells come back as strings from get_all_values(); re-coerce so a kept numeric
+        # (e.g. a quantity carried over from a prior run) is written as a number, not text —
+        # otherwise Sheets stores it as text and shows a leading-apostrophe '1.
+        merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
+        worksheet.update(range_name=f"A{row_number}", values=[merged])
+        claimed_rows.add(row_number)
+        updates += 1
 
     if appends:
         # Write at an explicit column-A range rather than worksheet.append_rows(): append_rows lets

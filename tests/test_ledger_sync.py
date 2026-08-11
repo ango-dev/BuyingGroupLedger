@@ -180,6 +180,66 @@ class TestSyncUpsert:
             "here so the prompt fix that avoids it stays honest"
         )
 
+    def test_divergent_item_name_defers_to_existing_row(self, sheet, tmp_path):
+        """The agent-fallback vs ss-api divergence: same order+date+shipment recorded under a
+        differently-worded name must UPDATE the existing row (keeping its name), not duplicate."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="B1", order_date="2026-08-10", item_name="ASUS  Vivobook 15 156 FHD",
+                shipment="Shipment 1", status="shipped", tracking_number="TRK1", cost_per_item="299.99"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="B1", order_date="2026-08-10", item_name='ASUS - Vivobook 15 15.6" FHD',
+                 shipment="Shipment 1", status="delivered", delivery_date="2026-08-12"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert len(rows) == 1, "a divergent-name row must update in place, not append a duplicate"
+        r = rows[0]
+        assert r[FIELDNAMES.index("item_name")] == "ASUS  Vivobook 15 156 FHD", "keeps recorded name"
+        assert r[FIELDNAMES.index("status")] == "delivered"
+        assert r[FIELDNAMES.index("delivery_date")] == "2026-08-12"
+        assert r[FIELDNAMES.index("tracking_number")] == "TRK1", "prior tracking preserved"
+        assert r[FIELDNAMES.index("cost_per_item")] == 299.99
+
+    def test_ambiguous_existing_shipment_line_is_not_reconciled(self, sheet, tmp_path):
+        # Two existing rows already share the shipment line -> can't tell which to update, so a
+        # divergent incoming row appends rather than mis-merging onto one of them.
+        common = dict(order_id="B1", order_date="2026-08-10", shipment="Shipment 1", status="shipped")
+        sheet.rows = [list(HEADER), row(item_name="Name A", **common), row(item_name="Name B", **common)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="B1", order_date="2026-08-10", shipment="Shipment 1", item_name="Name C",
+                 status="delivered"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 3, "ambiguous shipment line must not be reconciled"
+
+    def test_two_incoming_for_one_shipment_line_do_not_over_reconcile(self, sheet, tmp_path):
+        # Two distinct products in one shipment (two incoming rows, same shipment line) must not both
+        # collapse onto a single existing row.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="B1", order_date="2026-08-10", item_name="Existing", shipment="Shipment 1",
+                status="shipped"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="B1", order_date="2026-08-10", item_name="Prod A", shipment="Shipment 1",
+                 status="shipped"),
+            dict(order_id="B1", order_date="2026-08-10", item_name="Prod B", shipment="Shipment 1",
+                 status="shipped"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 3, "ambiguous (2 incoming) shipment line must not reconcile"
+
     def test_header_written_into_empty_sheet(self, sheet, tmp_path):
         sheet.rows = []
         path = write_csv_file(
