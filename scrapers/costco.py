@@ -13,7 +13,7 @@ class CostcoScraper(BaseRetailerScraper):
     retailer_name = "Costco"
     retailer_key = "costco"
     # Costco account "Orders & Purchases" — only used by the AGENT FALLBACK below. The primary path
-    # is Costco's GraphQL API (scrapers/costco_graphql.py), which needs no browser.
+    # is Costco's GraphQL API (scrapers/costco_api.py), which needs no browser.
     order_history_url = "https://www.costco.com/OrderStatusCmd"
     # Direct order-details deep link (shared with the GraphQL mapping, which fills order_url from it).
     # The UUID is Costco's web-app client id (same for every account), so the agent can jump straight
@@ -56,7 +56,7 @@ class CostcoScraper(BaseRetailerScraper):
         return start, end
 
     def _scrape_via_api(self):
-        from scrapers.costco_graphql import CostcoGraphQLClient  # lazy: keeps curl_cffi/jwt optional
+        from scrapers.costco_api import CostcoApiClient  # lazy: keeps curl_cffi/jwt optional
 
         # Test/ops hook: force the agent-fallback path (e.g. to validate it) without breaking the token.
         if os.getenv("COSTCO_FORCE_AGENT"):
@@ -67,7 +67,7 @@ class CostcoScraper(BaseRetailerScraper):
         terminal_ids = set(state.get("delivered_ids", [])) | set(state.get("cancelled_ids", []))
 
         start, end = self._api_window()
-        client = CostcoGraphQLClient(self.profile.label)
+        client = CostcoApiClient(self.profile.label)
         discovered = client.list_order_numbers(start, end)
         # Re-check open orders too (even older than the window); never re-fetch terminal ones.
         order_numbers = [

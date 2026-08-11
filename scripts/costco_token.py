@@ -40,7 +40,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from scrapers.costco_graphql import DEFAULT_WAREHOUSES, TOKEN_DIR
+from scrapers.costco_api import DEFAULT_WAREHOUSES, TOKEN_DIR
 
 # The CDP grab talks to Browser-Use, which reads BROWSER_USE_API_KEY from the environment; this
 # script doesn't import config.settings, so load .env ourselves.

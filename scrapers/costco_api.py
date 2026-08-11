@@ -145,7 +145,7 @@ def _is_token_expired(id_token: str, buffer_seconds: int = 120) -> bool:
         return True
 
 
-class CostcoGraphQLClient:
+class CostcoApiClient:
     def __init__(self, profile_label: str, token_dir: Path | str = TOKEN_DIR):
         self.profile_label = profile_label
         self.token_path = Path(token_dir) / f"{profile_label}.json"
