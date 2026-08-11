@@ -28,6 +28,7 @@ scrapers/amazon_business.py falls back to the Browser-Use agent — never an aut
 import logging
 
 from scrapers.amazon_business_mapping import build_order_items, discover_orders, parse_shipment_targets
+from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
 from models.order import TERMINAL_STATUSES
 
@@ -127,9 +128,10 @@ class AmazonBusinessApiClient:
         page.goto(ORDER_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(3000)
         if _looks_logged_out(page):
-            raise AmazonBusinessApiError(
+            raise ApiLoginError(
                 "Amazon Business session is logged out. Amazon login has OTP/2FA, so the deterministic "
-                "path does not auto-login; falling back to the agent."
+                "path does not auto-login; the agent is NOT run for a login failure (it can't fix auth) "
+                "— this run alerts and skips."
             )
 
         dates: dict[str, str] = {}

@@ -25,6 +25,7 @@ import json
 import logging
 import re
 
+from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
 
 log = logging.getLogger(__name__)
@@ -267,7 +268,7 @@ class BestBuyApiClient:
                 if not _deterministic_login(page, auth):
                     log.warning("Best Buy [%s]: deterministic self-login did not succeed.",
                                 self.profile.label)
-                    raise BestBuyApiError(
+                    raise ApiLoginError(
                         "Best Buy session is logged out and deterministic login did not succeed."
                     )
                 log.info("Best Buy [%s]: deterministic self-login succeeded.", self.profile.label)

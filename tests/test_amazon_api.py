@@ -193,6 +193,6 @@ def test_logged_out_raises(monkeypatch):
     client = AmazonApiClient(_Profile())
     try:
         client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
-        assert False, "expected AmazonApiError"
-    except amazon_api.AmazonApiError:
+        assert False, "expected ApiLoginError"
+    except amazon_api.ApiLoginError:
         pass

@@ -2,7 +2,7 @@ import logging
 import os
 
 from alerts.notifier import alert
-from scrapers.base import BaseRetailerScraper
+from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +28,19 @@ class AmazonScraper(BaseRetailerScraper):
         """
         try:
             return self._scrape_via_api()
-        except Exception as exc:  # noqa: BLE001 — any failure must degrade to the agent, not crash
+        except ApiLoginError as exc:
+            # Login failure is NOT a DOM change the agent can fix (Amazon login has OTP/2FA) — do NOT
+            # run the (paid) agent; alert and skip so the user re-logs in the profile.
+            log.warning("Amazon [%s]: session logged out (%s); NOT running the agent.",
+                        self.profile.label, exc)
+            alert(
+                f"Amazon [{self.profile.label}]: session logged out — agent NOT run",
+                f"The Amazon deterministic path found a logged-out session ({exc}). Re-login the profile "
+                f"(scripts/create_profile). The agent was deliberately not run — a login failure is not "
+                f"something the agent can fix.",
+            )
+            raise LoggedOutError(f"Amazon:{self.profile.label}") from exc
+        except Exception as exc:  # noqa: BLE001 — a NON-login failure (page shape) degrades to the agent
             reason = f"{type(exc).__name__}: {exc}"
             log.warning("Amazon [%s]: deterministic path failed (%s); falling back to the agent.",
                         self.profile.label, reason, exc_info=True)

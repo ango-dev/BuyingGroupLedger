@@ -25,6 +25,7 @@ import logging
 from datetime import date
 
 from scrapers.amazon_mapping import build_order_items, discover_orders, parse_shipment_targets
+from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
 from models.order import TERMINAL_STATUSES
 
@@ -149,9 +150,10 @@ class AmazonApiClient:
                 if first:
                     first = False
                     if _looks_logged_out(page):
-                        raise AmazonApiError(
+                        raise ApiLoginError(
                             "Amazon session is logged out. Amazon login has OTP/2FA, so the "
-                            "deterministic path does not auto-login; falling back to the agent."
+                            "deterministic path does not auto-login; the agent is NOT run for a login "
+                            "failure (it can't fix auth) — this run alerts and skips."
                         )
                 page_dates = discover_orders(page.content())
                 if not page_dates:

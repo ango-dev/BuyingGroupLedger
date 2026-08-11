@@ -1,5 +1,6 @@
 import csv
 import logging
+import re
 from pathlib import Path
 
 import gspread
@@ -106,6 +107,24 @@ def _coerce(field: str, value: str):
     return value
 
 
+def _next_shipment_number(order_id, existing, oid_hdr_idx, shipment_hdr_idx,
+                          appends, oid_field_idx, shipment_field_idx) -> int:
+    """Highest 'Shipment N' seen for this order (across existing sheet rows AND rows already queued to
+    append this sync) + 1 — a unique, stable label for a newly-detected split box."""
+    nums = [1]  # so the first extra box becomes at least "Shipment 2" even if labels don't parse
+    for row in existing[1:]:
+        if oid_hdr_idx < len(row) and row[oid_hdr_idx] == order_id and shipment_hdr_idx < len(row):
+            m = re.match(r"Shipment\s+(\d+)", str(row[shipment_hdr_idx]).strip())
+            if m:
+                nums.append(int(m.group(1)))
+    for row in appends:
+        if oid_field_idx < len(row) and row[oid_field_idx] == order_id:
+            m = re.match(r"Shipment\s+(\d+)", str(row[shipment_field_idx]).strip())
+            if m:
+                nums.append(int(m.group(1)))
+    return max(nums) + 1
+
+
 def sync_csv_to_sheet(csv_path: Path) -> None:
     worksheet = _get_worksheet()
     existing = worksheet.get_all_values()
@@ -141,6 +160,9 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     name_field_idx = FIELDNAMES.index("item_name")
     shipment_hdr_idx = header.index("Shipment")
     shipment_field_idx = FIELDNAMES.index("shipment")
+    oid_field_idx = FIELDNAMES.index("order_id")
+    qty_field_idx = FIELDNAMES.index("quantity")
+    total_field_idx = FIELDNAMES.index("total_cost")
     # Tracking-number index for the tracking-based deferral (Order ID + Tracking Number). The carrier
     # tracking number is an identity BOTH the API and the agent read identically, so it reconciles rows
     # even when their synthetic Shipment numbers diverge (e.g. Costco: the API numbers shipments by
@@ -187,6 +209,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     updates = 0
     appends: list[list] = []
     claimed_rows: set[int] = set()
+    split_events: list[dict] = []
     skipped_blank = 0
     for record in collapsed:
         # A record with no Order ID can't form a valid upsert key (Order ID + Order Date + Item Name
@@ -255,6 +278,46 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                 continue
             row_number, existing_row = match
 
+        # UNDISCLOSED-SPLIT DETECTION. We're about to update an existing shipment row, but its recorded
+        # tracking number is being CHANGED to a different non-blank number. That usually means the order
+        # shipped in more than one box while the retailer surfaces only ONE "primary" tracking number at
+        # a time (seen live on a Best Buy qty-15 order that split 9+6 — its number rotated 086084 ->
+        # 128095). Rather than overwrite (losing the first box), keep the existing box's row and APPEND a
+        # new row for the new box with Quantity "*" (the split is unknown), then alert so the user sets
+        # the per-box quantities. IDEMPOTENT: if the incoming number already owns its own row (a prior
+        # split already recorded it), update THAT row instead — so a stable rotated number doesn't
+        # re-duplicate every run. Exact-key/shipment-line matches reach here; tracking-number matches
+        # can't (they matched on an equal number).
+        if tracking_hdr_idx is not None:
+            existing_trk = existing_row[tracking_hdr_idx].strip() if tracking_hdr_idx < len(existing_row) else ""
+            incoming_trk = str(record.get("tracking_number", "")).strip()
+            if existing_trk and incoming_trk and existing_trk != incoming_trk:
+                owners = [c for c in tracking_to_existing.get((record["order_id"], incoming_trk), [])
+                          if c[0] not in claimed_rows]
+                if len(owners) == 1:
+                    # The new number already has a home row → update that one (keeping its identity).
+                    row_number, existing_row = owners[0]
+                    if name_hdr_idx < len(existing_row) and str(existing_row[name_hdr_idx]).strip():
+                        sheet_row[name_field_idx] = existing_row[name_hdr_idx]
+                    if shipment_hdr_idx < len(existing_row) and str(existing_row[shipment_hdr_idx]).strip():
+                        sheet_row[shipment_field_idx] = existing_row[shipment_hdr_idx]
+                else:
+                    label = f"Shipment {_next_shipment_number(record['order_id'], existing, oid_idx, shipment_hdr_idx, appends, oid_field_idx, shipment_field_idx)}"
+                    split_row = list(sheet_row)
+                    split_row[shipment_field_idx] = label
+                    split_row[qty_field_idx] = "*"      # unknown per-box split — user fills it in
+                    split_row[total_field_idx] = ""     # can't compute Total Cost without a quantity
+                    appends.append(split_row)
+                    split_events.append({
+                        "order_id": record["order_id"],
+                        "item_name": (existing_row[name_hdr_idx] if name_hdr_idx < len(existing_row)
+                                      else record.get("item_name", "")),
+                        "existing_tracking": existing_trk,
+                        "new_tracking": incoming_trk,
+                        "new_shipment": label,
+                    })
+                    continue  # leave the existing box's row untouched
+
         merged = _merge_row(existing_row, sheet_row)
         # Preserved cells come back as strings from get_all_values(); re-coerce so a kept numeric
         # (e.g. a quantity carried over from a prior run) is written as a number, not text —
@@ -273,10 +336,28 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         start_row = len(existing) + 1
         worksheet.update(range_name=f"A{start_row}", values=appends)
 
+    if split_events:
+        lines = [
+            f"- Order {e['order_id']} / {e['item_name']}: existing box {e['existing_tracking']}, "
+            f"NEW box {e['new_tracking']} added as {e['new_shipment']} (Quantity set to '*')"
+            for e in split_events
+        ]
+        # Lazy import: keep ledger_sync free of an alerts dependency at module load.
+        from alerts.notifier import alert
+
+        alert(
+            f"Split shipment detected on {len(split_events)} row(s) — set the quantities",
+            "A shipment's tracking number changed to a new value, which usually means the order shipped "
+            "in more than one box while the retailer reports only one tracking number at a time. A new "
+            "row was added per new box with Quantity '*'. Set the per-box quantities (and adjust the "
+            "ORIGINAL row's quantity to match), then verify each tracking number:\n\n" + "\n".join(lines),
+        )
+
     log.info(
-        "Sheet sync: %d row(s) updated, %d row(s) appended%s.",
+        "Sheet sync: %d row(s) updated, %d row(s) appended%s%s.",
         updates,
         len(appends),
+        f", {len(split_events)} split-box row(s) added" if split_events else "",
         f", {skipped_blank} skipped (blank Order ID)" if skipped_blank else "",
     )
 

@@ -19,6 +19,16 @@ class LoggedOutError(Exception):
     """Raised when Browser-Use reports the retailer session is logged out."""
 
 
+class ApiLoginError(Exception):
+    """The deterministic API path could not authenticate (session logged out / login or token failed).
+
+    This is an EXCEPTION to the agent fallback: a login failure is not a DOM-shape change the agent can
+    fix — running the agent would just burn a paid session or hit the same wall — so each retailer's
+    scrape() catches this, alerts, and skips (via LoggedOutError) instead of falling back to the agent.
+    Any OTHER deterministic-path failure (page shape / parsing / network) still falls back to the agent.
+    """
+
+
 def _extract_json_object(text: str) -> str:
     """Best-effort extraction of a JSON object from an LLM's raw text output.
 

@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from alerts.notifier import alert
-from scrapers.base import BaseRetailerScraper
+from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
 from scrapers.costco_mapping import ORDER_DETAILS_URL, build_order_items
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,19 @@ class CostcoScraper(BaseRetailerScraper):
         """
         try:
             return self._scrape_via_api()
-        except Exception as exc:  # noqa: BLE001 — any API failure must degrade to the agent, not crash
+        except ApiLoginError as exc:
+            # Auth failure (dead/rotated refresh token) is NOT a schema change the agent can fix — do
+            # NOT run the (paid) agent; alert and skip so the user re-authorizes the token.
+            log.warning("Costco [%s]: API auth failed (%s); NOT running the agent.",
+                        self.profile.label, exc)
+            alert(
+                f"Costco [{self.profile.label}]: API auth failed — agent NOT run",
+                f"The Costco API could not authenticate ({exc}). Re-authorize with "
+                f"`python -m scripts.costco_token --label {self.profile.label} ...`. The agent was "
+                f"deliberately not run — an auth failure is not something the agent can fix.",
+            )
+            raise LoggedOutError(f"Costco:{self.profile.label}") from exc
+        except Exception as exc:  # noqa: BLE001 — a NON-auth failure (schema/network) degrades to the agent
             reason = f"{type(exc).__name__}: {exc}"
             log.warning("Costco [%s]: API path failed (%s); falling back to the agent.",
                         self.profile.label, reason, exc_info=True)

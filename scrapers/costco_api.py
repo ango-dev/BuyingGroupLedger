@@ -22,6 +22,8 @@ from pathlib import Path
 import jwt
 from curl_cffi import requests as curl_requests
 
+from scrapers.base import ApiLoginError
+
 log = logging.getLogger(__name__)
 
 # --- Endpoints / client identifiers (from Costco's own web app; not secrets) --------------------
@@ -129,8 +131,11 @@ query getOrderDetails($orderNumbers: [String]) {
 """
 
 
-class CostcoAuthError(Exception):
-    """No usable refresh token, or the token exchange failed — the profile needs re-authorizing."""
+class CostcoAuthError(ApiLoginError):
+    """No usable refresh token, or the token exchange failed — the profile needs re-authorizing.
+
+    Subclasses ApiLoginError so costco.scrape() treats it as a login failure (alert + skip, NO agent)
+    rather than a DOM-change fallback."""
 
 
 class CostcoApiError(Exception):

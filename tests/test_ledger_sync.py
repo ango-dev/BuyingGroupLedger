@@ -458,6 +458,107 @@ class TestSameKeyCollapse:
         assert len(sheet.data_rows()) == 2
 
 
+class TestUndisclosedSplit:
+    """A shipment whose tracking number changes to a DIFFERENT non-blank value = the order shipped in
+    more than one box but the retailer surfaces only one number. Instead of overwriting (losing the
+    first box), append a new box row with Quantity '*' and alert — idempotently."""
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    def test_changed_tracking_appends_new_box_row_and_alerts(self, sheet, tmp_path, alerts):
+        # Existing (agent-written) box; incoming (ss-api) reports the SAME shipment line under a
+        # different item-name wording AND a different tracking number -> hidden 2nd box.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop",
+                shipment="Shipment 1", status="shipped", tracking_number="086084", quantity="15"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="B1", order_date="2026-08-10", item_name="HP  14 Laptop", shipment="Shipment 1",
+                 status="shipped", tracking_number="128095", quantity="15"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
+        assert set(rows) == {"Shipment 1", "Shipment 2"}, "the new box must be appended, not overwrite"
+        # Original box untouched.
+        assert rows["Shipment 1"][FIELDNAMES.index("tracking_number")] == "086084"
+        assert rows["Shipment 1"][FIELDNAMES.index("quantity")] == "15"
+        # New box row: new tracking, quantity placeholder, recorded name kept.
+        assert rows["Shipment 2"][FIELDNAMES.index("tracking_number")] == "128095"
+        assert rows["Shipment 2"][FIELDNAMES.index("quantity")] == "*"
+        assert rows["Shipment 2"][FIELDNAMES.index("total_cost")] == ""
+        assert rows["Shipment 2"][FIELDNAMES.index("item_name")] == "HP - 14 Laptop"
+        assert len(alerts) == 1 and "Split shipment" in alerts[0][0]
+
+    def test_idempotent_once_new_box_has_its_own_row(self, sheet, tmp_path, alerts):
+        # After a split, the API keeps reporting the new number against the old shipment line. It must
+        # update the box that already owns that number, not append another duplicate.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop",
+                shipment="Shipment 1", status="shipped", tracking_number="086084", quantity="9"),
+            row(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop",
+                shipment="Shipment 2", status="shipped", tracking_number="128095", quantity="6"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop", shipment="Shipment 1",
+                 status="delivered", tracking_number="128095", quantity="15"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 2, "must not re-duplicate a box whose number already has a row"
+        rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
+        assert rows["Shipment 2"][FIELDNAMES.index("status")] == "delivered", "the owning box updates"
+        assert rows["Shipment 1"][FIELDNAMES.index("tracking_number")] == "086084", "other box untouched"
+        assert alerts == []
+
+    def test_unchanged_tracking_does_not_trigger(self, sheet, tmp_path, alerts):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="Shipment 1",
+                status="shipped", tracking_number="086084", quantity="15"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="Shipment 1",
+                 status="delivered", tracking_number="086084"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 1
+        assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "delivered"
+        assert alerts == []
+
+    def test_blank_to_value_tracking_is_a_normal_ship_not_a_split(self, sheet, tmp_path, alerts):
+        # ordered -> shipped fills a previously-blank tracking number; that's not a split.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="Shipment 1",
+                status="ordered", tracking_number="", quantity="15"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="Shipment 1",
+                 status="shipped", tracking_number="128095"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 1
+        assert sheet.data_rows()[0][FIELDNAMES.index("tracking_number")] == "128095"
+        assert alerts == []
+
+
 class TestLoadOrderState:
     def test_order_is_delivered_only_when_every_shipment_is(self, sheet):
         sheet.rows = [
