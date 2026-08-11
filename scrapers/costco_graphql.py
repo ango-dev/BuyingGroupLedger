@@ -31,9 +31,16 @@ TENANT_ID = "e0714dd4-784d-46d6-a278-3e29553483eb"
 POLICY_NAME = "b2c_1a_sso_wcs_signup_signin_209"
 TOKEN_ENDPOINT = f"https://signin.costco.com/{TENANT_ID}/{POLICY_NAME}/oauth2/v2.0/token"
 MSAL_CLIENT_ID = "a3a5186b-7c89-4b4c-93a8-dd604e930757"
+# GLOBAL, not per-account. In the id_token JWT this appears as an app-level `issuer` (the per-user
+# value is `sub`/`issuerUserId`), and a live probe confirmed the ecom API IGNORES this header entirely:
+# a bogus value — or omitting `costco-x-wcs-clientid` — still returns the same account's orders, because
+# identity comes solely from the id_token bearer. Costco's web app reads it from localStorage, but the
+# value is shared. So hardcoding is safe for any consumer account. (A Costco *Business Center* account
+# could use a different WCS app; capture it per-account then, but it's irrelevant to the API anyway.)
 WCS_CLIENT_ID = "4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf"
-# Static client identifier the ecom API gateway requires — without it the gateway 401s with
-# "Missing credentials" even when the bearer token is valid. Not a secret (ships in Costco's web app).
+# Static client identifier the ecom API gateway REQUIRES and VALIDATES — a bogus value or omitting it
+# 401s "Missing credentials" even with a valid bearer token (live-probed). But it's a fixed GLOBAL
+# constant (the reference script hardcodes the same value), so it's correct for every account.
 CLIENT_IDENTIFIER = "481b1aec-aa3b-454b-b81b-48187e28f205"
 GRAPHQL_ENDPOINT = "https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql"
 
