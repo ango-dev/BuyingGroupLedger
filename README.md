@@ -1,7 +1,7 @@
 # Buying Group Ledger
 
-Automated order tracking for buying-group reselling. It logs into retailer accounts (Amazon, Best Buy,
-and Costco today; Amazon Business / Walmart planned), captures new orders and their shipment status,
+Automated order tracking for buying-group reselling. It logs into retailer accounts (Amazon, Amazon
+Business, Best Buy, and Costco today; Walmart planned), captures new orders and their shipment status,
 and keeps a Google Sheet ledger up to date — cheaply and hands-off.
 
 It runs on **Browser-Use Cloud** (the browser runs in their cloud, not on your machine) and uses a
@@ -218,6 +218,7 @@ live run.
 
 # a specific retailer:
 .venv/bin/python main.py amazon
+.venv/bin/python main.py amazon-business
 .venv/bin/python main.py bestbuy
 .venv/bin/python main.py costco
 ```
@@ -231,7 +232,11 @@ live run.
 > private GraphQL API using a stored refresh token — no browser and no agent — and tracks **online
 > shipped orders only** (in-warehouse pickups and Same-Day/Instacart grocery are skipped). If that API
 > ever fails, Costco falls back to the agent automatically (and alerts). See "Costco API setup" below.
-> Amazon uses the agent/CDP split (see the cost model above).
+> **Amazon and Amazon Business** also have a deterministic primary path (no order JSON exists, so a CDP
+> browser parses the order-details HTML and reads each shipment's tracking number off Amazon's own
+> package-tracking page), with the Browser-Use agent as the automatic fallback. Amazon Business is a
+> separate scraper (`retailer_key` `amazon-business`) that shares Amazon's tracking page but has its own
+> order-history discovery + pagination; keep the two Amazon accounts on separate profiles.
 
 ### Costco API setup (one-time)
 
@@ -340,7 +345,7 @@ scheduler on the new host. No re-login or re-sharing needed.
 - `delivery_date`: the prompts ask for `YYYY-MM-DD`, but the dormant CDP path writes the raw promise
   text ("Arriving Monday") into the same field. No live exposure while that path stays disabled —
   revisit only if it's ever re-enabled.
-- More retailers: Amazon Business (shares Amazon's tracking page), Walmart.
+- More retailers: Walmart. (Amazon Business is built — see the retailer list above.)
 - Optional delivery-watch cost optimization: revive the dormant CDP fast-path, or use a REST tracking
   API (17TRACK / TrackingMore) — verify Amazon Logistics TBA coverage before committing to one.
   Currently shelved: reliability beat the saving once already.
