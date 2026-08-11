@@ -258,11 +258,19 @@ class BestBuyApiClient:
             page.wait_for_timeout(3000)
 
             if _looks_logged_out(page):
+                # Best Buy sessions die ~20-25 min, so a scheduled run routinely lands here and must
+                # self-heal. Log it so the self-login is visible in run logs (and distinguishable from
+                # a warm session, which skips this block entirely).
+                log.info("Best Buy [%s]: session logged out; attempting deterministic self-login.",
+                         self.profile.label)
                 auth = self.profile.auth.get("bestbuy")
                 if not _deterministic_login(page, auth):
+                    log.warning("Best Buy [%s]: deterministic self-login did not succeed.",
+                                self.profile.label)
                     raise BestBuyApiError(
                         "Best Buy session is logged out and deterministic login did not succeed."
                     )
+                log.info("Best Buy [%s]: deterministic self-login succeeded.", self.profile.label)
                 page.goto(PURCHASE_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
 
