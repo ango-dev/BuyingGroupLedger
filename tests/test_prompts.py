@@ -90,6 +90,18 @@ def test_quantity_is_preserved_not_exploded_into_rows(scraper_cls):
     assert "quantity = the total count" in prompt
 
 
+def test_amazon_numbers_shipments_by_status_card_matching_the_api():
+    """The deterministic API path splits shipments by Amazon's own shipmentId (one per status card),
+    so a 2-package order reads Shipment 1 / Shipment 2 and a returned item is its own shipment. The
+    agent must match that or the two paths write divergent Shipment numbers -> duplicate rows on any
+    order both paths touch. Guard the wording that makes the agent count one shipment per status card,
+    including same-status cards and returns."""
+    prompt = build(AmazonScraper)
+    assert "exactly ONE shipment\n  per status card" in prompt or "ONE shipment per status card" in prompt.replace("\n  ", " ")
+    assert "SAME status word AND the SAME date" in prompt
+    assert "Return started" in prompt and "its OWN shipment" in prompt
+
+
 @SCRAPERS
 def test_logged_out_contract(scraper_cls):
     prompt = build(scraper_cls)

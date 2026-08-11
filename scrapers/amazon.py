@@ -198,13 +198,21 @@ memberships and subscriptions, and credits. Only physical, shippable products ar
 JOB 2 is the re-check list above (empty if none). Combine JOB 1 and JOB 2 entries into "items".
 
 SHIPMENT RULES (apply to every order-details page):
-- An order can split into multiple shipments. On the order-details page each shipment is its own block
+- An order can split into multiple shipments. On the order-details page each shipment is its own CARD
   with its OWN status header ("Delivered <date>", "Arriving <date>", "Out for delivery", "Now
-  arriving", etc.) and its OWN "Track package" button that opens that shipment's tracking page.
-- Label EVERY shipment "Shipment 1", "Shipment 2", "Shipment 3", ... in top-to-bottom order,
-  INCLUDING a single-shipment order (its one shipment is "Shipment 1"). Amazon often starts an order
-  as one shipment and splits it into several when it ships, so always number them — that way the
-  original row updates in place and any newly-split shipments are added as new rows.
+  arriving", "Return started"/"Refunded", etc.) and, usually, its OWN "Track package" link.
+- COUNT shipments by the number of these separate status cards, top-to-bottom — exactly ONE shipment
+  per status card. This is critical for matching how the order is stored: TWO cards are TWO shipments
+  EVEN IF they show the SAME status word AND the SAME date (e.g. two packages each labeled "Delivered
+  July 27" are "Shipment 1" and "Shipment 2", NOT one merged shipment). A returned or refunded item in
+  its OWN card ("Return started" / "Return requested" / "Refunded") is likewise its OWN shipment — give
+  it its own number, do not fold it into another card. Do NOT merge separate cards into one shipment
+  because their items look alike or share a status, and do NOT split a single card into several.
+- Label EVERY shipment "Shipment 1", "Shipment 2", "Shipment 3", ... in top-to-bottom order (the top
+  status card is "Shipment 1", the next card down "Shipment 2", and so on),
+  INCLUDING a single-shipment order (its one card is "Shipment 1"). Amazon often starts an order as one
+  shipment and splits it into several when it ships, so always number them — that way the original row
+  updates in place and any newly-split shipments are added as new rows.
 - Output ONE entry per (shipment x distinct product). If the SAME product appears more than once inside
   ONE shipment, do NOT create duplicate rows — output a single entry with quantity = the total count in
   that shipment. The same product appearing in TWO shipments is still TWO entries (one per shipment),
