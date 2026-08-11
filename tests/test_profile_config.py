@@ -5,6 +5,10 @@ It must survive save_profiles -> load_profiles unchanged (that pair is how creat
 edits), and default to empty for the many profiles that don't set it.
 """
 
+import json
+
+import pytest
+
 import config.profiles as profiles_mod
 from models.profile import ProfileConfig, RetailerAuth
 
@@ -47,3 +51,36 @@ def test_auth_round_trips_through_save_and_load(tmp_path, monkeypatch):
     assert len(loaded) == 1
     assert loaded[0].auth["bestbuy"].method == "google"
     assert loaded[0].auth["bestbuy"].google_email == "you@gmail.com"
+
+
+# --- amazon vs amazon-business mutual exclusion --------------------------------------------------
+def _write_profiles(tmp_path, monkeypatch, entries):
+    path = tmp_path / "profiles.json"
+    path.write_text(json.dumps(entries), encoding="utf-8")
+    monkeypatch.setattr(profiles_mod, "PROFILES_FILE", path)
+
+
+def test_profile_with_both_amazon_keys_is_rejected(tmp_path, monkeypatch):
+    _write_profiles(tmp_path, monkeypatch, [
+        {"label": "profile-oops", "retailers": ["amazon", "amazon-business"]},
+    ])
+    with pytest.raises(ValueError, match="profile-oops"):
+        profiles_mod.load_profiles()
+
+
+def test_separate_amazon_and_business_profiles_load_fine(tmp_path, monkeypatch):
+    _write_profiles(tmp_path, monkeypatch, [
+        {"label": "profile-bravo", "retailers": ["amazon"]},
+        {"label": "profile-biz", "retailers": ["amazon-business"]},
+    ])
+    loaded = profiles_mod.load_profiles()
+    assert [p.label for p in loaded] == ["profile-bravo", "profile-biz"]
+
+
+def test_amazon_alongside_other_retailers_is_fine(tmp_path, monkeypatch):
+    # amazon + bestbuy on one profile is legitimate (different sites, different accounts allowed).
+    _write_profiles(tmp_path, monkeypatch, [
+        {"label": "profile-multi", "retailers": ["amazon", "bestbuy", "costco"]},
+    ])
+    loaded = profiles_mod.load_profiles()
+    assert loaded[0].retailers == ["amazon", "bestbuy", "costco"]
