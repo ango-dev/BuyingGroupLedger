@@ -8,3 +8,6 @@ requests>=2.32.0
 # vanilla HTTP clients); PyJWT decodes the id_token to check its expiry before reusing it.
 curl_cffi>=0.7.0
 PyJWT>=2.8.0
+# Amazon deterministic path: Amazon has no order JSON endpoint (its order pages are server-rendered
+# HTML), so scrapers/amazon_mapping.py parses that HTML with BeautifulSoup.
+beautifulsoup4>=4.12.0

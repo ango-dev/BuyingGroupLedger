@@ -1,10 +1,62 @@
+import logging
+import os
+
+from alerts.notifier import alert
 from scrapers.base import BaseRetailerScraper
+
+log = logging.getLogger(__name__)
 
 
 class AmazonScraper(BaseRetailerScraper):
     retailer_name = "Amazon"
     retailer_key = "amazon"
     order_history_url = "https://www.amazon.com/gp/css/order-history"
+
+    # PRIMARY PATH: Amazon's own web pages read deterministically (no agent, no tokens — just a CDP
+    # browser holding the logged-in cookie). Amazon has no order JSON endpoint (unlike Best Buy's
+    # ss-api), so scrape() -> _scrape_via_api -> scrapers/amazon_api.py fetches HTML and
+    # scrapers/amazon_mapping.py parses it; the pt page supplies each shipment's tracking number via
+    # the same read_tracking_page selectors below. FALLBACK: on ANY failure (logged out, page shape,
+    # network) scrape() alerts and defers to the Browser-Use agent (the base implementation driven by
+    # task_prompt below), which has its own logged-out handling. AMAZON_FORCE_AGENT=1 forces fallback.
+
+    def scrape(self):
+        """Try the deterministic web-page path first; fall back to the Browser-Use agent on ANY failure.
+
+        A successful run that finds no orders returns [] (not an error), so the agent — which costs
+        money — only runs when the deterministic path genuinely can't.
+        """
+        try:
+            return self._scrape_via_api()
+        except Exception as exc:  # noqa: BLE001 — any failure must degrade to the agent, not crash
+            reason = f"{type(exc).__name__}: {exc}"
+            log.warning("Amazon [%s]: deterministic path failed (%s); falling back to the agent.",
+                        self.profile.label, reason, exc_info=True)
+            alert(
+                f"Amazon [{self.profile.label}]: deterministic path failed — using agent fallback",
+                f"The Amazon deterministic path could not run, so this run used the Browser-Use agent "
+                f"instead.\n\nReason: {reason}\n\nIf this persists, re-capture the page shape "
+                f"(scripts/amazon_capture.py) or check whether the session is logged out.",
+            )
+            return super().scrape()
+
+    def _scrape_via_api(self):
+        from scrapers.amazon_api import AmazonApiClient
+
+        # Test/ops hook: force the agent-fallback path (e.g. to validate it) without breaking anything.
+        if os.getenv("AMAZON_FORCE_AGENT"):
+            raise RuntimeError("AMAZON_FORCE_AGENT is set — forcing the agent fallback.")
+
+        state = self._load_order_state()
+        open_ids = {o["order_id"] for o in state.get("open_orders", [])}
+        terminal_ids = set(state.get("delivered_ids", [])) | set(state.get("cancelled_ids", []))
+        today, since, _ = self._date_window()
+
+        client = AmazonApiClient(self.profile, tracking_reader=self.read_tracking_page)
+        items = client.fetch_order_items(since, open_ids, terminal_ids, today=today)
+        log.info("Amazon [%s]: built %d ledger row(s) from the deterministic path.",
+                 self.profile.label, len(items))
+        return items
 
     # Work is split by cost: the AGENT reads the order-details page (structure — how many shipments
     # there are, which can change when an order splits at ship time), and CDP + selectors read each

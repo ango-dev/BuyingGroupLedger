@@ -3,6 +3,7 @@ service_account.json
 profiles.json
 .costco/
 .bestbuy_capture/
+.amazon_capture/
 data/
 logs/
 __pycache__/
