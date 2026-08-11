@@ -153,6 +153,9 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
         return []
     order_date = _date(detail.get("orderPlacedDate"))
     card_last4 = _card_last4(detail.get("orderPayment"))
+    # Shipping is ORDER-LEVEL, repeated on every shipment row (same value) — matches the Best Buy
+    # mapping and the agent path, so the API and agent writers agree on this field.
+    shipping_total = _num(detail.get("shippingAndHandling"))
 
     # Group physical lines by SKU (itemNumber), preserving first-seen order for stable numbering.
     groups: dict[str, dict] = {}
@@ -171,7 +174,6 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
                     "item_number": item_number,
                     "description": description,
                     "unit_price": _num(line_item.get("price")),
-                    "shipping": 0.0,
                     "quantity": 0,
                     "packages": [],
                     "package_keys": set(),
@@ -181,7 +183,6 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
                 groups[key] = group
                 order_keys.append(key)
             group["quantity"] += _int(line_item.get("quantity"))
-            group["shipping"] += _num(line_item.get("shippingChargeAmount")) or 0.0
             if _order_cancelled(line_item):
                 group["cancelled"] = True
             for package in line_item.get("shipment") or []:
@@ -223,7 +224,7 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
         for key in order_keys
         for row in _rows_for_group(
             groups[key], order_id, order_date, card_last4, profile_label,
-            shipment_number, unshipped_shipment,
+            shipment_number, unshipped_shipment, shipping_total,
         )
     ]
 
@@ -236,12 +237,12 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
 
 def _rows_for_group(
     group, order_id, order_date, card_last4, profile_label, shipment_number, unshipped_shipment,
+    shipping_total,
 ) -> list[OrderItem]:
     name = group["description"]
     if group["item_number"]:
         name = f"{name} (Item #{group['item_number']})".strip()
     unit_price = group["unit_price"]
-    shipping = round(group["shipping"], 2) if group["shipping"] else None
     # Only packages with a real tracking number count as shipped; anything else is "not shipped yet".
     packages = [p for p in group["packages"] if p["tracking_number"]]
 
@@ -259,7 +260,7 @@ def _rows_for_group(
                 item_name=name,
                 quantity=group["quantity"] or None,
                 cost_per_item=unit_price,
-                shipping=shipping,
+                shipping=shipping_total,
                 card_last4=card_last4,
                 shipment=f"Shipment {unshipped_shipment}",
             )
@@ -284,8 +285,8 @@ def _rows_for_group(
                 item_name=name,
                 quantity=quantities[i] or None,
                 cost_per_item=unit_price,
-                # Line shipping belongs to the order once, not once per split package.
-                shipping=shipping if i == 0 else None,
+                # Order-level shipping, repeated on every shipment row (matches the agent + Best Buy).
+                shipping=shipping_total,
                 card_last4=card_last4,
                 shipment=f"Shipment {shipment_number[package['tracking_number']]}",
             )

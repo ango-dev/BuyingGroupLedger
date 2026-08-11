@@ -240,6 +240,105 @@ class TestSyncUpsert:
 
         assert len(sheet.data_rows()) == 3, "ambiguous (2 incoming) shipment line must not reconcile"
 
+    def test_divergent_shipment_number_reconciles_by_tracking(self, sheet, tmp_path):
+        """Costco agent-vs-API: the two paths disagree on BOTH the Shipment number and the item name
+        but read the SAME tracking number. An incoming row uniquely sharing (Order ID, Tracking Number)
+        with one existing row updates it in place — keeping the recorded name AND shipment — instead of
+        appending a divergent duplicate. This is the tracking-based deferral tier."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="C1", order_date="2026-06-23", item_name="Watch (Item #1847785)",
+                shipment="Shipment 1", status="shipped", tracking_number="TRK1", cost_per_item="309.99"),
+        ]
+        # Agent re-check: same physical box (TRK1), but numbered Shipment 2 and named from page text.
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="C1", order_date="2026-06-23", item_name="Apple Watch Series 11",
+                 shipment="Shipment 2", status="delivered", tracking_number="TRK1",
+                 delivery_date="2026-06-30"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert len(rows) == 1, "same tracking number must reconcile, not duplicate"
+        r = rows[0]
+        assert r[FIELDNAMES.index("item_name")] == "Watch (Item #1847785)", "keeps recorded (API) name"
+        assert r[FIELDNAMES.index("shipment")] == "Shipment 1", "keeps recorded (API) shipment number"
+        assert r[FIELDNAMES.index("status")] == "delivered", "status advances"
+        assert r[FIELDNAMES.index("delivery_date")] == "2026-06-30"
+        assert r[FIELDNAMES.index("cost_per_item")] == 309.99, "recorded cost preserved"
+
+    def test_swapped_shipment_numbers_reconcile_by_tracking_not_by_number(self, sheet, tmp_path):
+        """The critical Costco case: a 2-box order where the agent numbers the boxes in the OPPOSITE
+        order from the API (top-to-bottom vs tracking-sort). Reconciliation must match each incoming
+        row to its TRACKING-matched box, never to the row that merely shares the (swapped) Shipment
+        number — otherwise the two boxes' tracking numbers cross. Tracking is tried before shipment."""
+        api = dict(order_id="C1", order_date="2026-06-24", item_name="Dell (Item #1953694)",
+                   cost_per_item="899.99", status="shipped")
+        sheet.rows = [
+            list(HEADER),
+            row(shipment="Shipment 1", tracking_number="TRK_A", **api),
+            row(shipment="Shipment 2", tracking_number="TRK_B", **api),
+        ]
+        # Agent re-check: same two boxes, but Shipment numbers swapped and a page-title name.
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="C1", order_date="2026-06-24", item_name="Dell All-in-One",
+                 shipment="Shipment 2", tracking_number="TRK_A", status="delivered"),
+            dict(order_id="C1", order_date="2026-06-24", item_name="Dell All-in-One",
+                 shipment="Shipment 1", tracking_number="TRK_B", status="delivered"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert len(rows) == 2, "swapped-number rows must reconcile by tracking, not duplicate"
+        by_ship = {r[FIELDNAMES.index("shipment")]: r for r in rows}
+        # Each box keeps its recorded (Shipment N, tracking) pairing — no cross-merge.
+        assert by_ship["Shipment 1"][FIELDNAMES.index("tracking_number")] == "TRK_A"
+        assert by_ship["Shipment 2"][FIELDNAMES.index("tracking_number")] == "TRK_B"
+        assert all(r[FIELDNAMES.index("status")] == "delivered" for r in rows), "status advanced on both"
+        assert all(r[FIELDNAMES.index("item_name")] == "Dell (Item #1953694)" for r in rows), "kept names"
+
+    def test_tracking_reconcile_skips_when_tracking_is_ambiguous(self, sheet, tmp_path):
+        # A box holding two distinct SKUs -> two existing rows share (order, tracking). An incoming row
+        # can't be uniquely matched by tracking, so it appends rather than mis-merging onto one of them.
+        common = dict(order_id="C1", order_date="2026-06-23", tracking_number="TRK1")
+        sheet.rows = [
+            list(HEADER),
+            row(item_name="SKU A", shipment="Shipment 1", status="shipped", **common),
+            row(item_name="SKU B", shipment="Shipment 1", status="shipped", **common),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(item_name="SKU C page name", shipment="Shipment 9", status="delivered", **common),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 3, "ambiguous tracking (2 existing) must not reconcile"
+
+    def test_tracking_reconcile_skips_two_incoming_same_tracking(self, sheet, tmp_path):
+        # Two incoming rows share one tracking number (two SKUs in one box) -> don't both collapse onto
+        # a single existing row.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="C1", order_date="2026-06-23", item_name="Existing", shipment="Shipment 1",
+                status="shipped", tracking_number="TRK1"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="C1", order_date="2026-06-23", item_name="A", shipment="Shipment 2",
+                 status="shipped", tracking_number="TRK1"),
+            dict(order_id="C1", order_date="2026-06-23", item_name="B", shipment="Shipment 2",
+                 status="shipped", tracking_number="TRK1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 3, "two incoming for one tracking must not reconcile"
+
     def test_header_written_into_empty_sheet(self, sheet, tmp_path):
         sheet.rows = []
         path = write_csv_file(

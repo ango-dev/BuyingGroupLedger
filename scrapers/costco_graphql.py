@@ -75,6 +75,7 @@ query getOrderDetails($orderNumbers: [String]) {
         orderNumber: sourceOrderNumber
         orderPlacedDate: orderedDate
         status
+        shippingAndHandling
         orderPayment {
             paymentType
             cardNumber
@@ -97,7 +98,6 @@ query getOrderDetails($orderNumbers: [String]) {
                 isFeeItem
                 carrierItemCategory
                 orderedShipMethod
-                shippingChargeAmount
                 itemStatus {
                     cancelled {
                         quantity

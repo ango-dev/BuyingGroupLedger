@@ -51,6 +51,7 @@ def test_single_shipment_delivered_order(details):
     assert row.tracking_url.startswith("https://shipmenttracking.costco.com/")
     assert row.delivery_date == "2026-07-23"
     assert row.card_last4 == "1111"
+    assert row.shipping == 0.0  # order-level shippingAndHandling (free shipping)
     assert "Testville" in row.delivery_address
     # Order link is the derivable order-details deep link (built from the order number).
     assert row.order_url == "https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/1399000006"
@@ -77,9 +78,10 @@ def test_line_split_across_packages_becomes_numbered_shipments(details):
     # Quantity split so the column still sums to the line total (2 x 899.99).
     assert sorted(r.quantity for r in rows) == [1, 1]
     assert round(sum(r.total_cost for r in rows), 2) == 1799.98
-    # Shipping counted once for the line, on the first package only.
-    assert by_shipment["Shipment 1"].shipping == 29.98
-    assert by_shipment["Shipment 2"].shipping is None
+    # Shipping is ORDER-LEVEL (the payload's shippingAndHandling, 59.96 — NOT the per-line 29.98),
+    # repeated on EVERY shipment row so the API and agent writers agree on this field.
+    assert by_shipment["Shipment 1"].shipping == 59.96
+    assert by_shipment["Shipment 2"].shipping == 59.96
 
 
 def test_identical_truncated_descriptions_do_not_collide_on_the_key(details):

@@ -139,9 +139,17 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     skey_idx = [header.index(c) for c in ("Order ID", "Order Date", "Shipment")]
     name_hdr_idx = header.index("Item Name")
     name_field_idx = FIELDNAMES.index("item_name")
+    shipment_hdr_idx = header.index("Shipment")
+    shipment_field_idx = FIELDNAMES.index("shipment")
+    # Tracking-number index for the tracking-based deferral (Order ID + Tracking Number). The carrier
+    # tracking number is an identity BOTH the API and the agent read identically, so it reconciles rows
+    # even when their synthetic Shipment numbers diverge (e.g. Costco: the API numbers shipments by
+    # tracking sort, the agent numbers top-to-bottom).
+    tracking_hdr_idx = header.index("Tracking Number") if "Tracking Number" in header else None
 
     key_to_existing: dict[tuple, tuple[int, list]] = {}
     shipment_to_existing: dict[tuple, list[tuple[int, list]]] = {}
+    tracking_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     for row_number, row in enumerate(existing[1:], start=2):
         # Rows written before Shipment existed are shorter than key_idx; read missing cells as ""
         # (never skip them, or pre-migration rows would fail to match and duplicate on re-check).
@@ -151,6 +159,10 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         key_to_existing[key] = (row_number, row)
         skey = tuple(row[i] if i < len(row) else "" for i in skey_idx)
         shipment_to_existing.setdefault(skey, []).append((row_number, row))
+        if tracking_hdr_idx is not None:
+            trk = row[tracking_hdr_idx].strip() if tracking_hdr_idx < len(row) else ""
+            if trk:
+                tracking_to_existing.setdefault((row[oid_idx], trk), []).append((row_number, row))
 
     with csv_path.open(newline="", encoding="utf-8") as f:
         records = list(csv.DictReader(f))
@@ -161,10 +173,16 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     # How many incoming rows target each shipment line — the deferral only fires in the unambiguous
     # 1:1 case (see below), so a shipment carrying two distinct products doesn't mis-merge.
     incoming_skey_count: dict[tuple, int] = {}
+    incoming_tkey_count: dict[tuple, int] = {}
     for rec in collapsed:
-        if str(rec.get("order_id", "")).strip():
+        oid = str(rec.get("order_id", "")).strip()
+        if oid:
             sk = (rec.get("order_id", ""), rec.get("order_date", ""), rec.get("shipment", ""))
             incoming_skey_count[sk] = incoming_skey_count.get(sk, 0) + 1
+            trk = str(rec.get("tracking_number", "")).strip()
+            if trk:
+                tk = (rec.get("order_id", ""), trk)
+                incoming_tkey_count[tk] = incoming_tkey_count.get(tk, 0) + 1
 
     updates = 0
     appends: list[list] = []
@@ -198,22 +216,44 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         if key in key_to_existing:
             row_number, existing_row = key_to_existing[key]
         else:
-            # DEFER TO AN ALREADY-RECORDED SHIPMENT LINE. The exact key (…+ Item Name) didn't match,
-            # but a row for the SAME order+date+shipment may already exist under a differently-worded
-            # item name — e.g. the ss-api's `itemDesc` vs the agent fallback's page-title text. Update
-            # that row IN PLACE, keeping its recorded item name, instead of appending a divergent
-            # duplicate. Only in the unambiguous 1:1 case (exactly one incoming row and exactly one
-            # unclaimed existing row for the shipment line) — a shipment with two distinct products is
-            # left to append rather than risk mis-merging.
-            skey = (record["order_id"], record["order_date"], record.get("shipment", ""))
-            candidates = [c for c in shipment_to_existing.get(skey, []) if c[0] not in claimed_rows]
-            if incoming_skey_count.get(skey, 0) == 1 and len(candidates) == 1:
-                row_number, existing_row = candidates[0]
-                if name_hdr_idx < len(existing_row) and str(existing_row[name_hdr_idx]).strip():
-                    sheet_row[name_field_idx] = existing_row[name_hdr_idx]  # keep recorded identity
-            else:
+            match: tuple[int, list] | None = None
+            # DEFER (1) BY TRACKING NUMBER — the strongest cross-path identity, tried FIRST. The
+            # carrier tracking number is read identically by the API and the agent even when their
+            # synthetic Shipment numbers diverge (Costco: the API numbers shipments by tracking sort,
+            # the agent top-to-bottom, so they can be swapped). An incoming row uniquely sharing
+            # (Order ID, Tracking Number) with one existing row is the same physical line: update it in
+            # place, keeping BOTH its recorded item name and Shipment number so the paths converge on
+            # one row. Tried before the shipment-line rule below so a swapped Shipment number can't
+            # mis-merge onto the wrong box. Only the unambiguous 1:1 case (one incoming, one existing
+            # for that tracking number) — a box holding two distinct SKUs is left to append.
+            if tracking_hdr_idx is not None:
+                trk = str(record.get("tracking_number", "")).strip()
+                tkey = (record["order_id"], trk)
+                tcandidates = [c for c in tracking_to_existing.get(tkey, []) if c[0] not in claimed_rows]
+                if trk and incoming_tkey_count.get(tkey, 0) == 1 and len(tcandidates) == 1:
+                    match = tcandidates[0]
+                    er = match[1]
+                    if name_hdr_idx < len(er) and str(er[name_hdr_idx]).strip():
+                        sheet_row[name_field_idx] = er[name_hdr_idx]  # keep recorded name
+                    if shipment_hdr_idx < len(er) and str(er[shipment_hdr_idx]).strip():
+                        sheet_row[shipment_field_idx] = er[shipment_hdr_idx]  # keep recorded shipment
+            # DEFER (2) TO AN ALREADY-RECORDED SHIPMENT LINE (name-agnostic), for rows the tracking
+            # rule didn't resolve — e.g. not-yet-shipped lines with no tracking number. The exact key
+            # (…+ Item Name) missed, but a row for the SAME order+date+shipment may already exist under
+            # a differently-worded item name (the Best Buy ss-api `itemDesc` vs the agent's page-title
+            # text, where the two paths DO agree on the Shipment number). Keep the recorded item name.
+            # Unambiguous 1:1 only — a shipment with two distinct products is left to append.
+            if match is None:
+                skey = (record["order_id"], record["order_date"], record.get("shipment", ""))
+                candidates = [c for c in shipment_to_existing.get(skey, []) if c[0] not in claimed_rows]
+                if incoming_skey_count.get(skey, 0) == 1 and len(candidates) == 1:
+                    match = candidates[0]
+                    if name_hdr_idx < len(match[1]) and str(match[1][name_hdr_idx]).strip():
+                        sheet_row[name_field_idx] = match[1][name_hdr_idx]  # keep recorded name
+            if match is None:
                 appends.append(sheet_row)
                 continue
+            row_number, existing_row = match
 
         merged = _merge_row(existing_row, sheet_row)
         # Preserved cells come back as strings from get_all_values(); re-coerce so a kept numeric
