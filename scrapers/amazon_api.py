@@ -22,6 +22,7 @@ back to the Browser-Use agent (which detects logged-out, alerts, and skips) — 
 """
 
 import logging
+from datetime import date
 
 from scrapers.amazon_mapping import build_order_items, discover_orders, parse_shipment_targets
 from scrapers.cdp import CdpBrowser
@@ -29,9 +30,30 @@ from models.order import TERMINAL_STATUSES
 
 log = logging.getLogger(__name__)
 
-ORDER_HISTORY_URL = "https://www.amazon.com/gp/css/order-history"
+# Order history PAGINATES (10 orders/page) via ?timeFilter=<tf>&startIndex=<n> — it does NOT
+# infinite-scroll, so reading only the first page silently MISSES every older in-window order (a
+# heavy buyer can have 18 orders in 30 days across 2+ pages). `timeFilter` buckets: last30 / months-3
+# (default, ~90d) / year-YYYY. We page through the smallest bucket(s) covering `since`.
+ORDER_HISTORY_PAGE = "https://www.amazon.com/your-orders/orders?timeFilter={tf}&startIndex={start}"
+_PAGE_SIZE = 10
+_MAX_PAGES_PER_FILTER = 40  # hard stop so a layout change can't loop forever (~400 orders)
 ORDER_DETAILS_URL = "https://www.amazon.com/gp/css/order-details?orderID={}"
 _SIGNIN_MARKERS = ("/ap/signin", "/ap/mfa", "/ap/cvf", "signin")
+
+
+def _time_filters_for(since_date: str, today: str) -> list[str]:
+    """The order-history `timeFilter` bucket(s), newest-first, that cover [since_date, today].
+
+    `months-3` covers ~90 days (the default view) and handles every normal lookback in one bucket;
+    only a window older than 90 days falls back to per-year buckets."""
+    try:
+        since = date.fromisoformat(since_date)
+        end = date.fromisoformat(today)
+    except (ValueError, TypeError):
+        return ["months-3"]
+    if (end - since).days <= 90:
+        return ["months-3"]
+    return [f"year-{y}" for y in range(end.year, since.year - 1, -1)]
 
 
 class AmazonApiError(Exception):
@@ -64,23 +86,7 @@ class AmazonApiClient:
         terminal_ids = set(terminal_ids or [])
 
         with CdpBrowser(self.profile) as page:
-            page.goto(ORDER_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(4000)
-            if _looks_logged_out(page):
-                raise AmazonApiError(
-                    "Amazon session is logged out. Amazon login has OTP/2FA, so the deterministic path "
-                    "does not auto-login; falling back to the agent."
-                )
-
-            # Lazy-load the history so older in-window orders render into the card list.
-            for _ in range(5):
-                try:
-                    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
-                except Exception:
-                    pass
-                page.wait_for_timeout(1200)
-
-            dates = discover_orders(page.content())
+            dates = self._discover(page, since_date, today)
             if not dates:
                 raise AmazonApiError("No orders found on the order-history page (shape changed?).")
 
@@ -92,7 +98,7 @@ class AmazonApiClient:
                 if oid not in to_fetch and oid not in terminal_ids:
                     to_fetch.append(oid)
 
-            log.info("Amazon [%s]: %d order(s) on page, fetching %d order-details page(s).",
+            log.info("Amazon [%s]: %d order(s) in window, fetching %d order-details page(s).",
                      self.profile.label, len(dates), len(to_fetch))
             if not to_fetch:
                 return []
@@ -125,6 +131,43 @@ class AmazonApiClient:
             if r.order_id in open_ids or not r.order_date or r.order_date >= since_date:
                 kept.append(r)
         return kept
+
+    def _discover(self, page, since_date: str, today: str) -> dict[str, str]:
+        """{order_id: order_date} for every order back to `since_date`, PAGINATING order history.
+
+        Amazon paginates 10 orders/page (newest-first) — not infinite scroll — so we walk
+        `startIndex=0,10,20,…` within each timeFilter bucket, stopping a bucket once a full page is
+        entirely older than `since_date` (everything past it is older too). Raises if the very first
+        page is logged out."""
+        dates: dict[str, str] = {}
+        first = True
+        for tf in _time_filters_for(since_date, today):
+            for pageno in range(_MAX_PAGES_PER_FILTER):
+                url = ORDER_HISTORY_PAGE.format(tf=tf, start=pageno * _PAGE_SIZE)
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(3000)
+                if first:
+                    first = False
+                    if _looks_logged_out(page):
+                        raise AmazonApiError(
+                            "Amazon session is logged out. Amazon login has OTP/2FA, so the "
+                            "deterministic path does not auto-login; falling back to the agent."
+                        )
+                page_dates = discover_orders(page.content())
+                if not page_dates:
+                    break  # past the last page of this bucket
+                new_ids = [oid for oid in page_dates if oid not in dates]
+                dates.update(page_dates)
+                # Stop this bucket once a whole page is older than the window (dates are newest-first);
+                # a page with no new ids (all already seen) also means we've caught up.
+                page_all_old = bool(page_dates) and all(
+                    d and d < since_date for d in page_dates.values()
+                )
+                if page_all_old or not new_ids:
+                    break
+        log.info("Amazon [%s]: discovered %d order(s) across paginated history.",
+                 self.profile.label, len(dates))
+        return dates
 
     def _read_tracking_numbers(self, page, details_html: dict[str, str]) -> dict[str, dict]:
         """{order_id: {shipment_label: tracking_number}} read from each non-terminal shipment's pt page.
