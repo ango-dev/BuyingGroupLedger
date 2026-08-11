@@ -45,7 +45,13 @@ _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7,
     "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+    # Amazon also shows abbreviated months in ETAs ("Arriving Aug 14").
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "sept": 9,
+    "oct": 10, "nov": 11, "dec": 12,
 }
+
+_WEEKDAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4,
+             "saturday": 5, "sunday": 6}
 
 # Digital line markers (best-effort — no digital fixture captured yet; the agent fallback also skips
 # digital). A shipment whose status/text is clearly a digital delivery has no physical package.
@@ -78,43 +84,68 @@ def _parse_full_date(text: str) -> str:
     return f"{int(m.group(3)):04d}-{month:02d}-{int(m.group(2)):02d}"
 
 
-def _parse_delivered_date(status_text: str, order_date: str, today: str) -> str:
-    """Best-effort YYYY-MM-DD for a 'Delivered …' status. Handles 'Delivered today/yesterday' (relative
-    to `today`) and 'Delivered <Month> <Day>' (year inferred from `order_date`, rolling to next year if
-    the delivered month is before the order month). Returns '' when it can't be determined safely."""
+def _parse_status_date(status_text: str, order_date: str, today: str) -> str:
+    """Best-effort YYYY-MM-DD from a shipment status card. Works for BOTH the actual delivery date
+    ('Delivered <Month> <Day>' / 'Delivered today|yesterday') and the estimated arrival of a
+    not-yet-delivered shipment ('Arriving <Month> <Day>', 'Now arriving <Month> <Day>', a
+    '… - <Month> <Day>' range — the first date is taken). This keeps the deterministic path's
+    delivery_date identical to the agent's, which records the ETA while ordered/shipped and the real
+    date once delivered; a later re-check simply overwrites the estimate (a non-blank value overwrites
+    in ledger_sync._merge_row), so a delayed ETA updates and the actual date lands on delivery.
+
+    Year is inferred from `order_date` (rolling to next year when the arrival month is before the order
+    month, e.g. ordered Dec / arriving Jan). Returns '' when no date can be read (e.g. 'Preparing for
+    shipment', 'Not yet shipped')."""
     from datetime import date, timedelta
 
     low = status_text.lower()
-    if "today" in low:
-        return today or ""
-    if "yesterday" in low:
-        if not today:
+    is_delivered = low.lstrip().startswith("delivered")
+
+    def _infer_year(month: int):
+        if order_date and len(order_date) >= 7 and order_date[:4].isdigit():
+            year = int(order_date[:4])
+            if month < int(order_date[5:7]):  # spills into the next year (ordered Dec, arriving Jan)
+                year += 1
+            return year
+        return int(today[:4]) if today and today[:4].isdigit() else None
+
+    # 1. Explicit "<Month> <Day>" (full or abbreviated month) — most precise, prefer it. Scan every
+    #    word+number pair so a leading weekday ("Friday, August 14") doesn't block the real month.
+    for m in re.finditer(r"([A-Za-z]{3,9})\.?\s+(\d{1,2})\b", status_text):
+        month = _MONTHS.get(m.group(1).lower().rstrip("."))
+        if month is None:
+            continue
+        year = _infer_year(month)
+        if year is None:
             return ""
         try:
-            return (date.fromisoformat(today) - timedelta(days=1)).isoformat()
+            return date(year, month, int(m.group(2))).isoformat()
         except ValueError:
             return ""
-    m = re.search(r"([A-Za-z]+)\s+(\d{1,2})", status_text)
-    if not m:
-        return ""
-    month = _MONTHS.get(m.group(1).lower())
-    if not month:
-        return ""
-    day = int(m.group(2))
-    year = None
-    if order_date and len(order_date) >= 4 and order_date[:4].isdigit():
-        year = int(order_date[:4])
-        order_month = int(order_date[5:7]) if len(order_date) >= 7 else 1
-        if month < order_month:  # delivered in the new year (e.g. ordered Dec, delivered Jan)
-            year += 1
-    elif today and today[:4].isdigit():
-        year = int(today[:4])
-    if year is None:
-        return ""
+
+    # Relative forms need the run date as a reference.
     try:
-        return date(year, month, day).isoformat()
+        t = date.fromisoformat(today) if today else None
     except ValueError:
+        t = None
+    if t is None:
         return ""
+
+    # 2. today / tomorrow / yesterday.
+    if "today" in low:
+        return t.isoformat()
+    if "tomorrow" in low:
+        return (t + timedelta(days=1)).isoformat()
+    if "yesterday" in low:
+        return (t - timedelta(days=1)).isoformat()
+
+    # 3. A bare weekday ("Arriving Friday" / "Delivered Tuesday") — Amazon's near-term form. Resolve to
+    #    the NEXT occurrence for an arrival (future) or the MOST RECENT for a delivered date (past).
+    for name, wd in _WEEKDAYS.items():
+        if re.search(rf"\b{name}\b", low):
+            delta = (t.weekday() - wd) % 7 if is_delivered else (wd - t.weekday()) % 7
+            return (t - timedelta(days=delta)).isoformat() if is_delivered else (t + timedelta(days=delta)).isoformat()
+    return ""
 
 
 def _status_from_text(status_text: str) -> str:
@@ -299,7 +330,9 @@ def build_order_items(
             or ""
         )
 
-        delivery_date = _parse_delivered_date(status_text, order_date, today) if status == "delivered" else ""
+        # delivery_date = the actual date once delivered, else the estimated arrival while
+        # ordered/shipped (matches the agent). '' for cancelled or when no date is shown.
+        delivery_date = "" if status == "cancelled" else _parse_status_date(status_text, order_date, today)
 
         for title_el in wrapper.select("[data-component='itemTitle']"):
             container = _item_container(title_el)

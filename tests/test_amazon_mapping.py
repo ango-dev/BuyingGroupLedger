@@ -211,6 +211,49 @@ def test_delivered_today_uses_run_date():
     assert rows[0].delivery_date == "2026-08-10"
 
 
+def test_arriving_estimate_fills_delivery_date_for_open_order():
+    """An ordered/shipped order records its estimated arrival date (matching the agent), so both paths
+    write the same delivery_date; a later re-check overwrites it with the actual delivered date."""
+    oid = "111-2223334-5556667"
+    html = _details(oid, "August 11, 2026",
+                    [_shipment(oid, 0, "Arriving Thursday, August 14", [_item("Switch 2", "$449.00", qty=4)])])
+    rows = build_order_items(html, today="2026-08-11")
+    assert rows[0].status == "ordered"          # no tracking number yet
+    assert rows[0].delivery_date == "2026-08-14"  # ETA captured, not left blank
+
+
+def test_bare_weekday_arrival_resolves_to_next_occurrence():
+    """Amazon often shows a bare weekday ETA ("Arriving Friday") with no date — resolve it to the next
+    occurrence so the API matches the agent (which does the same). 2026-08-11 is a Tuesday."""
+    oid = "111-2223334-5556667"
+    html = _details(oid, "August 11, 2026",
+                    [_shipment(oid, 0, "Arriving Friday", [_item("Switch 2", "$449.00", qty=4)])])
+    rows = build_order_items(html, today="2026-08-11")
+    assert rows[0].delivery_date == "2026-08-14"  # next Friday on/after Tue Aug 11
+
+
+def test_abbreviated_month_estimate_parsed():
+    oid = "111-2223334-5556667"
+    html = _details(oid, "August 11, 2026",
+                    [_shipment(oid, 0, "Arriving Aug 14", [_item("Thing", "$5.00")])])
+    assert build_order_items(html, today="2026-08-11")[0].delivery_date == "2026-08-14"
+
+
+def test_delivered_weekday_resolves_to_past_occurrence():
+    oid = "111-2223334-5556667"
+    html = _details(oid, "August 7, 2026",
+                    [_shipment(oid, 0, "Delivered Monday", [_item("Thing", "$5.00")])])
+    # From Tue 2026-08-11, the most recent Monday is 2026-08-10.
+    assert build_order_items(html, today="2026-08-11")[0].delivery_date == "2026-08-10"
+
+
+def test_no_date_in_status_leaves_delivery_date_blank():
+    oid = "111-2223334-5556667"
+    html = _details(oid, "August 11, 2026",
+                    [_shipment(oid, 0, "Preparing for shipment", [_item("Thing", "$5.00")])])
+    assert build_order_items(html, today="2026-08-11")[0].delivery_date == ""
+
+
 def test_year_rollover_when_delivered_month_before_order_month():
     oid = "111-2223334-5556667"
     html = _details(oid, "December 30, 2025",
