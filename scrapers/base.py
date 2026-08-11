@@ -265,7 +265,11 @@ class BaseRetailerScraper(abc.ABC):
             from sheets.ledger_sync import load_order_state
 
             _, earliest, _ = self._date_window()
-            return load_order_state(self.profile.label, since=earliest)
+            # Scope to THIS retailer's rows: a profile can host several retailers (e.g. profile-alpha
+            # = Best Buy + Costco + Amazon Business), and without this a re-check would pull in another
+            # retailer's open orders and re-read them under the wrong retailer (the agent fallback would
+            # open their order_url and mislabel them, corrupting the ledger).
+            return load_order_state(self.profile.label, since=earliest, retailer=self.retailer_name)
         except Exception:
             log.warning("Could not load order state; treating all orders as new.", exc_info=True)
             return {"delivered_ids": [], "open_orders": []}

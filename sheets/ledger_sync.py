@@ -311,7 +311,8 @@ def _rollup_status(statuses: list[str]) -> str:
     return "ordered"
 
 
-def load_order_state(profile_label: str | None = None, since: str | None = None) -> dict:
+def load_order_state(profile_label: str | None = None, since: str | None = None,
+                     retailer: str | None = None) -> dict:
     """Read the sheet and return, for this profile:
 
         {
@@ -342,6 +343,13 @@ def load_order_state(profile_label: str | None = None, since: str | None = None)
     discovery window from those lists — the agent never scans back past the window, so without
     this the skip list grows forever and is re-sent on every single agent step.
 
+    `retailer` (a retailer_name like "Amazon Business") scopes the state to that retailer's rows. This
+    MATTERS when one profile hosts several retailers (e.g. profile-alpha = Best Buy + Costco + Amazon
+    Business): without it, a scraper's re-check would pull in the OTHER retailers' open orders and
+    re-read them through its own path — the agent fallback would open their order_url and re-emit those
+    orders under the wrong retailer, corrupting the ledger (and, because the upsert key has no retailer
+    field, overwriting the real rows). Omitted (single-retailer profiles) = no filtering, as before.
+
     Fails soft (empty state) if the sheet isn't configured/readable → treat all as new.
     """
     empty: dict = {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
@@ -365,12 +373,21 @@ def load_order_state(profile_label: str | None = None, since: str | None = None)
     # Optional: sheets written before the Shipment column exist. Those rows group under "",
     # which behaves like any other single shipment.
     shipment_idx = header.index("Shipment") if "Shipment" in header else None
+    # Retailer scoping (multi-retailer profiles): filter to this retailer's rows only.
+    retailer_idx = header.index("Retailer") if "Retailer" in header else None
 
     orders: dict[str, dict] = {}
     for row in existing[1:]:
         if len(row) <= max(idx.values()):
             continue
         if profile_label is not None and row[idx["Profile"]] != profile_label:
+            continue
+        if (
+            retailer is not None
+            and retailer_idx is not None
+            and retailer_idx < len(row)
+            and row[retailer_idx].strip() != retailer
+        ):
             continue
         oid = row[idx["Order ID"]].strip()
         if not oid:

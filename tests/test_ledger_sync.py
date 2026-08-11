@@ -488,6 +488,30 @@ class TestLoadOrderState:
         assert state["delivered_ids"] == ["A1"]
         assert state["open_orders"] == []
 
+    def test_retailer_scopes_state_on_a_multi_retailer_profile(self, sheet):
+        """A profile hosting several retailers (e.g. profile-alpha = Best Buy + Amazon Business) must
+        NOT leak one retailer's open orders into another's re-check. Without the retailer filter the
+        agent fallback re-reads the other retailer's order_url and re-emits it under the wrong retailer,
+        corrupting the ledger (retailer isn't in the upsert key). Regression for the live bug where an
+        Amazon Business forced-agent run relabeled Best Buy rows."""
+        sheet.rows = [
+            list(HEADER),
+            row(retailer="Best Buy", order_id="BBY01-1", order_date="2026-08-08", item_name="PS5",
+                shipment="Shipment 1", status="ordered", tracking_url="http://fedex/1", profile_label="p1"),
+            row(retailer="Amazon Business", order_id="114-1", order_date="2026-08-08", item_name="Switch",
+                shipment="Shipment 1", status="ordered", tracking_url="http://amz/1", profile_label="p1"),
+        ]
+
+        biz = load_order_state("p1", retailer="Amazon Business")
+        assert [o["order_id"] for o in biz["open_orders"]] == ["114-1"]
+
+        bby = load_order_state("p1", retailer="Best Buy")
+        assert [o["order_id"] for o in bby["open_orders"]] == ["BBY01-1"]
+
+        # No retailer arg = old behavior (both, unscoped) — single-retailer profiles are unaffected.
+        both = load_order_state("p1")
+        assert {o["order_id"] for o in both["open_orders"]} == {"BBY01-1", "114-1"}
+
     def test_each_shipment_keeps_its_own_tracking_and_items(self, sheet):
         """The core of the per-shipment shape: a split order has one tracking page per shipment,
         and collapsing them to one URL is what forced the old code to skip multi-shipment orders."""
@@ -658,8 +682,8 @@ class TestCancelledOrders:
         today = datetime.now(timezone.utc).date().isoformat()
         sheet.rows = [
             list(HEADER),
-            row(order_id="CANCELLED1", order_date=today, item_name="W", shipment="Shipment 1",
-                status="cancelled", profile_label="p1"),
+            row(retailer="Best Buy", order_id="CANCELLED1", order_date=today, item_name="W",
+                shipment="Shipment 1", status="cancelled", profile_label="p1"),
         ]
         # Wide lookback so the fixed order date can't fall outside the discovery window and get
         # trimmed as the real "today" advances — this test is about skip-list assembly, not date
