@@ -7,6 +7,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 from config.settings import settings
+from config.warehouses import classify_address, is_personal
 from models.order import FIELDNAMES, TERMINAL_STATUSES
 
 log = logging.getLogger(__name__)
@@ -34,7 +35,8 @@ HEADER = [
     "Total Cost",
     "Card Last 4",
     "Last Scraped At",
-    "Shipment",  # last column; see models.order FIELDNAMES for why it's appended, not inserted
+    "Shipment",  # see models.order FIELDNAMES for why columns are appended, not inserted
+    "Buying Group",  # last column; derived from Delivery Address (config.warehouses.classify_address)
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas.
@@ -135,10 +137,13 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         existing = [HEADER]
 
     header = existing[0]
-    # Migrate older sheets that predate the Shipment column: it's appended at the end, so existing
-    # data rows keep their positions and just gain a trailing (empty) cell. Rewriting row 1 to the
-    # full HEADER is safe because the leading columns are identical to what's already there.
-    if "Shipment" not in header:
+    # Migrate an older sheet whose header is a PREFIX of the current HEADER. Columns are only ever
+    # APPENDED (Shipment, then Buying Group), so a pre-migration sheet's header is HEADER truncated at
+    # the right — its leading columns are byte-identical to ours. Rewriting row 1 to the full HEADER is
+    # then safe: existing data rows keep their positions and simply gain trailing (empty) cells. A
+    # header that is NOT a prefix (garbage, reordered, or renamed) is deliberately left alone so the
+    # key-column check below can reject it instead of silently overwriting real column names.
+    if header != list(HEADER) and header == list(HEADER[: len(header)]):
         worksheet.update(range_name="A1", values=[HEADER])
         header = list(HEADER)
 
@@ -390,6 +395,69 @@ def _rollup_status(statuses: list[str]) -> str:
     if any(s in ("shipped", "delivered") for s in statuses):
         return "shipped"
     return "ordered"
+
+
+def plan_buying_group_retag(header: list[str], data_rows: list[list[str]], warehouses) -> dict:
+    """Read-only: work out what a retroactive Buying Group classification pass would do to rows
+    ALREADY on the sheet, without writing anything. `apply_buying_group_retag` (or a caller script)
+    turns this plan into real writes/deletes.
+
+    This exists because the classifier only tags NEW/re-checked rows at scrape time (main.run_scrape) —
+    rows recorded before the Buying Group column existed, or before warehouses.json had an entry that
+    now matches them, are never revisited automatically. This is the one-off backfill.
+
+    `header` is the sheet's CURRENT header row (may predate the Buying Group column — that's reported
+    via `needs_header_migration`, not assumed). `data_rows` is `existing[1:]` (no header). Rows with a
+    blank Order ID are skipped, same rule as sync_csv_to_sheet.
+
+    Returns:
+        {
+          "needs_header_migration": bool,
+          "updates": [(row_number, order_id, item_name, old_tag, new_tag), ...],
+          "deletions": [(row_number, order_id, item_name, delivery_address, old_tag), ...],  # Personal
+          "unchanged": int,
+          "group_counts": {tag: count},  # post-classification, excluding deletions
+        }
+    """
+    needs_header_migration = "Buying Group" not in header
+    oid_idx = header.index("Order ID")
+    name_idx = header.index("Item Name")
+    addr_idx = header.index("Delivery Address")
+    bg_idx = None if needs_header_migration else header.index("Buying Group")
+
+    updates: list[tuple] = []
+    deletions: list[tuple] = []
+    group_counts: dict[str, int] = {}
+    unchanged = 0
+
+    for offset, row in enumerate(data_rows):
+        row_number = offset + 2  # row 1 is the header
+        oid = row[oid_idx].strip() if oid_idx < len(row) else ""
+        if not oid:
+            continue
+        name = row[name_idx].strip() if name_idx < len(row) else ""
+        addr = row[addr_idx].strip() if addr_idx < len(row) else ""
+        old_tag = row[bg_idx].strip() if bg_idx is not None and bg_idx < len(row) else ""
+        new_tag = classify_address(addr, warehouses)
+
+        if is_personal(new_tag):
+            deletions.append((row_number, oid, name, addr, old_tag))
+            continue
+
+        display_tag = new_tag or old_tag or "(blank)"
+        group_counts[display_tag] = group_counts.get(display_tag, 0) + 1
+        if new_tag and new_tag != old_tag:
+            updates.append((row_number, oid, name, old_tag, new_tag))
+        else:
+            unchanged += 1
+
+    return {
+        "needs_header_migration": needs_header_migration,
+        "updates": updates,
+        "deletions": deletions,
+        "unchanged": unchanged,
+        "group_counts": group_counts,
+    }
 
 
 def load_order_state(profile_label: str | None = None, since: str | None = None,

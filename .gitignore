@@ -1,6 +1,7 @@
 .env
 service_account.json
 profiles.json
+warehouses.json
 .costco/
 .bestbuy_capture/
 .amazon_capture/

@@ -1,0 +1,21 @@
+[
+  {
+    "buying_group": "BFMR",
+    "jigs": [
+      { "label": "BFMR-A", "street": "123 Main St", "zip": "10001", "name_contains": "c/o BFMR" },
+      { "label": "BFMR-B", "street": "500 Warehouse Blvd", "zip": "07004" }
+    ]
+  },
+  {
+    "buying_group": "MaxOutDeals",
+    "jigs": [
+      { "label": "MOD-1", "street": "9 Oak Ave", "zip": "30303" }
+    ]
+  },
+  {
+    "buying_group": "Personal",
+    "jigs": [
+      { "label": "home", "zip": "94103", "name_contains": "Test Buyer" }
+    ]
+  }
+]

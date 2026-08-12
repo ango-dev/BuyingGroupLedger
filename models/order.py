@@ -37,6 +37,12 @@ FIELDNAMES = [
     # on the upsert key. Every retailer numbers shipments "Shipment N" from 1, single included;
     # "" only on legacy rows written before this column existed.
     "shipment",
+    # Appended LAST (after shipment) on purpose, same positional-write reasoning: older sheets gain a
+    # trailing empty cell and no existing row shifts. Derived from delivery_address by
+    # config.warehouses.classify_address at run time (in main.run_scrape): the buying group whose
+    # warehouse/jig this shipment went to, "Personal" if configured, "Unclassified" if it matched no
+    # jig, or "" when the address is blank (a partial re-check) so _merge_row preserves the earlier tag.
+    "buying_group",
 ]
 
 
@@ -60,6 +66,7 @@ class OrderItem(BaseModel):
     total_cost: float | None = None  # computed = quantity * cost_per_item (this row/shipment line)
     card_last4: str = ""
     shipment: str = ""  # "Shipment 1" / "Shipment 2" / ...; "" only on pre-Shipment-column rows
+    buying_group: str = ""  # derived from delivery_address; "Unclassified" if no jig matched, "" if blank
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost", mode="before")
     @classmethod

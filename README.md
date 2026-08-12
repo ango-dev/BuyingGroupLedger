@@ -80,7 +80,7 @@ status/tracking/date/last-scraped **without clobbering** the item name, cost, ad
 
 `Retailer · Profile · Order ID · Order Date · Status · Order Link · Tracking Number · Tracking Link ·
 Delivery Date · Delivery Address · Item Name · Quantity · Cost Per Item · Shipping · Total Cost ·
-Card Last 4 · Last Scraped At · Shipment`
+Card Last 4 · Last Scraped At · Shipment · Buying Group`
 
 **Total Cost is per row** = `Quantity × Cost Per Item` for that shipment line (computed in code, not
 trusted from the agent), so the column sums to the order total. **Status** is one of `ordered`,
@@ -107,6 +107,15 @@ date) after an order already looks shipped, so a cached single-page poll would s
 
 **Digital items are skipped** on every retailer (gift cards, eBooks, memberships, redemption codes,
 etc.) — they're never resold, so they never hit the ledger.
+
+**Buying Group** classifies each row's `Delivery Address`: which buying group's warehouse the order
+shipped to, or `Unclassified` when the address matches no configured warehouse. It's derived at run time
+from a `warehouses.json` config (see "Warehouse / jig config" below), so it also sets up the later
+buying-group tracking-post step. **Personal orders are dropped entirely** — an address matched to a group
+named `Personal` (your own reship/consumer addresses) never reaches the sheet. `Unclassified` is
+deliberately *not* treated as personal: a real warehouse you simply haven't configured yet is kept and
+counted (in the run log) rather than silently disappearing. A blank address on a partial re-check leaves
+the tag untouched.
 
 ---
 
@@ -260,6 +269,39 @@ Costco alerts and falls back to the Browser-Use agent for that run.
 Profiles with a blank `profile_id` are skipped. Output goes to `data/orders_*.csv` and the Sheet;
 logs to `logs/run.log`. A lock (`logs/.run.lock`, auto-expires after 3h) prevents overlapping runs.
 
+### Warehouse / jig config (the "Buying Group" column)
+
+To classify each order by which buying group's warehouse it shipped to, create a **`warehouses.json`**
+at the repo root (gitignored — it holds real addresses). Copy `warehouses.example.json` and edit it:
+
+```json
+[
+  { "buying_group": "BFMR",
+    "jigs": [
+      { "label": "BFMR-A", "street": "123 Main St", "zip": "10001", "name_contains": "c/o BFMR" },
+      { "label": "BFMR-B", "street": "500 Warehouse Blvd", "zip": "07004" }
+    ] },
+  { "buying_group": "Personal",
+    "jigs": [ { "label": "home", "zip": "94103", "name_contains": "Test Buyer" } ] }
+]
+```
+
+Each buying group lists one or more **jigs** — the address variants it routes packages through. A jig
+matches an order when **every** substring field it sets (`street` / `zip` / `name_contains`, or a generic
+`contains: [...]` list) appears in the delivery address after normalization (lowercased, punctuation and
+extra spaces removed — so "c/o" vs "c o" and "Ste." vs "Ste" don't matter). The first matching jig (in
+file order) wins and its `buying_group` is written to the row.
+
+- List your own reship address under a group literally named **`Personal`** — those orders are **dropped
+  from the sheet entirely** (never recorded). List every personal address you use, or the order will fall
+  through to `Unclassified` and still show.
+- An address matching **no** jig is tagged **`Unclassified`** (kept, not dropped), and the run logs how
+  many — a real warehouse you forgot to add stands out instead of silently vanishing. A jig with no match
+  fields is rejected (it would match everything).
+- No `warehouses.json` at all = every non-blank address is `Unclassified` (nothing is guessed).
+- Editing the file re-tags **open** orders on the next run (they get re-read); already-delivered rows
+  keep their tag. Classification is offline and free — no live run is needed to change it.
+
 ### Automatic running (~4×/day, 6h apart — adjustable)
 
 **Linux (cron):**
@@ -368,7 +410,8 @@ trimmed JOB 2 example so re-checks don't re-fill identity fields.
 main.py                 orchestration + run lock
 config/settings.py      .env-backed settings
 config/profiles.py      profiles.json loader + Sheet order-state reader
-models/                 OrderItem + ProfileConfig schemas
+config/warehouses.py    warehouses.json loader + address -> buying-group classifier
+models/                 OrderItem + ProfileConfig + Warehouse/Jig schemas
 scrapers/base.py        scrape(): CDP re-check + agent scan + merge/cleanup
 scrapers/amazon.py      Amazon prompt + tracking-page selectors/reader
 scrapers/bestbuy.py     Best Buy: ss-api primary path + agent-fallback prompt (deterministic login)

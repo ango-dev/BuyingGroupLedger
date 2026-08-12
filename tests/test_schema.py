@@ -19,10 +19,14 @@ def test_header_and_fieldnames_have_matching_length():
     )
 
 
-def test_shipment_is_last_in_both():
-    # A mid-list insert misaligns every pre-existing sheet row. New columns go on the end.
-    assert FIELDNAMES[-1] == "shipment"
-    assert HEADER[-1] == "Shipment"
+def test_new_columns_are_appended_at_the_end():
+    # A mid-list insert misaligns every pre-existing sheet row, so new columns go on the end.
+    # buying_group was appended after shipment (the previous last column); both must stay last-aligned.
+    assert FIELDNAMES[-1] == "buying_group"
+    assert HEADER[-1] == "Buying Group"
+    # shipment stays put as the second-to-last column so existing 18-col sheets don't shift.
+    assert FIELDNAMES[-2] == "shipment"
+    assert HEADER[-2] == "Shipment"
 
 
 def test_fieldnames_match_order_item_fields():

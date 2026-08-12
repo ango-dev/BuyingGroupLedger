@@ -37,8 +37,11 @@ logging.basicConfig(
     ],
 )
 
+from functools import lru_cache  # noqa: E402
+
 from alerts.notifier import alert  # noqa: E402
 from config.profiles import load_profiles_for_retailer  # noqa: E402
+from config.warehouses import load_warehouses, tag_and_filter_personal  # noqa: E402
 from output.csv_writer import write_csv  # noqa: E402
 from scrapers.amazon import AmazonScraper  # noqa: E402
 from scrapers.amazon_business import AmazonBusinessScraper  # noqa: E402
@@ -57,6 +60,31 @@ SCRAPERS: dict[str, type[BaseRetailerScraper]] = {
 }
 
 
+# Loaded once per process (the file rarely changes within a run) and shared across every profile x
+# retailer. lru_cache also means a missing/edited warehouses.json is read at most once.
+@lru_cache(maxsize=1)
+def _warehouses():
+    return load_warehouses()
+
+
+def _classify_and_drop_personal(items: list, label: str) -> list:
+    """Tag each row's buying group from its delivery address and drop personal rows.
+
+    Runs here because every retailer (deterministic + agent) funnels through run_scrape, so one call
+    site handles them all. Personal-address orders are excluded from the ledger entirely; Unclassified
+    (unrecognized) rows are kept and counted so a not-yet-configured warehouse stays visible.
+    """
+    kept, dropped_personal, unclassified = tag_and_filter_personal(items, _warehouses())
+    if dropped_personal:
+        log.info("%s: dropped %d personal-address row(s) (not recorded).", label, dropped_personal)
+    if unclassified:
+        log.info(
+            "%s: %d row(s) tagged Unclassified (address matched no configured warehouse jig).",
+            label, unclassified,
+        )
+    return kept
+
+
 def run_scrape(scraper: BaseRetailerScraper) -> None:
     label = f"{scraper.retailer_name} [{scraper.profile.label}]"
     log.info("Scraping %s...", label)
@@ -73,6 +101,11 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
 
     if not items:
         log.info("No orders found for %s (nothing new in the lookback window).", label)
+        return
+
+    items = _classify_and_drop_personal(items, label)
+    if not items:
+        log.info("Nothing to record for %s (all scraped rows were personal addresses).", label)
         return
 
     csv_path = write_csv(items)

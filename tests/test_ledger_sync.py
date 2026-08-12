@@ -9,8 +9,15 @@ import csv
 import pytest
 
 from models.order import FIELDNAMES
+from models.warehouse import Jig, Warehouse
 from sheets import ledger_sync
-from sheets.ledger_sync import HEADER, _merge_row, load_order_state, sync_csv_to_sheet
+from sheets.ledger_sync import (
+    HEADER,
+    _merge_row,
+    load_order_state,
+    plan_buying_group_retag,
+    sync_csv_to_sheet,
+)
 
 
 class FakeWorksheet:
@@ -350,7 +357,9 @@ class TestSyncUpsert:
         assert sheet.rows[0] == HEADER
 
     def test_legacy_sheet_without_shipment_column_is_migrated(self, sheet, tmp_path):
-        legacy_header = [h for h in HEADER if h != "Shipment"]
+        # A true pre-Shipment sheet predates Buying Group too (both were appended later), so the legacy
+        # header is HEADER with both trailing columns dropped — a genuine prefix of the current HEADER.
+        legacy_header = [h for h in HEADER if h not in ("Shipment", "Buying Group")]
         legacy_row = [str(i) for i in range(len(legacy_header))]
         legacy_row[legacy_header.index("Order ID")] = "A1"
         legacy_row[legacy_header.index("Order Date")] = "2026-08-08"
@@ -366,6 +375,47 @@ class TestSyncUpsert:
 
         assert sheet.rows[0] == HEADER, "header row should be migrated to include Shipment"
         assert len(sheet.data_rows()) == 1, "legacy row should match, not duplicate"
+
+    def test_sheet_without_buying_group_column_is_migrated(self, sheet, tmp_path):
+        # A sheet that already has Shipment but predates Buying Group: the column is appended, so the
+        # existing row keeps its position and gains a trailing empty cell (same as the Shipment migration).
+        legacy_header = [h for h in HEADER if h != "Buying Group"]
+        legacy_row = [""] * len(legacy_header)
+        legacy_row[legacy_header.index("Order ID")] = "A1"
+        legacy_row[legacy_header.index("Order Date")] = "2026-08-08"
+        legacy_row[legacy_header.index("Item Name")] = "Widget"
+        legacy_row[legacy_header.index("Shipment")] = "Shipment 1"
+        sheet.rows = [legacy_header, legacy_row]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 status="shipped", buying_group="BFMR"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.rows[0] == HEADER, "header row should be migrated to include Buying Group"
+        assert len(sheet.data_rows()) == 1, "legacy row should match, not duplicate"
+        assert sheet.data_rows()[0][FIELDNAMES.index("buying_group")] == "BFMR"
+
+    def test_blank_buying_group_does_not_clobber_existing_tag(self, sheet, tmp_path):
+        # A partial re-check classifies to "" (blank address); _merge_row must keep the recorded tag.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                status="shipped", tracking_number="1Z1", buying_group="BFMR"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 status="delivered", delivery_date="2026-08-12", buying_group=""),
+        )
+
+        sync_csv_to_sheet(path)
+
+        r = sheet.data_rows()[0]
+        assert r[FIELDNAMES.index("buying_group")] == "BFMR", "blank re-check tag must not wipe it"
+        assert r[FIELDNAMES.index("status")] == "delivered"
 
     def test_unrecognized_header_raises(self, sheet, tmp_path):
         sheet.rows = [["Something", "Entirely", "Different", "Shipment"]]
@@ -849,3 +899,95 @@ class TestNumericCoercionOnMerge:
         assert written[FIELDNAMES.index("quantity")] == 1, "preserved quantity must be int, not '1'"
         assert isinstance(written[FIELDNAMES.index("quantity")], int)
         assert written[FIELDNAMES.index("cost_per_item")] == 899.99
+
+
+class TestPlanBuyingGroupRetag:
+    """plan_buying_group_retag is READ-ONLY (the caller script decides whether/how to apply it), so
+    these tests work off raw header/rows, never a sheet write."""
+
+    warehouses = [
+        Warehouse(buying_group="BFMR", jigs=[Jig(zip="10001")]),
+        Warehouse(buying_group="Personal", jigs=[Jig(zip="94103")]),
+    ]
+
+    def test_new_tag_is_planned_as_an_update(self):
+        rows = [row(order_id="A1", order_date="2026-08-08", item_name="W",
+                    delivery_address="123 Main St, New York NY 10001", buying_group="")]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["updates"] == [(2, "A1", "W", "", "BFMR")]
+        assert plan["deletions"] == []
+        assert plan["group_counts"] == {"BFMR": 1}
+
+    def test_personal_row_is_planned_for_deletion_not_update(self):
+        rows = [row(order_id="A1", order_date="2026-08-08", item_name="W",
+                    delivery_address="5 Home St, SF CA 94103", buying_group="")]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["updates"] == []
+        assert len(plan["deletions"]) == 1
+        row_number, oid, name, addr, old_tag = plan["deletions"][0]
+        assert (row_number, oid, name) == (2, "A1", "W")
+        assert "94103" in addr
+
+    def test_already_correctly_tagged_row_is_unchanged(self):
+        rows = [row(order_id="A1", order_date="2026-08-08", item_name="W",
+                    delivery_address="123 Main St, New York NY 10001", buying_group="BFMR")]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["updates"] == []
+        assert plan["unchanged"] == 1
+        assert plan["group_counts"] == {"BFMR": 1}
+
+    def test_blank_address_row_is_left_alone(self):
+        # No address to classify from -> "" -> not a real change, old tag (if any) stands.
+        rows = [row(order_id="A1", order_date="2026-08-08", item_name="W",
+                    delivery_address="", buying_group="BFMR")]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["updates"] == []
+        assert plan["deletions"] == []
+        assert plan["unchanged"] == 1
+
+    def test_blank_order_id_row_is_skipped(self):
+        rows = [row(order_id="", order_date="2026-08-08", item_name="W",
+                    delivery_address="123 Main St, New York NY 10001")]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["updates"] == []
+        assert plan["deletions"] == []
+        assert plan["unchanged"] == 0
+
+    def test_unclassified_address_counts_but_is_not_deleted(self):
+        rows = [row(order_id="A1", order_date="2026-08-08", item_name="W",
+                    delivery_address="99 Nowhere Rd, ZZ 00000", buying_group="")]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["deletions"] == []
+        assert plan["updates"] == [(2, "A1", "W", "", "Unclassified")]
+        assert plan["group_counts"] == {"Unclassified": 1}
+
+    def test_needs_header_migration_flag(self):
+        legacy_header = [h for h in HEADER if h != "Buying Group"]
+        rows = [[""] * len(legacy_header)]
+
+        plan = plan_buying_group_retag(legacy_header, rows, self.warehouses)
+
+        assert plan["needs_header_migration"] is True
+
+    def test_row_numbers_account_for_the_header_row(self):
+        rows = [
+            row(order_id="A1", order_date="2026-08-08", item_name="First"),
+            row(order_id="A2", order_date="2026-08-08", item_name="Second",
+                delivery_address="123 Main St, New York NY 10001"),
+        ]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["updates"][0][0] == 3, "second data row is sheet row 3 (row 1 is the header)"
