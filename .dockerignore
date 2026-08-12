@@ -3,6 +3,8 @@
 .env
 service_account.json
 profiles.json
+warehouses.json
+cards.json
 .costco/
 .venv/
 __pycache__/

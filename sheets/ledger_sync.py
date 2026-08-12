@@ -36,11 +36,72 @@ HEADER = [
     "Card Last 4",
     "Last Scraped At",
     "Shipment",  # see models.order FIELDNAMES for why columns are appended, not inserted
-    "Buying Group",  # last column; derived from Delivery Address (config.warehouses.classify_address)
+    "Buying Group",  # derived from Delivery Address (config.warehouses.classify_address)
+    "Card",  # derived from Card Last 4 (config.cards.resolve_card)
+    "Cashback Rate",  # decimal fraction, e.g. 0.02 — format the column as a percentage to taste
+    "Insurance",  # user-entered (BFMR/MaxOutDeals later)
+    "Payout Date",  # user-entered (BFMR/MaxOutDeals later)
+    "Payout Amount",  # user-entered (BFMR/MaxOutDeals later)
+    "Total Profit",  # a live sheet formula, written by _profit_formula
 ]
 
-# Numeric columns get coerced to numbers so the sheet supports sum()/formulas.
-_NUMERIC_FIELDS = {"quantity", "cost_per_item", "shipping", "total_cost"}
+# Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
+# deliberately absent: it's written as a formula string, never as a number.
+_NUMERIC_FIELDS = {
+    "quantity", "cost_per_item", "shipping", "total_cost",
+    "cashback_rate", "insurance", "payout_amount",
+}
+
+
+def _col_letter(index: int) -> str:
+    """0-based column index -> its A1 letter ("A", ..., "Z", "AA", ...)."""
+    letters = ""
+    index += 1
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(ord("A") + remainder) + letters
+    return letters
+
+
+# A1 letters for the columns the profit formula reads, derived from FIELDNAMES rather than hardcoded
+# so appending another column can never silently point the formula at the wrong cells.
+_COL = {field: _col_letter(i) for i, field in enumerate(FIELDNAMES)}
+
+
+def _profit_formula(row_number: int) -> str:
+    """The live Total Profit formula for one sheet row.
+
+        Total Profit = Payout Amount + Cashback - Total Cost - Shipping - Insurance
+        Cashback     = (Total Cost + Shipping) * Cashback Rate
+
+    It's a formula, not a Python-computed number, because Insurance and Payout Amount are typed into
+    the sheet by hand (and later filled by the BFMR/MaxOutDeals step). A value computed at scrape time
+    would be stale the moment either is entered, and a delivered row is terminal — never re-scraped —
+    so it would stay stale forever.
+
+    SHIPPING IS ALLOCATED PRO-RATA, which is the one non-obvious part. Every retailer repeats the
+    ORDER-level shipping total on each of the order's rows (Best Buy `price.shippingTotal`, Costco
+    `shippingAndHandling`, both Amazon parsers, and all four agent prompts). Subtracting column N
+    as-is would therefore charge a 3-row order its shipping three times over, and credit cashback on
+    it three times, making the column's SUM wrong — the number this ledger exists to get right. So
+    each row takes the share of shipping matching its share of the order's Total Cost:
+
+        s = Shipping * Total Cost / SUMIF(all rows of this Order ID, Total Cost)
+
+    which sums back to exactly one shipping charge per order. IFERROR covers the degenerate case
+    where an order's costs are all blank (division by zero) -> 0.
+
+    Returns "" (blank cell, not 0) until Payout Amount is filled, so an un-paid-out row doesn't
+    display a large fake loss that would poison a column sum.
+    """
+    n = row_number
+    oid, ship, cost = _COL["order_id"], _COL["shipping"], _COL["total_cost"]
+    rate, ins, payout = _COL["cashback_rate"], _COL["insurance"], _COL["payout_amount"]
+    prorated_shipping = (
+        f"IFERROR({ship}{n}*{cost}{n}/SUMIF(${oid}$2:${oid},${oid}{n},${cost}$2:${cost}),0)"
+    )
+    profit = f"{payout}{n}+({cost}{n}+s)*{rate}{n}-{cost}{n}-s-{ins}{n}"
+    return f'=IF({payout}{n}="","",IFERROR(LET(s,{prorated_shipping},{profit}),""))'
 
 # Furthest-along status wins when two rows of ONE shipment are collapsed in a single sync (see
 # _collapse_records). Mirrors _rollup_status's spirit: cancelled overrides, then delivered, then
@@ -214,6 +275,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     updates = 0
     appends: list[list] = []
     claimed_rows: set[int] = set()
+    written_rows: list[int] = []  # every row touched this sync -> gets its Total Profit formula
     split_events: list[dict] = []
     skipped_blank = 0
     for record in collapsed:
@@ -330,6 +392,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
         worksheet.update(range_name=f"A{row_number}", values=[merged])
         claimed_rows.add(row_number)
+        written_rows.append(row_number)
         updates += 1
 
     if appends:
@@ -340,6 +403,9 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         # updates and updates never add rows, so len(existing)+1 is the first free row.
         start_row = len(existing) + 1
         worksheet.update(range_name=f"A{start_row}", values=appends)
+        written_rows.extend(range(start_row, start_row + len(appends)))
+
+    _write_profit_formulas(worksheet, written_rows)
 
     if split_events:
         lines = [
@@ -365,6 +431,38 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         f", {len(split_events)} split-box row(s) added" if split_events else "",
         f", {skipped_blank} skipped (blank Order ID)" if skipped_blank else "",
     )
+
+
+def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
+    """(Re)write the Total Profit formula into every row this sync touched — one batched API call.
+
+    Why a SEPARATE write instead of putting the formula in the main row block: the row block is sent
+    RAW so the sheet stores values exactly as scraped, which a formula string would land as literal
+    text. This call is the only one using USER_ENTERED, and it's scoped to a single column — keeping
+    USER_ENTERED away from the data columns, where it would reinterpret long numeric tracking numbers
+    as numbers and render them in scientific notation.
+
+    Rewriting on every touch is deliberate: get_all_values() returns a formula cell's EVALUATED text,
+    so _merge_row carries that number forward and the RAW row write would replace the formula with a
+    frozen value. Re-stamping the formula last restores it.
+
+    A failure here is logged, not raised: the scraped data is already safely written, and the next
+    sync re-stamps the formula.
+    """
+    if not row_numbers:
+        return
+    col = _COL["total_profit"]
+    data = [
+        {"range": f"{col}{n}", "values": [[_profit_formula(n)]]}
+        for n in sorted(set(row_numbers))
+    ]
+    try:
+        worksheet.batch_update(data, value_input_option="USER_ENTERED")
+    except Exception:
+        log.exception(
+            "Could not write the Total Profit formula into %d row(s); the row data itself was "
+            "written and the next sync will restore the formula.", len(data),
+        )
 
 
 def _merge_row(existing_row: list, new_row: list) -> list:

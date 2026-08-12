@@ -43,6 +43,23 @@ FIELDNAMES = [
     # warehouse/jig this shipment went to, "Personal" if configured, "Unclassified" if it matched no
     # jig, or "" when the address is blank (a partial re-check) so _merge_row preserves the earlier tag.
     "buying_group",
+    # --- Profit accounting, all appended LAST for the same positional-write reason as above. ---
+    # Derived from card_last4 at run time (main.run_scrape -> config.cards.tag_cards): the friendly
+    # card name and the cashback rate that applies to this row. Both blank when card_last4 is blank
+    # (a partial re-check), so _merge_row preserves what the first full extraction recorded.
+    "card_name",
+    "cashback_rate",
+    # USER-ENTERED (and later filled by the BFMR / MaxOutDeals integration, the design notes). The scrapers
+    # always emit these blank, and _merge_row's blank-never-overwrites rule is what keeps a re-scrape
+    # from wiping numbers typed into the sheet by hand.
+    "insurance",
+    "payout_date",
+    "payout_amount",
+    # DERIVED IN THE SHEET, not here: sheets.ledger_sync writes a live formula into this cell so the
+    # number updates the moment insurance/payout are typed in — a Python-computed value would go
+    # stale, and a delivered row is never re-scraped to refresh it. Kept in FIELDNAMES (emitted blank)
+    # so the column still exists positionally in the CSV and the sheet row.
+    "total_profit",
 ]
 
 
@@ -68,7 +85,18 @@ class OrderItem(BaseModel):
     shipment: str = ""  # "Shipment 1" / "Shipment 2" / ...; "" only on pre-Shipment-column rows
     buying_group: str = ""  # derived from delivery_address; "Unclassified" if no jig matched, "" if blank
 
-    @field_validator("quantity", "cost_per_item", "shipping", "total_cost", mode="before")
+    # Derived from card_last4 by config.cards.tag_cards; blank when card_last4 is blank.
+    card_name: str = ""
+    cashback_rate: float | None = None  # decimal fraction (0.02 = 2%)
+    # User-entered / BFMR-filled. Always blank from a scraper — see FIELDNAMES.
+    insurance: float | None = None
+    payout_date: str = ""
+    payout_amount: float | None = None
+    # Always blank from here; sheets.ledger_sync writes a live formula into the cell instead.
+    total_profit: float | None = None
+
+    @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
+                     "cashback_rate", "insurance", "payout_amount", "total_profit", mode="before")
     @classmethod
     def _blank_to_none(cls, v):
         # The agent may send "" (or whitespace) for numbers it skipped — treat as None, not 0.

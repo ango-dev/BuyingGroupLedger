@@ -40,6 +40,7 @@ logging.basicConfig(
 from functools import lru_cache  # noqa: E402
 
 from alerts.notifier import alert  # noqa: E402
+from config.cards import load_cards, tag_cards  # noqa: E402
 from config.profiles import load_profiles_for_retailer  # noqa: E402
 from config.warehouses import load_warehouses, tag_and_filter_personal  # noqa: E402
 from output.csv_writer import write_csv  # noqa: E402
@@ -65,6 +66,27 @@ SCRAPERS: dict[str, type[BaseRetailerScraper]] = {
 @lru_cache(maxsize=1)
 def _warehouses():
     return load_warehouses()
+
+
+@lru_cache(maxsize=1)
+def _cards():
+    return load_cards()
+
+
+def _tag_cards(items: list, label: str) -> None:
+    """Resolve each row's card name + cashback rate from the last 4 digits the scraper captured.
+
+    Same one-call-site reasoning as _classify_and_drop_personal: every retailer, deterministic path
+    and agent fallback alike, funnels through run_scrape. Unlike the warehouse classifier this never
+    drops a row — an unrecognized card is only a missing profit input, not a reason to lose an order.
+    """
+    unknown = tag_cards(items, _cards())
+    if unknown:
+        log.info(
+            "%s: %d row(s) have a card ending in digits not listed in cards.json (default "
+            "cashback rate applied).",
+            label, unknown,
+        )
 
 
 def _classify_and_drop_personal(items: list, label: str) -> list:
@@ -107,6 +129,9 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
     if not items:
         log.info("Nothing to record for %s (all scraped rows were personal addresses).", label)
         return
+
+    # After the personal-address drop, so no work is spent resolving cards for rows we discard.
+    _tag_cards(items, label)
 
     csv_path = write_csv(items)
     log.info("Wrote %d line item(s) to %s", len(items), csv_path)

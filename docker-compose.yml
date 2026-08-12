@@ -18,5 +18,11 @@ services:
       - ./profiles.json:/app/profiles.json:ro
       - ./service_account.json:/app/service_account.json:ro
       - ./.costco:/app/.costco:ro # Costco refresh tokens (.costco/<label>.json); omit if not using Costco
+      # Buying-group warehouses and credit-card cashback rates. Both are OPTIONAL — but a bind mount
+      # whose host file is missing makes Docker create an empty DIRECTORY there, so either create the
+      # file on the host (even as `[]`) or delete the line. Without them the run still works: every
+      # address tags Unclassified and every card falls back to DEFAULT_CASHBACK_RATE.
+      - ./warehouses.json:/app/warehouses.json:ro
+      - ./cards.json:/app/cards.json:ro
       - ./data:/app/data          # generated CSVs (optional; Sheet is source of truth)
       - ./logs:/app/logs          # run.log + the overlap lock

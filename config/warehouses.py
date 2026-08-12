@@ -36,8 +36,11 @@ def load_warehouses() -> list[Warehouse]:
 
     Returns [] when warehouses.json is absent — then every non-blank address classifies as Unclassified,
     which is the safe default (nothing is silently called personal).
+
+    is_file(), not exists(): Docker creates an empty DIRECTORY at a bind-mount path whose host file is
+    missing, and reading that would raise and take the whole run down over an optional config file.
     """
-    if not WAREHOUSES_FILE.exists():
+    if not WAREHOUSES_FILE.is_file():
         return []
     data = json.loads(WAREHOUSES_FILE.read_text(encoding="utf-8"))
     return [Warehouse.model_validate(entry) for entry in data]

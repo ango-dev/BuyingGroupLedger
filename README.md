@@ -80,7 +80,8 @@ status/tracking/date/last-scraped **without clobbering** the item name, cost, ad
 
 `Retailer · Profile · Order ID · Order Date · Status · Order Link · Tracking Number · Tracking Link ·
 Delivery Date · Delivery Address · Item Name · Quantity · Cost Per Item · Shipping · Total Cost ·
-Card Last 4 · Last Scraped At · Shipment · Buying Group`
+Card Last 4 · Last Scraped At · Shipment · Buying Group · Card · Cashback Rate · Insurance ·
+Payout Date · Payout Amount · Total Profit`
 
 **Total Cost is per row** = `Quantity × Cost Per Item` for that shipment line (computed in code, not
 trusted from the agent), so the column sums to the order total. **Status** is one of `ordered`,
@@ -107,6 +108,34 @@ date) after an order already looks shipped, so a cached single-page poll would s
 
 **Digital items are skipped** on every retailer (gift cards, eBooks, memberships, redemption codes,
 etc.) — they're never resold, so they never hit the ledger.
+
+**Profit accounting** (the last six columns) turns the ledger into a P&L rather than just a tracker:
+
+- **Card** and **Cashback Rate** are derived automatically from `Card Last 4`, which the scrapers
+  already capture, via a `cards.json` config (see "Card / cashback config" below). Each card has an
+  overall rate plus optional **per-retailer overrides**, so a card earning 1.5% generally and 5% at
+  Amazon reports the right rate on each row. A card that isn't configured keeps a blank name — so the
+  gap stays visible — but still gets your `DEFAULT_CASHBACK_RATE` so profit stays computable. The rate
+  is the only cashback column; the dollar amount isn't stored, it's folded into Total Profit.
+- **Insurance**, **Payout Date** and **Payout Amount** are yours to fill in (the BFMR / MaxOutDeals
+  integration will populate them later). The scrapers always write them blank, and the upsert's
+  blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.
+- **Total Profit** is a **live Google Sheets formula**, not a scraped number:
+
+  ```
+  Total Profit = Payout Amount + Cashback − Total Cost − Shipping − Insurance
+  Cashback     = (Total Cost + Shipping) × Cashback Rate
+  ```
+
+  It's a formula so it recalculates the instant you type an Insurance or Payout Amount — a value
+  computed at scrape time would go stale immediately, and a `delivered` row is terminal and never
+  re-scraped, so it would stay stale forever. The cell reads blank (not `0`) until Payout Amount is
+  filled, so un-paid-out rows don't drag a column sum down with fake losses.
+
+  **Shipping is allocated pro-rata across an order's rows** (`Shipping × this row's Total Cost ÷ the
+  order's Total Cost`). Every retailer reports one *order-level* shipping total and repeats it on every
+  row, so charging it per row would bill a 3-row order for shipping three times over and make the
+  column's sum wrong. Pro-rata makes the column sum to exactly one shipping charge per order.
 
 **Buying Group** classifies each row's `Delivery Address`: which buying group's warehouse the order
 shipped to, or `Unclassified` when the address matches no configured warehouse. It's derived at run time
@@ -143,6 +172,8 @@ python -m venv .venv
 # 2. config
 cp .env.example .env          # then fill it in (see below)
 cp profiles.example.json profiles.json
+cp warehouses.example.json warehouses.json   # optional: buying-group address classification
+cp cards.example.json cards.json             # optional: card names + per-card cashback rates
 ```
 
 **`.env`** — fill in:
@@ -150,6 +181,9 @@ cp profiles.example.json profiles.json
 - `GOOGLE_SERVICE_ACCOUNT_FILE` (path to the JSON key), `GOOGLE_SHEET_ID`, `GOOGLE_SHEET_WORKSHEET_NAME`
 - `GMAIL_ADDRESS` + `GMAIL_APP_PASSWORD`, `ALERT_EMAIL_TO`, `DISCORD_WEBHOOK_URL`
 - `LOOKBACK_DAYS` (default 1 = today + yesterday), `BROWSER_USE_MAX_COST_USD` (per-run cost cap)
+- `DEFAULT_CASHBACK_RATE` — the cashback rate of last resort, applied when a row's card isn't in
+  `cards.json` at all. A decimal fraction (`0.02` = 2%); `"2%"` also works. A bare `2` is rejected
+  rather than guessed at.
 
 **Google Sheet** — create a Google Cloud service account, download its JSON key to
 `service_account.json`, and **share the sheet** with the service account's `…@…iam.gserviceaccount.com`
@@ -302,6 +336,50 @@ file order) wins and its `buying_group` is written to the row.
 - Editing the file re-tags **open** orders on the next run (they get re-read); already-delivered rows
   keep their tag. Classification is offline and free — no live run is needed to change it.
 
+### Card / cashback config (the "Card" and "Cashback Rate" columns)
+
+Every scraper already captures the last 4 digits of the card an order was charged to. Create a
+**`cards.json`** at the repo root (gitignored — it names your cards) to turn those digits into a card
+name and a cashback rate. Copy `cards.example.json`:
+
+```json
+[
+  { "last4": "4321", "name": "Chase Freedom Unlimited", "cashback_rate": 0.015,
+    "retailer_rates": { "Amazon": "5%", "Best Buy": "3%" } },
+  { "last4": "8765", "name": "Citi Double Cash", "cashback_rate": "2%" },
+  { "last4": "1111", "name": "Amex Business Platinum",
+    "retailer_rates": { "Amazon Business": "5%" } },
+  { "last4": "1111", "name": "Personal Amex Gold", "cashback_rate": "4%", "profile": "profile-1" }
+]
+```
+
+**Each card gets an overall rate plus optional per-retailer overrides**, because a card's earn rate is
+category-dependent in practice. The rate for a row resolves in three tiers, most specific first:
+
+1. the card's **`retailer_rates`** entry for that row's retailer — this card, at this store
+2. the card's **`cashback_rate`** — its overall rate everywhere else
+3. **`DEFAULT_CASHBACK_RATE`** from `.env` — for cards you haven't configured at all
+
+Details:
+
+- Rates are **decimal fractions** (`0.015` = 1.5%); `"1.5%"` is accepted and converted, in both
+  `cashback_rate` and `retailer_rates`. A bare `2` is **rejected** rather than guessed at — it reads
+  equally as 2% or 200%, and picking wrong would misstate every profit number by 100×.
+- `retailer_rates` keys are matched loosely: `"Best Buy"`, `"bestbuy"` and `"best-buy"` are the same
+  key. A key that names **no** retailer this ledger scrapes logs a warning at load — a typo'd override
+  would otherwise never apply and nothing would say so.
+- `last4` is matched **normalized**, so it doesn't matter that Amazon says "ending in 4321", Best Buy
+  sends `************4321`, and Costco sends `xxxx4321`.
+- Two *different* cards can genuinely share a last 4 across accounts. Add an optional **`profile`** (a
+  `profiles.json` label) to scope an entry; the scoped entry wins over the catch-all, and genuinely
+  ambiguous duplicates log a warning rather than one being silently picked. (There's no `retailer`
+  scope — one physical card is used at many retailers, and what varies per retailer is the *rate*.)
+- A card that's charged but **not configured** gets a blank Card name (so the gap is visible, and a
+  name you type by hand survives) and the default rate. No `cards.json` at all = every row gets the
+  default rate and no name.
+- Like the warehouse config, this is offline and free — editing it re-derives the columns for **open**
+  orders on the next run. Delivered rows are terminal and keep what they were tagged with.
+
 ### Automatic running (~4×/day, 6h apart — adjustable)
 
 **Linux (cron):**
@@ -333,6 +411,11 @@ never baked in). If you use Costco, also have `.costco/<label>.json` present —
 the container can use the GraphQL API path; without it, Costco falls back to the agent every run. (Not
 using Costco? Drop the `./.costco` volume line from `docker-compose.yml`.)
 
+`warehouses.json` and `cards.json` are mounted the same way. Both are optional, **but a bind mount
+whose host file is missing makes Docker create an empty directory in its place** — so either create the
+file (even as `[]`) or delete that volume line. Without them the run still works: every address tags
+`Unclassified` and every card falls back to `DEFAULT_CASHBACK_RATE`.
+
 ```bash
 docker compose up -d --build      # build + start; runs every RUN_INTERVAL_HOURS
 docker compose logs -f            # watch runs
@@ -350,7 +433,8 @@ mounted per instance (e.g. one per proxy pool).
 
 Everything except the local environment is cloud-side (profiles, sheet, proxies), so migration is just:
 copy the project **except** `.venv/`, `__pycache__/`, `data/`, `logs/`; be sure to bring the gitignored
-`.env`, `service_account.json`, and `profiles.json` (they hold live credentials — move them securely);
+`.env`, `service_account.json`, `profiles.json`, and (if you use them) `warehouses.json` / `cards.json`
+— the first three hold live credentials, so move them securely;
 then recreate the venv (`python -m venv .venv && …/pip install -r requirements.txt`) and re-install the
 scheduler on the new host. No re-login or re-sharing needed.
 
@@ -363,7 +447,9 @@ scheduler on the new host. No re-login or re-sharing needed.
 - **BFMR + MaxOutDeals integration.** `buying_groups/bfmr.py` and `maxoutdeals.py` are placeholders with
   guessed endpoints and payload shapes — they need real API docs, keys, and auth. Then build
   `sync_tracking.py`: read the ledger for rows that have a tracking number but aren't posted yet, match
-  by Order ID, POST the tracking to each platform, and mark the row posted.
+  by Order ID, POST the tracking to each platform, and mark the row posted. The **Insurance**,
+  **Payout Date** and **Payout Amount** columns already exist for this step to fill — they're
+  hand-entered until then, and Total Profit picks them up automatically either way.
 - **Event-driven re-checks from retailer emails.** Ingest Amazon / Best Buy shipped + delivered +
   order-update emails (Gmail API or IMAP) to trigger a targeted re-check of just that order, instead of
   or alongside the 6-hour poll. Faster status, fewer wasted agent runs.
@@ -411,7 +497,8 @@ main.py                 orchestration + run lock
 config/settings.py      .env-backed settings
 config/profiles.py      profiles.json loader + Sheet order-state reader
 config/warehouses.py    warehouses.json loader + address -> buying-group classifier
-models/                 OrderItem + ProfileConfig + Warehouse/Jig schemas
+config/cards.py         cards.json loader + card last-4 -> card name/cashback-rate resolver
+models/                 OrderItem + ProfileConfig + Warehouse/Jig + Card schemas
 scrapers/base.py        scrape(): CDP re-check + agent scan + merge/cleanup
 scrapers/amazon.py      Amazon prompt + tracking-page selectors/reader
 scrapers/bestbuy.py     Best Buy: ss-api primary path + agent-fallback prompt (deterministic login)

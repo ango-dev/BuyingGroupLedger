@@ -16,6 +16,25 @@ def _get_float(name: str, default: float) -> float:
     return float(value) if value else default
 
 
+def _get_rate(name: str, default: float) -> float:
+    """Read a rate that may be written either as a decimal fraction (0.02) or a percentage ("2%").
+
+    Both spellings are natural in a .env, and getting it wrong by 100x would misstate every profit
+    number on the sheet, so the "%" suffix is honoured explicitly rather than guessed at. A bare
+    value > 1 is rejected for the same reason models.card.Card rejects it: "2" is equally readable
+    as 2% or 200%.
+    """
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        return default
+    rate = float(value[:-1].strip()) / 100 if value.endswith("%") else float(value)
+    if not 0 <= rate <= 1:
+        raise ValueError(
+            f"{name}={value!r} is outside 0-1. Write 2% as either 0.02 or \"2%\", not 2."
+        )
+    return rate
+
+
 @dataclass(frozen=True)
 class Settings:
     # Browser-Use Cloud v4 (browser_use_sdk.v4.BrowserUse reads BROWSER_USE_API_KEY itself).
@@ -34,6 +53,11 @@ class Settings:
     # reasoning about a rolling 24h clock, so the window is date-based and the exact cutoff date
     # is handed to the agent (see BaseRetailerScraper._date_window).
     lookback_days: int = _get_int("LOOKBACK_DAYS", 1)
+
+    # Cashback rate applied to a row whose card isn't listed in cards.json (or is listed without its
+    # own rate) — a decimal fraction, so 0.02 = 2%; "2%" is also accepted. Per-card overrides live in
+    # cards.json (see config/cards.py). 0 = assume no cashback unless a card says otherwise.
+    default_cashback_rate: float = _get_rate("DEFAULT_CASHBACK_RATE", 0.0)
 
     google_service_account_file: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
     google_sheet_id: str = os.getenv("GOOGLE_SHEET_ID", "")

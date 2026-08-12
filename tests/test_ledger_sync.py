@@ -26,6 +26,10 @@ class FakeWorksheet:
     def __init__(self, rows=None):
         self.rows = [list(r) for r in (rows or [])]
         self.update_calls = 0
+        # Every {"range": ..., "values": ...} dict passed to batch_update, so tests can assert on the
+        # Total Profit formulas without them also having to land in self.rows.
+        self.batched: list[dict] = []
+        self.batch_input_options: list = []
 
     def get_all_values(self):
         return [list(r) for r in self.rows]
@@ -40,6 +44,34 @@ class FakeWorksheet:
                 self.rows.append([])
             self.rows[idx] = list(value)
         self.update_calls += 1
+
+    def batch_update(self, data, value_input_option=None):
+        # Real gspread writes each {"range", "values"} entry independently. ledger_sync only ever
+        # sends single-cell ranges here (the Total Profit formula), so mirror that narrowly and
+        # record the value_input_option — USER_ENTERED is what makes a formula a formula.
+        self.batch_input_options.append(value_input_option)
+        for entry in data:
+            self.batched.append(entry)
+            range_name = entry["range"]
+            column = "".join(c for c in range_name if c.isalpha())
+            row_index = int("".join(c for c in range_name if c.isdigit())) - 1
+            col_index = 0
+            for char in column:
+                col_index = col_index * 26 + (ord(char) - ord("A") + 1)
+            col_index -= 1
+            while len(self.rows) <= row_index:
+                self.rows.append([])
+            row = self.rows[row_index]
+            while len(row) <= col_index:
+                row.append("")
+            row[col_index] = entry["values"][0][0]
+
+    def profit_formulas(self):
+        """{row_number: formula} for every Total Profit cell written this sync."""
+        return {
+            int("".join(c for c in e["range"] if c.isdigit())): e["values"][0][0]
+            for e in self.batched
+        }
 
     def append_rows(self, rows):
         self.rows.extend([list(r) for r in rows])
@@ -357,9 +389,11 @@ class TestSyncUpsert:
         assert sheet.rows[0] == HEADER
 
     def test_legacy_sheet_without_shipment_column_is_migrated(self, sheet, tmp_path):
-        # A true pre-Shipment sheet predates Buying Group too (both were appended later), so the legacy
-        # header is HEADER with both trailing columns dropped — a genuine prefix of the current HEADER.
-        legacy_header = [h for h in HEADER if h not in ("Shipment", "Buying Group")]
+        # A real legacy header is the CURRENT header TRUNCATED at the point that column was added —
+        # every column since has been appended after it. Build it that way (not by filtering the name
+        # out of HEADER, which stops being a prefix as soon as another column is appended, and the
+        # migration deliberately only accepts a prefix).
+        legacy_header = list(HEADER[: HEADER.index("Shipment")])
         legacy_row = [str(i) for i in range(len(legacy_header))]
         legacy_row[legacy_header.index("Order ID")] = "A1"
         legacy_row[legacy_header.index("Order Date")] = "2026-08-08"
@@ -378,8 +412,8 @@ class TestSyncUpsert:
 
     def test_sheet_without_buying_group_column_is_migrated(self, sheet, tmp_path):
         # A sheet that already has Shipment but predates Buying Group: the column is appended, so the
-        # existing row keeps its position and gains a trailing empty cell (same as the Shipment migration).
-        legacy_header = [h for h in HEADER if h != "Buying Group"]
+        # existing row keeps its position and gains trailing empty cells (same as the Shipment migration).
+        legacy_header = list(HEADER[: HEADER.index("Buying Group")])
         legacy_row = [""] * len(legacy_header)
         legacy_row[legacy_header.index("Order ID")] = "A1"
         legacy_row[legacy_header.index("Order Date")] = "2026-08-08"
@@ -974,7 +1008,7 @@ class TestPlanBuyingGroupRetag:
         assert plan["group_counts"] == {"Unclassified": 1}
 
     def test_needs_header_migration_flag(self):
-        legacy_header = [h for h in HEADER if h != "Buying Group"]
+        legacy_header = list(HEADER[: HEADER.index("Buying Group")])
         rows = [[""] * len(legacy_header)]
 
         plan = plan_buying_group_retag(legacy_header, rows, self.warehouses)

@@ -20,13 +20,25 @@ def test_header_and_fieldnames_have_matching_length():
 
 
 def test_new_columns_are_appended_at_the_end():
-    # A mid-list insert misaligns every pre-existing sheet row, so new columns go on the end.
-    # buying_group was appended after shipment (the previous last column); both must stay last-aligned.
-    assert FIELDNAMES[-1] == "buying_group"
-    assert HEADER[-1] == "Buying Group"
-    # shipment stays put as the second-to-last column so existing 18-col sheets don't shift.
-    assert FIELDNAMES[-2] == "shipment"
-    assert HEADER[-2] == "Shipment"
+    """Columns are only ever APPENDED, never inserted or reordered.
+
+    A mid-list insert misaligns every pre-existing sheet row. It also breaks the header migration in
+    sync_csv_to_sheet, which only rewrites a header that is a strict PREFIX of the current HEADER —
+    an older sheet must look like today's columns truncated at the right.
+
+    So this pins the historical tail in the exact order it grew: ... Shipment, Buying Group, then the
+    profit-accounting block. Adding a column means appending to BOTH lists and extending this tail.
+    """
+    tail_fields = [
+        "shipment", "buying_group",
+        "card_name", "cashback_rate", "insurance", "payout_date", "payout_amount", "total_profit",
+    ]
+    tail_headers = [
+        "Shipment", "Buying Group",
+        "Card", "Cashback Rate", "Insurance", "Payout Date", "Payout Amount", "Total Profit",
+    ]
+    assert FIELDNAMES[-len(tail_fields):] == tail_fields
+    assert HEADER[-len(tail_headers):] == tail_headers
 
 
 def test_fieldnames_match_order_item_fields():

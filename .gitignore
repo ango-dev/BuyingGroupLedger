@@ -2,6 +2,7 @@
 service_account.json
 profiles.json
 warehouses.json
+cards.json
 .costco/
 .bestbuy_capture/
 .amazon_capture/
