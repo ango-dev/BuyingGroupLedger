@@ -1,11 +1,9 @@
 import csv
 import logging
 import re
-from datetime import date, timedelta
 from pathlib import Path
 
 import gspread
-from gspread.utils import ValueRenderOption
 from google.oauth2.service_account import Credentials
 
 from config.settings import settings
@@ -54,10 +52,22 @@ HEADER = [
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
 # deliberately absent: it's written as a formula string, never as a number.
+#
+# "shipment" is here for a different reason than the rest: it's not summed, it's a plain 1-based index
+# ("1", "2", ...) that should just look like the number it is, with no leading apostrophe. Unlike
+# card_last4 (also digit-only, but where a leading zero is real data — "0315" must stay "0315"),
+# shipment numbers never have meaningful leading zeros, so coercing to int is always safe. The rare
+# non-numeric fallback label (see models.order.normalize_shipment) isn't a number, so _parse_display_
+# number returns None for it and _coerce leaves it as text untouched — no data is lost.
 _NUMERIC_FIELDS = {
     "quantity", "cost_per_item", "shipping", "total_cost",
     "cashback_rate", "insurance", "payout_amount",
+    "shipment",
 }
+
+# Fields that must be a plain int rather than a float when coerced (quantity: "3", not "3.0"; shipment:
+# "2", not "2.0"). Every other numeric field is a currency/rate amount, where a float is correct.
+_INT_FIELDS = {"quantity", "shipment"}
 
 
 def _col_letter(index: int) -> str:
@@ -168,59 +178,6 @@ def _get_worksheet() -> gspread.Worksheet:
         return worksheet
 
 
-# Google Sheets counts days from 1899-12-30, so a date-typed cell reads back as an integer serial.
-_SHEETS_EPOCH = date(1899, 12, 30)
-
-# Every column a user might format as a Date. ALL of them need normalizing on read and restoring on
-# write — not just Order Date (the one in the upsert key). A date-formatted Delivery Date reads back as
-# the serial 46241, and preserving that on a partial re-check would stamp the literal text "46241" into
-# the cell. Payout Date is here for the same reason, ahead of the BFMR/MaxOutDeals step filling it.
-_DATE_HEADERS = ("Order Date", "Delivery Date", "Payout Date")
-
-def _cell_text(value) -> str:
-    """One cell from an UNFORMATTED read as text, without float(int) artefacts.
-
-    An unformatted read returns real types, so a whole-number cell arrives as 1.0 rather than "1" and
-    would stop matching the "1" a scraper emits. Trailing ".0" is dropped for exactly that reason.
-    """
-    if isinstance(value, bool):
-        return str(value)
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
-
-
-def sheet_date_to_iso(value) -> str:
-    """Normalize a sheet's Order Date cell to "YYYY-MM-DD", whatever the user formatted it as.
-
-    Order Date is part of the UPSERT KEY, and the scrapers always emit ISO. Formatting that column as
-    a Date in the sheet converts the stored text into a real date, after which a FORMATTED read returns
-    the locale display ("8/6/2026") and an UNFORMATTED read returns a serial (46240) — neither of which
-    equals "2026-08-06". The key then misses, and a row with no tracking number to reconcile against
-    APPENDS A DUPLICATE instead of updating. So every read of that column goes through here.
-
-    Serials are preferred over display text on purpose: "8/6/2026" is genuinely ambiguous (Aug 6 in a
-    US locale, 6 Aug elsewhere), whereas the serial is exact. Display text is still parsed as a
-    best-effort fallback, and anything unrecognized is returned unchanged so behavior degrades to
-    plain string comparison rather than losing the value.
-    """
-    if isinstance(value, bool):
-        return str(value)
-    if isinstance(value, (int, float)):
-        return (_SHEETS_EPOCH + timedelta(days=int(value))).isoformat()
-    text = str(value).strip()
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        return text
-    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", text)
-    if m:  # a formatted read in a US locale; month-first, matching how Sheets renders it there
-        month, day, year = (int(g) for g in m.groups())
-        try:
-            return date(year, month, day).isoformat()
-        except ValueError:
-            return text
-    return text
-
-
 def _parse_display_number(value: str):
     """Parse a number that may be wearing the sheet's DISPLAY formatting. None if it isn't a number.
 
@@ -264,7 +221,7 @@ def _coerce(field: str, value: str):
         number = _parse_display_number(value)
         if number is None:
             return value
-        return int(number) if field == "quantity" else number
+        return int(number) if field in _INT_FIELDS else number
     return value
 
 
@@ -298,30 +255,13 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     # _merge_row — corrupting them on write-back. Unformatted gives the underlying value: a date is an
     # exact serial (no locale ambiguity), a rate is 0.04, a cost is 3402.0. Formatting the sheet is a
     # readability choice the user is entitled to make, and it must not change behaviour.
-    raw = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
+    existing = worksheet.get_all_values()
     # An empty-but-existing worksheet returns [] or a single blank row like [[]] — both mean
     # "no header yet", so (re)write our header into row 1.
-    if not raw or not any(str(cell).strip() for cell in raw[0]):
+    if not existing or not any(cell.strip() for cell in existing[0]):
         worksheet.update(range_name="A1", values=[HEADER])
-        raw = [list(HEADER)]
+        existing = [HEADER]
 
-    # Cells can now be numbers, so normalize the grid to text once — every comparison below (keys,
-    # blank checks, tracking numbers) is string-based, and _coerce turns the numeric columns back.
-    # Order Date additionally goes through sheet_date_to_iso, since it's in the upsert key.
-    raw_header = [_cell_text(c) for c in raw[0]]
-    date_cols = {raw_header.index(name) for name in _DATE_HEADERS if name in raw_header}
-    existing = [raw_header] + [
-        [sheet_date_to_iso(c) if j in date_cols else _cell_text(c) for j, c in enumerate(row)]
-        for row in raw[1:]
-    ]
-    # The ORIGINAL date cells, so an update to a Date-typed cell can write the date value back rather
-    # than ISO text — otherwise every sync would quietly strip the user's date formatting, and a
-    # PRESERVED one would land as the literal serial ("46241") because a date isn't a numeric field
-    # that _coerce would rescue.
-    raw_dates = {
-        row_number: {j: row[j] for j in date_cols if j < len(row)}
-        for row_number, row in enumerate(raw[1:], start=2)
-    }
     header = existing[0]
     # Migrate an older sheet whose header is a PREFIX of the current HEADER. Columns are only ever
     # APPENDED (Shipment, then Buying Group), so a pre-migration sheet's header is HEADER truncated at
@@ -513,7 +453,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                         appends, oid_field_idx, shipment_field_idx,
                     ))
                     split_row = list(sheet_row)
-                    split_row[shipment_field_idx] = label
+                    split_row[shipment_field_idx] = _coerce("shipment", label)
                     split_row[qty_field_idx] = "*"      # unknown per-box split — user fills it in
                     split_row[total_field_idx] = ""     # can't compute Total Cost without a quantity
                     appends.append(split_row)
@@ -532,17 +472,6 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         # (e.g. a quantity carried over from a prior run) is written as a number, not text —
         # otherwise Sheets stores it as text and shows a leading-apostrophe '1.
         merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
-        # Where a date cell is a real DATE and still means the same day, write the date value back
-        # instead of the ISO string — otherwise a re-check silently converts the cell to text and drops
-        # the date formatting the user applied. (The header is guaranteed == HEADER by the guard above,
-        # so a sheet column index is a FIELDNAMES index.)
-        for column, original in raw_dates.get(row_number, {}).items():
-            if (
-                not isinstance(original, str)
-                and column < len(merged)
-                and sheet_date_to_iso(original) == str(merged[column]).strip()
-            ):
-                merged[column] = original
         worksheet.update(range_name=f"A{row_number}", values=[merged])
         claimed_rows.add(row_number)
         written_rows.append(row_number)
@@ -755,22 +684,13 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
     empty: dict = {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
     try:
         worksheet = _get_worksheet()
-        # UNFORMATTED for the same reason as sync_csv_to_sheet: a Date-formatted Order Date column
-        # reads back as locale display text ("8/6/2026"), which would break the `since` window
-        # comparison below (it expects ISO) and be handed to the agent as the order's date.
-        raw = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
+        existing = worksheet.get_all_values()
     except Exception:
         log.warning("Could not read order state from sheet; treating all orders as new.", exc_info=True)
         return empty
 
-    if not raw or not any(str(cell).strip() for cell in raw[0]):
+    if not existing or not any(cell.strip() for cell in existing[0]):
         return empty
-    raw_header = [_cell_text(c) for c in raw[0]]
-    date_cols = {raw_header.index(name) for name in _DATE_HEADERS if name in raw_header}
-    existing = [raw_header] + [
-        [sheet_date_to_iso(c) if j in date_cols else _cell_text(c) for j, c in enumerate(row)]
-        for row in raw[1:]
-    ]
     header = existing[0]
     needed = (
         "Order ID", "Order Date", "Status", "Profile", "Order Link",

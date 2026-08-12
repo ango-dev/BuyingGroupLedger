@@ -20,6 +20,16 @@ from sheets.ledger_sync import (
 )
 
 
+def _as_sheet_text(value) -> str:
+    """How Google Sheets renders a stored value in a FORMATTED read: always text, and a whole number
+    without a trailing ".0" (the cell holds 1, the API hands back "1")."""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 class FakeWorksheet:
     """Minimal stand-in for gspread.Worksheet covering only what ledger_sync calls."""
 
@@ -32,13 +42,14 @@ class FakeWorksheet:
         self.batch_input_options: list = []
 
     def get_all_values(self):
-        return [list(r) for r in self.rows]
+        # Real gspread ALWAYS returns strings here — it's a FORMATTED read, so a numeric cell comes
+        # back as "1", not 1. Mirroring that matters: a sheet can legitimately hold Shipment or
+        # Quantity as a number (the column migration wrote some that way), and a fake that handed back
+        # a raw int would make a test "fail" on a mismatch that cannot happen against the real API.
+        return [[_as_sheet_text(c) for c in r] for r in self.rows]
 
     def get_values(self, range_name=None, value_render_option=None, **kwargs):
-        # ledger_sync reads UNFORMATTED so the sheet's display formatting (a Date-formatted Order
-        # Date, a percent-formatted rate) can't reach the upsert key or the preserved values. The fake
-        # stores whatever a test seeded — usually strings, but a test may seed real numbers/serials to
-        # stand in for an unformatted read.
+        # The unformatted/formula render options DO return real types, so this one is verbatim.
         return [list(r) for r in self.rows]
 
     def update(self, range_name, values):
@@ -310,7 +321,7 @@ class TestSyncUpsert:
         assert len(rows) == 1, "same tracking number must reconcile, not duplicate"
         r = rows[0]
         assert r[FIELDNAMES.index("item_name")] == "Watch (Item #1847785)", "keeps recorded (API) name"
-        assert r[FIELDNAMES.index("shipment")] == "1", "keeps recorded (API) shipment number"
+        assert r[FIELDNAMES.index("shipment")] == 1, "keeps recorded (API) shipment number"
         assert r[FIELDNAMES.index("status")] == "delivered", "status advances"
         assert r[FIELDNAMES.index("delivery_date")] == "2026-06-30"
         assert r[FIELDNAMES.index("cost_per_item")] == 309.99, "recorded cost preserved"
@@ -342,8 +353,8 @@ class TestSyncUpsert:
         assert len(rows) == 2, "swapped-number rows must reconcile by tracking, not duplicate"
         by_ship = {r[FIELDNAMES.index("shipment")]: r for r in rows}
         # Each box keeps its recorded (Shipment N, tracking) pairing — no cross-merge.
-        assert by_ship["1"][FIELDNAMES.index("tracking_number")] == "TRK_A"
-        assert by_ship["2"][FIELDNAMES.index("tracking_number")] == "TRK_B"
+        assert by_ship[1][FIELDNAMES.index("tracking_number")] == "TRK_A"
+        assert by_ship[2][FIELDNAMES.index("tracking_number")] == "TRK_B"
         assert all(r[FIELDNAMES.index("status")] == "delivered" for r in rows), "status advanced on both"
         assert all(r[FIELDNAMES.index("item_name")] == "Dell (Item #1953694)" for r in rows), "kept names"
 
@@ -577,15 +588,15 @@ class TestUndisclosedSplit:
         sync_csv_to_sheet(path)
 
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
-        assert set(rows) == {"1", "2"}, "the new box must be appended, not overwrite"
+        assert set(rows) == {"1", 2}, "the new box must be appended, not overwrite"
         # Original box untouched.
         assert rows["1"][FIELDNAMES.index("tracking_number")] == "086084"
         assert rows["1"][FIELDNAMES.index("quantity")] == "15"
         # New box row: new tracking, quantity placeholder, recorded name kept.
-        assert rows["2"][FIELDNAMES.index("tracking_number")] == "128095"
-        assert rows["2"][FIELDNAMES.index("quantity")] == "*"
-        assert rows["2"][FIELDNAMES.index("total_cost")] == ""
-        assert rows["2"][FIELDNAMES.index("item_name")] == "HP - 14 Laptop"
+        assert rows[2][FIELDNAMES.index("tracking_number")] == "128095"
+        assert rows[2][FIELDNAMES.index("quantity")] == "*"
+        assert rows[2][FIELDNAMES.index("total_cost")] == ""
+        assert rows[2][FIELDNAMES.index("item_name")] == "HP - 14 Laptop"
         assert len(alerts) == 1 and "Split shipment" in alerts[0][0]
 
     def test_idempotent_once_new_box_has_its_own_row(self, sheet, tmp_path, alerts):
@@ -608,7 +619,7 @@ class TestUndisclosedSplit:
 
         assert len(sheet.data_rows()) == 2, "must not re-duplicate a box whose number already has a row"
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
-        assert rows["2"][FIELDNAMES.index("status")] == "delivered", "the owning box updates"
+        assert rows[2][FIELDNAMES.index("status")] == "delivered", "the owning box updates"
         assert rows["1"][FIELDNAMES.index("tracking_number")] == "086084", "other box untouched"
         assert alerts == []
 
@@ -1036,3 +1047,144 @@ class TestPlanBuyingGroupRetag:
         plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
 
         assert plan["updates"][0][0] == 3, "second data row is sheet row 3 (row 1 is the header)"
+
+
+class TestNumericCellsInTextColumns:
+    """A sheet can legitimately hold Shipment / Order ID as NUMBERS rather than text — the column
+    migration wrote some rows that way, and a numeric-looking value typed by hand lands the same. The
+    upsert key compares strings, and a FORMATTED read hands back "1" either way, so both must match.
+    (This is also why some cells show a leading apostrophe in the formula bar: that's Sheets marking a
+    number-looking value stored as text. It's a storage difference, not a data one.)"""
+
+    def test_a_numeric_shipment_cell_still_matches(self, sheet, tmp_path):
+        seeded = row(order_id="A1", order_date="2026-08-06", item_name="W", status="ordered")
+        seeded[FIELDNAMES.index("shipment")] = 1  # stored as a number, not "1"
+        sheet.rows = [list(HEADER), seeded]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-06", item_name="W", shipment="1",
+                 status="shipped", tracking_number="1Z1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 1, "a numeric Shipment cell must not append a duplicate"
+        assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "shipped"
+
+    def test_a_numeric_order_id_cell_still_matches(self, sheet, tmp_path):
+        # Costco order numbers are all digits, so they're the ones that can land as numbers.
+        seeded = row(order_date="2026-08-06", item_name="W", shipment="1", status="ordered")
+        seeded[FIELDNAMES.index("order_id")] = 1399000007
+        sheet.rows = [list(HEADER), seeded]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="1399000007", order_date="2026-08-06", item_name="W", shipment="1",
+                 status="shipped", tracking_number="1Z1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 1
+
+
+class TestShipmentStoredAsANumber:
+    """Shipment is a plain 1-based index ("1", "2", ...), so it's coerced to an int on write — no
+    leading apostrophe in the sheet. This is the opposite call from Card Last 4, which stays TEXT
+    because a leading zero there ("0315") is real data that int() would destroy."""
+
+    def test_a_new_row_stores_shipment_as_an_int(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                 status="ordered"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        value = sheet.data_rows()[0][FIELDNAMES.index("shipment")]
+        assert value == 1
+        assert isinstance(value, int), "must not carry a leading apostrophe in the sheet"
+
+    def test_an_updated_row_re_coerces_shipment_to_an_int(self, sheet, tmp_path):
+        # Simulates a sheet row that was hand-typed or otherwise landed as text; the next update must
+        # normalize it, matching how _merge_row already re-coerces cost/quantity on every write.
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                status="ordered"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                 status="shipped", tracking_number="1Z1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.data_rows()[0][FIELDNAMES.index("shipment")] == 1
+
+    def test_the_undisclosed_split_appended_row_is_also_an_int(self, sheet, tmp_path):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop",
+                shipment="1", status="shipped", tracking_number="086084", quantity="15"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop", shipment="1",
+                 status="shipped", tracking_number="128095", quantity="15"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        new_box = next(r for r in sheet.data_rows()
+                       if r[FIELDNAMES.index("tracking_number")] == "128095")
+        assert new_box[FIELDNAMES.index("shipment")] == 2
+        assert isinstance(new_box[FIELDNAMES.index("shipment")], int)
+
+    def test_a_non_numeric_shipment_fallback_label_is_left_as_text(self, sheet, tmp_path):
+        # normalize_shipment keeps an unrecognized label rather than discard it; _coerce must not
+        # crash on it or invent a number — it just isn't touched.
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Box A",
+                 status="ordered"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.data_rows()[0][FIELDNAMES.index("shipment")] == "Box A"
+
+    def test_card_last4_stays_text_leading_zero_preserved(self, sheet, tmp_path):
+        # The contrasting case: Card Last 4 is also digit-only, but a leading zero is REAL DATA
+        # ("0315"), so it must NOT be coerced the way Shipment is.
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                 card_last4="0315"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        value = sheet.data_rows()[0][FIELDNAMES.index("card_last4")]
+        assert value == "0315"
+        assert isinstance(value, str), "coercing to int would destroy the leading zero"
+
+    def test_quantity_still_has_no_leading_zero_problem(self, sheet, tmp_path):
+        # Confirms the already-existing behavior the user cited as the reference case: quantities are
+        # plain counts, never have meaningful leading zeros, and have been coerced to int all along.
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                 quantity="3"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        value = sheet.data_rows()[0][FIELDNAMES.index("quantity")]
+        assert value == 3
+        assert isinstance(value, int)
