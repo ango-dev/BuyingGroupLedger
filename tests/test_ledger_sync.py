@@ -34,6 +34,13 @@ class FakeWorksheet:
     def get_all_values(self):
         return [list(r) for r in self.rows]
 
+    def get_values(self, range_name=None, value_render_option=None, **kwargs):
+        # ledger_sync reads UNFORMATTED so the sheet's display formatting (a Date-formatted Order
+        # Date, a percent-formatted rate) can't reach the upsert key or the preserved values. The fake
+        # stores whatever a test seeded — usually strings, but a test may seed real numbers/serials to
+        # stand in for an unformatted read.
+        return [list(r) for r in self.rows]
+
     def update(self, range_name, values):
         # Real gspread writes the whole 2D `values` block starting at the range's top-left cell, so a
         # multi-row block lands on consecutive rows (that's how ledger_sync now appends).
