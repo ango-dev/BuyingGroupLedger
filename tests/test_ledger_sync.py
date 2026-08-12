@@ -131,7 +131,7 @@ class TestSyncUpsert:
         path = write_csv_file(
             tmp_path,
             dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
-                 shipment="Shipment 1", status="ordered"),
+                 shipment="1", status="ordered"),
         )
 
         sync_csv_to_sheet(path)
@@ -147,9 +147,9 @@ class TestSyncUpsert:
         path = write_csv_file(
             tmp_path,
             dict(retailer="Best Buy", order_id="", order_date="2026-08-10", item_name="Laptop",
-                 shipment="Shipment 3", status="shipped", tracking_number="TRK1"),
+                 shipment="3", status="shipped", tracking_number="TRK1"),
             dict(retailer="Best Buy", order_id="B1", order_date="2026-08-10", item_name="Laptop",
-                 shipment="Shipment 3", status="shipped", tracking_number="TRK1"),
+                 shipment="3", status="shipped", tracking_number="TRK1"),
         )
 
         sync_csv_to_sheet(path)
@@ -162,13 +162,13 @@ class TestSyncUpsert:
         sheet.rows = [
             list(HEADER),
             row(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
-                shipment="Shipment 1", status="ordered", cost_per_item="189.99",
+                shipment="1", status="ordered", cost_per_item="189.99",
                 delivery_address="123 Main St"),
         ]
         # A JOB 2 re-check: only status/tracking filled, everything else blank.
         path = write_csv_file(
             tmp_path,
-            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
                  status="shipped", tracking_number="1Z999"),
         )
 
@@ -189,8 +189,8 @@ class TestSyncUpsert:
         common = dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget")
         path = write_csv_file(
             tmp_path,
-            dict(**common, shipment="Shipment 1", status="shipped"),
-            dict(**common, shipment="Shipment 2", status="ordered"),
+            dict(**common, shipment="1", status="shipped"),
+            dict(**common, shipment="2", status="ordered"),
         )
 
         sync_csv_to_sheet(path)
@@ -208,7 +208,7 @@ class TestSyncUpsert:
         ]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
                  status="shipped"),
         )
 
@@ -225,12 +225,12 @@ class TestSyncUpsert:
         sheet.rows = [
             list(HEADER),
             row(order_id="B1", order_date="2026-08-10", item_name="ASUS  Vivobook 15 156 FHD",
-                shipment="Shipment 1", status="shipped", tracking_number="TRK1", cost_per_item="299.99"),
+                shipment="1", status="shipped", tracking_number="TRK1", cost_per_item="299.99"),
         ]
         path = write_csv_file(
             tmp_path,
             dict(order_id="B1", order_date="2026-08-10", item_name='ASUS - Vivobook 15 15.6" FHD',
-                 shipment="Shipment 1", status="delivered", delivery_date="2026-08-12"),
+                 shipment="1", status="delivered", delivery_date="2026-08-12"),
         )
 
         sync_csv_to_sheet(path)
@@ -247,11 +247,11 @@ class TestSyncUpsert:
     def test_ambiguous_existing_shipment_line_is_not_reconciled(self, sheet, tmp_path):
         # Two existing rows already share the shipment line -> can't tell which to update, so a
         # divergent incoming row appends rather than mis-merging onto one of them.
-        common = dict(order_id="B1", order_date="2026-08-10", shipment="Shipment 1", status="shipped")
+        common = dict(order_id="B1", order_date="2026-08-10", shipment="1", status="shipped")
         sheet.rows = [list(HEADER), row(item_name="Name A", **common), row(item_name="Name B", **common)]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="B1", order_date="2026-08-10", shipment="Shipment 1", item_name="Name C",
+            dict(order_id="B1", order_date="2026-08-10", shipment="1", item_name="Name C",
                  status="delivered"),
         )
 
@@ -264,14 +264,14 @@ class TestSyncUpsert:
         # collapse onto a single existing row.
         sheet.rows = [
             list(HEADER),
-            row(order_id="B1", order_date="2026-08-10", item_name="Existing", shipment="Shipment 1",
+            row(order_id="B1", order_date="2026-08-10", item_name="Existing", shipment="1",
                 status="shipped"),
         ]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="B1", order_date="2026-08-10", item_name="Prod A", shipment="Shipment 1",
+            dict(order_id="B1", order_date="2026-08-10", item_name="Prod A", shipment="1",
                  status="shipped"),
-            dict(order_id="B1", order_date="2026-08-10", item_name="Prod B", shipment="Shipment 1",
+            dict(order_id="B1", order_date="2026-08-10", item_name="Prod B", shipment="1",
                  status="shipped"),
         )
 
@@ -287,13 +287,13 @@ class TestSyncUpsert:
         sheet.rows = [
             list(HEADER),
             row(order_id="C1", order_date="2026-06-23", item_name="Watch (Item #1847785)",
-                shipment="Shipment 1", status="shipped", tracking_number="TRK1", cost_per_item="309.99"),
+                shipment="1", status="shipped", tracking_number="TRK1", cost_per_item="309.99"),
         ]
         # Agent re-check: same physical box (TRK1), but numbered Shipment 2 and named from page text.
         path = write_csv_file(
             tmp_path,
             dict(order_id="C1", order_date="2026-06-23", item_name="Apple Watch Series 11",
-                 shipment="Shipment 2", status="delivered", tracking_number="TRK1",
+                 shipment="2", status="delivered", tracking_number="TRK1",
                  delivery_date="2026-06-30"),
         )
 
@@ -303,7 +303,7 @@ class TestSyncUpsert:
         assert len(rows) == 1, "same tracking number must reconcile, not duplicate"
         r = rows[0]
         assert r[FIELDNAMES.index("item_name")] == "Watch (Item #1847785)", "keeps recorded (API) name"
-        assert r[FIELDNAMES.index("shipment")] == "Shipment 1", "keeps recorded (API) shipment number"
+        assert r[FIELDNAMES.index("shipment")] == "1", "keeps recorded (API) shipment number"
         assert r[FIELDNAMES.index("status")] == "delivered", "status advances"
         assert r[FIELDNAMES.index("delivery_date")] == "2026-06-30"
         assert r[FIELDNAMES.index("cost_per_item")] == 309.99, "recorded cost preserved"
@@ -317,16 +317,16 @@ class TestSyncUpsert:
                    cost_per_item="899.99", status="shipped")
         sheet.rows = [
             list(HEADER),
-            row(shipment="Shipment 1", tracking_number="TRK_A", **api),
-            row(shipment="Shipment 2", tracking_number="TRK_B", **api),
+            row(shipment="1", tracking_number="TRK_A", **api),
+            row(shipment="2", tracking_number="TRK_B", **api),
         ]
         # Agent re-check: same two boxes, but Shipment numbers swapped and a page-title name.
         path = write_csv_file(
             tmp_path,
             dict(order_id="C1", order_date="2026-06-24", item_name="Dell All-in-One",
-                 shipment="Shipment 2", tracking_number="TRK_A", status="delivered"),
+                 shipment="2", tracking_number="TRK_A", status="delivered"),
             dict(order_id="C1", order_date="2026-06-24", item_name="Dell All-in-One",
-                 shipment="Shipment 1", tracking_number="TRK_B", status="delivered"),
+                 shipment="1", tracking_number="TRK_B", status="delivered"),
         )
 
         sync_csv_to_sheet(path)
@@ -335,8 +335,8 @@ class TestSyncUpsert:
         assert len(rows) == 2, "swapped-number rows must reconcile by tracking, not duplicate"
         by_ship = {r[FIELDNAMES.index("shipment")]: r for r in rows}
         # Each box keeps its recorded (Shipment N, tracking) pairing — no cross-merge.
-        assert by_ship["Shipment 1"][FIELDNAMES.index("tracking_number")] == "TRK_A"
-        assert by_ship["Shipment 2"][FIELDNAMES.index("tracking_number")] == "TRK_B"
+        assert by_ship["1"][FIELDNAMES.index("tracking_number")] == "TRK_A"
+        assert by_ship["2"][FIELDNAMES.index("tracking_number")] == "TRK_B"
         assert all(r[FIELDNAMES.index("status")] == "delivered" for r in rows), "status advanced on both"
         assert all(r[FIELDNAMES.index("item_name")] == "Dell (Item #1953694)" for r in rows), "kept names"
 
@@ -346,12 +346,12 @@ class TestSyncUpsert:
         common = dict(order_id="C1", order_date="2026-06-23", tracking_number="TRK1")
         sheet.rows = [
             list(HEADER),
-            row(item_name="SKU A", shipment="Shipment 1", status="shipped", **common),
-            row(item_name="SKU B", shipment="Shipment 1", status="shipped", **common),
+            row(item_name="SKU A", shipment="1", status="shipped", **common),
+            row(item_name="SKU B", shipment="1", status="shipped", **common),
         ]
         path = write_csv_file(
             tmp_path,
-            dict(item_name="SKU C page name", shipment="Shipment 9", status="delivered", **common),
+            dict(item_name="SKU C page name", shipment="9", status="delivered", **common),
         )
 
         sync_csv_to_sheet(path)
@@ -363,14 +363,14 @@ class TestSyncUpsert:
         # a single existing row.
         sheet.rows = [
             list(HEADER),
-            row(order_id="C1", order_date="2026-06-23", item_name="Existing", shipment="Shipment 1",
+            row(order_id="C1", order_date="2026-06-23", item_name="Existing", shipment="1",
                 status="shipped", tracking_number="TRK1"),
         ]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="C1", order_date="2026-06-23", item_name="A", shipment="Shipment 2",
+            dict(order_id="C1", order_date="2026-06-23", item_name="A", shipment="2",
                  status="shipped", tracking_number="TRK1"),
-            dict(order_id="C1", order_date="2026-06-23", item_name="B", shipment="Shipment 2",
+            dict(order_id="C1", order_date="2026-06-23", item_name="B", shipment="2",
                  status="shipped", tracking_number="TRK1"),
         )
 
@@ -381,7 +381,7 @@ class TestSyncUpsert:
     def test_header_written_into_empty_sheet(self, sheet, tmp_path):
         sheet.rows = []
         path = write_csv_file(
-            tmp_path, dict(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1")
+            tmp_path, dict(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1")
         )
 
         sync_csv_to_sheet(path)
@@ -418,11 +418,11 @@ class TestSyncUpsert:
         legacy_row[legacy_header.index("Order ID")] = "A1"
         legacy_row[legacy_header.index("Order Date")] = "2026-08-08"
         legacy_row[legacy_header.index("Item Name")] = "Widget"
-        legacy_row[legacy_header.index("Shipment")] = "Shipment 1"
+        legacy_row[legacy_header.index("Shipment")] = "1"
         sheet.rows = [legacy_header, legacy_row]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
                  status="shipped", buying_group="BFMR"),
         )
 
@@ -436,12 +436,12 @@ class TestSyncUpsert:
         # A partial re-check classifies to "" (blank address); _merge_row must keep the recorded tag.
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
                 status="shipped", tracking_number="1Z1", buying_group="BFMR"),
         ]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
                  status="delivered", delivery_date="2026-08-12", buying_group=""),
         )
 
@@ -470,16 +470,16 @@ class TestSameKeyCollapse:
         # blank tracking). The row must end up shipped WITH the tracking number, not clobbered.
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
                 status="ordered", tracking_url="http://t/1", cost_per_item="189.99"),
         ]
         path = write_csv_file(
             tmp_path,
             # CDP read first (as scrape() orders recheck_items before agent_items)
-            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
                  status="shipped", tracking_number="1Z999"),
             # agent re-read second: same shipment, no tracking, but a delivery date
-            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
                  status="shipped", delivery_date="2026-08-10"),
         )
 
@@ -498,9 +498,9 @@ class TestSameKeyCollapse:
         path = write_csv_file(
             tmp_path,
             dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
-                 shipment="Shipment 1", status="ordered", delivery_date="2026-08-10"),
+                 shipment="1", status="ordered", delivery_date="2026-08-10"),
             dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
-                 shipment="Shipment 1", status="shipped", tracking_number="1Z999"),
+                 shipment="1", status="shipped", tracking_number="1Z999"),
         )
 
         sync_csv_to_sheet(path)
@@ -516,9 +516,9 @@ class TestSameKeyCollapse:
         path = write_csv_file(
             tmp_path,
             dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
-                 shipment="Shipment 1", status="shipped", tracking_number="1Z999"),
+                 shipment="1", status="shipped", tracking_number="1Z999"),
             dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget",
-                 shipment="Shipment 1", status="delivered", delivery_date="2026-08-10"),
+                 shipment="1", status="delivered", delivery_date="2026-08-10"),
         )
 
         sync_csv_to_sheet(path)
@@ -533,8 +533,8 @@ class TestSameKeyCollapse:
         common = dict(retailer="Amazon", order_id="A1", order_date="2026-08-08", item_name="Widget")
         path = write_csv_file(
             tmp_path,
-            dict(**common, shipment="Shipment 1", status="shipped", tracking_number="1Z1"),
-            dict(**common, shipment="Shipment 2", status="ordered"),
+            dict(**common, shipment="1", status="shipped", tracking_number="1Z1"),
+            dict(**common, shipment="2", status="ordered"),
         )
 
         sync_csv_to_sheet(path)
@@ -559,26 +559,26 @@ class TestUndisclosedSplit:
         sheet.rows = [
             list(HEADER),
             row(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop",
-                shipment="Shipment 1", status="shipped", tracking_number="086084", quantity="15"),
+                shipment="1", status="shipped", tracking_number="086084", quantity="15"),
         ]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="B1", order_date="2026-08-10", item_name="HP  14 Laptop", shipment="Shipment 1",
+            dict(order_id="B1", order_date="2026-08-10", item_name="HP  14 Laptop", shipment="1",
                  status="shipped", tracking_number="128095", quantity="15"),
         )
 
         sync_csv_to_sheet(path)
 
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
-        assert set(rows) == {"Shipment 1", "Shipment 2"}, "the new box must be appended, not overwrite"
+        assert set(rows) == {"1", "2"}, "the new box must be appended, not overwrite"
         # Original box untouched.
-        assert rows["Shipment 1"][FIELDNAMES.index("tracking_number")] == "086084"
-        assert rows["Shipment 1"][FIELDNAMES.index("quantity")] == "15"
+        assert rows["1"][FIELDNAMES.index("tracking_number")] == "086084"
+        assert rows["1"][FIELDNAMES.index("quantity")] == "15"
         # New box row: new tracking, quantity placeholder, recorded name kept.
-        assert rows["Shipment 2"][FIELDNAMES.index("tracking_number")] == "128095"
-        assert rows["Shipment 2"][FIELDNAMES.index("quantity")] == "*"
-        assert rows["Shipment 2"][FIELDNAMES.index("total_cost")] == ""
-        assert rows["Shipment 2"][FIELDNAMES.index("item_name")] == "HP - 14 Laptop"
+        assert rows["2"][FIELDNAMES.index("tracking_number")] == "128095"
+        assert rows["2"][FIELDNAMES.index("quantity")] == "*"
+        assert rows["2"][FIELDNAMES.index("total_cost")] == ""
+        assert rows["2"][FIELDNAMES.index("item_name")] == "HP - 14 Laptop"
         assert len(alerts) == 1 and "Split shipment" in alerts[0][0]
 
     def test_idempotent_once_new_box_has_its_own_row(self, sheet, tmp_path, alerts):
@@ -587,13 +587,13 @@ class TestUndisclosedSplit:
         sheet.rows = [
             list(HEADER),
             row(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop",
-                shipment="Shipment 1", status="shipped", tracking_number="086084", quantity="9"),
+                shipment="1", status="shipped", tracking_number="086084", quantity="9"),
             row(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop",
-                shipment="Shipment 2", status="shipped", tracking_number="128095", quantity="6"),
+                shipment="2", status="shipped", tracking_number="128095", quantity="6"),
         ]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop", shipment="Shipment 1",
+            dict(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop", shipment="1",
                  status="delivered", tracking_number="128095", quantity="15"),
         )
 
@@ -601,19 +601,19 @@ class TestUndisclosedSplit:
 
         assert len(sheet.data_rows()) == 2, "must not re-duplicate a box whose number already has a row"
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
-        assert rows["Shipment 2"][FIELDNAMES.index("status")] == "delivered", "the owning box updates"
-        assert rows["Shipment 1"][FIELDNAMES.index("tracking_number")] == "086084", "other box untouched"
+        assert rows["2"][FIELDNAMES.index("status")] == "delivered", "the owning box updates"
+        assert rows["1"][FIELDNAMES.index("tracking_number")] == "086084", "other box untouched"
         assert alerts == []
 
     def test_unchanged_tracking_does_not_trigger(self, sheet, tmp_path, alerts):
         sheet.rows = [
             list(HEADER),
-            row(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="Shipment 1",
+            row(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
                 status="shipped", tracking_number="086084", quantity="15"),
         ]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="Shipment 1",
+            dict(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
                  status="delivered", tracking_number="086084"),
         )
 
@@ -627,12 +627,12 @@ class TestUndisclosedSplit:
         # ordered -> shipped fills a previously-blank tracking number; that's not a split.
         sheet.rows = [
             list(HEADER),
-            row(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="Shipment 1",
+            row(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
                 status="ordered", tracking_number="", quantity="15"),
         ]
         path = write_csv_file(
             tmp_path,
-            dict(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="Shipment 1",
+            dict(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
                  status="shipped", tracking_number="128095"),
         )
 
@@ -647,9 +647,9 @@ class TestLoadOrderState:
     def test_order_is_delivered_only_when_every_shipment_is(self, sheet):
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="delivered", tracking_number="1Z1", profile_label="p1"),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 2",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="2",
                 status="shipped", tracking_number="1Z2", profile_label="p1"),
         ]
 
@@ -662,9 +662,9 @@ class TestLoadOrderState:
     def test_all_shipments_delivered_rolls_up(self, sheet):
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="delivered", profile_label="p1"),
-            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="2",
                 status="delivered", profile_label="p1"),
         ]
 
@@ -682,9 +682,9 @@ class TestLoadOrderState:
         sheet.rows = [
             list(HEADER),
             row(retailer="Best Buy", order_id="BBY01-1", order_date="2026-08-08", item_name="PS5",
-                shipment="Shipment 1", status="ordered", tracking_url="http://fedex/1", profile_label="p1"),
+                shipment="1", status="ordered", tracking_url="http://fedex/1", profile_label="p1"),
             row(retailer="Amazon Business", order_id="114-1", order_date="2026-08-08", item_name="Switch",
-                shipment="Shipment 1", status="ordered", tracking_url="http://amz/1", profile_label="p1"),
+                shipment="1", status="ordered", tracking_url="http://amz/1", profile_label="p1"),
         ]
 
         biz = load_order_state("p1", retailer="Amazon Business")
@@ -702,16 +702,16 @@ class TestLoadOrderState:
         and collapsing them to one URL is what forced the old code to skip multi-shipment orders."""
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="shipped", tracking_number="1Z-ONE", tracking_url="http://t/1",
                 profile_label="p1"),
-            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="2",
                 status="ordered", tracking_url="http://t/2", profile_label="p1"),
         ]
 
         shipments = load_order_state("p1")["open_orders"][0]["shipments"]
 
-        assert [s["shipment"] for s in shipments] == ["Shipment 1", "Shipment 2"]
+        assert [s["shipment"] for s in shipments] == ["1", "2"]
         assert shipments[0]["tracking_number"] == "1Z-ONE"
         assert shipments[0]["tracking_url"] == "http://t/1"
         assert shipments[0]["item_names"] == ["W"]
@@ -724,9 +724,9 @@ class TestLoadOrderState:
     def test_items_in_the_same_shipment_group_together(self, sheet):
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="shipped", tracking_number="1Z1", profile_label="p1"),
-            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="1",
                 status="shipped", tracking_number="1Z1", profile_label="p1"),
         ]
 
@@ -740,7 +740,7 @@ class TestLoadOrderState:
         # of the order-details page can see that.
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="ordered", profile_label="p1"),
         ]
 
@@ -749,9 +749,9 @@ class TestLoadOrderState:
     def test_needs_agent_false_once_everything_is_tracked(self, sheet):
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="shipped", tracking_number="1Z1", profile_label="p1"),
-            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="2",
                 status="shipped", tracking_number="1Z2", profile_label="p1"),
         ]
 
@@ -760,9 +760,9 @@ class TestLoadOrderState:
     def test_delivered_shipment_without_tracking_does_not_force_the_agent(self, sheet):
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="delivered", profile_label="p1"),
-            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="2",
                 status="shipped", tracking_number="1Z2", profile_label="p1"),
         ]
 
@@ -785,9 +785,9 @@ class TestLoadOrderState:
         past the window, so old delivered orders are pure dead weight."""
         sheet.rows = [
             list(HEADER),
-            row(order_id="OLD", order_date="2026-01-01", item_name="W", shipment="Shipment 1",
+            row(order_id="OLD", order_date="2026-01-01", item_name="W", shipment="1",
                 status="delivered", profile_label="p1"),
-            row(order_id="NEW", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="NEW", order_date="2026-08-08", item_name="W", shipment="1",
                 status="delivered", profile_label="p1"),
         ]
 
@@ -798,7 +798,7 @@ class TestLoadOrderState:
         # Open orders are re-checked regardless of age — only delivered ones get trimmed.
         sheet.rows = [
             list(HEADER),
-            row(order_id="OLD", order_date="2026-01-01", item_name="W", shipment="Shipment 1",
+            row(order_id="OLD", order_date="2026-01-01", item_name="W", shipment="1",
                 status="shipped", tracking_number="1Z1", profile_label="p1"),
         ]
 
@@ -809,9 +809,9 @@ class TestLoadOrderState:
     def test_other_profiles_are_filtered_out(self, sheet):
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="ordered", profile_label="p1"),
-            row(order_id="B2", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="B2", order_date="2026-08-08", item_name="W", shipment="1",
                 status="ordered", profile_label="p2"),
         ]
 
@@ -820,7 +820,7 @@ class TestLoadOrderState:
     def test_blank_status_is_treated_as_open(self, sheet):
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="", profile_label="p1"),
         ]
 
@@ -844,7 +844,7 @@ class TestCancelledOrders:
     def test_cancelled_order_is_terminal_and_skipped(self, sheet):
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="cancelled", profile_label="p1"),
         ]
 
@@ -868,7 +868,7 @@ class TestCancelledOrders:
         sheet.rows = [
             list(HEADER),
             row(retailer="Best Buy", order_id="CANCELLED1", order_date=today, item_name="W",
-                shipment="Shipment 1", status="cancelled", profile_label="p1"),
+                shipment="1", status="cancelled", profile_label="p1"),
         ]
         # Wide lookback so the fixed order date can't fall outside the discovery window and get
         # trimmed as the real "today" advances — this test is about skip-list assembly, not date
@@ -886,9 +886,9 @@ class TestCancelledOrders:
     def test_since_trims_old_cancelled_orders(self, sheet):
         sheet.rows = [
             list(HEADER),
-            row(order_id="OLD", order_date="2026-01-01", item_name="W", shipment="Shipment 1",
+            row(order_id="OLD", order_date="2026-01-01", item_name="W", shipment="1",
                 status="cancelled", profile_label="p1"),
-            row(order_id="NEW", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="NEW", order_date="2026-08-08", item_name="W", shipment="1",
                 status="cancelled", profile_label="p1"),
         ]
 
@@ -898,9 +898,9 @@ class TestCancelledOrders:
         # One shipment cancelled, the other delivered -> nothing left to track.
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="delivered", profile_label="p1"),
-            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="Shipment 2",
+            row(order_id="A1", order_date="2026-08-08", item_name="X", shipment="2",
                 status="cancelled", profile_label="p1"),
         ]
 
@@ -917,13 +917,13 @@ class TestNumericCoercionOnMerge:
         stores it as text and shows a leading apostrophe."""
         sheet.rows = [
             list(HEADER),
-            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                 status="ordered", quantity="1", cost_per_item="899.99"),
         ]
         # Re-check: quantity/cost blank, only status changes.
         path = write_csv_file(
             tmp_path,
-            dict(order_id="A1", order_date="2026-08-08", item_name="W", shipment="Shipment 1",
+            dict(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
                  status="shipped"),
         )
 

@@ -36,7 +36,7 @@ def test_shipped_single_shipment_sums_units(payloads):
     row = rows[0]
     assert row.retailer == "Best Buy"
     assert row.profile_label == "profile-alpha"
-    assert row.shipment == "Shipment 1"
+    assert row.shipment == "1"
     assert row.status == "shipped"
     assert row.quantity == 7
     assert row.cost_per_item == 299.99
@@ -64,7 +64,7 @@ def test_ordered_not_yet_shipped(payloads):
     assert row.quantity == 4
     assert row.tracking_number == ""
     assert row.delivery_date == ""  # blank while only ordered, even though an ETA exists
-    assert row.shipment == "Shipment 1"
+    assert row.shipment == "1"
     assert row.cost_per_item == 399.99
     assert row.total_cost == 1599.96
 
@@ -72,16 +72,16 @@ def test_ordered_not_yet_shipped(payloads):
 def test_delivered_and_ordered_split_numbers_shipments(payloads):
     rows = _rows_for(build_order_items(payloads, "p"), "BBY01-809900000002")
     by_shipment = _by_shipment(rows)
-    assert set(by_shipment) == {"Shipment 1", "Shipment 2", "Shipment 3"}
+    assert set(by_shipment) == {"1", "2", "3"}
     # Shipment 1: three delivered MacBooks collapse to one row.
-    s1 = by_shipment["Shipment 1"]
+    s1 = by_shipment["1"]
     assert s1.status == "delivered"
     assert s1.quantity == 3
     assert s1.cost_per_item == 1134.0
     assert s1.tracking_number == "529900000001"
     assert s1.delivery_date == "2026-08-07"  # carrier delivered date
     # Shipments 2 & 3: the qty-2 PS5 line, pre-split into two shipments, both still ordered.
-    for label in ("Shipment 2", "Shipment 3"):
+    for label in ("2", "3"):
         assert by_shipment[label].status == "ordered"
         assert by_shipment[label].quantity == 1
         assert by_shipment[label].tracking_number == ""
@@ -97,7 +97,7 @@ def test_shipping_on_every_shipment(payloads):
 def test_five_way_split_each_shipment_has_its_own_tracking(payloads):
     rows = _rows_for(build_order_items(payloads, "p"), "BBY01-809900000005")
     assert len(rows) == 5
-    assert {r.shipment for r in rows} == {f"Shipment {i}" for i in range(1, 6)}
+    assert {r.shipment for r in rows} == {str(i) for i in range(1, 6)}
     trackings = {r.tracking_number for r in rows}
     assert len(trackings) == 5, "each shipment carries its own distinct tracking number"
     assert all(r.status == "shipped" for r in rows)
@@ -116,7 +116,7 @@ def test_recorded_order_that_became_cancelled_is_emitted(payloads):
     assert len(rows) == 1  # only the physical (cancelled) PNY line; the digital lines stay dropped
     row = rows[0]
     assert row.status == "cancelled"
-    assert row.shipment == "Shipment 1"
+    assert row.shipment == "1"
     assert row.tracking_number == ""
     assert "PNY" in row.item_name
     # Quantity is left blank so the cancelled re-check doesn't zero the recorded quantity.
@@ -127,7 +127,7 @@ def test_every_row_is_well_formed(payloads):
     items = build_order_items(payloads, "p", known_open_ids={"BBY01-809900000001"})
     assert items
     for it in items:
-        assert it.shipment.startswith("Shipment ")
+        assert it.shipment.isdigit()
         assert it.order_date and it.order_date[4] == "-"
         assert it.order_url.endswith("/view")
         assert it.retailer == "Best Buy"

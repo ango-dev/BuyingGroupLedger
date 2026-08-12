@@ -26,7 +26,7 @@ def order(order_id="A1", *, needs_agent=False, shipments=None):
     return {
         "order_id": order_id, "order_date": "2026-08-08", "order_url": "http://order/1",
         "status": "shipped", "needs_agent": needs_agent,
-        "shipments": shipments if shipments is not None else [shipment("Shipment 1")],
+        "shipments": shipments if shipments is not None else [shipment("1")],
     }
 
 
@@ -153,14 +153,14 @@ class TestRouting:
         """The whole point of the reshape — a split order has one tracking page per shipment."""
         scraper = amazon(monkeypatch, READ_OK)
         o = order(shipments=[
-            shipment("Shipment 1", url="http://track/1", items=["W"]),
-            shipment("Shipment 2", url="http://track/2", items=["X"]),
+            shipment("1", url="http://track/1", items=["W"]),
+            shipment("2", url="http://track/2", items=["X"]),
         ])
 
         items, agent_orders = scraper._recheck_via_cdp([o])
 
         assert cdp.last.page.visited == ["http://track/1", "http://track/2"]
-        assert {(i.shipment, i.item_name) for i in items} == {("Shipment 1", "W"), ("Shipment 2", "X")}
+        assert {(i.shipment, i.item_name) for i in items} == {("1", "W"), ("2", "X")}
         assert agent_orders == []
 
     def test_items_are_written_against_their_own_shipment(self, monkeypatch, cdp):
@@ -168,8 +168,8 @@ class TestRouting:
         # have corrupted the key for multi-shipment orders.
         scraper = amazon(monkeypatch, READ_OK)
         o = order(shipments=[
-            shipment("Shipment 1", items=["W", "X"]),
-            shipment("Shipment 2", url="http://track/2", items=["Y"]),
+            shipment("1", items=["W", "X"]),
+            shipment("2", url="http://track/2", items=["Y"]),
         ])
 
         items, _ = scraper._recheck_via_cdp([o])
@@ -177,7 +177,7 @@ class TestRouting:
         by_shipment = {}
         for i in items:
             by_shipment.setdefault(i.shipment, []).append(i.item_name)
-        assert by_shipment == {"Shipment 1": ["W", "X"], "Shipment 2": ["Y"]}
+        assert by_shipment == {"1": ["W", "X"], "2": ["Y"]}
 
     def test_needs_agent_order_goes_to_the_agent_and_is_still_read(self, monkeypatch, cdp):
         scraper = amazon(monkeypatch, READ_OK)
@@ -198,8 +198,8 @@ class TestRouting:
     def test_delivered_shipments_are_not_read(self, monkeypatch, cdp):
         scraper = amazon(monkeypatch, READ_OK)
         o = order(shipments=[
-            shipment("Shipment 1", status="delivered", url="http://track/1"),
-            shipment("Shipment 2", url="http://track/2"),
+            shipment("1", status="delivered", url="http://track/1"),
+            shipment("2", url="http://track/2"),
         ])
 
         scraper._recheck_via_cdp([o])
@@ -209,8 +209,8 @@ class TestRouting:
     def test_cancelled_shipments_are_not_read(self, monkeypatch, cdp):
         scraper = amazon(monkeypatch, READ_OK)
         o = order(shipments=[
-            shipment("Shipment 1", status="cancelled", url="http://track/1"),
-            shipment("Shipment 2", url="http://track/2"),
+            shipment("1", status="cancelled", url="http://track/1"),
+            shipment("2", url="http://track/2"),
         ])
 
         scraper._recheck_via_cdp([o])
@@ -219,7 +219,7 @@ class TestRouting:
 
     def test_shipment_without_a_link_is_skipped_not_guessed(self, monkeypatch, cdp):
         scraper = amazon(monkeypatch, READ_OK)
-        o = order(needs_agent=True, shipments=[shipment("Shipment 1", number="", url="")])
+        o = order(needs_agent=True, shipments=[shipment("1", number="", url="")])
 
         items, agent_orders = scraper._recheck_via_cdp([o])
 
@@ -240,8 +240,8 @@ class TestFallback:
     def test_order_is_not_queued_for_the_agent_twice(self, monkeypatch, cdp):
         scraper = amazon(monkeypatch, READ_NONE)
         o = order(needs_agent=True, shipments=[
-            shipment("Shipment 1", url="http://track/1"),
-            shipment("Shipment 2", url="http://track/2"),
+            shipment("1", url="http://track/1"),
+            shipment("2", url="http://track/2"),
         ])
 
         _, agent_orders = scraper._recheck_via_cdp([o])

@@ -26,7 +26,7 @@ Row model (keyed on Order ID + Order Date + Item Name + Shipment, like every ret
 response (the object with a top-level `order` key).
 """
 
-from models.order import OrderItem
+from models.order import OrderItem, shipment_label
 
 RETAILER = "Best Buy"
 
@@ -181,7 +181,7 @@ def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[
 
     rows: list[OrderItem] = []
     for index, (_group_id, gtype, physical_items) in enumerate(physical_groups):
-        shipment = f"Shipment {index + 1}"
+        shipment = shipment_label(index + 1)
         cancelled = gtype == "canceled"
 
         # One row per distinct SKU in the shipment; same SKU repeated = summed quantity.

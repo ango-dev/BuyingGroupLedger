@@ -30,7 +30,7 @@ open in the sheet; a brand-new fully-cancelled order (not in that set) is ignore
 a recorded order that has since been cancelled is emitted as `cancelled` so its rows go terminal.
 """
 
-from models.order import OrderItem
+from models.order import OrderItem, shipment_label
 
 RETAILER = "Costco"
 
@@ -262,7 +262,7 @@ def _rows_for_group(
                 cost_per_item=unit_price,
                 shipping=shipping_total,
                 card_last4=card_last4,
-                shipment=f"Shipment {unshipped_shipment}",
+                shipment=shipment_label(unshipped_shipment),
             )
         ]
 
@@ -288,7 +288,7 @@ def _rows_for_group(
                 # Order-level shipping, repeated on every shipment row (matches the agent + Best Buy).
                 shipping=shipping_total,
                 card_last4=card_last4,
-                shipment=f"Shipment {shipment_number[package['tracking_number']]}",
+                shipment=shipment_label(shipment_number[package["tracking_number"]]),
             )
         )
     return rows

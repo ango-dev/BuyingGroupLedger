@@ -8,41 +8,46 @@ from google.oauth2.service_account import Credentials
 
 from config.settings import settings
 from config.warehouses import classify_address, is_personal
-from models.order import FIELDNAMES, TERMINAL_STATUSES
+from models.order import FIELDNAMES, TERMINAL_STATUSES, shipment_label
 
 log = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
+# A Shipment cell in either spelling: the current bare "2" or the pre-2026-08-12 "Shipment 2".
+_SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)
+
 # Display names for the sheet's header row, positionally 1:1 with models.order.FIELDNAMES — rows are
-# written positionally from column A, so the two lists must stay the same length and order. Adding a
-# column means appending to BOTH, never inserting. tests/test_schema.py enforces this.
+# written positionally from column A, so the two lists must stay the same length and order.
+# tests/test_schema.py pins both lists in full, so any reorder fails loudly and forces the author to
+# migrate the live sheet (scripts/reorder_sheet.py) rather than silently scrambling existing rows.
+# ADDING a column means appending to BOTH lists, which needs no migration.
 HEADER = [
-    "Retailer",
-    "Profile",
-    "Order ID",
     "Order Date",
     "Status",
-    "Order Link",
-    "Tracking Number",
-    "Tracking Link",
-    "Delivery Date",
-    "Delivery Address",
+    "Profile",
+    "Retailer",
     "Item Name",
     "Quantity",
+    "Order ID",
+    "Tracking Number",
+    "Shipment",  # bare number ("1", "2"), not "Shipment 1" — the column heading already says it
+    "Delivery Date",
     "Cost Per Item",
     "Shipping",
     "Total Cost",
+    "Card",  # derived from Card Last 4 (config.cards.resolve_card)
+    "Cashback Rate",  # decimal fraction (0.02) — format the column as a percentage to taste
+    "Delivery Address",
+    "Buying Group",  # derived from Delivery Address (config.warehouses.classify_address)
+    "Insurance",  # user-entered (BFMR/MaxOutDeals later)
+    "Payout Amount",  # user-entered (BFMR/MaxOutDeals later)
+    "Payout Date",  # user-entered (BFMR/MaxOutDeals later)
+    "Total Profit",  # a live sheet formula, written by _profit_formula
+    "Order Link",
+    "Tracking Link",
     "Card Last 4",
     "Last Scraped At",
-    "Shipment",  # see models.order FIELDNAMES for why columns are appended, not inserted
-    "Buying Group",  # derived from Delivery Address (config.warehouses.classify_address)
-    "Card",  # derived from Card Last 4 (config.cards.resolve_card)
-    "Cashback Rate",  # decimal fraction, e.g. 0.02 — format the column as a percentage to taste
-    "Insurance",  # user-entered (BFMR/MaxOutDeals later)
-    "Payout Date",  # user-entered (BFMR/MaxOutDeals later)
-    "Payout Amount",  # user-entered (BFMR/MaxOutDeals later)
-    "Total Profit",  # a live sheet formula, written by _profit_formula
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
@@ -172,17 +177,21 @@ def _coerce(field: str, value: str):
 
 def _next_shipment_number(order_id, existing, oid_hdr_idx, shipment_hdr_idx,
                           appends, oid_field_idx, shipment_field_idx) -> int:
-    """Highest 'Shipment N' seen for this order (across existing sheet rows AND rows already queued to
-    append this sync) + 1 — a unique, stable label for a newly-detected split box."""
-    nums = [1]  # so the first extra box becomes at least "Shipment 2" even if labels don't parse
+    """Highest shipment number seen for this order (across existing sheet rows AND rows already queued
+    to append this sync) + 1 — a unique, stable label for a newly-detected split box.
+
+    Accepts BOTH the current bare "2" and the pre-2026-08-12 "Shipment 2" wording, so a sheet that
+    still holds old-style labels (or a row an agent wrote in the labelled form) can't make this
+    restart at 2 and collide with an existing box."""
+    nums = [1]  # so the first extra box becomes at least "2" even if labels don't parse
     for row in existing[1:]:
         if oid_hdr_idx < len(row) and row[oid_hdr_idx] == order_id and shipment_hdr_idx < len(row):
-            m = re.match(r"Shipment\s+(\d+)", str(row[shipment_hdr_idx]).strip())
+            m = _SHIPMENT_NUMBER.match(str(row[shipment_hdr_idx]).strip())
             if m:
                 nums.append(int(m.group(1)))
     for row in appends:
         if oid_field_idx < len(row) and row[oid_field_idx] == order_id:
-            m = re.match(r"Shipment\s+(\d+)", str(row[shipment_field_idx]).strip())
+            m = _SHIPMENT_NUMBER.match(str(row[shipment_field_idx]).strip())
             if m:
                 nums.append(int(m.group(1)))
     return max(nums) + 1
@@ -217,6 +226,20 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         raise RuntimeError(
             f"Worksheet '{settings.google_sheet_worksheet_name}' first row is not a recognized "
             f"header (missing {missing}). Clear the sheet, or set its header row to: {HEADER}"
+        )
+    # THE ORDER MUST MATCH EXACTLY, not merely contain the right names. Rows are written positionally
+    # from column A, so a sheet holding the right columns in a DIFFERENT order (e.g. one written before
+    # the 2026-08-12 reorder) would read fine by name here and then be overwritten with values in the
+    # new order — silently scrambling every field of every row it touched. That is the single worst
+    # failure this module can have, and no runtime error would announce it. Refuse instead, and point
+    # at the migration that rewrites the existing rows.
+    if header != list(HEADER):
+        raise RuntimeError(
+            f"Worksheet '{settings.google_sheet_worksheet_name}' has the ledger's columns in a "
+            "different ORDER than the current schema, so writing to it positionally would scramble "
+            "existing rows. Nothing was written. Run `python -m scripts.reorder_sheet` to preview the "
+            "migration, then `python -m scripts.reorder_sheet --apply` to rewrite the sheet into the "
+            f"current order.\n  sheet:  {header}\n  expected: {list(HEADER)}"
         )
     key_idx = [header.index(col) for col in key_cols]
     oid_idx = header.index("Order ID")
@@ -369,7 +392,10 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                     if shipment_hdr_idx < len(existing_row) and str(existing_row[shipment_hdr_idx]).strip():
                         sheet_row[shipment_field_idx] = existing_row[shipment_hdr_idx]
                 else:
-                    label = f"Shipment {_next_shipment_number(record['order_id'], existing, oid_idx, shipment_hdr_idx, appends, oid_field_idx, shipment_field_idx)}"
+                    label = shipment_label(_next_shipment_number(
+                        record["order_id"], existing, oid_idx, shipment_hdr_idx,
+                        appends, oid_field_idx, shipment_field_idx,
+                    ))
                     split_row = list(sheet_row)
                     split_row[shipment_field_idx] = label
                     split_row[qty_field_idx] = "*"      # unknown per-box split — user fills it in

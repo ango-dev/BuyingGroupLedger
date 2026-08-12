@@ -19,26 +19,33 @@ def test_header_and_fieldnames_have_matching_length():
     )
 
 
-def test_new_columns_are_appended_at_the_end():
-    """Columns are only ever APPENDED, never inserted or reordered.
+def test_column_order_is_pinned():
+    """The exact column order, pinned in full — changing it is a MIGRATION, not an edit.
 
-    A mid-list insert misaligns every pre-existing sheet row. It also breaks the header migration in
-    sync_csv_to_sheet, which only rewrites a header that is a strict PREFIX of the current HEADER —
-    an older sheet must look like today's columns truncated at the right.
+    Rows are written to the sheet positionally from column A, so reordering FIELDNAMES/HEADER without
+    rewriting the rows already on the sheet silently scrambles every one of them, and moves the cells
+    the Total Profit formula points at. This test is the tripwire: if you meant to reorder, update the
+    lists here too AND run `python -m scripts.reorder_sheet --apply` against the live sheet.
 
-    So this pins the historical tail in the exact order it grew: ... Shipment, Buying Group, then the
-    profit-accounting block. Adding a column means appending to BOTH lists and extending this tail.
+    Adding a column is the cheap case — APPEND it to both lists and to the end of both lists here;
+    existing rows just gain a trailing blank and no migration is needed.
     """
-    tail_fields = [
-        "shipment", "buying_group",
-        "card_name", "cashback_rate", "insurance", "payout_date", "payout_amount", "total_profit",
+    assert FIELDNAMES == [
+        "order_date", "status", "profile_label", "retailer", "item_name", "quantity", "order_id",
+        "tracking_number", "shipment", "delivery_date",
+        "cost_per_item", "shipping", "total_cost", "card_name", "cashback_rate",
+        "delivery_address", "buying_group", "insurance", "payout_amount", "payout_date",
+        "total_profit",
+        "order_url", "tracking_url", "card_last4", "last_scraped_at",
     ]
-    tail_headers = [
-        "Shipment", "Buying Group",
-        "Card", "Cashback Rate", "Insurance", "Payout Date", "Payout Amount", "Total Profit",
+    assert HEADER == [
+        "Order Date", "Status", "Profile", "Retailer", "Item Name", "Quantity", "Order ID",
+        "Tracking Number", "Shipment", "Delivery Date",
+        "Cost Per Item", "Shipping", "Total Cost", "Card", "Cashback Rate",
+        "Delivery Address", "Buying Group", "Insurance", "Payout Amount", "Payout Date",
+        "Total Profit",
+        "Order Link", "Tracking Link", "Card Last 4", "Last Scraped At",
     ]
-    assert FIELDNAMES[-len(tail_fields):] == tail_fields
-    assert HEADER[-len(tail_headers):] == tail_headers
 
 
 def test_fieldnames_match_order_item_fields():

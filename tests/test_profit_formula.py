@@ -35,8 +35,8 @@ class TestFormulaShape:
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
         # here rather than quietly producing wrong money on the sheet.
         assert ledger_sync._profit_formula(7) == (
-            '=IF(X7="","",IFERROR(LET(s,IFERROR(N7*O7/SUMIF($C$2:$C,$C7,$O$2:$O),0),'
-            'X7+(O7+s)*U7-O7-s-V7),""))'
+            '=IF(S7="","",IFERROR(LET(s,IFERROR(L7*M7/SUMIF($G$2:$G,$G7,$M$2:$M),0),'
+            'S7+(M7+s)*O7-M7-s-R7),""))'
         )
 
     def test_formula_reads_the_intended_columns(self):

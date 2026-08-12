@@ -1,8 +1,35 @@
 import logging
+import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 log = logging.getLogger(__name__)
+
+# Matches the old "Shipment N" wording so it can be reduced to a bare "N". The label used to carry the
+# word because the column didn't exist yet; under a column already headed "Shipment" it's redundant.
+#Kept as a normalizer rather than a one-off migration because the AGENT fallback
+# prompts still say "Shipment 1" — an LLM writing the labelled form must not create a second, differently
+# keyed row for a shipment the deterministic path already recorded as "1".
+_SHIPMENT_PREFIX = re.compile(r"^shipment\s*", re.IGNORECASE)
+
+
+def shipment_label(number: int) -> str:
+    """The canonical Shipment cell value for shipment `number` (1-based): a bare "1", "2", ...
+
+    Every producer goes through this so the upsert key (which includes Shipment) can't drift between
+    the deterministic paths, and normalize_shipment covers the agent path.
+    """
+    return str(number)
+
+
+def normalize_shipment(value: str) -> str:
+    """Reduce any accepted spelling of a shipment label to the bare number: "Shipment 2" -> "2".
+
+    Leaves "" alone (legacy rows written before the column existed) and leaves anything unrecognized
+    as-is rather than discarding it — an odd label is still a usable key, whereas dropping it would
+    silently merge two shipments onto one row.
+    """
+    return _SHIPMENT_PREFIX.sub("", (value or "").strip()).strip()
 
 # The status values the ledger understands. load_order_state treats delivered and cancelled as
 # TERMINAL (the order drops out of future runs) and anything unrecognized as still-open — so an
@@ -12,54 +39,66 @@ log = logging.getLogger(__name__)
 STATUSES = ("ordered", "shipped", "delivered", "cancelled")
 TERMINAL_STATUSES = ("delivered", "cancelled")
 
-# CSV/Sheet column order — keep in sync with output/csv_writer.py and sheets/ledger_sync.py
+# CSV/Sheet column order — keep in sync with output/csv_writer.py and sheets/ledger_sync.py HEADER,
+# which is this same list in display-name form, positionally 1:1. tests/test_schema.py pins BOTH.
+#
+# ORDER IS READING ORDER, chosen by the user (2026-08-12): identity first (when/what/where), then the
+# money columns left-to-right in the order you reason about them (cost -> cashback -> payout ->
+# profit), then reference/audit columns you rarely scan, parked at the end.
+#
+# CHANGING THIS ORDER IS A MIGRATION, NOT AN EDIT. Rows are written to the sheet POSITIONALLY from
+# column A, so reordering here without rewriting the existing rows silently scrambles every one of
+# them. This list was reordered ONCE (2026-08-12) and `scripts/reorder_sheet.py` conformed the live
+# sheet to it — it remaps by column NAME, so it also covers any future reorder. Still, the cheap and
+# preferred way to add a column stays APPENDING at the end: existing rows just gain a trailing blank
+# and no migration is needed.
 FIELDNAMES = [
-    "retailer",
-    "profile_label",
-    "order_id",
+    # --- identity: what was bought, when, and on whose account ---
     "order_date",
     "status",
-    "order_url",
-    "tracking_number",
-    "tracking_url",
-    "delivery_date",
-    "delivery_address",
+    "profile_label",
+    "retailer",
     "item_name",
     "quantity",
+    "order_id",
+    "tracking_number",
+    # Distinguishes shipments of one order so identical items split across shipments (same SKU in
+    # shipment 1 and 2) don't collide on the upsert key. A BARE NUMBER ("1", "2", ...) — the old
+    # "Shipment 1" wording was redundant under a column already headed "Shipment". Every retailer
+    # numbers from 1, single included; "" only on legacy rows written before this column existed.
+    # OrderItem normalizes any "Shipment N" input down to "N" (see _normalize_shipment).
+    "shipment",
+    "delivery_date",
+    # --- money: cost in, cashback + payout back, profit out ---
     "cost_per_item",
     "shipping",
     "total_cost",
-    "card_last4",
-    "last_scraped_at",
-    # Appended LAST on purpose: a mid-list insert would misalign existing sheet rows (the sync
-    # writes rows positionally from column A). Distinguishes shipments of one order so identical
-    # items split across shipments (e.g. same SKU in "Shipment 1" and "Shipment 2") don't collide
-    # on the upsert key. Every retailer numbers shipments "Shipment N" from 1, single included;
-    # "" only on legacy rows written before this column existed.
-    "shipment",
-    # Appended LAST (after shipment) on purpose, same positional-write reasoning: older sheets gain a
-    # trailing empty cell and no existing row shifts. Derived from delivery_address by
-    # config.warehouses.classify_address at run time (in main.run_scrape): the buying group whose
-    # warehouse/jig this shipment went to, "Personal" if configured, "Unclassified" if it matched no
-    # jig, or "" when the address is blank (a partial re-check) so _merge_row preserves the earlier tag.
-    "buying_group",
-    # --- Profit accounting, all appended LAST for the same positional-write reason as above. ---
     # Derived from card_last4 at run time (main.run_scrape -> config.cards.tag_cards): the friendly
     # card name and the cashback rate that applies to this row. Both blank when card_last4 is blank
     # (a partial re-check), so _merge_row preserves what the first full extraction recorded.
     "card_name",
     "cashback_rate",
+    # Kept next to the buying group it produces: buying_group is DERIVED from delivery_address by
+    # config.warehouses.classify_address at run time, so having them adjacent makes a misclassified
+    # address visible at a glance.
+    "delivery_address",
+    "buying_group",
     # USER-ENTERED (and later filled by the BFMR / MaxOutDeals integration, the design notes). The scrapers
     # always emit these blank, and _merge_row's blank-never-overwrites rule is what keeps a re-scrape
     # from wiping numbers typed into the sheet by hand.
     "insurance",
-    "payout_date",
     "payout_amount",
+    "payout_date",
     # DERIVED IN THE SHEET, not here: sheets.ledger_sync writes a live formula into this cell so the
     # number updates the moment insurance/payout are typed in — a Python-computed value would go
     # stale, and a delivered row is never re-scraped to refresh it. Kept in FIELDNAMES (emitted blank)
     # so the column still exists positionally in the CSV and the sheet row.
     "total_profit",
+    # --- reference / audit: rarely scanned, so parked at the end ---
+    "order_url",
+    "tracking_url",
+    "card_last4",
+    "last_scraped_at",
 ]
 
 
@@ -82,7 +121,7 @@ class OrderItem(BaseModel):
     shipping: float | None = None
     total_cost: float | None = None  # computed = quantity * cost_per_item (this row/shipment line)
     card_last4: str = ""
-    shipment: str = ""  # "Shipment 1" / "Shipment 2" / ...; "" only on pre-Shipment-column rows
+    shipment: str = ""  # bare number: "1" / "2" / ...; "" only on pre-Shipment-column rows
     buying_group: str = ""  # derived from delivery_address; "Unclassified" if no jig matched, "" if blank
 
     # Derived from card_last4 by config.cards.tag_cards; blank when card_last4 is blank.
@@ -103,6 +142,19 @@ class OrderItem(BaseModel):
         if isinstance(v, str) and v.strip() == "":
             return None
         return v
+
+    @field_validator("shipment", mode="before")
+    @classmethod
+    def _normalize_shipment(cls, v):
+        """Strip the redundant "Shipment " wording so the cell reads "2", not "Shipment 2".
+
+        Enforced HERE, on every path, rather than only where the deterministic mappings build labels:
+        the agent-fallback prompts still describe shipments as "Shipment 1"/"Shipment 2" (the labelled
+        form reads unambiguously to an LLM), and Shipment is part of the upsert key — so an agent
+        re-check emitting "Shipment 2" for a row the API recorded as "2" would append a duplicate
+        instead of updating it.
+        """
+        return normalize_shipment(v) if isinstance(v, str) else v
 
     @field_validator("status", mode="before")
     @classmethod

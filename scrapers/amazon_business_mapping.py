@@ -39,7 +39,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from models.order import OrderItem
+from models.order import OrderItem, shipment_label
 
 RETAILER = "Amazon Business"
 _BASE = "https://www.amazon.com"
@@ -272,7 +272,7 @@ def _shipment_targets(region) -> list[dict]:
         hrefs = " ".join(a.get("href", "") for a in wrapper.select("a[href]"))
         m = _SHIPMENT_ID_RE.search(hrefs)
         targets.append({
-            "shipment": f"Shipment {i + 1}",
+            "shipment": shipment_label(i + 1),
             "shipmentId": m.group(1) if m else "",
             "tracking_url": _abs_url(track.get("href")) if track else "",
             "status": _status_from_text(status_el.get_text(" ", strip=True)),
@@ -334,7 +334,7 @@ def build_order_items(
         status_text = status_el.get_text(" ", strip=True)
         if _is_digital_shipment(status_text):
             continue
-        shipment = f"Shipment {i + 1}"
+        shipment = shipment_label(i + 1)
         status = _status_from_text(status_text)
         cancelled = status == "cancelled"
 

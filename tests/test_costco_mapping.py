@@ -41,7 +41,7 @@ def test_single_shipment_delivered_order(details):
     row = rows[0]
     assert row.retailer == "Costco"
     assert row.profile_label == "profile-2"
-    assert row.shipment == "Shipment 1"
+    assert row.shipment == "1"
     assert row.status == "delivered"
     assert row.item_name.endswith("(Item #2045014)")
     assert row.quantity == 2
@@ -72,7 +72,7 @@ def test_line_split_across_packages_becomes_numbered_shipments(details):
     # Two physical packages for the one Dell SKU; the two e-delivery lines are dropped.
     assert len(rows) == 2
     by_shipment = _by_shipment(rows)
-    assert set(by_shipment) == {"Shipment 1", "Shipment 2"}
+    assert set(by_shipment) == {"1", "2"}
     trackings = {r.tracking_number for r in rows}
     assert trackings == {"1Z999TST0000000002", "1Z999TST0000000003"}
     # Quantity split so the column still sums to the line total (2 x 899.99).
@@ -80,8 +80,8 @@ def test_line_split_across_packages_becomes_numbered_shipments(details):
     assert round(sum(r.total_cost for r in rows), 2) == 1799.98
     # Shipping is ORDER-LEVEL (the payload's shippingAndHandling, 59.96 — NOT the per-line 29.98),
     # repeated on EVERY shipment row so the API and agent writers agree on this field.
-    assert by_shipment["Shipment 1"].shipping == 59.96
-    assert by_shipment["Shipment 2"].shipping == 59.96
+    assert by_shipment["1"].shipping == 59.96
+    assert by_shipment["2"].shipping == 59.96
 
 
 def test_identical_truncated_descriptions_do_not_collide_on_the_key(details):
@@ -133,7 +133,7 @@ def test_recorded_order_that_became_cancelled_is_emitted(details):
     assert len(rows) == 1
     row = rows[0]
     assert row.status == "cancelled"
-    assert row.shipment == "Shipment 1"
+    assert row.shipment == "1"
     assert row.tracking_number == ""
     assert "(Item #2045014)" in row.item_name
     assert "ReshipCo" in row.delivery_address
@@ -142,5 +142,5 @@ def test_recorded_order_that_became_cancelled_is_emitted(details):
 def test_every_row_has_the_costco_shipment_label_populated(details):
     items = build_order_items(details, "p", known_open_ids={"1399000001"})
     assert items, "fixture should produce rows"
-    assert all(r.shipment.startswith("Shipment ") for r in items)
+    assert all(r.shipment.isdigit() for r in items)
     assert all(r.order_date and r.order_date[4] == "-" for r in items)

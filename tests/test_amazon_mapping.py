@@ -95,7 +95,7 @@ def test_single_shipment_fields_and_total_cost():
     assert len(rows) == 1
     r = rows[0]
     assert (r.retailer, r.order_id, r.order_date) == ("Amazon", "111-2223334-5556667", "2026-07-26")
-    assert r.shipment == "Shipment 1"
+    assert r.shipment == "1"
     assert r.status == "delivered"
     assert r.item_name == "Widget"
     assert r.quantity == 1
@@ -132,7 +132,7 @@ def test_multi_shipment_split_numbers_top_to_bottom():
         ],
     )
     rows = build_order_items(html, today="2026-08-10")
-    assert [r.shipment for r in rows] == ["Shipment 1", "Shipment 2"]
+    assert [r.shipment for r in rows] == ["1", "2"]
     targets = parse_shipment_targets(html)
     assert [t["shipmentId"] for t in targets] == ["AAA", "BBB"]
     assert all("ship-track" in t["tracking_url"] for t in targets)
@@ -153,7 +153,7 @@ def test_tracking_by_shipment_number_promotes_to_shipped():
     oid = "111-2223334-5556667"
     html = _details(oid, "August 9, 2026",
                     [_shipment(oid, 0, "Arriving Monday", [_item("Thing", "$5.00")], shipment_id="ZZZ")])
-    rows = build_order_items(html, today="2026-08-10", tracking_by_shipment={"Shipment 1": "TBA123"})
+    rows = build_order_items(html, today="2026-08-10", tracking_by_shipment={"1": "TBA123"})
     assert rows[0].status == "shipped"
     assert rows[0].tracking_number == "TBA123"
 

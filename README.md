@@ -78,10 +78,21 @@ One row per line item (its real quantity preserved — a qty-3 line is one row, 
 **Order ID + Order Date + Item Name + Shipment** (safe upsert — re-checks update
 status/tracking/date/last-scraped **without clobbering** the item name, cost, address, etc.):
 
-`Retailer · Profile · Order ID · Order Date · Status · Order Link · Tracking Number · Tracking Link ·
-Delivery Date · Delivery Address · Item Name · Quantity · Cost Per Item · Shipping · Total Cost ·
-Card Last 4 · Last Scraped At · Shipment · Buying Group · Card · Cashback Rate · Insurance ·
-Payout Date · Payout Amount · Total Profit`
+Columns are in reading order — identity first, then the money columns left-to-right in the order you
+reason about them, then reference/audit columns you rarely scan:
+
+`Order Date · Status · Profile · Retailer · Item Name · Quantity · Order ID · Tracking Number ·
+Shipment · Delivery Date · Cost Per Item · Shipping · Total Cost · Card · Cashback Rate ·
+Delivery Address · Buying Group · Insurance · Payout Amount · Payout Date · Total Profit ·
+Order Link · Tracking Link · Card Last 4 · Last Scraped At`
+
+> **Column order is part of the wire format.** Rows are written to the sheet *positionally* from column
+> A, so `FIELDNAMES` (models/order.py) and `HEADER` (sheets/ledger_sync.py) define where every value
+> lands. Reordering them without rewriting the rows already on the sheet would silently scramble every
+> one of them, so `sync_csv_to_sheet` **refuses to write** to a sheet whose header order doesn't match,
+> and `python -m scripts.reorder_sheet --apply` is what conforms an existing sheet to a new order.
+> **Adding** a column is the cheap case: append it to both lists and existing rows just gain a trailing
+> blank — no migration needed.
 
 **Total Cost is per row** = `Quantity × Cost Per Item` for that shipment line (computed in code, not
 trusted from the agent), so the column sums to the order total. **Status** is one of `ordered`,
@@ -92,12 +103,11 @@ that the order page later shows cancelled); brand-new already-cancelled orders a
 **Multiple shipments per order:** when an order splits across shipments, each shipment gets its own
 row(s) with that shipment's own status, tracking number and delivery date. The **Shipment** column is
 part of the key so the *same* product in two different shipments stays on two distinct rows instead of
-colliding. It's the last column so adding it doesn't disturb existing rows; older sheets are migrated
-automatically on the next sync.
+colliding. Its value is a bare number (`1`, `2`) — the column heading already says "Shipment".
 
-**Both retailers number shipments** `Shipment 1`, `Shipment 2`, … top-to-bottom, a single shipment
+**Every retailer numbers shipments** `1`, `2`, … top-to-bottom, a single shipment
 included. Amazon starts an order as one shipment and often **splits it into several when it ships**, so
-numbering from the start means the original row updates in place (`Shipment 1`) and the newly-split
+numbering from the start means the original row updates in place (`1`) and the newly-split
 shipments are added as new rows. Best Buy uses the same scheme deliberately: the label is part of the
 upsert key, so a label that varies between runs (the page's own wording isn't guaranteed to be stable,
 or present) would append a duplicate row instead of updating the existing one.
@@ -109,7 +119,7 @@ date) after an order already looks shipped, so a cached single-page poll would s
 **Digital items are skipped** on every retailer (gift cards, eBooks, memberships, redemption codes,
 etc.) — they're never resold, so they never hit the ledger.
 
-**Profit accounting** (the last six columns) turns the ledger into a P&L rather than just a tracker:
+**Profit accounting** (Card through Total Profit) turns the ledger into a P&L rather than just a tracker:
 
 - **Card** and **Cashback Rate** are derived automatically from `Card Last 4`, which the scrapers
   already capture, via a `cards.json` config (see "Card / cashback config" below). Each card has an
@@ -464,8 +474,8 @@ scheduler on the new host. No re-login or re-sharing needed.
   end-to-end (discovery, detail fetch, mapping, and the agent extracting a real 2-shipment order all
   match). Still worth watching over time: an order observed while still *unshipped* transitioning to
   shipped/split on a later run, and the refresh-token rotation surviving many days of scheduled runs.
-- **The Amazon split lifecycle** — a single `Shipment 1` order, an agent re-check that catches the
-  ship-time split, `Shipment 1` updating in place while `Shipment 2/3` append, and the order staying
+- **The Amazon split lifecycle** — a single-shipment order, an agent re-check that catches the
+  ship-time split, shipment `1` updating in place while `2`/`3` append, and the order staying
   open until every shipment is delivered.
 
 **Open questions / smaller items**
@@ -479,7 +489,7 @@ scheduler on the new host. No re-login or re-sharing needed.
   Currently shelved: reliability beat the saving once already.
 
 **Known wrinkle.** A *legacy* Amazon row written before the Shipment column existed (blank shipment)
-will orphan once if that order later splits: the agent emits `Shipment 1…` and the blank row goes stale
+will orphan once if that order later splits: the scraper emits `1`… and the blank row goes stale
 and stays perpetually open. Only affects pre-migration rows; clear the test sheet if it shows up.
 
 **Recently done.** Offline test suite (`pytest`); `sync_csv_to_sheet` now derives its row from
