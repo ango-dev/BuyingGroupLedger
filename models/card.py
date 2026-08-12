@@ -13,8 +13,12 @@ def normalize_retailer(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
 
 
-def _to_fraction(value):
-    """Accept a rate as either a decimal fraction (0.02) or a percentage string ("2%") -> 0.02."""
+def parse_rate(value):
+    """Accept a rate as either a decimal fraction (0.02) or a percentage string ("2%") -> 0.02.
+
+    Public because the sheet side needs the same rule: a percent-FORMATTED cell reads back as the text
+    "4%", and comparing that against 0.04 must not look like a disagreement.
+    """
     if isinstance(value, str):
         cleaned = value.strip()
         if not cleaned:
@@ -84,14 +88,14 @@ class Card(BaseModel):
     @field_validator("cashback_rate", mode="before")
     @classmethod
     def _percent_to_fraction(cls, v):
-        return _to_fraction(v)
+        return parse_rate(v)
 
     @field_validator("retailer_rates", mode="before")
     @classmethod
     def _normalize_retailer_rates(cls, v):
         if not isinstance(v, dict):
             return v
-        return {normalize_retailer(k): _to_fraction(rate) for k, rate in v.items()}
+        return {normalize_retailer(k): parse_rate(rate) for k, rate in v.items()}
 
     @model_validator(mode="after")
     def _validate(self):
