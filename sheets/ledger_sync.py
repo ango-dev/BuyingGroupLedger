@@ -171,6 +171,12 @@ def _get_worksheet() -> gspread.Worksheet:
 # Google Sheets counts days from 1899-12-30, so a date-typed cell reads back as an integer serial.
 _SHEETS_EPOCH = date(1899, 12, 30)
 
+# Every column a user might format as a Date. ALL of them need normalizing on read and restoring on
+# write — not just Order Date (the one in the upsert key). A date-formatted Delivery Date reads back as
+# the serial 46241, and preserving that on a partial re-check would stamp the literal text "46241" into
+# the cell. Payout Date is here for the same reason, ahead of the BFMR/MaxOutDeals step filling it.
+_DATE_HEADERS = ("Order Date", "Delivery Date", "Payout Date")
+
 def _cell_text(value) -> str:
     """One cell from an UNFORMATTED read as text, without float(int) artefacts.
 
@@ -303,19 +309,19 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     # blank checks, tracking numbers) is string-based, and _coerce turns the numeric columns back.
     # Order Date additionally goes through sheet_date_to_iso, since it's in the upsert key.
     raw_header = [_cell_text(c) for c in raw[0]]
-    date_idx = raw_header.index("Order Date") if "Order Date" in raw_header else None
+    date_cols = {raw_header.index(name) for name in _DATE_HEADERS if name in raw_header}
     existing = [raw_header] + [
-        [sheet_date_to_iso(c) if j == date_idx else _cell_text(c) for j, c in enumerate(row)]
+        [sheet_date_to_iso(c) if j in date_cols else _cell_text(c) for j, c in enumerate(row)]
         for row in raw[1:]
     ]
-    # The ORIGINAL Order Date cells, so an update to a Date-typed cell can write the date value back
-    # rather than ISO text — otherwise every sync would quietly strip the user's date formatting.
+    # The ORIGINAL date cells, so an update to a Date-typed cell can write the date value back rather
+    # than ISO text — otherwise every sync would quietly strip the user's date formatting, and a
+    # PRESERVED one would land as the literal serial ("46241") because a date isn't a numeric field
+    # that _coerce would rescue.
     raw_dates = {
-        row_number: row[date_idx]
+        row_number: {j: row[j] for j in date_cols if j < len(row)}
         for row_number, row in enumerate(raw[1:], start=2)
-        if date_idx is not None and date_idx < len(row)
     }
-    date_field_idx = FIELDNAMES.index("order_date")
     header = existing[0]
     # Migrate an older sheet whose header is a PREFIX of the current HEADER. Columns are only ever
     # APPENDED (Shipment, then Buying Group), so a pre-migration sheet's header is HEADER truncated at
@@ -526,17 +532,17 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         # (e.g. a quantity carried over from a prior run) is written as a number, not text —
         # otherwise Sheets stores it as text and shows a leading-apostrophe '1.
         merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
-        # If this row's Order Date cell is a real DATE and still means the same day, write the date
-        # value back instead of the ISO string — otherwise a re-check silently converts the cell to
-        # text and drops the date formatting the user applied.
-        original_date = raw_dates.get(row_number)
-        if (
-            original_date is not None
-            and not isinstance(original_date, str)
-            and date_field_idx < len(merged)
-            and sheet_date_to_iso(original_date) == str(merged[date_field_idx]).strip()
-        ):
-            merged[date_field_idx] = original_date
+        # Where a date cell is a real DATE and still means the same day, write the date value back
+        # instead of the ISO string — otherwise a re-check silently converts the cell to text and drops
+        # the date formatting the user applied. (The header is guaranteed == HEADER by the guard above,
+        # so a sheet column index is a FIELDNAMES index.)
+        for column, original in raw_dates.get(row_number, {}).items():
+            if (
+                not isinstance(original, str)
+                and column < len(merged)
+                and sheet_date_to_iso(original) == str(merged[column]).strip()
+            ):
+                merged[column] = original
         worksheet.update(range_name=f"A{row_number}", values=[merged])
         claimed_rows.add(row_number)
         written_rows.append(row_number)
@@ -760,9 +766,9 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
     if not raw or not any(str(cell).strip() for cell in raw[0]):
         return empty
     raw_header = [_cell_text(c) for c in raw[0]]
-    date_idx = raw_header.index("Order Date") if "Order Date" in raw_header else None
+    date_cols = {raw_header.index(name) for name in _DATE_HEADERS if name in raw_header}
     existing = [raw_header] + [
-        [sheet_date_to_iso(c) if j == date_idx else _cell_text(c) for j, c in enumerate(row)]
+        [sheet_date_to_iso(c) if j in date_cols else _cell_text(c) for j, c in enumerate(row)]
         for row in raw[1:]
     ]
     header = existing[0]

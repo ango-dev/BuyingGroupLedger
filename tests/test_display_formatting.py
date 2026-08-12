@@ -269,3 +269,66 @@ class TestAddressIsOneLine:
         multiline = "BuyForMeRetail\nTHIRTEEN Sample Drive\nTestville, NH 03050"
         assert classify_address(multiline, warehouses) == "BFMR"
         assert classify_address(self._address(multiline), warehouses) == "BFMR"
+
+
+class TestEveryDateColumnSurvives:
+    """Not just Order Date. A first cut of this fix special-cased the upsert-key column only, which
+    left a Date-formatted Delivery Date being rewritten as the literal serial text "46241" — a date
+    isn't a numeric field, so _coerce doesn't rescue it the way it does a rate or a cost."""
+
+    SERIAL_2026_08_07 = 46241
+
+    def _sheet(self, field, serial):
+        seeded = row(order_id="A1", order_date="2026-08-06", item_name="Widget", shipment="1",
+                     status="shipped", tracking_number="1Z1")
+        seeded[FIELDNAMES.index(field)] = serial
+        return FakeWorksheet(rows=[list(HEADER), seeded])
+
+    def _partial_recheck(self, ws, tmp_path):
+        path = write_csv_file(
+            tmp_path,
+            # Blank delivery date / payout date: the preserve path, which is where this broke.
+            dict(order_id="A1", order_date="2026-08-06", item_name="Widget", shipment="1",
+                 status="shipped", tracking_number="1Z1"),
+        )
+        with patch.object(ledger_sync, "_get_worksheet", lambda: ws):
+            sync_csv_to_sheet(path)
+        return ws.data_rows()[0]
+
+    def test_delivery_date_stays_a_date(self, tmp_path):
+        ws = self._sheet("delivery_date", self.SERIAL_2026_08_07)
+
+        updated = self._partial_recheck(ws, tmp_path)
+
+        assert updated[FIELDNAMES.index("delivery_date")] == self.SERIAL_2026_08_07
+
+    def test_payout_date_stays_a_date(self, tmp_path):
+        # User-entered today, BFMR/MaxOutDeals-filled later — same exposure either way.
+        ws = self._sheet("payout_date", self.SERIAL_2026_08_07)
+
+        updated = self._partial_recheck(ws, tmp_path)
+
+        assert updated[FIELDNAMES.index("payout_date")] == self.SERIAL_2026_08_07
+
+    def test_load_order_state_reports_an_iso_delivery_date(self, monkeypatch):
+        # It feeds the agent's JOB 2 block and the CDP re-check; a raw serial there is meaningless.
+        ws = self._sheet("delivery_date", self.SERIAL_2026_08_07)
+        monkeypatch.setattr(ledger_sync, "_get_worksheet", lambda: ws)
+
+        state = load_order_state()
+
+        shipment = state["open_orders"][0]["shipments"][0]
+        assert shipment["delivery_date"] == "2026-08-07"
+
+    def test_a_newly_delivered_date_still_overwrites(self, tmp_path):
+        # Preservation is only for unchanged dates; a real new delivery date must land.
+        ws = self._sheet("delivery_date", self.SERIAL_2026_08_07)
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-06", item_name="Widget", shipment="1",
+                 status="delivered", tracking_number="1Z1", delivery_date="2026-08-09"),
+        )
+        with patch.object(ledger_sync, "_get_worksheet", lambda: ws):
+            sync_csv_to_sheet(path)
+
+        assert ws.data_rows()[0][FIELDNAMES.index("delivery_date")] == "2026-08-09"
