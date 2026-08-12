@@ -249,12 +249,6 @@ def _next_shipment_number(order_id, existing, oid_hdr_idx, shipment_hdr_idx,
 
 def sync_csv_to_sheet(csv_path: Path) -> None:
     worksheet = _get_worksheet()
-    # UNFORMATTED, not get_all_values(): a formatted read returns the sheet's DISPLAY text, so
-    # formatting a column (Order Date as a Date, Cashback Rate as a percentage, costs as currency)
-    # would feed "8/6/2026" / "4%" / "$3,402.00" into the upsert key and into the values preserved by
-    # _merge_row — corrupting them on write-back. Unformatted gives the underlying value: a date is an
-    # exact serial (no locale ambiguity), a rate is 0.04, a cost is 3402.0. Formatting the sheet is a
-    # readability choice the user is entitled to make, and it must not change behaviour.
     existing = worksheet.get_all_values()
     # An empty-but-existing worksheet returns [] or a single blank row like [[]] — both mean
     # "no header yet", so (re)write our header into row 1.
