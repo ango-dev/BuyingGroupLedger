@@ -153,6 +153,12 @@ so keep the number of browser actions small and never dump the full page repeate
 - Get order_id + date + top-level status for every in-window order in that single read. Then open each
   qualifying order's details view once and read its shipments in ONE evaluate. Target roughly one read
   per page; dozens of browser actions for a handful of orders means you are exploring too much.
+- If that one read finds NO tracking number and NO shipment/tracking section at all, that almost always
+  means the order hasn't shipped yet — record it as "ordered" with tracking_number "" and MOVE ON
+  immediately. Do NOT try a second or third selector to double-check, do NOT delegate a sub-agent task
+  to re-read the same output, and do NOT take a screenshot to visually confirm the absence. One clean
+  read that shows no tracking is itself the answer, not a sign to dig deeper — an order that's still
+  "Preparing"/"Order received" simply has nothing there to find yet.
 
 SCOPE — ONLINE SHIPPED ORDERS ONLY. Costco's Orders & Purchases page mixes several kinds of purchase.
 Record ONLY online orders that ship to an address. IGNORE (do not output any entry for):

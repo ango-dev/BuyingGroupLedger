@@ -330,6 +330,17 @@ def test_costco_prompt_gives_an_efficient_method():
     assert "COMPACT JSON" in prompt
 
 
+def test_costco_prompt_stops_exploring_once_no_tracking_is_found():
+    """A live run (2026-08-12) burned 67 steps / $0.237 (vs. an ~11-step / $0.02 baseline) on an order
+    that simply hadn't shipped yet — the agent kept re-querying selectors and delegating sub-agent reads
+    to CONFIRM the tracking section was genuinely absent, rather than accepting one clean read that
+    already said so. The prompt now tells it explicitly to stop after one read."""
+    prompt = build(CostcoScraper)
+    assert "MOVE ON" in prompt  # wraps across a line before "immediately."
+    assert "Do NOT try a second or third selector" in prompt
+    assert "do NOT delegate a sub-agent task" in prompt
+
+
 def test_costco_scopes_to_online_shipped_orders_only():
     """Costco's Orders & Purchases page mixes shippable online orders with in-warehouse pickups and
     Same-Day/Instacart grocery — only the first ships with carrier tracking, so the rest are skipped."""

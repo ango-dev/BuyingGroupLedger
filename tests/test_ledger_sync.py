@@ -1125,6 +1125,9 @@ class TestShipmentStoredAsANumber:
         assert sheet.data_rows()[0][FIELDNAMES.index("shipment")] == 1
 
     def test_the_undisclosed_split_appended_row_is_also_an_int(self, sheet, tmp_path):
+        # This hits the undisclosed-split path, which calls alerts.notifier.alert(); real sends are
+        # blocked globally by conftest.py's autouse _block_real_alerts (added after this exact test
+        # fired a real one — see that fixture's docstring).
         sheet.rows = [
             list(HEADER),
             row(order_id="B1", order_date="2026-08-10", item_name="HP - 14 Laptop",
