@@ -222,3 +222,50 @@ class TestDateFormattedColumnStillMatches:
 
         assert load_order_state(since="2026-08-01")["delivered_ids"] == ["A1"]
         assert load_order_state(since="2026-09-01")["delivered_ids"] == []
+
+
+class TestAddressIsOneLine:
+    """An agent copies the address block off the page verbatim, so it can arrive with real newlines
+    in it — which makes the sheet row tall and ragged. The deterministic parsers already comma-join,
+    so normalizing in the model keeps both paths writing the same shape."""
+
+    def _address(self, raw):
+        from models.order import OrderItem
+        return OrderItem(retailer="Amazon", order_id="A1", order_date="2026-08-11",
+                         item_name="W", delivery_address=raw).delivery_address
+
+    def test_newlines_become_comma_separated(self):
+        raw = "BuyForMeRetail B999999\nTHIRTEEN Sample Drive\nB999999\nTestville, NH 03050-0000\nUnited States"
+        assert self._address(raw) == (
+            "BuyForMeRetail B999999, THIRTEEN Sample Drive, B999999, "
+            "Testville, NH 03050-0000, United States"
+        )
+
+    def test_windows_line_endings_too(self):
+        assert self._address("A\r\nB") == "A, B"
+
+    def test_a_line_already_ending_in_a_comma_does_not_double_up(self):
+        assert self._address("Name,\nStreet") == "Name, Street"
+
+    def test_blank_lines_are_dropped(self):
+        assert self._address("A\n\n\nB\n") == "A, B"
+
+    def test_internal_whitespace_is_collapsed(self):
+        assert self._address("123   Main    St") == "123 Main St"
+
+    def test_an_already_flat_address_is_untouched(self):
+        flat = "Test Buyer, 100 Reship Rd, Unit C00, Reshipburg DE 19700"
+        assert self._address(flat) == flat
+
+    def test_blank_stays_blank(self):
+        # A partial re-check sends no address; it must stay blank so _merge_row preserves the old one.
+        assert self._address("") == ""
+
+    def test_classification_is_unaffected_by_the_change(self):
+        from config.warehouses import classify_address
+        from models.warehouse import Jig, Warehouse
+
+        warehouses = [Warehouse(buying_group="BFMR", jigs=[Jig(street="Sample Drive", zip="03050")])]
+        multiline = "BuyForMeRetail\nTHIRTEEN Sample Drive\nTestville, NH 03050"
+        assert classify_address(multiline, warehouses) == "BFMR"
+        assert classify_address(self._address(multiline), warehouses) == "BFMR"

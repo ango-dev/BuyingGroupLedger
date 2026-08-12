@@ -145,6 +145,24 @@ class OrderItem(BaseModel):
             return None
         return v
 
+    @field_validator("delivery_address", mode="before")
+    @classmethod
+    def _flatten_address(cls, v):
+        """Collapse a multi-line address into one comma-separated line.
+
+        The deterministic parsers already comma-join the address block, but the AGENT copies the page
+        text verbatim, so an agent-written row could land with real newlines inside the cell — which
+        makes the sheet row tall and ragged. Normalizing here rather than in each prompt keeps the two
+        paths writing the same shape, and can't drift the way prompt wording does.
+
+        Classification is unaffected either way (config.warehouses.normalize_address already reduces
+        every non-alphanumeric run to a single space), so this is purely about how the cell reads.
+        """
+        if not isinstance(v, str):
+            return v
+        parts = [" ".join(line.split()).rstrip(",;") for line in v.splitlines()]
+        return ", ".join(p for p in parts if p)
+
     @field_validator("shipment", mode="before")
     @classmethod
     def _normalize_shipment(cls, v):
