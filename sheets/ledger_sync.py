@@ -38,14 +38,14 @@ HEADER = [
     "Total Cost",
     "Card",  # derived from Card Last 4 (config.cards.resolve_card)
     "Cashback Rate",  # decimal fraction (0.02) — format the column as a percentage to taste
-    "Delivery Address",
-    "Buying Group",  # derived from Delivery Address (config.warehouses.classify_address)
     "Insurance",  # user-entered (BFMR/MaxOutDeals later)
     "Payout Amount",  # user-entered (BFMR/MaxOutDeals later)
     "Payout Date",  # user-entered (BFMR/MaxOutDeals later)
     "Total Profit",  # a live sheet formula, written by _profit_formula
+    "Buying Group",  # derived from Delivery Address (config.warehouses.classify_address)
     "Order Link",
     "Tracking Link",
+    "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Last Scraped At",
 ]

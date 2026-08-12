@@ -83,8 +83,8 @@ reason about them, then reference/audit columns you rarely scan:
 
 `Order Date · Status · Profile · Retailer · Item Name · Quantity · Order ID · Tracking Number ·
 Shipment · Delivery Date · Cost Per Item · Shipping · Total Cost · Card · Cashback Rate ·
-Delivery Address · Buying Group · Insurance · Payout Amount · Payout Date · Total Profit ·
-Order Link · Tracking Link · Card Last 4 · Last Scraped At`
+Insurance · Payout Amount · Payout Date · Total Profit · Buying Group ·
+Order Link · Tracking Link · Delivery Address · Card Last 4 · Last Scraped At`
 
 > **Column order is part of the wire format.** Rows are written to the sheet *positionally* from column
 > A, so `FIELDNAMES` (models/order.py) and `HEADER` (sheets/ledger_sync.py) define where every value

@@ -78,11 +78,6 @@ FIELDNAMES = [
     # (a partial re-check), so _merge_row preserves what the first full extraction recorded.
     "card_name",
     "cashback_rate",
-    # Kept next to the buying group it produces: buying_group is DERIVED from delivery_address by
-    # config.warehouses.classify_address at run time, so having them adjacent makes a misclassified
-    # address visible at a glance.
-    "delivery_address",
-    "buying_group",
     # USER-ENTERED (and later filled by the BFMR / MaxOutDeals integration, the design notes). The scrapers
     # always emit these blank, and _merge_row's blank-never-overwrites rule is what keeps a re-scrape
     # from wiping numbers typed into the sheet by hand.
@@ -94,9 +89,16 @@ FIELDNAMES = [
     # stale, and a delivered row is never re-scraped to refresh it. Kept in FIELDNAMES (emitted blank)
     # so the column still exists positionally in the CSV and the sheet row.
     "total_profit",
+    # Closes the money block: which buying group this row's payout is coming from. DERIVED from
+    # delivery_address by config.warehouses.classify_address at run time (in main.run_scrape).
+    "buying_group",
     # --- reference / audit: rarely scanned, so parked at the end ---
     "order_url",
     "tracking_url",
+    # The raw address buying_group was classified from — kept back here with the other reference data
+    # rather than beside its tag, since it's long, wraps badly, and is only consulted when a
+    # classification looks wrong.
+    "delivery_address",
     "card_last4",
     "last_scraped_at",
 ]

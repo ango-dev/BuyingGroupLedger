@@ -1008,7 +1008,11 @@ class TestPlanBuyingGroupRetag:
         assert plan["group_counts"] == {"Unclassified": 1}
 
     def test_needs_header_migration_flag(self):
-        legacy_header = list(HEADER[: HEADER.index("Buying Group")])
+        # Just "Buying Group" removed, NOT a prefix truncation: plan_buying_group_retag reads columns
+        # by NAME and doesn't write positionally, so it only cares that the column is absent. (A prefix
+        # cut would also drop Delivery Address, which this planner needs and which really did predate
+        # Buying Group on the sheet.)
+        legacy_header = [h for h in HEADER if h != "Buying Group"]
         rows = [[""] * len(legacy_header)]
 
         plan = plan_buying_group_retag(legacy_header, rows, self.warehouses)
