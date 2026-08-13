@@ -84,7 +84,8 @@ reason about them, then reference/audit columns you rarely scan:
 `Order Date · Status · Profile · Retailer · Item Name · Quantity · Order ID · Tracking Number ·
 Shipment · Delivery Date · Cost Per Item · Shipping · Total Cost · Card · Cashback Rate ·
 Insurance · Payout Amount · Payout Date · Total Profit · Buying Group ·
-Order Link · Tracking Link · Delivery Address · Card Last 4 · Last Scraped At`
+Order Link · Tracking Link · Delivery Address · Card Last 4 · Last Scraped At ·
+Tracking Submitted`
 
 > **Column order is part of the wire format.** Rows are written to the sheet *positionally* from column
 > A, so `FIELDNAMES` (models/order.py) and `HEADER` (sheets/ledger_sync.py) define where every value
@@ -109,15 +110,18 @@ typing `2026-08-12` makes Sheets store a real Date, which changes the upsert key
 on its next re-check; type `'2026-08-12`, or format the column as plain text first. Get both right and
 the row is indistinguishable from a scraped one: it sorts into place and gets its Total Profit formula
 on the next append-triggered sort (`scripts/sort_ledger.py --apply` if you don't want to wait). Don't
-hand-write **Total Profit** — it's position-bound and re-stamped on every sort. **Insurance**, **Payout
-Amount** and **Payout Date** are exactly the columns meant for hand entry and are never overwritten by a
-re-check. A note or spacer row belongs *below* the last order, where the sort leaves it alone; put one
+hand-write **Total Profit** — it's position-bound and re-stamped on every sort. **Insurance** is yours
+to fill in and is never overwritten by anything. **Payout Amount** and **Payout Date** are hand-entered
+too, but the buying-group sync fills them in once the group pays (it never blanks a cell it has no
+figure for, so a value you typed only changes if the group reports a different one). A note or spacer row belongs *below* the last order, where the sort leaves it alone; put one
 inside the block and it gets shuffled in among the orders. `scripts/audit_sheet.py` flags all of this.
 
 **Status** is one of `ordered`, `shipped`, `delivered`, `cancelled`, `paid`, `return`. The first two are
 the live lifecycle the scrapers maintain; the other four are **terminal** — the order drops out of
-future runs. `paid` and `return` are **hand-entered only**: no scraper emits them and nothing
-transitions a row into them. Anything outside this vocabulary keeps the order **open forever**, so it
+future runs. `paid` and `return` come from the **buying group**, not the retailer (see "Buying
+groups" below): BFMR reports both, MOD confirms `paid` by listing a package as received but has no
+return signal, so a MOD return is typed in by hand. A status only ever moves forward, so that
+hand-typed `return` survives every later run. Anything outside this vocabulary keeps the order **open forever**, so it
 gets re-read on every run indefinitely — which on an agent retailer is a recurring cost on an order
 that is already finished. `audit_sheet`'s `column_shape` fails an unknown status for exactly that
 reason.
@@ -200,9 +204,9 @@ etc.) — they're never resold, so they never hit the ledger.
   Amazon reports the right rate on each row. A card that isn't configured keeps a blank name — so the
   gap stays visible — but still gets your `DEFAULT_CASHBACK_RATE` so profit stays computable. The rate
   is the only cashback column; the dollar amount isn't stored, it's folded into Total Profit.
-- **Insurance**, **Payout Date** and **Payout Amount** are yours to fill in (the BFMR / MaxOutDeals
-  integration will populate them later). The scrapers always write them blank, and the upsert's
-  blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.
+- **Insurance**, **Payout Date** and **Payout Amount** are filled by the buying-group sync (see
+  "Buying groups" below) — or by hand until you enable it. The scrapers always write them blank, and
+  the upsert's blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.
 - **Total Profit** is a **live Google Sheets formula**, not a scraped number:
 
   ```
@@ -513,6 +517,100 @@ Details:
 - Like the warehouse config, this is offline and free — editing it re-derives the columns for **open**
   orders on the next run. Delivered rows are terminal and keep what they were tagged with.
 
+### Buying groups (posting tracking numbers, and reading payouts back)
+
+Scraping tells you what you bought. The buying group is who pays you for it — so `sync_tracking.py`
+posts each shipped package's tracking number to the right group, and reads their payout back into the
+**Insurance**, **Payout Amount** and **Payout Date** columns, which is what makes **Total Profit**
+light up (the formula stays blank until Payout Amount is filled).
+
+Two groups are supported today, and they work nothing alike:
+
+| | **BFMR** | **MaxOutDeals** |
+|---|---|---|
+| auth | `API-KEY` + `API-SECRET` headers | bearer token **+ an IP allowlist** |
+| keyed on | its own reservation → purchase → shipment ids | the tracking number |
+| batching | one object per ledger row | one object per package (rows summed) |
+| limits | undocumented | **10/day** payouts, **30/day** tracking |
+
+```bash
+# .env
+BFMR_API_KEY=...           # both from Developer Tools in your BFMR account settings
+BFMR_API_SECRET=...
+BFMR_MIN_INSURANCE_VALUE=0 # 0 = insure every shipment
+MAXOUTDEALS_API_KEY=...    # MOD also needs the account id + email it wants in every request body
+MAXOUTDEALS_USER_ID=...
+MAXOUTDEALS_EMAIL=...
+```
+
+⚠️ **MaxOutDeals rejects any call from an unregistered IP**, however valid your token. Add the machine
+that runs this under the **firewall tab** in your MOD profile — and again if you move hosts, change
+ISP, or containerize it.
+
+```bash
+python -m scripts.bg_probe          # read-only recon; answers the open API questions
+python -m sync_tracking             # DRY RUN — shows exactly what it would send. Sends nothing.
+python -m sync_tracking --apply --limit 1     # one package per group, for the first live test
+python -m sync_tracking --void 1Z999...       # undo a BFMR insurance filing
+```
+
+**Routing is the Buying Group column**, which is already derived from the delivery address (see
+"Warehouse / jig config"). A row goes to exactly one group. `Personal` orders never reach the sheet,
+and `Unclassified` rows are **skipped and counted** rather than posted to a guess — an unconfigured
+warehouse is a real warehouse, and sending someone else's package to the wrong group is worse than
+leaving it visible.
+
+**There's no "posted at" column, deliberately.** Whether a number has been submitted is something the
+group knows and the sheet doesn't: MOD ignores duplicates by contract, and BFMR has a status
+endpoint, so each run asks rather than keeping a local copy that drifts the moment a write fails or
+you paste something into their dashboard by hand.
+
+**A payout is split pro-rata** across the rows sharing a tracking number, for the same reason
+order-level shipping is — a box holding two items is two rows, and writing the whole payout to each
+would book it twice.
+
+**Status advances to `paid` or `return`.** Those are the two outcomes a retailer can never tell you
+about, so the buying group is the authority on them:
+
+- **BFMR reports both directly** — its tracker carries `paid` and `returned` per package.
+- **MaxOutDeals confirms payment by listing a package in its received-items report**; there is no
+  finer signal. ⚠️ **MOD gives no return signal at all**, so a returned MOD package will keep reading
+  `paid` until you set its Status to `return` on the sheet **by hand**. That correction is safe: a
+  status only ever moves forward, so later runs won't undo it.
+- Everything earlier in the journey (`shipped`, `delivered`) stays the retailer's to report — if both
+  sources wrote it, they'd overwrite each other every run.
+
+**A payout is only written once the group has actually paid.** An unpaid package leaves the cell
+blank rather than writing `0` — Total Profit reads a blank as "not paid out yet", but a literal zero
+would make it compute a large fictitious loss.
+
+**`Tracking Submitted`** is a checkbox: ticked when the buying group holds that package's tracking
+number. Format the column as a checkbox in Sheets and it renders as a tick — the values are real
+booleans. It's for reading, not for deciding: what's already been submitted is still re-derived from
+the group on every run, so a failed sheet write can't strand a package. An unticked box next to a
+shipped row is the thing worth noticing. Boxes are never cleared automatically.
+
+**Insurance** is filled from the group's own premium line. A package that's been paid out and shows
+no premium records a real `0`; one still in transit is left blank, since the premium may not be
+posted yet. An inferred `0` never overwrites a figure you typed yourself.
+
+**BFMR insurance is filed automatically** when enabled. It never declares a package value (BFMR works
+it out from the shipment, so there's no way to over-declare and overpay), never files twice, and only
+covers shipments worth at least `BFMR_MIN_INSURANCE_VALUE`. The **premium** is read back into the
+Insurance column and the **gross** payout into Payout Amount — rather than netting the two — so the
+deduction is visible rather than silently shrinking your payout. MOD never charges a premium, so its
+rows record a real `0`.
+
+> **Best Buy sometimes reuses a tracking number** across two orders. BFMR rejects the duplicate and
+> [asks you to append B/C/D](https://support.bfmr.com/hc/en-us/articles/50968170907547) until it's
+> accepted, so their record reads `529900000009B` where your ledger reads `529900000009`. Matching
+> handles that automatically. Submission does **not** — BFMR wants a support ticket with proof of
+> purchase alongside the suffixed resubmission, so the run reports the package and names the exact
+> spellings to try, and leaves it to you.
+
+Once you've done a dry run and a one-package live test, set `BUYING_GROUP_SYNC_ENABLED=1` to let the
+scheduled run do it too — it's off by default because it spends real money unattended.
+
 ### Automatic running (~4×/day, 6h apart — adjustable)
 
 **Linux (cron):**
@@ -577,12 +675,9 @@ scheduler on the new host. No re-login or re-sharing needed.
 
 **Next up**
 
-- **BFMR + MaxOutDeals integration.** `buying_groups/bfmr.py` and `maxoutdeals.py` are placeholders with
-  guessed endpoints and payload shapes — they need real API docs, keys, and auth. Then build
-  `sync_tracking.py`: read the ledger for rows that have a tracking number but aren't posted yet, match
-  by Order ID, POST the tracking to each platform, and mark the row posted. The **Insurance**,
-  **Payout Date** and **Payout Amount** columns already exist for this step to fill — they're
-  hand-entered until then, and Total Profit picks them up automatically either way.
+- **BFMR + MaxOutDeals integration — BUILT, read side live-validated.** See "Buying groups" above.
+  What's left: BFMR credentials (its half is entirely unvalidated), one `scripts.bg_probe` run to
+  settle how BFMR's tracker joins back to a ledger row, and a `--limit 1` live test per group.
 - **Event-driven re-checks from retailer emails.** Ingest Amazon / Best Buy shipped + delivered +
   order-update emails (Gmail API or IMAP) to trigger a targeted re-check of just that order, instead of
   or alongside the 6-hour poll. Faster status, fewer wasted agent runs.
@@ -653,7 +748,12 @@ scrapers/cdp.py         Playwright-over-CDP browser helper (deterministic reads)
 sheets/ledger_sync.py   Google Sheet upsert (safe partial refresh) + order-state loader
 output/csv_writer.py    per-run CSV
 alerts/notifier.py      email + Discord alerts
-buying_groups/          BFMR / MaxOutDeals API clients (placeholders)
+sync_tracking.py        post tracking numbers to buying groups + pull payouts back (dry-run default)
+buying_groups/base.py   provider contract + shared HTTP transport (per-provider auth, 429 backoff)
+buying_groups/bfmr.py   BFMR: reserve/purchase/shipment chain, insurance filing
+buying_groups/maxoutdeals.py  MaxOutDeals: batched tracking push + CSV receipts parse
+buying_groups/registry.py     Buying Group column -> provider (handles MOD/MaxOutDeals aliasing)
+scripts/bg_probe.py     read-only recon against both buying-group APIs (writes nothing)
 tests/                  offline pytest suite (no credentials/network needed)
 run.sh / run.ps1        scheduler entry points
 scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
