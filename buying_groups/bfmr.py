@@ -561,13 +561,26 @@ def _duplicate_tracking_hint(tracking_number: str) -> str:
     """
     suggested = ", ".join(tracking_number + s for s in BFMR_SUGGESTED_SUFFIXES)
     return (
-        f"BFMR accepted the request but {tracking_number} did not appear in My Tracker. This is "
-        f"usually the Best Buy DUPLICATE TRACKING issue: Best Buy shipped several orders in one "
-        f"carton under this number, so BFMR rejects the second one. Resubmit it in My Tracker by "
-        f"hand with a letter appended — {suggested}, and onwards through the alphabet if those are "
-        f"taken — until it is accepted, then raise a BFMR support ticket with proof of purchase. "
-        f"Once their record exists this tool matches it automatically, whichever letter you used; "
-        f"no sheet edit needed. https://support.bfmr.com/hc/en-us/articles/50968170907547"
+        f"{tracking_number}: BFMR accepted the request but the number never appeared in My Tracker "
+        f"— the BEST BUY COMBINED PACKAGE issue. Best Buy shipped several orders in one carton "
+        f"under this tracking number, and BFMR only allows a number once, so the second order is "
+        f"rejected.\n"
+        f"\n"
+        f"THIS PACKAGE IS NOT SUBMITTED AND NOT INSURED. Three steps, all in BFMR:\n"
+        f"  1. ADD THE TRACKING BY HAND in My Tracker, with a letter appended — try {suggested}, "
+        f"and on through the alphabet if those are taken — until it is accepted. Put the order "
+        f"number on it, which is what lets this tool find it again.\n"
+        f"  2. FILE THE INSURANCE BY HAND on that same suffixed number. This tool deliberately "
+        f"does not file for it: BFMR has no shipment to insure until step 1 is done, so an "
+        f"automatic filing would post against nothing and report success.\n"
+        f"  3. RAISE A BFMR SUPPORT TICKET with the tracking number and proof of purchase, which "
+        f"BFMR requires for a suffixed submission to be processed.\n"
+        f"\n"
+        f"Steps: https://support.bfmr.com/hc/en-us/articles/50968170907547\n"
+        f"\n"
+        f"NOTHING TO EDIT ON THE SHEET. The next run reads My Tracker, matches whichever letter you "
+        f"used back to {tracking_number}, ticks Tracking Submitted, and fills the payout, premium "
+        f"and status as they arrive."
     )
 
 

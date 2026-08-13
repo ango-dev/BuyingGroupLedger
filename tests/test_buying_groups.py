@@ -735,8 +735,50 @@ class TestSilentlyDroppedSubmission:
         result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
         assert result.submitted == []
         assert result.failed == [], "not a transient failure — no retry of ours can clear it"
-        assert "DUPLICATE TRACKING" in result.needs_manual[0][1]
+        assert "COMBINED PACKAGE" in result.needs_manual[0][1]
         assert "529900000009B" in result.needs_manual[0][1]  # names the exact retry spellings
+
+    def test_the_alert_names_all_three_manual_steps_and_the_article(self, bfmr, transport):
+        """The package is neither submitted NOR insured, and this tool will do neither for it. An
+        alert that only said "rejected" would leave the reader to work that out."""
+        transport.responses = [
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
+        ]
+        result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
+        message = result.needs_manual[0][1]
+
+        assert "NOT SUBMITTED AND NOT INSURED" in message
+        assert "ADD THE TRACKING BY HAND" in message
+        assert "FILE THE INSURANCE BY HAND" in message
+        assert "SUPPORT TICKET" in message
+        assert "529900000009B" in message                       # a spelling to try
+        assert "support.bfmr.com/hc/en-us/articles/50968170907547" in message
+        assert "NOTHING TO EDIT ON THE SHEET" in message
+
+    def test_a_manual_fix_is_picked_up_on_the_next_run(self, bfmr, transport):
+        """THE ROUND TRIP. Once the package exists in My Tracker under any letter, the next run must
+        recognise it, stop trying to submit it, leave its insurance alone, and carry the payout back
+        — with no edit to the sheet. Without this the alert would repeat every six hours forever."""
+        after_manual_fix = tracker({
+            "reserve_id": "R1", "purchase_id": "P1", "shipment_id": "S1", "order_id": "O1",
+            "tracking_number": "529900000009B", "qty": 4, "deal_title": "Samsung SSD",
+            "status": "paid", "amount_paid": "1,584.00", "date_paid": "08/12/2026",
+            "insurance_status": "insured",
+        })
+        row = submission(order_id="O1", tracking_number="529900000009")
+
+        transport.responses = [after_manual_fix]
+        assert bfmr.already_submitted([row]) == {("O1", "529900000009")}, "recognised, not resubmitted"
+
+        transport.responses = [after_manual_fix]
+        assert bfmr.file_insurance([row]).skipped[0][1] == "already insured"
+
+        transport.responses = [after_manual_fix]
+        payout = bfmr.fetch_payouts(["529900000009"])[0]
+        assert payout.tracking_number == "529900000009", "reported under the LEDGER's spelling"
+        assert payout.payout_amount == 1584.0 and payout.status == "paid"
 
     def test_the_hint_does_not_auto_append_letters(self, bfmr, transport):
         """BFMR pairs the suffixed resubmission with "submit a support ticket providing proof of

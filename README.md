@@ -601,12 +601,18 @@ Insurance column and the **gross** payout into Payout Amount — rather than net
 deduction is visible rather than silently shrinking your payout. MOD never charges a premium, so its
 rows record a real `0`.
 
-> **Best Buy sometimes reuses a tracking number** across two orders. BFMR rejects the duplicate and
+> **Best Buy sometimes ships several orders in one carton** under a single tracking number. BFMR
+> allows a number once, so the second order is rejected and
 > [asks you to append B/C/D](https://support.bfmr.com/hc/en-us/articles/50968170907547) until it's
-> accepted, so their record reads `529900000009B` where your ledger reads `529900000009`. Matching
-> handles that automatically. Submission does **not** — BFMR wants a support ticket with proof of
-> purchase alongside the suffixed resubmission, so the run reports the package and names the exact
-> spellings to try, and leaves it to you.
+> accepted — their record then reads `529900000009B` where your ledger reads `529900000009`.
+>
+> You get an **ACTION NEEDED** alert naming the three manual steps: add the tracking by hand (with
+> the order number on it), **file the insurance by hand**, and raise a support ticket with proof of
+> purchase. The tool won't do any of them for you — until the tracking exists, BFMR has no shipment
+> to insure, and an automatic filing would post against nothing while reporting success.
+>
+> There's nothing to edit on the sheet. The next run finds whichever letter you used, ticks
+> Tracking Submitted, and fills in the payout, premium and status as they arrive.
 
 Once you've done a dry run and a one-package live test, set `BUYING_GROUP_SYNC_ENABLED=1` to let the
 scheduled run do it too — it's off by default because it spends real money unattended.
