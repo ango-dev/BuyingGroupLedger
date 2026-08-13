@@ -100,16 +100,19 @@ class TestPlanReorder:
         new = plan["new_rows"][0]
         assert new[HEADER.index("Order ID")] == "A1"
         assert new[HEADER.index("Item Name")] == "Widget"
-        assert new[HEADER.index("Total Cost")] == "199.99"
-        assert new[HEADER.index("Card Last 4")] == "4321"
+        # Coerced to a real number (_coerce), same as a normal sync_csv_to_sheet write — not left as
+        # the text gspread/the RAW write would otherwise silently freeze it as.
+        assert new[HEADER.index("Total Cost")] == 199.99
+        assert new[HEADER.index("Card Last 4")] == "4321"  # NOT numeric-coerced: a leading zero is real data
         assert new[HEADER.index("Buying Group")] == "BFMR"
 
     def test_shipment_prefix_is_stripped_during_migration(self):
         # Shipment is part of the upsert key: leaving "Shipment 2" would duplicate against the "2"
-        # that every scraper now emits.
+        # that every scraper now emits. Also coerced to a real int, like _coerce("shipment", ...) does
+        # on a normal write — the migration must not silently downgrade it to text.
         plan = plan_reorder(list(OLD_HEADER), [old_row(**{"Shipment": "Shipment 2"})])
 
-        assert plan["new_rows"][0][HEADER.index("Shipment")] == "2"
+        assert plan["new_rows"][0][HEADER.index("Shipment")] == 2
         assert plan["shipment_relabelled"] == 1
 
     def test_already_correct_sheet_is_a_no_op(self):

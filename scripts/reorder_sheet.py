@@ -31,10 +31,14 @@ from pathlib import Path
 
 from gspread.utils import ValueInputOption, ValueRenderOption
 
-from models.order import normalize_shipment
-from sheets.ledger_sync import HEADER, _get_worksheet, _write_profit_formulas
+from models.order import FIELDNAMES, normalize_shipment
+from sheets.ledger_sync import HEADER, _coerce, _get_worksheet, _write_profit_formulas
 
 log = logging.getLogger("reorder_sheet")
+
+# HEADER and FIELDNAMES are positionally 1:1 (tests/test_schema.py pins it), so this maps a display
+# name straight to the field name _coerce expects.
+_FIELD_FOR_HEADER = dict(zip(HEADER, FIELDNAMES))
 
 
 def plan_reorder(header: list[str], data_rows: list[list]) -> dict:
@@ -66,6 +70,14 @@ def plan_reorder(header: list[str], data_rows: list[list]) -> dict:
         if after != before:
             reshipped += 1
         new_row[si] = after
+        # RAW writes (below) store a Python str exactly as given — it does NOT get auto-parsed into a
+        # number the way typing "1" into a cell by hand would. `cell()` reads through gspread, which
+        # doesn't reliably preserve numeric types either. So every column gets the SAME coercion
+        # sync_csv_to_sheet applies on a normal write, or a numeric column (Shipment being the one
+        # this script itself just touched via str()/normalize_shipment) would silently land as TEXT —
+        # invisible until something like audit_sheet's shipment_is_int check goes looking for it.
+        # No-op on non-numeric fields (card_last4, item_name, the Total Profit formula column, ...).
+        new_row = [_coerce(_FIELD_FOR_HEADER[name], value) for name, value in zip(HEADER, new_row)]
         # Any OTHER formula the user added by hand would be rewritten as literal text by the RAW write
         # below (Total Profit is re-stamped afterwards, so it's exempt). Flag rather than clobber.
         for i, value in enumerate(new_row):

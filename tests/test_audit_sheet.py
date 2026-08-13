@@ -441,10 +441,12 @@ def test_shipped_without_a_tracking_number_is_unreachable_from_every_producer():
     assert result_for(sheet, "shipped_rows_have_tracking").status == "FAIL"
 
 
-def test_inconsistent_order_level_shipping_breaks_the_pro_rata_profit():
+def test_inconsistent_shipping_split_breaks_the_pro_rata_profit():
+    # Both rows share the default Total Cost (798.0, see row_cells), so their Shipping/Total Cost
+    # ratios should match if the split were applied consistently -- 10.0/798.0 vs 0.0/798.0 don't.
     a = row_cells(2, **{"Order ID": Cell("BBY01-1"), "Shipping": Cell(10.0), "Item Name": Cell("A")})
     b = row_cells(3, **{"Order ID": Cell("BBY01-1"), "Shipping": Cell(0.0), "Item Name": Cell("B")})
-    assert result_for(build(a, b), "shipping_is_order_level").status == "WARN"
+    assert result_for(build(a, b), "shipping_is_cost_weighted").status == "WARN"
 
 
 def test_total_cost_that_does_not_reconcile_is_flagged():
@@ -643,9 +645,9 @@ class TestReviewFindings:
     """Bugs an adversarial review found in the checks themselves, and the checks it prompted."""
 
     def test_a_broken_formula_renders_blank_and_only_the_payout_pairing_catches_it(self):
-        """_profit_formula wraps its body in IFERROR(..., ""), so an error inside the LET is SWALLOWED
-        and the cell renders blank -- identical to a not-yet-paid-out row. An error-string scan sees
-        nothing; the blank-profit-with-a-payout pairing is what actually catches it."""
+        """_profit_formula wraps its body in IFERROR(..., ""), so an error inside is SWALLOWED and the
+        cell renders blank -- identical to a not-yet-paid-out row. An error-string scan sees nothing;
+        the blank-profit-with-a-payout pairing is what actually catches it."""
         sheet = build(row_cells(2, **{
             "Payout Amount": Cell(1500.0, fmt="currency"),
             "Total Profit": Cell("", formula=_profit_formula(2)),
@@ -718,11 +720,13 @@ class TestReviewFindings:
         )
         assert result_for(Sheet(ragged), "row_count").status == "FAIL"
 
-    def test_blank_and_zero_shipping_are_the_same_to_the_pro_rata_formula(self):
-        """Comparing them raw false-WARNed on any legacy or partially-filled row."""
+    def test_a_blank_shipping_row_is_excluded_rather_than_false_flagged(self):
+        """A blank Shipping (partial re-check that never touched this field) can't form a ratio, so
+        it's dropped from the comparison rather than compared raw against 0.0 -- which would
+        false-WARN on any legacy or partially-filled row."""
         a = row_cells(2, **{"Order ID": Cell("O-1"), "Shipping": Cell(0.0), "Item Name": Cell("A")})
         b = row_cells(3, **{"Order ID": Cell("O-1"), "Shipping": Cell(""), "Item Name": Cell("B")})
-        assert result_for(build(a, b), "shipping_is_order_level").status == "PASS"
+        assert result_for(build(a, b), "shipping_is_cost_weighted").status == "PASS"
 
     def test_a_non_numeric_shipment_label_is_allowed_consistently(self):
         """The check used to count the label as allowed and then fail it two lines later, so the

@@ -87,6 +87,10 @@ FIELDNAMES = [
     "delivery_date",
     # --- money: cost in, cashback + payout back, profit out ---
     "cost_per_item",
+    # Every scraper/agent emits the ORDER-LEVEL shipping total, repeated on every shipment row (see
+    # OrderItem.shipping below) — sheets.ledger_sync.sync_csv_to_sheet is what turns that into each
+    # row's actual cost-weighted SHARE before it lands on the sheet, so this field's value in a CSV
+    # and its value in the ledger are deliberately NOT the same number.
     "shipping",
     "total_cost",
     # Derived from card_last4 at run time (main.run_scrape -> config.cards.tag_cards): the friendly
@@ -149,7 +153,7 @@ class OrderItem(BaseModel):
     # serializes blank in the CSV and never clobbers an already-recorded number in the sheet.
     quantity: int | None = None
     cost_per_item: float | None = None
-    shipping: float | None = None
+    shipping: float | None = None  # ORDER-LEVEL total as emitted; ledger_sync reprorates it for the sheet
     total_cost: float | None = None  # computed = quantity * cost_per_item (this row/shipment line)
     card_last4: str = ""
     shipment: str = ""  # bare number: "1" / "2" / ...; "" only on pre-Shipment-column rows

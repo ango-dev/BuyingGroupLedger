@@ -1,11 +1,17 @@
-"""The Total Profit cell is a LIVE sheet formula, not a scraped value.
+"""The Total Profit cell is a LIVE sheet formula, not a scraped value. Shipping, by contrast, is a
+Python-computed NUMBER written once per sync (see TestShippingReproration below) — not a formula.
 
     Total Profit = Payout Amount + Cashback - Total Cost - Shipping - Insurance
     Cashback     = (Total Cost + Shipping) * Cashback Rate
 
 Insurance and Payout Amount are typed in by hand (the BFMR/MaxOutDeals step fills them later), so a
 value computed at scrape time would be stale the moment either is entered — and a delivered row is
-terminal, never re-scraped, so it would stay stale forever.
+terminal, never re-scraped, so it would stay stale forever. Total Profit therefore stays a live
+formula. Shipping doesn't have that problem (it depends only on scraped data, which is only ever
+current as of the last re-scrape anyway), so its cost-weighted split is computed once in Python by
+sheets.ledger_sync._reprorate_shipping and written as a plain number — see that function's docstring
+for why a live SUMIF-based formula (the original design, briefly a separate "Prorated Shipping"
+column) was dropped in favor of this.
 
 These tests share test_ledger_sync's FakeWorksheet + helpers rather than re-deriving them, so the
 fake stays a single stand-in for gspread.
@@ -35,34 +41,22 @@ class TestFormulaShape:
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
         # here rather than quietly producing wrong money on the sheet.
         assert ledger_sync._profit_formula(7) == (
-            '=IF(Q7="","",IFERROR(LET(s,IFERROR(L7*M7/SUMIF($G$2:$G,$G7,$M$2:$M),0),'
-            'Q7+(M7+s)*O7-M7-s-P7),""))'
+            '=IF(Q7="","",IFERROR(Q7+(M7+L7)*O7-M7-L7-P7,""))'
         )
 
     def test_formula_reads_the_intended_columns(self):
         # The self-checking half of the pin above: assert by HEADER NAME, so the intent survives a
         # future append even though the letters would change.
         formula = ledger_sync._profit_formula(7)
-        for name in ("Order ID", "Shipping", "Total Cost", "Cashback Rate", "Insurance",
-                     "Payout Amount"):
+        for name in ("Shipping", "Total Cost", "Cashback Rate", "Insurance", "Payout Amount"):
             letter = ledger_sync._col_letter(HEADER.index(name))
             assert f"{letter}7" in formula, f"{name} ({letter}) missing from the profit formula"
-        # Card and Payout Date are descriptive only — they must NOT appear in the arithmetic.
-        for name in ("Card", "Payout Date"):
+        # Card, Payout Date, and Order ID are NOT part of the arithmetic. Order ID in particular:
+        # there's no SUMIF here (unlike the original design) — Shipping already holds this row's
+        # final cost-weighted share by the time this formula ever runs.
+        for name in ("Card", "Payout Date", "Order ID"):
             letter = ledger_sync._col_letter(HEADER.index(name))
             assert f"{letter}7" not in formula, f"{name} should not be part of the profit math"
-
-    def test_shipping_is_prorated_across_an_orders_rows(self):
-        # Every retailer repeats the ORDER-level shipping total on each of the order's rows, so
-        # subtracting column Shipping as-is would charge a 3-row order three times over (and credit
-        # cashback on it three times), making the column's SUM wrong.
-        ship = ledger_sync._col_letter(HEADER.index("Shipping"))
-        cost = ledger_sync._col_letter(HEADER.index("Total Cost"))
-        oid = ledger_sync._col_letter(HEADER.index("Order ID"))
-        assert (
-            f"{ship}7*{cost}7/SUMIF(${oid}$2:${oid},${oid}7,${cost}$2:${cost})"
-            in ledger_sync._profit_formula(7)
-        )
 
     def test_blank_payout_leaves_the_cell_blank(self):
         # Not 0: an un-paid-out row would otherwise show a large fake loss and poison a column sum.
@@ -93,6 +87,8 @@ class TestFormulaIsWritten:
     def test_written_with_user_entered_so_it_is_a_formula(self, sheet, tmp_path):
         # The data rows are written RAW on purpose (USER_ENTERED would reinterpret a long numeric
         # tracking number into scientific notation). Only this one narrow column may use USER_ENTERED.
+        # (No Shipping figure is sent here, so _reprorate_shipping never fires and never adds a
+        # competing RAW batch_update call — see TestShippingReproration for that path.)
         sheet.rows = [list(HEADER)]
         path = write_csv_file(
             tmp_path,
@@ -160,6 +156,117 @@ class TestFormulaIsWritten:
         sync_csv_to_sheet(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("total_profit")] == ledger_sync._profit_formula(2)
+
+
+class TestShippingReproration:
+    """_reprorate_shipping (sheets/ledger_sync.py) rewrites every row of a touched order's Shipping
+    cell to its own cost-weighted share of the order's raw shipping total — replacing the raw
+    order-level number every scraper/agent emits, in place, as a plain number (not a formula)."""
+
+    def test_single_row_order_keeps_the_full_shipping_total(self, sheet, tmp_path):
+        # One row IS the whole order, so its "share" is 100% of the total — just coerced to a real
+        # number rather than left as the text a RAW write would otherwise store.
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="19.99"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.data_rows()[0][FIELDNAMES.index("shipping")] == 19.99
+
+    def test_multi_row_order_splits_by_total_cost_not_evenly(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="40.00"),
+            dict(order_id="A1", order_date="2026-08-08", item_name="Gadget", shipment="Shipment 2",
+                 quantity="1", cost_per_item="300.00", total_cost="300.00", shipping="40.00"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert rows[0][FIELDNAMES.index("shipping")] == 10.0   # 40 * 100/400
+        assert rows[1][FIELDNAMES.index("shipping")] == 30.0   # 40 * 300/400
+
+    def test_a_sibling_row_not_in_this_syncs_csv_is_still_reprorated(self, sheet, tmp_path):
+        """The classic Best Buy undisclosed-split case: only the NEW box shows up in a given sync
+        (the retailer surfaces one rotating tracking number at a time), but the order's ORIGINAL row
+        must still be re-split now that a second box is known — not left at its old (now wrong) full
+        total. _reprorate_shipping re-derives from EVERY row of the order currently on the sheet, not
+        just the ones this sync's CSV happened to include."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="40.00"),
+        ]
+        # This sync only ever mentions the NEW second box — row 2 above is never in this CSV.
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Gadget", shipment="Shipment 2",
+                 quantity="1", cost_per_item="300.00", total_cost="300.00", shipping="40.00"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert rows[0][FIELDNAMES.index("shipping")] == 10.0   # the untouched sibling, re-split
+        assert rows[1][FIELDNAMES.index("shipping")] == 30.0   # the newly appended box
+
+    def test_a_partial_recheck_with_no_shipping_figure_leaves_the_split_alone(self, sheet, tmp_path):
+        """A tracking-only re-check sends blank shipping (nothing new to report). With no raw total
+        to re-derive from this sync, the order's already-correct split must be left exactly as is —
+        not zeroed out or collapsed onto the one touched row."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="10.0"),
+            row(order_id="A1", order_date="2026-08-08", item_name="Gadget", shipment="2",
+                quantity="1", cost_per_item="300.00", total_cost="300.00", shipping="30.0"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 status="shipped", tracking_number="1Z1"),  # no shipping/cost figures at all
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert rows[0][FIELDNAMES.index("shipping")] == "10.0"
+        assert rows[1][FIELDNAMES.index("shipping")] == "30.0"
+
+    def test_an_order_with_zero_total_cost_everywhere_splits_to_zero_not_an_error(self, sheet, tmp_path):
+        # Every row still "ordered" (no cost yet) -> the SUMIF-equivalent denominator is 0; guard
+        # against a ZeroDivisionError rather than letting the sync crash on an in-progress order.
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 shipping="12.00"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.data_rows()[0][FIELDNAMES.index("shipping")] == 0.0
+
+    def test_reprorate_writes_raw_not_user_entered(self, sheet, tmp_path):
+        # Shipping is a plain number, never a formula — USER_ENTERED would risk Sheets reinterpreting
+        # it (harmless for a currency amount, but RAW is still the correct, deliberate choice here).
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="19.99"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert "RAW" in sheet.batch_input_options
 
 
 class TestProfitColumnsUpsert:

@@ -927,23 +927,36 @@ def check_total_cost(sheet: Sheet, opts: Options) -> Result:
     return Result("total_cost_matches_quantity", "WARN", f"{len(offenders)} row(s) don't reconcile{tail}", _truncate(offenders, opts.max_detail))
 
 
-@check("shipping_is_order_level")
-def check_shipping_is_order_level(sheet: Sheet, opts: Options) -> Result:
-    """_profit_formula's pro-rata SUMIF assumes every row of an order repeats the SAME order-level
-    shipping total. Violate that and the profit column is quietly wrong with nothing to surface it."""
-    by_order: dict[str, set] = {}
+@check("shipping_is_cost_weighted")
+def check_shipping_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
+    """_reprorate_shipping (sheets/ledger_sync.py) rewrites each row's Shipping to its own
+    cost-weighted SHARE of its order's raw shipping total -- so Shipping / Total Cost should be the
+    SAME ratio across every row of one order. A row that disagrees was prorated against a different
+    raw total than its siblings (stale from before a later box was discovered, or a manual edit), and
+    Total Profit -- which reads Shipping directly, with no re-derivation of its own -- is quietly
+    wrong for it with nothing else to surface that."""
+    by_order: dict[str, list[tuple[int, float, float]]] = {}
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         order_id = str(sheet.cell(sheet.grids.formatted, row_number, "Order ID")).strip()
-        shipping = sheet.cell(sheet.grids.unformatted, row_number, "Shipping")
-        # Blank and 0 are the SAME to the SUMIF the profit formula uses, so comparing them raw would
-        # false-WARN on any legacy or partially-filled row.
-        by_order.setdefault(order_id, set()).add(_text(shipping) or "0")
-    offenders = [f"order {oid}: rows disagree -- {sorted(values)}" for oid, values in by_order.items() if len(values) > 1]
+        shipping = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Shipping"))
+        cost = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Total Cost"))
+        if shipping is None or not cost:
+            continue  # can't derive a ratio without a non-zero cost to divide by
+        by_order.setdefault(order_id, []).append((row_number, shipping, cost))
+
+    offenders = []
+    for order_id, rows in by_order.items():
+        if len(rows) < 2:
+            continue
+        ratios = {round(shipping / cost, 4) for _, shipping, cost in rows}
+        if len(ratios) > 1:
+            detail = ", ".join(f"row {n}: {shipping}/{cost}={shipping / cost:.4f}" for n, shipping, cost in rows)
+            offenders.append(f"order {order_id}: rows disagree -- {detail}")
     if not offenders:
-        return Result("shipping_is_order_level", "PASS", f"{len(by_order)} order(s) repeat one shipping total")
+        return Result("shipping_is_cost_weighted", "PASS", f"{len(by_order)} order(s) checked")
     return Result(
-        "shipping_is_order_level", "WARN",
-        f"{len(offenders)} order(s) carry inconsistent shipping -- pro-rata profit will be wrong there",
+        "shipping_is_cost_weighted", "WARN",
+        f"{len(offenders)} order(s) carry an inconsistent shipping split -- Total Profit will be wrong there",
         _truncate(offenders, opts.max_detail),
     )
 
@@ -1098,9 +1111,9 @@ def check_profit_blank_despite_payout(sheet: Sheet, opts: Options) -> Result:
     """A paid-out row whose Total Profit renders BLANK — the real signature of a broken formula.
 
     Scanning for `#REF!` mostly WON'T catch a broken profit formula, because `_profit_formula` wraps
-    its body in `IFERROR(LET(...), "")`. An error raised inside the LET is swallowed and the cell
-    renders blank — indistinguishable, to the eye, from the deliberate blank of a not-yet-paid-out
-    row. So the whole profit column can silently go blank and an error scan sees nothing.
+    its body in `IFERROR(..., "")`. An error raised inside is swallowed and the cell renders blank —
+    indistinguishable, to the eye, from the deliberate blank of a not-yet-paid-out row. So the whole
+    profit column can silently go blank and an error scan sees nothing.
 
     The distinguishing signal is the pairing: `_profit_formula` returns "" only when Payout Amount is
     empty. Blank profit + non-blank payout therefore means the formula failed, and money that should
@@ -1154,8 +1167,9 @@ def check_unresolved_split_quantity(sheet: Sheet, opts: Options) -> Result:
 
     Left unresolved it is a money bomb, not just an untidy row: with Total Cost blank and a payout
     filled, the profit formula evaluates `payout + (0+0)*rate - 0 - 0 - ins`, so **the entire payout
-    is booked as profit**. The blank also counts as 0 in the pro-rata SUMIF denominator, so that box
-    absorbs none of the order's shipping and its sibling row absorbs all of it.
+    is booked as profit**. The blank Total Cost also drops out of _reprorate_shipping's cost-weighted
+    split (sheets/ledger_sync.py), so that box absorbs none of the order's shipping and its sibling
+    row absorbs all of it.
 
     Nothing else surfaces this after the one alert fired at creation time.
     """
