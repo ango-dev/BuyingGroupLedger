@@ -19,6 +19,21 @@ class LoggedOutError(Exception):
     """Raised when Browser-Use reports the retailer session is logged out."""
 
 
+class ScrapeUnavailableError(Exception):
+    """This profile can't be scraped this run, and THE AGENT MUST NOT BE TRIED as a substitute.
+
+    Distinct from LoggedOutError, which says the retailer SESSION is dead and a human has to log in
+    again. This says the run couldn't reach the retailer at all — nothing is wrong with the account,
+    nothing needs re-authorizing, and the next scheduled run will very likely succeed.
+
+    It exists so a transport fault can't be reported as a logout. Observed 2026-08-13: the profile's
+    proxy failed one upstream CONNECT to signin.costco.com, the API path fell back to the agent, and
+    the agent — which egresses through THAT SAME PROXY — couldn't load the page and concluded the
+    session was logged out. That alert pointed at the token, which was perfectly healthy; sixty
+    seconds later the API authenticated first try. The raiser has already sent an accurate alert.
+    """
+
+
 class ApiLoginError(Exception):
     """The deterministic API path could not authenticate (session logged out / login or token failed).
 

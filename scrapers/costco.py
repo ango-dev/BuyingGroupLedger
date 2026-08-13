@@ -3,10 +3,47 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from alerts.notifier import alert
-from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
+from scrapers.base import (
+    ApiLoginError,
+    BaseRetailerScraper,
+    LoggedOutError,
+    ScrapeUnavailableError,
+)
 from scrapers.costco_mapping import ORDER_DETAILS_URL, build_order_items
 
 log = logging.getLogger(__name__)
+
+#: Exception names meaning "the request never reached Costco" — no response was ever received.
+#: Matched by NAME across the MRO rather than by importing curl_cffi, which `_scrape_via_api`
+#: deliberately imports lazily so the dependency stays optional.
+#:
+#: `HTTPError` is pointedly absent: an HTTP status means the transport DID get through, so the fault
+#: is at Costco's end and the agent is worth a try.
+#: Both spellings of each concept on purpose: curl_cffi and requests say `Timeout` / `ConnectionError`
+#: while Python's builtins say `TimeoutError` / `ConnectionError`, and either can surface here.
+#: Subclasses (ConnectionRefusedError, ConnectionResetError, ReadTimeout, ...) match through the MRO.
+_TRANSPORT_FAILURE_NAMES = frozenset({
+    "ConnectionError", "ConnectTimeout", "ReadTimeout", "Timeout", "TimeoutError",
+    "ProxyError", "SSLError",
+})
+
+
+def _is_shared_proxy_failure(exc: Exception, proxy) -> bool:
+    """Did this fail in a way the agent fallback would hit identically?
+
+    Only when a proxy is CONFIGURED. That is the whole condition: the API path and the browser paths
+    egress through the same static ISP proxy (`CostcoApiClient(..., proxy=self.profile.proxy)` here,
+    `if proxy and proxy.host` there), so a transport that can't get out through it won't get out for
+    the agent either. Spending a paid agent session on that is guaranteed waste — and worse, the
+    agent interprets a page it cannot load as a logged-out session, which is a false alarm aimed at
+    the wrong component.
+
+    Without a proxy the answer is no, deliberately: the agent then uses a completely different
+    transport (a remote browser, not this host's curl), so it really might succeed where curl didn't.
+    """
+    if proxy is None or not getattr(proxy, "host", ""):
+        return False
+    return bool({cls.__name__ for cls in type(exc).__mro__} & _TRANSPORT_FAILURE_NAMES)
 
 
 class CostcoScraper(BaseRetailerScraper):
@@ -49,6 +86,29 @@ class CostcoScraper(BaseRetailerScraper):
             raise LoggedOutError(f"Costco:{self.profile.label}") from exc
         except Exception as exc:  # noqa: BLE001 — a NON-auth failure (schema/network) degrades to the agent
             reason = f"{type(exc).__name__}: {exc}"
+            if _is_shared_proxy_failure(exc, self.profile.proxy):
+                # Same reasoning as ApiLoginError above — "or hit the same wall" — for the case where
+                # the wall is the proxy both paths share. Skip, and say so accurately: the last time
+                # this fell through to the agent it cost a paid run and produced a "session is logged
+                # out" alert about a session that was fine.
+                log.warning(
+                    "Costco [%s]: proxy could not reach Costco (%s); NOT running the agent.",
+                    self.profile.label, reason,
+                )
+                alert(
+                    f"Costco [{self.profile.label}]: proxy unreachable — agent NOT run",
+                    f"The request never reached Costco, so nothing was scraped this run.\n\n"
+                    f"Reason: {reason}\n\n"
+                    f"THIS IS NOT A LOGIN PROBLEM — do not re-authorize the token. The profile's "
+                    f"proxy ({self.profile.proxy.host}:{self.profile.proxy.port}) failed to get a "
+                    f"connection out. The agent was deliberately not run because it egresses through "
+                    f"that same proxy, so it would fail identically while costing a paid session.\n\n"
+                    f"Usually transient — the next scheduled run picks the orders up. If it repeats, "
+                    f"check the proxy is alive and that its IP is still allowlisted.",
+                )
+                raise ScrapeUnavailableError(
+                    f"Costco:{self.profile.label} proxy unreachable"
+                ) from exc
             log.warning("Costco [%s]: API path failed (%s); falling back to the agent.",
                         self.profile.label, reason, exc_info=True)
             alert(

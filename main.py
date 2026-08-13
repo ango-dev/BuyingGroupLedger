@@ -47,7 +47,11 @@ from config.warehouses import load_warehouses, tag_and_filter_personal  # noqa: 
 from output.csv_writer import write_csv  # noqa: E402
 from scrapers.amazon import AmazonScraper  # noqa: E402
 from scrapers.amazon_business import AmazonBusinessScraper  # noqa: E402
-from scrapers.base import BaseRetailerScraper, LoggedOutError  # noqa: E402
+from scrapers.base import (  # noqa: E402
+    BaseRetailerScraper,
+    LoggedOutError,
+    ScrapeUnavailableError,
+)
 from scrapers.bestbuy import BestBuyScraper  # noqa: E402
 from scrapers.costco import CostcoScraper  # noqa: E402
 from sheets.ledger_sync import sort_ledger_by_date_desc, sync_csv_to_sheet  # noqa: E402
@@ -116,6 +120,12 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
         items = scraper.scrape()
     except LoggedOutError:
         log.warning("%s session is logged out; alert sent, skipping.", label)
+        return
+    except ScrapeUnavailableError as exc:
+        # Deliberately NOT folded into the branch above. "Logged out" sends someone to re-authorize;
+        # this means the retailer was unreachable and the account is fine. The scraper has already
+        # alerted with the real diagnosis.
+        log.warning("%s could not be reached (%s); alert sent, skipping.", label, exc)
         return
     except Exception:
         log.exception("Scrape failed for %s", label)
