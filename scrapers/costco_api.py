@@ -9,6 +9,11 @@ orders.
 
 curl_cffi impersonates a real Chrome TLS fingerprint because Costco's edge blocks vanilla clients.
 
+Requests go through the profile's static ISP proxy when one is configured (`CostcoApiClient(...,
+proxy=profile.proxy)`), so Costco sees this account from the same IP as the browser paths (agent
+fallback / CDP) rather than the host's own IP — which also matters once this runs in Docker/a server,
+where the host IP would be a datacenter address.
+
 The queries here are trimmed to only the fields `costco_mapping.build_order_items` consumes. The full
 schema (captured working against costco.com) has ~100 more fields per line item; adding one back is
 just pasting it into QUERY_ORDER_DETAILS.
@@ -151,13 +156,25 @@ def _is_token_expired(id_token: str, buffer_seconds: int = 120) -> bool:
 
 
 class CostcoApiClient:
-    def __init__(self, profile_label: str, token_dir: Path | str = TOKEN_DIR):
+    def __init__(self, profile_label: str, token_dir: Path | str = TOKEN_DIR, proxy=None):
+        """`proxy` is the profile's `ProxyConfig` (profiles.json). Passing it routes BOTH the token
+        exchange and the GraphQL calls through that static ISP proxy, so Costco sees this account from
+        the same IP as the browser paths (agent fallback / CDP), instead of the host's own IP. Optional
+        so a proxy-less profile still works; None = direct, the pre-2026-08-13 behavior."""
         self.profile_label = profile_label
         self.token_path = Path(token_dir) / f"{profile_label}.json"
         self._auth = self._load_auth()
         self.warehouse_numbers = [
             str(w) for w in (self._auth.get("warehouse_numbers") or DEFAULT_WAREHOUSES)
         ]
+        # Same guard the browser paths use (`if proxy and proxy.host`) — an entry with a blank host
+        # counts as "no proxy" rather than producing a bogus "http://:0" URL.
+        self._proxies: dict[str, str] | None = None
+        if proxy is not None and getattr(proxy, "host", ""):
+            url = proxy.as_url()
+            self._proxies = {"http": url, "https": url}
+            log.info("Costco [%s]: API requests routed through proxy %s:%s",
+                     profile_label, proxy.host, proxy.port)
 
     # --- token cache -----------------------------------------------------------------------------
     def _load_auth(self) -> dict:
@@ -183,6 +200,7 @@ class CostcoApiClient:
             },
             headers=_TOKEN_HEADERS,
             impersonate=_IMPERSONATE,
+            proxies=self._proxies,
             timeout=30,
         )
         if not resp.ok:
@@ -238,6 +256,7 @@ class CostcoApiClient:
                 json={"query": query, "variables": variables},
                 headers=self._headers(),
                 impersonate=_IMPERSONATE,
+                proxies=self._proxies,
                 timeout=30,
             )
             if resp.status_code == 401 and attempt == 0:

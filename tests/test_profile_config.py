@@ -10,7 +10,28 @@ import json
 import pytest
 
 import config.profiles as profiles_mod
-from models.profile import ProfileConfig, RetailerAuth
+from models.profile import ProfileConfig, ProxyConfig, RetailerAuth
+
+
+class TestProxyAsUrl:
+    """`as_url()` is what direct-HTTP retailers (Costco's API) hand to curl_cffi so their traffic
+    leaves from the same static ISP IP the browser paths use."""
+
+    def test_with_credentials(self):
+        p = ProxyConfig(host="1.2.3.4", port=50100, username="user", password="pass")
+        assert p.as_url() == "http://user:pass@1.2.3.4:50100"
+
+    def test_without_credentials(self):
+        assert ProxyConfig(host="1.2.3.4", port=8080).as_url() == "http://1.2.3.4:8080"
+
+    def test_username_only(self):
+        p = ProxyConfig(host="1.2.3.4", port=8080, username="user")
+        assert p.as_url() == "http://user@1.2.3.4:8080"
+
+    def test_special_characters_are_percent_encoded(self):
+        # A password containing @ or : would otherwise split the URL in the wrong place.
+        p = ProxyConfig(host="1.2.3.4", port=8080, username="u@ser", password="p:a@ss/word")
+        assert p.as_url() == "http://u%40ser:p%3Aa%40ss%2Fword@1.2.3.4:8080"
 
 
 def test_auth_defaults_to_empty():

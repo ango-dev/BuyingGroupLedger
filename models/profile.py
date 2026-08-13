@@ -1,4 +1,5 @@
 from typing import Literal
+from urllib.parse import quote
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +9,23 @@ class ProxyConfig(BaseModel):
     port: int
     username: str = ""
     password: str = ""
+
+    def as_url(self, scheme: str = "http") -> str:
+        """`http://user:pass@host:port` — the form direct HTTP clients want.
+
+        Browser paths hand the fields to Browser-Use separately (see `BaseRetailerScraper.
+        _build_browser_settings` and `CdpBrowser`), but a retailer that calls an API over plain HTTP
+        (Costco) needs the single-URL form so its traffic leaves from the same static ISP IP the
+        browser paths use. Credentials are percent-encoded: a password containing `@` or `:` would
+        otherwise split the URL in the wrong place.
+        """
+        auth = ""
+        if self.username:
+            auth = quote(self.username, safe="")
+            if self.password:
+                auth += f":{quote(self.password, safe='')}"
+            auth += "@"
+        return f"{scheme}://{auth}{self.host}:{self.port}"
 
 
 class RetailerAuth(BaseModel):

@@ -79,7 +79,9 @@ class CostcoScraper(BaseRetailerScraper):
         terminal_ids = set(state.get("delivered_ids", [])) | set(state.get("cancelled_ids", []))
 
         start, end = self._api_window()
-        client = CostcoApiClient(self.profile.label)
+        # Pass the profile's proxy so API traffic egresses from the same static ISP IP as the browser
+        # paths (agent fallback / CDP) instead of the host's own IP.
+        client = CostcoApiClient(self.profile.label, proxy=self.profile.proxy)
         discovered = client.list_order_numbers(start, end)
         # Re-check open orders too (even older than the window); never re-fetch terminal ones.
         order_numbers = [
