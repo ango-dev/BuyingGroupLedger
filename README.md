@@ -273,8 +273,19 @@ authenticates with a read-only scope, so it isn't merely well-behaved — it isn
 ```
 
 It's worth running **before and after** a live run — the diff is what proves a run updated rows
-instead of duplicating them. Exit code is `0` when nothing failed, `1` on a failure (or on a warning
-under `--strict`), so it can gate a scheduled run.
+instead of duplicating them, and `--compare` does that for you:
+
+```bash
+.venv/bin/python -m scripts.audit_sheet --save-snapshot before.json
+.venv/bin/python main.py
+.venv/bin/python -m scripts.audit_sheet --compare before.json
+```
+
+That reports added / removed / changed rows keyed on the upsert key, so a run that appended a
+genuinely new order is immediately distinguishable from one that duplicated an existing row.
+(`Last Scraped At` is ignored — it changes on every touch and would otherwise mark every row as
+changed.) Exit code is `0` when nothing failed, `1` on a failure (or on a warning under `--strict`),
+so it can gate a scheduled run.
 
 What it checks, and why each one matters: the header matches `HEADER` **exactly** (right names in the
 wrong order is the one failure that scrambles every row with no error — see the column-order warning
@@ -290,9 +301,15 @@ on its next re-check. A more general check catches the same class of bug for any
 builds each row's key twice — once from the displayed text and once from the stored value — and
 fails if they differ, i.e. if a row's identity depends on how you happen to have formatted it.
 
+It also checks the things that go wrong *around* the data rather than in it: content outside the
+25-column block (a stray note below the data misplaces the next appended row), `#REF!` errors left by
+a deleted column, a cashback rate outside 0–1, merged cells (they blank their neighbours on read), and
+**open orders that stopped being re-scraped** — the failure nobody notices, whether that's an order
+stuck open forever or the scheduler silently not running. Tune that last one with `--stale-days`.
+
 Two flags make it free to iterate on: `--save-snapshot FILE` dumps the raw sheet, and
 `--from-snapshot FILE` re-audits that dump offline with no credentials and no API calls. `--json`
-emits the same results machine-readably, for diffing a before/after pair.
+emits the same results machine-readably, `--compare` included.
 
 ---
 

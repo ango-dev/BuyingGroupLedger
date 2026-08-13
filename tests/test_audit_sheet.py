@@ -153,10 +153,24 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
     return [base[name] for name in HEADER]
 
 
-def build(*rows: list[Cell]) -> Sheet:
+def build(*rows: list[Cell], merges=None) -> Sheet:
+    return Sheet(grids_for(*rows, merges=merges))
+
+
+def grids_for(*rows: list[Cell], merges=None) -> Grids:
+    """The Grids a fake worksheet holding these rows would produce.
+
+    `merges` is threaded through meta the way read_grids captures it live, so the merge check can be
+    exercised without the fake needing to imitate the whole spreadsheet-metadata API.
+    """
     worksheet = RenderedFakeWorksheet([header_cells(), *rows])
     grids = audit_sheet.read_grids(worksheet)
-    return Sheet(grids)
+    return Grids(
+        formatted=grids.formatted,
+        unformatted=grids.unformatted,
+        formula=grids.formula,
+        meta={**grids.meta, "merges": merges},
+    )
 
 
 def result_for(sheet: Sheet, name: str, opts: Options | None = None):
@@ -409,10 +423,34 @@ def test_total_cost_that_does_not_reconcile_is_flagged():
     assert result_for(sheet, "total_cost_matches_quantity").status == "WARN"
 
 
-def test_the_undisclosed_split_quantity_marker_is_not_a_type_error():
-    """Quantity "*" is the documented marker the split safety net writes."""
-    sheet = build(row_cells(2, Quantity=Cell("*")))
-    assert result_for(sheet, "numeric_columns_are_numeric").status == "PASS"
+class TestQuantityIsChecked:
+    """Regression: Quantity had NO type check at all.
+
+    `numeric_columns_are_numeric` builds its column list as `_NUMERIC_FIELDS - _INT_FIELDS`, which
+    drops Quantity — so the `*` carve-out that used to live inside it was unreachable, and the test
+    that "proved" it passed vacuously against a column the check never inspects. Asserting PASS on a
+    check that isn't looking is worse than having no test.
+    """
+
+    def test_numeric_columns_check_genuinely_does_not_inspect_quantity(self):
+        from sheets.ledger_sync import _INT_FIELDS, _NUMERIC_FIELDS
+
+        assert "quantity" not in {f for f in _NUMERIC_FIELDS if f not in _INT_FIELDS}
+
+    def test_a_text_quantity_is_caught_by_the_dedicated_check(self):
+        sheet = build(row_cells(2, Quantity=Cell("2 units")))
+        assert result_for(sheet, "quantity_is_int").status == "FAIL"
+
+    def test_a_float_quantity_is_caught(self):
+        assert result_for(build(row_cells(2, Quantity=Cell(2.0))), "quantity_is_int").status == "FAIL"
+
+    def test_the_undisclosed_split_marker_is_legal(self):
+        """Quantity "*" is what the split safety net writes -- a type error would be a false positive."""
+        assert result_for(build(row_cells(2, Quantity=Cell("*"))), "quantity_is_int").status == "PASS"
+
+    def test_a_row_with_non_numeric_factors_is_reported_as_skipped_not_silently_passed(self):
+        sheet = build(row_cells(2, Quantity=Cell("*")))
+        assert "skipped" in result_for(sheet, "total_cost_matches_quantity").summary
 
 
 # --------------------------------------------------------------------------------------------------
@@ -468,3 +506,231 @@ def test_a_broken_check_does_not_hide_the_checks_after_it():
 def test_header_and_fieldnames_stay_paired():
     """A guard the auditor leans on: it maps _NUMERIC_FIELDS to display names positionally."""
     assert len(HEADER) == len(FIELDNAMES)
+
+
+# --------------------------------------------------------------------------------------------------
+# The hardening pass: six more checks, each with a false-positive guard
+#
+# The guards matter more than the positive cases. A noisy auditor gets skimmed, and a check that cries
+# wolf on a legitimate sheet is worse than no check -- it trains the reader to ignore the column that
+# the real failures will one day appear in.
+# --------------------------------------------------------------------------------------------------
+
+
+def _iso_days_ago(days: int) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+class TestLegacyBlankShipment:
+    def test_a_row_with_no_shipment_number_is_flagged(self):
+        """It orphans if that order later splits: the scraper emits 1..N, none matching the blank."""
+        assert result_for(build(row_cells(2, Shipment=Cell(""))), "legacy_blank_shipment").status == "WARN"
+
+    def test_a_normal_row_is_not_flagged(self):
+        assert result_for(build(row_cells(2)), "legacy_blank_shipment").status == "PASS"
+
+
+class TestContentOutsideTheSchema:
+    def test_content_past_the_last_schema_column_fails(self):
+        """The signature of the append_rows bug that once landed rows ten columns right, in K:AB."""
+        wide = row_cells(2) + [Cell("stray")]
+        assert result_for(build(wide), "content_outside_the_schema").status == "FAIL"
+
+    def test_content_below_the_data_block_warns(self):
+        """The append anchor is len(existing)+1, so a note under the data misplaces the next append."""
+        note = [Cell("") for _ in HEADER]
+        note[4] = Cell("my notes")  # Item Name column, but no Order ID -- not a ledger row
+        assert result_for(build(row_cells(2), note), "content_outside_the_schema").status == "WARN"
+
+    def test_a_blank_row_inside_the_data_block_warns(self):
+        blank = [Cell("") for _ in HEADER]
+        assert result_for(build(row_cells(2), blank, row_cells(4)), "content_outside_the_schema").status == "WARN"
+
+    def test_a_clean_block_passes(self):
+        assert result_for(build(row_cells(2), row_cells(3)), "content_outside_the_schema").status == "PASS"
+
+
+class TestNoFormulaErrors:
+    def test_a_ref_error_is_caught(self):
+        """What a column delete leaves behind -- and profit_formula_coverage would still see a formula."""
+        sheet = build(row_cells(2, **{"Total Profit": Cell("#REF!", formula="=IF(#REF!,1,2)")}))
+        assert result_for(sheet, "no_formula_errors").status == "FAIL"
+
+    def test_a_costco_item_number_is_not_an_error(self):
+        """THE false positive to avoid: costco_mapping appends "(Item #N)" to disambiguate Costco's
+        truncated descriptions, so a 'starts with #' rule would flag real data on every Costco row."""
+        sheet = build(row_cells(2, **{"Item Name": Cell("KIRKLAND SIGNATURE (Item #1847785)")}))
+        assert result_for(sheet, "no_formula_errors").status == "PASS"
+
+
+class TestCashbackRateSane:
+    def test_a_rate_of_4_meaning_4_percent_is_caught(self):
+        """It multiplies straight into the profit formula -- 100x overstatement, plausible-looking."""
+        sheet = build(row_cells(2, **{"Cashback Rate": Cell(4)}))
+        assert result_for(sheet, "cashback_rate_sane").status == "FAIL"
+
+    def test_the_confirmed_13_percent_costco_rate_is_not_flagged(self):
+        """Deliberately no 'suspiciously high' band: this rate is real and user-confirmed, so a band
+        would be permanent noise on every Costco row."""
+        sheet = build(row_cells(2, **{"Cashback Rate": Cell(0.13, fmt="percent")}))
+        assert result_for(sheet, "cashback_rate_sane").status == "PASS"
+
+
+class TestOpenRowStaleness:
+    def test_an_open_row_that_stopped_being_scraped_warns(self):
+        sheet = build(row_cells(2, Status=Cell("ordered"), **{"Last Scraped At": Cell(_iso_days_ago(9))}))
+        result = result_for(sheet, "open_row_staleness")
+        assert result.status == "WARN" and "9 days ago" in result.details[0]
+
+    def test_a_terminal_row_is_never_stale(self):
+        """Delivered rows are terminal and deliberately never re-scraped -- flagging them would mean
+        warning about all 20-odd historical rows forever."""
+        sheet = build(row_cells(2, Status=Cell("delivered"), **{"Last Scraped At": Cell(_iso_days_ago(400))}))
+        assert result_for(sheet, "open_row_staleness").status == "PASS"
+
+    def test_a_recently_scraped_open_row_passes(self):
+        sheet = build(row_cells(2, Status=Cell("ordered"), **{"Last Scraped At": Cell(_iso_days_ago(0))}))
+        assert result_for(sheet, "open_row_staleness").status == "PASS"
+
+
+class TestMergedCells:
+    def test_a_merge_is_a_failure(self):
+        """A merged cell reads as its top-left value and blanks its neighbours -- which _merge_row
+        then PRESERVES as though the data were legitimately absent, freezing those cells forever."""
+        merges = [{"startRowIndex": 1, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": 2}]
+        assert result_for(build(row_cells(2), merges=merges), "no_merged_cells").status == "FAIL"
+
+    def test_no_merges_passes(self):
+        assert result_for(build(row_cells(2), merges=[]), "no_merged_cells").status == "PASS"
+
+    def test_a_snapshot_without_merge_data_skips_rather_than_passing(self):
+        """An older snapshot must not report a confident PASS about something it never captured."""
+        assert result_for(build(row_cells(2), merges=None), "no_merged_cells").status == "SKIP"
+
+
+class TestReviewFindings:
+    """Bugs an adversarial review found in the checks themselves, and the checks it prompted."""
+
+    def test_a_broken_formula_renders_blank_and_only_the_payout_pairing_catches_it(self):
+        """_profit_formula wraps its body in IFERROR(..., ""), so an error inside the LET is SWALLOWED
+        and the cell renders blank -- identical to a not-yet-paid-out row. An error-string scan sees
+        nothing; the blank-profit-with-a-payout pairing is what actually catches it."""
+        sheet = build(row_cells(2, **{
+            "Payout Amount": Cell(1500.0, fmt="currency"),
+            "Total Profit": Cell("", formula=_profit_formula(2)),
+        }))
+        assert result_for(sheet, "profit_blank_despite_payout").status == "FAIL"
+        assert result_for(sheet, "no_formula_errors").status == "PASS"  # the scan is blind to it
+
+    def test_an_unpaid_row_with_a_blank_profit_is_correct_not_a_failure(self):
+        assert result_for(build(row_cells(2)), "profit_blank_despite_payout").status == "PASS"
+
+    def test_a_blank_status_keeps_an_order_open_and_billable_forever(self):
+        """column_shape guards with `if status and ...`, so blank slipped through; load_order_state
+        then reads it as "ordered" and the order never closes."""
+        sheet = build(row_cells(2, Status=Cell("")))
+        assert result_for(sheet, "status_is_present").status == "FAIL"
+        assert result_for(sheet, "column_shape").status == "PASS"  # why it needed its own check
+
+    def test_an_unresolved_split_that_has_been_paid_out_books_the_whole_payout_as_profit(self):
+        sheet = build(row_cells(2, Quantity=Cell("*"), **{
+            "Total Cost": Cell(""), "Payout Amount": Cell(1500.0, fmt="currency"),
+        }))
+        assert result_for(sheet, "unresolved_split_quantity").status == "FAIL"
+
+    def test_an_unresolved_split_awaiting_quantities_only_warns(self):
+        sheet = build(row_cells(2, Quantity=Cell("*"), **{"Total Cost": Cell("")}))
+        assert result_for(sheet, "unresolved_split_quantity").status == "WARN"
+
+    def test_a_multi_sku_box_is_informational_not_a_permanent_warning(self):
+        """Items boxed together legitimately share a shipment number and a tracking number. Warning
+        would nag forever on a healthy sheet and make --strict exit 1 for good."""
+        a = row_cells(2, **{"Order ID": Cell("C-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1")})
+        b = row_cells(3, **{"Order ID": Cell("C-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1")})
+        sheet = build(a, b)
+        pair = [r for r in run_checks(sheet, Options()) if r.name in
+                ("duplicate_shipment_lines", "duplicate_tracking_keys")]
+        assert [r.status for r in pair] == ["INFO", "INFO"]
+        # The point of INFO: these two cannot, on their own, make --strict exit non-zero.
+        # (Scoped to this pair deliberately -- the coverage checks read the real warehouses.json /
+        # cards.json, so a whole-sheet exit code would depend on the user's config, not on the code.)
+        assert audit_sheet.exit_code(pair, strict=True) == 0
+
+    def test_one_tracking_number_under_two_orders_is_still_a_warning(self):
+        a = row_cells(2, **{"Order ID": Cell("C-1"), "Tracking Number": Cell("1Z1")})
+        b = row_cells(3, **{"Order ID": Cell("C-2"), "Tracking Number": Cell("1Z1")})
+        assert result_for(build(a, b), "duplicate_tracking_keys").status == "WARN"
+
+    def test_expect_rows_is_not_swallowed_when_render_modes_disagree(self):
+        """It used to return the height WARN before ever comparing, so --expect-rows reported success
+        on the one sheet state that most warrants a hard stop."""
+        worksheet = RenderedFakeWorksheet([header_cells(), row_cells(2)])
+        grids = audit_sheet.read_grids(worksheet)
+        ragged = Grids(
+            formatted=grids.formatted,
+            unformatted=grids.unformatted + [["extra"]],
+            formula=grids.formula,
+            meta=grids.meta,
+        )
+        result = result_for(Sheet(ragged), "row_count", Options(expect_rows=99))
+        assert result.status == "FAIL" and "expected 99" in result.summary
+
+    def test_render_modes_disagreeing_on_height_is_a_failure_not_a_warning(self):
+        """sync_csv_to_sheet takes its append anchor from the formatted read's height alone."""
+        worksheet = RenderedFakeWorksheet([header_cells(), row_cells(2)])
+        grids = audit_sheet.read_grids(worksheet)
+        ragged = Grids(
+            formatted=grids.formatted,
+            unformatted=grids.unformatted + [["extra"]],
+            formula=grids.formula,
+            meta=grids.meta,
+        )
+        assert result_for(Sheet(ragged), "row_count").status == "FAIL"
+
+    def test_blank_and_zero_shipping_are_the_same_to_the_pro_rata_formula(self):
+        """Comparing them raw false-WARNed on any legacy or partially-filled row."""
+        a = row_cells(2, **{"Order ID": Cell("O-1"), "Shipping": Cell(0.0), "Item Name": Cell("A")})
+        b = row_cells(3, **{"Order ID": Cell("O-1"), "Shipping": Cell(""), "Item Name": Cell("B")})
+        assert result_for(build(a, b), "shipping_is_order_level").status == "PASS"
+
+    def test_a_non_numeric_shipment_label_is_allowed_consistently(self):
+        """The check used to count the label as allowed and then fail it two lines later, so the
+        'label' bucket could never coexist with a PASS."""
+        assert result_for(build(row_cells(2, Shipment=Cell("backorder"))), "shipment_is_int").status == "PASS"
+
+    def test_informational_results_are_counted_in_the_tally(self):
+        a = row_cells(2, **{"Order ID": Cell("C-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1")})
+        b = row_cells(3, **{"Order ID": Cell("C-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1")})
+        text = audit_sheet.render_text(run_checks(build(a, b), Options()), {}, verbose=False)
+        assert "informational" in text
+
+
+class TestCompare:
+    """The before/after diff -- the thing that actually answers "did that run update or duplicate?"."""
+
+    def test_a_new_order_shows_as_added(self):
+        before = grids_for(row_cells(2))
+        after = grids_for(row_cells(2), row_cells(3))
+        diff = audit_sheet.diff_snapshots(before, after)
+        assert len(diff["added"]) == 1 and not diff["removed"] and not diff["changed"]
+        assert diff["rows_before"] == 1 and diff["rows_after"] == 2
+
+    def test_a_status_change_shows_as_a_changed_cell_not_an_add(self):
+        before = grids_for(row_cells(2, Status=Cell("ordered")))
+        after = grids_for(row_cells(2, Status=Cell("shipped")))
+        diff = audit_sheet.diff_snapshots(before, after)
+        assert not diff["added"] and not diff["removed"]
+        assert any("Status" in c and "ordered" in c and "shipped" in c for c in diff["changed"])
+
+    def test_a_deleted_row_shows_as_removed(self):
+        diff = audit_sheet.diff_snapshots(grids_for(row_cells(2), row_cells(3)), grids_for(row_cells(2)))
+        assert len(diff["removed"]) == 1
+
+    def test_last_scraped_at_is_ignored_so_it_cannot_bury_the_real_signal(self):
+        """Every touched row's timestamp changes on every run, so including it would mean every diff
+        reported every row as changed."""
+        before = grids_for(row_cells(2, **{"Last Scraped At": Cell("2026-08-01T00:00:00Z")}))
+        after = grids_for(row_cells(2, **{"Last Scraped At": Cell("2026-08-12T00:00:00Z")}))
+        assert audit_sheet.diff_snapshots(before, after)["changed"] == []

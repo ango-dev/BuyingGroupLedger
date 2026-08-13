@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Callable, Iterator
 
-from models.order import FIELDNAMES, STATUSES
+from models.order import FIELDNAMES, STATUSES, TERMINAL_STATUSES, normalize_shipment
 from sheets.ledger_sync import (
     HEADER,
     _INT_FIELDS,
@@ -60,6 +60,13 @@ _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # Columns that must hold plain ISO text, not a date serial. Order Date is the dangerous one: it's in
 # the primary upsert key AND the name-agnostic fallback key (ledger_sync.py:273, :297).
 _DATE_COLUMNS = ("Order Date", "Delivery Date", "Payout Date")
+
+# Sheets' error values, matched as a WHOLE cell. Never as a "starts with #" prefix: costco_mapping
+# appends "(Item #1847785)" to item names to disambiguate Costco's truncated descriptions, so a prefix
+# rule would flag real data on every Costco row.
+_SHEET_ERRORS = {
+    "#REF!", "#DIV/0!", "#NAME?", "#VALUE!", "#N/A", "#NUM!", "#NULL!", "#ERROR!",
+}
 
 # Display-name lookups for the field-keyed sets imported from ledger_sync.
 _HEADER_FOR_FIELD = dict(zip(FIELDNAMES, HEADER))
@@ -133,6 +140,24 @@ def open_worksheet_readonly():
     return worksheet, spreadsheet.title
 
 
+def _read_merges(worksheet):
+    """Merged ranges on this worksheet, or None if they couldn't be determined.
+
+    Captured here rather than inside a check so the checks keep operating on frozen data only, and so
+    a saved snapshot carries the information with it. Best-effort: a metadata failure degrades the
+    merge check to SKIP rather than taking the whole audit down over its lowest-priority item.
+    """
+    try:
+        metadata = worksheet.spreadsheet.fetch_sheet_metadata()
+        sheet_id = worksheet.id
+        for entry in metadata.get("sheets", []):
+            if entry.get("properties", {}).get("sheetId") == sheet_id:
+                return entry.get("merges", [])
+        return []
+    except Exception:
+        return None
+
+
 def read_grids(worksheet, spreadsheet_title: str = "") -> Grids:
     """Read the worksheet once per render mode. The ONLY function that touches the live sheet."""
     from gspread.utils import ValueRenderOption
@@ -149,6 +174,7 @@ def read_grids(worksheet, spreadsheet_title: str = "") -> Grids:
             "worksheet": getattr(worksheet, "title", ""),
             "rows": max(0, len(formatted) - 1),
             "cols": len(formatted[0]) if formatted else 0,
+            "merges": _read_merges(worksheet),
         },
     )
 
@@ -251,6 +277,9 @@ class Options:
     expect_rows: int | None = None
     strict: bool = False
     max_detail: int = 8
+    # How long an OPEN row may go un-rescraped before it's suspicious. The scheduler runs ~4x/day, so
+    # 3 days is many missed runs, not a blip.
+    stale_days: int = 3
 
 
 CHECKS: list[tuple[str, bool, Callable]] = []
@@ -312,12 +341,21 @@ def check_row_count(sheet: Sheet, opts: Options) -> Result:
     total = max(0, len(sheet.grids.formatted) - 1)
     ledger = sum(1 for _ in sheet.ledger_rows(sheet.grids.formatted)) if sheet.schema_ok else total
     heights = {len(sheet.grids.formatted), len(sheet.grids.unformatted), len(sheet.grids.formula)}
-    if len(heights) > 1:
-        return Result("row_count", "WARN", f"render modes disagree on height: {sorted(heights)}")
     summary = f"{total} data rows ({ledger} with an Order ID)"
+
+    # --expect-rows is evaluated FIRST and unconditionally. An earlier version returned the
+    # height-disagreement WARN before ever comparing, so `--expect-rows N` reported success on the one
+    # sheet state that most warrants a hard stop.
+    if opts.expect_rows is not None and total != opts.expect_rows:
+        return Result("row_count", "FAIL", f"{summary} -- expected {opts.expect_rows}")
+    if len(heights) > 1:
+        # sync_csv_to_sheet computes its append anchor as len(existing)+1 from the FORMATTED read
+        # alone, so a height disagreement is an append-anchor signal, not a curiosity.
+        return Result(
+            "row_count", "FAIL",
+            f"render modes disagree on height: {sorted(heights)} -- appends may land in the wrong row",
+        )
     if opts.expect_rows is not None:
-        if total != opts.expect_rows:
-            return Result("row_count", "FAIL", f"{summary} -- expected {opts.expect_rows}")
         summary += f" (expected {opts.expect_rows})"
     return Result("row_count", "PASS", summary)
 
@@ -394,8 +432,11 @@ def check_duplicate_shipment_lines(sheet: Sheet, opts: Options) -> Result:
     if not multi:
         return Result("duplicate_shipment_lines", "PASS", "every shipment line holds exactly one item")
     details = [f"rows {v}: order {k[0]} shipment {k[2]!r}" for k, v in multi.items()]
+    # INFO, not WARN: a box holding several SKUs is NORMAL and permanent ("items boxed together share
+    # a number"). Warning about it would nag forever on a healthy sheet and make --strict exit 1 for
+    # good -- which would foreclose ever using this as a pre-flight gate. A noisy check gets skimmed.
     return Result(
-        "duplicate_shipment_lines", "WARN",
+        "duplicate_shipment_lines", "INFO",
         f"{len(multi)} shipment line(s) hold several items -- the name-agnostic merge can't fire there",
         _truncate(details, opts.max_detail),
     )
@@ -413,17 +454,27 @@ def check_duplicate_tracking_keys(sheet: Sheet, opts: Options) -> Result:
             continue
         seen.setdefault(key, []).append(row_number)
         by_number.setdefault(key[1], set()).add(key[0])
-    details = [f"rows {v}: order {k[0]} tracking {k[1]}" for k, v in seen.items() if len(v) > 1]
-    details += [
+    shared = [f"rows {v}: order {k[0]} tracking {k[1]}" for k, v in seen.items() if len(v) > 1]
+    # One number under TWO Order IDs is a genuine defect, unlike several rows sharing one box.
+    crossed = [
         f"tracking {number} appears under {len(orders)} different Order IDs: {sorted(orders)}"
         for number, orders in by_number.items() if len(orders) > 1
     ]
-    if not details:
+    if not shared and not crossed:
         return Result("duplicate_tracking_keys", "PASS", f"{len(seen)} tracked row(s), all 1:1")
+    if crossed:
+        return Result(
+            "duplicate_tracking_keys", "WARN",
+            "one tracking number spans several orders",
+            _truncate(crossed + shared, opts.max_detail),
+        )
+    # INFO for the same reason as duplicate_shipment_lines: a multi-SKU box legitimately puts several
+    # rows behind one tracking number. It only means the tracking-based reconciliation declines to
+    # fire there (it is guarded to the unambiguous 1:1 case), which is correct behaviour, not a fault.
     return Result(
-        "duplicate_tracking_keys", "WARN",
-        "tracking-number reconciliation is ambiguous for some rows",
-        _truncate(details, opts.max_detail),
+        "duplicate_tracking_keys", "INFO",
+        f"{len(shared)} tracking number(s) cover several rows -- reconciliation won't fire on them",
+        _truncate(shared, opts.max_detail),
     )
 
 
@@ -553,14 +604,60 @@ def check_shipment_is_int(sheet: Sheet, opts: Options) -> Result:
         elif str(stored).strip().isdigit():
             counts["text"] += 1
             offenders.append(f"row {row_number}: stored as text {stored!r}, should be int")
+        elif normalize_shipment(str(stored)) != str(stored).strip():
+            # The pre-2026-08-12 "Shipment 2" spelling. normalize_shipment would reduce it, which is
+            # exactly how we know the cell was never migrated -- and Shipment is in the upsert key, so
+            # an incoming bare "2" won't match it and will append a duplicate.
+            counts["text"] += 1
+            offenders.append(f"row {row_number}: legacy label {stored!r} -- migrate to a bare number")
         else:
-            counts["label"] += 1  # a non-numeric fallback label is allowed (normalize_shipment)
+            # A genuinely non-numeric fallback label IS supported (normalize_shipment / _coerce), so it
+            # must not also be failed by the display rule below. An earlier version counted it as
+            # allowed here and then failed it two lines later, so "label" could never coexist with PASS.
+            counts["label"] += 1
+            continue
         if shown and not shown.isdigit():
             offenders.append(f"row {row_number}: displays {shown!r} -- the key wants bare digits")
     summary = " | ".join(f"{v} {k}" for k, v in counts.items() if v)
     if not offenders:
         return Result("shipment_is_int", "PASS", summary or "no rows")
     return Result("shipment_is_int", "FAIL", summary, _truncate(offenders, opts.max_detail))
+
+
+@check("quantity_is_int")
+def check_quantity_is_int(sheet: Sheet, opts: Options) -> Result:
+    """Quantity has to be checked HERE, because numeric_columns_are_numeric deliberately skips it.
+
+    That exclusion (it drops `_INT_FIELDS`) once left Quantity with no type check at all. A text
+    Quantity — a leading-apostrophe `'2`, or a hand edit — stops the column summing AND makes
+    `total_cost_matches_quantity` silently skip the row while still reporting PASS.
+
+    `*` is legal: it's the marker the undisclosed-split safety net writes (see
+    `unresolved_split_quantity`, which is what chases it up).
+    """
+    counts = {"int": 0, "split_marker": 0, "float": 0, "text": 0, "blank": 0}
+    offenders = []
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        stored = sheet.cell(sheet.grids.unformatted, row_number, "Quantity")
+        if stored == "" or stored is None:
+            counts["blank"] += 1
+        elif isinstance(stored, bool):
+            counts["text"] += 1
+            offenders.append(f"row {row_number}: boolean {stored!r}")
+        elif isinstance(stored, int):
+            counts["int"] += 1
+        elif isinstance(stored, float):
+            counts["float"] += 1
+            offenders.append(f"row {row_number}: stored as float {stored!r}, should be int")
+        elif str(stored).strip() == "*":
+            counts["split_marker"] += 1
+        else:
+            counts["text"] += 1
+            offenders.append(f"row {row_number}: text {stored!r} -- the column won't sum and cost checks skip this row")
+    summary = " | ".join(f"{v} {k}" for k, v in counts.items() if v)
+    if not offenders:
+        return Result("quantity_is_int", "PASS", summary or "no rows")
+    return Result("quantity_is_int", "FAIL", summary, _truncate(offenders, opts.max_detail))
 
 
 @check("card_last4_is_text")
@@ -594,6 +691,10 @@ def check_numeric_columns(sheet: Sheet, opts: Options) -> Result:
     A string that _parse_display_number CAN parse ("$3,402.00", "4%") is the §8 corruption signature
     exactly: a formatted value that was read back and rewritten as literal text.
     """
+    # NB: _INT_FIELDS (quantity, shipment) are excluded here because they have their own dedicated
+    # int-ness checks -- `quantity_is_int` and `shipment_is_int`. An earlier version of this check
+    # carried a Quantity "*" carve-out that was DEAD CODE for exactly that reason, and the test
+    # guarding it passed vacuously against a column this check never inspects.
     columns = [
         _HEADER_FOR_FIELD[f] for f in _NUMERIC_FIELDS
         if f not in _INT_FIELDS and f in _HEADER_FOR_FIELD
@@ -607,8 +708,6 @@ def check_numeric_columns(sheet: Sheet, opts: Options) -> Result:
             checked += 1
             if isinstance(stored, (int, float)) and not isinstance(stored, bool):
                 continue
-            if name == "Quantity" and str(stored).strip() == "*":
-                continue  # the documented undisclosed-split marker
             hint = ""
             if _parse_display_number(stored) is not None:
                 hint = " -- a formatted value written back as literal TEXT"
@@ -679,10 +778,17 @@ def check_no_embedded_newlines(sheet: Sheet, opts: Options) -> Result:
 @check("key_cells_have_no_edge_whitespace")
 def check_key_whitespace(sheet: Sheet, opts: Options) -> Result:
     """ledger_sync.py:319 builds the key from the raw cell with NO .strip(), so a trailing space is
-    an invisible, guaranteed duplicate."""
+    an invisible, guaranteed duplicate.
+
+    Profile and Retailer are included even though they aren't in the key, because `load_order_state`
+    FILTERS on them -- and it compares Profile UNSTRIPPED (`row[idx["Profile"]] != profile_label`)
+    while stripping Retailer three lines below. So one invisible trailing space in a Profile cell
+    hides that row from its own retailer's run; if the rows that remain visible are all delivered, the
+    order is classified TERMINAL and silently stops being tracked, with its real open shipment frozen.
+    """
     offenders = []
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-        for name in ("Order ID", "Order Date", "Item Name", "Shipment"):
+        for name in ("Order ID", "Order Date", "Item Name", "Shipment", "Profile", "Retailer"):
             value = str(sheet.cell(sheet.grids.formatted, row_number, name))
             if value != value.strip():
                 offenders.append(f"row {row_number}, {name}: {value!r}")
@@ -752,9 +858,13 @@ def check_total_cost(sheet: Sheet, opts: Options) -> Result:
         checked += 1
         if abs(total - round(qty * cpi, 2)) > 0.01:
             offenders.append(f"row {row_number}: {qty} x {cpi} = {round(qty * cpi, 2)}, but Total Cost is {total}")
+    # Report what was SKIPPED, not just what passed: this check silently declines to run on any row
+    # whose factors aren't numeric, and a bare "PASS" over a shrinking sample hides that.
+    skipped = sum(1 for _ in sheet.ledger_rows(sheet.grids.formatted)) - checked
+    tail = f" ({skipped} skipped -- non-numeric factors)" if skipped else ""
     if not offenders:
-        return Result("total_cost_matches_quantity", "PASS", f"{checked} row(s) reconcile")
-    return Result("total_cost_matches_quantity", "WARN", f"{len(offenders)} row(s) don't reconcile", _truncate(offenders, opts.max_detail))
+        return Result("total_cost_matches_quantity", "PASS", f"{checked} row(s) reconcile{tail}")
+    return Result("total_cost_matches_quantity", "WARN", f"{len(offenders)} row(s) don't reconcile{tail}", _truncate(offenders, opts.max_detail))
 
 
 @check("shipping_is_order_level")
@@ -765,7 +875,9 @@ def check_shipping_is_order_level(sheet: Sheet, opts: Options) -> Result:
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         order_id = str(sheet.cell(sheet.grids.formatted, row_number, "Order ID")).strip()
         shipping = sheet.cell(sheet.grids.unformatted, row_number, "Shipping")
-        by_order.setdefault(order_id, set()).add(_text(shipping))
+        # Blank and 0 are the SAME to the SUMIF the profit formula uses, so comparing them raw would
+        # false-WARN on any legacy or partially-filled row.
+        by_order.setdefault(order_id, set()).add(_text(shipping) or "0")
     offenders = [f"order {oid}: rows disagree -- {sorted(values)}" for oid, values in by_order.items() if len(values) > 1]
     if not offenders:
         return Result("shipping_is_order_level", "PASS", f"{len(by_order)} order(s) repeat one shipping total")
@@ -830,6 +942,274 @@ def check_card_and_rate_coverage(sheet: Sheet, opts: Options) -> Result:
     return Result("card_and_rate_coverage", status, "Card + Cashback Rate resolve cleanly" if status == "PASS" else "gaps found", _truncate(details, opts.max_detail))
 
 
+@check("legacy_blank_shipment")
+def check_legacy_blank_shipment(sheet: Sheet, opts: Options) -> Result:
+    """A row with an Order ID but no Shipment number — written before that column existed.
+
+    the design notes has carried "check the live sheet once for this" as an open item. It matters because
+    such a row ORPHANS if its order later splits: the scraper emits Shipment 1..N, none of which match
+    the blank, so the blank row goes stale and stays perpetually open while a duplicate is appended
+    alongside it.
+    """
+    offenders = [
+        f"row {n}: order {sheet.cell(sheet.grids.formatted, n, 'Order ID')}"
+        for n, _ in sheet.ledger_rows(sheet.grids.formatted)
+        if not str(sheet.cell(sheet.grids.formatted, n, "Shipment")).strip()
+    ]
+    if not offenders:
+        return Result("legacy_blank_shipment", "PASS", "no pre-Shipment-column legacy rows")
+    return Result(
+        "legacy_blank_shipment", "WARN",
+        f"{len(offenders)} row(s) have no Shipment number and will orphan if that order splits",
+        _truncate(offenders, opts.max_detail),
+    )
+
+
+@check("content_outside_the_schema", requires_schema=False)
+def check_content_outside_the_schema(sheet: Sheet, opts: Options) -> Result:
+    """Anything living outside the 25-column x N-row data block.
+
+    Two real hazards, not tidiness. (1) `append_rows` once auto-detected the "table" on the real sheet
+    and anchored appends TEN COLUMNS RIGHT, landing rows in K:AB — content past column Y is that
+    signature. (2) The append anchor is `len(existing) + 1`, so a stray note UNDER the data makes the
+    next appended row land past it, leaving a gap and (worse) writing where nothing expects it.
+    """
+    grid = sheet.grids.formatted
+    width = len(HEADER)
+    wide, below, holes = [], [], []
+
+    last_ledger_row = 0
+    for row_number, _ in sheet.rows(grid):
+        order_id = sheet.cell(grid, row_number, "Order ID") if sheet.schema_ok else ""
+        if str(order_id).strip():
+            last_ledger_row = row_number
+
+    for row_number, row in sheet.rows(grid):
+        if len(row) > width and any(str(c).strip() for c in row[width:]):
+            extra = [c for c in row[width:] if str(c).strip()]
+            wide.append(f"row {row_number}: {len(row) - width} cell(s) past column {_col_letter(width - 1)}: {extra[:3]}")
+        populated = any(str(c).strip() for c in row)
+        if last_ledger_row and row_number > last_ledger_row and populated:
+            below.append(f"row {row_number}: content below the last ledger row ({last_ledger_row})")
+        if last_ledger_row and row_number < last_ledger_row and not populated:
+            holes.append(f"row {row_number}: blank row inside the data block")
+
+    if wide:
+        return Result(
+            "content_outside_the_schema", "FAIL",
+            f"{len(wide)} row(s) have content past column {_col_letter(width - 1)} -- appends may be mis-anchored",
+            _truncate(wide + below + holes, opts.max_detail),
+        )
+    if below or holes:
+        return Result(
+            "content_outside_the_schema", "WARN",
+            f"{len(below)} row(s) below the data block, {len(holes)} blank row(s) inside it",
+            _truncate(below + holes, opts.max_detail),
+        )
+    return Result("content_outside_the_schema", "PASS", f"nothing outside the {width}-column data block")
+
+
+@check("no_formula_errors", requires_schema=False)
+def check_no_formula_errors(sheet: Sheet, opts: Options) -> Result:
+    """Spreadsheet error values anywhere on the sheet.
+
+    A `#REF!` is exactly what deleting a column leaves behind, and `profit_formula_coverage` would
+    still see a formula there and pass. Matched as the WHOLE cell value, never as a prefix: Costco
+    item names legitimately contain "#" (the mapping appends "(Item #1847785)" to disambiguate
+    truncated descriptions), so a "starts with #" rule would flag real data on every Costco row.
+    """
+    offenders = []
+    for row_number, row in sheet.rows(sheet.grids.unformatted):
+        for index, value in enumerate(row):
+            if isinstance(value, str) and value.strip() in _SHEET_ERRORS:
+                name = sheet.header[index] if index < len(sheet.header) else f"col {index + 1}"
+                offenders.append(f"row {row_number}, {name}: {value.strip()}")
+    if not offenders:
+        return Result("no_formula_errors", "PASS", "no #REF!/#VALUE!/#N/A cells")
+    return Result(
+        "no_formula_errors", "FAIL",
+        f"{len(offenders)} cell(s) hold a spreadsheet error value",
+        _truncate(offenders, opts.max_detail),
+    )
+
+
+@check("profit_blank_despite_payout")
+def check_profit_blank_despite_payout(sheet: Sheet, opts: Options) -> Result:
+    """A paid-out row whose Total Profit renders BLANK — the real signature of a broken formula.
+
+    Scanning for `#REF!` mostly WON'T catch a broken profit formula, because `_profit_formula` wraps
+    its body in `IFERROR(LET(...), "")`. An error raised inside the LET is swallowed and the cell
+    renders blank — indistinguishable, to the eye, from the deliberate blank of a not-yet-paid-out
+    row. So the whole profit column can silently go blank and an error scan sees nothing.
+
+    The distinguishing signal is the pairing: `_profit_formula` returns "" only when Payout Amount is
+    empty. Blank profit + non-blank payout therefore means the formula failed, and money that should
+    be reported isn't.
+    """
+    offenders = []
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        payout = sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount")
+        profit = sheet.cell(sheet.grids.unformatted, row_number, "Total Profit")
+        if payout == "" or payout is None:
+            continue
+        if profit == "" or profit is None:
+            order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
+            offenders.append(f"row {row_number}: order {order_id} has a payout of {payout!r} but no profit")
+    if not offenders:
+        return Result("profit_blank_despite_payout", "PASS", "every paid-out row reports a profit")
+    return Result(
+        "profit_blank_despite_payout", "FAIL",
+        f"{len(offenders)} paid-out row(s) render a blank profit -- the formula is failing silently",
+        _truncate(offenders, opts.max_detail),
+    )
+
+
+@check("status_is_present")
+def check_status_is_present(sheet: Sheet, opts: Options) -> Result:
+    """A BLANK Status keeps an order open forever, and costs money every run.
+
+    `column_shape` only validates a status it can see (`if status and status not in STATUSES`), so
+    blank slips through. `load_order_state` reads it as `... or "ordered"`, so the order stays in
+    open_orders permanently; and if that shipment also lacks a tracking number, `needs_agent` stays
+    True, so every scheduled run pays for an agent pass on an order that will never close. the design notes
+    records a single such order costing $0.237 in one run.
+    """
+    offenders = [
+        f"row {n}: order {sheet.cell(sheet.grids.formatted, n, 'Order ID')} has no status"
+        for n, _ in sheet.ledger_rows(sheet.grids.formatted)
+        if not str(sheet.cell(sheet.grids.formatted, n, "Status")).strip()
+    ]
+    if not offenders:
+        return Result("status_is_present", "PASS", "every row has a status")
+    return Result(
+        "status_is_present", "FAIL",
+        f"{len(offenders)} row(s) have a blank Status -- those orders stay open (and billable) forever",
+        _truncate(offenders, opts.max_detail),
+    )
+
+
+@check("unresolved_split_quantity")
+def check_unresolved_split_quantity(sheet: Sheet, opts: Options) -> Result:
+    """The undisclosed-split safety net writes Quantity `*` + a blank Total Cost, awaiting the user.
+
+    Left unresolved it is a money bomb, not just an untidy row: with Total Cost blank and a payout
+    filled, the profit formula evaluates `payout + (0+0)*rate - 0 - 0 - ins`, so **the entire payout
+    is booked as profit**. The blank also counts as 0 in the pro-rata SUMIF denominator, so that box
+    absorbs none of the order's shipping and its sibling row absorbs all of it.
+
+    Nothing else surfaces this after the one alert fired at creation time.
+    """
+    pending, billed = [], []
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        quantity = str(sheet.cell(sheet.grids.formatted, row_number, "Quantity")).strip()
+        if quantity != "*":
+            continue
+        order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
+        payout = sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount")
+        if payout not in ("", None):
+            billed.append(f"row {row_number}: order {order_id} is paid out ({payout!r}) with no cost -- profit is overstated by the full payout")
+        else:
+            pending.append(f"row {row_number}: order {order_id} awaits per-box quantities")
+    if billed:
+        return Result("unresolved_split_quantity", "FAIL", f"{len(billed)} unresolved split row(s) already paid out", _truncate(billed + pending, opts.max_detail))
+    if pending:
+        return Result("unresolved_split_quantity", "WARN", f"{len(pending)} split row(s) still need per-box quantities", _truncate(pending, opts.max_detail))
+    return Result("unresolved_split_quantity", "PASS", "no unresolved split rows")
+
+
+@check("cashback_rate_sane")
+def check_cashback_rate_sane(sheet: Sheet, opts: Options) -> Result:
+    """A rate must be a fraction in [0, 1].
+
+    models/card.py enforces this on the CONFIG side, but nothing enforces it on the sheet, and the
+    profit formula multiplies by it directly — a 4 meaning "4%" overstates that row by 100x while
+    still looking like a plausible number. There is deliberately NO "suspiciously high" warning band:
+    a real 13% Costco rate is configured and confirmed, so such a band would be permanent noise.
+    """
+    offenders, rates = [], set()
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        value = sheet.cell(sheet.grids.unformatted, row_number, "Cashback Rate")
+        if value == "" or value is None or isinstance(value, bool):
+            continue
+        if not isinstance(value, (int, float)):
+            continue  # a text rate is numeric_columns_are_numeric's failure to report
+        rates.add(value)
+        if not 0 <= value <= 1:
+            offenders.append(f"row {row_number}: rate {value!r} is outside [0,1] -- profit is off by ~100x")
+    if not offenders:
+        return Result("cashback_rate_sane", "PASS", f"rates in use: {sorted(rates) or 'none'}")
+    return Result("cashback_rate_sane", "FAIL", f"{len(offenders)} implausible rate(s)", _truncate(offenders, opts.max_detail))
+
+
+@check("open_row_staleness")
+def check_open_row_staleness(sheet: Sheet, opts: Options) -> Result:
+    """Non-terminal rows that stopped being re-scraped.
+
+    This is the failure nobody notices: an order stuck open forever (a status the vocabulary doesn't
+    recognise, a retailer that silently stopped discovering it) or the scheduler simply not running.
+    Every other check looks at whether the data is well-formed; this one asks whether it's still alive.
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    stale, open_count, unparsed = [], 0, 0
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
+        if status in TERMINAL_STATUSES:
+            continue
+        open_count += 1
+        raw = str(sheet.cell(sheet.grids.formatted, row_number, "Last Scraped At")).strip()
+        if not raw:
+            continue  # never scraped is a different (and visible) condition
+        try:
+            seen = datetime.fromisoformat(raw)
+        except ValueError:
+            unparsed += 1
+            continue
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        age = (now - seen).days
+        if age >= opts.stale_days:
+            order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
+            stale.append(f"row {row_number}: order {order_id} ({status}) last scraped {age} days ago")
+    details = list(stale)
+    if unparsed:
+        details.append(f"{unparsed} row(s) have an unparseable Last Scraped At")
+    if not stale and not unparsed:
+        return Result("open_row_staleness", "PASS", f"{open_count} open row(s), all scraped within {opts.stale_days}d")
+    return Result(
+        "open_row_staleness", "WARN",
+        f"{len(stale)}/{open_count} open row(s) not scraped in {opts.stale_days}+ days",
+        _truncate(details, opts.max_detail),
+    )
+
+
+@check("no_merged_cells", requires_schema=False)
+def check_no_merged_cells(sheet: Sheet, opts: Options) -> Result:
+    """A merged cell reads as its top-left value and BLANKS its neighbours.
+
+    That's uniquely nasty here: _merge_row's blank-never-overwrites rule would then preserve the old
+    values as though the data were legitimately absent, so a merge quietly freezes those cells forever
+    instead of erroring. Read from the sheet metadata captured at read time (see read_grids), so an
+    older snapshot without it degrades to SKIP rather than a false PASS.
+    """
+    merges = sheet.grids.meta.get("merges")
+    if merges is None:
+        return Result("no_merged_cells", "SKIP", "snapshot predates merge capture")
+    if not merges:
+        return Result("no_merged_cells", "PASS", "no merged cells")
+    details = [
+        f"rows {m.get('startRowIndex', '?')}-{m.get('endRowIndex', '?')}, "
+        f"cols {m.get('startColumnIndex', '?')}-{m.get('endColumnIndex', '?')}"
+        for m in merges
+    ]
+    return Result(
+        "no_merged_cells", "FAIL",
+        f"{len(merges)} merged range(s) -- merged cells blank their neighbours on read",
+        _truncate(details, opts.max_detail),
+    )
+
+
 # --------------------------------------------------------------------------------------------------
 # Running and rendering
 # --------------------------------------------------------------------------------------------------
@@ -846,6 +1226,74 @@ def run_checks(sheet: Sheet, opts: Options) -> list[Result]:
         except Exception as exc:  # a broken check must not hide the checks after it
             results.append(Result(name, "FAIL", f"check raised {type(exc).__name__}: {exc}"))
     return results
+
+
+# Changes on every touch, so including it would bury every real change under 25 lines of noise.
+_DIFF_IGNORED_COLUMNS = ("Last Scraped At",)
+
+
+def diff_snapshots(before: Grids, after: Grids, ignore=_DIFF_IGNORED_COLUMNS) -> dict:
+    """What changed between two reads of the sheet, keyed by the primary upsert key.
+
+    This is REPORTED, never asserted: a diff has no correct answer (a new order legitimately appends),
+    and `duplicate_primary_keys` already owns the actual failure condition. Its job is to answer the
+    question the audit alone can't -- "did that run UPDATE rows or DUPLICATE them?" -- which is the
+    whole reason the audit is run before and after a live run.
+    """
+    old, new = Sheet(before), Sheet(after)
+
+    def index(sheet: Sheet) -> dict:
+        return {
+            sheet.primary_key(sheet.grids.formatted, n): n
+            for n, _ in sheet.ledger_rows(sheet.grids.formatted)
+        }
+
+    old_rows, new_rows = index(old), index(new)
+
+    def describe(sheet: Sheet, row_number: int) -> str:
+        get = lambda c: sheet.cell(sheet.grids.formatted, row_number, c)  # noqa: E731
+        return (
+            f"{get('Retailer')} {get('Order ID')} ship {get('Shipment')} "
+            f"[{get('Status')}] {str(get('Item Name'))[:40]!r}"
+        )
+
+    added = [describe(new, n) for k, n in new_rows.items() if k not in old_rows]
+    removed = [describe(old, n) for k, n in old_rows.items() if k not in new_rows]
+
+    changed = []
+    columns = [c for c in new.header if c not in ignore]
+    for key, new_row_number in new_rows.items():
+        old_row_number = old_rows.get(key)
+        if old_row_number is None:
+            continue
+        for column in columns:
+            was = old.cell(old.grids.formatted, old_row_number, column)
+            now = new.cell(new.grids.formatted, new_row_number, column)
+            if str(was) != str(now):
+                changed.append(f"{key[0]} ship {key[3]} | {column}: {was!r} -> {now!r}")
+
+    return {
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+        "rows_before": len(old_rows),
+        "rows_after": len(new_rows),
+        "ignored_columns": list(ignore),
+    }
+
+
+def render_diff(diff: dict, source: str, max_detail: int) -> str:
+    lines = ["", f"Changes since {source}:"]
+    lines.append(
+        f"  {diff['rows_before']} -> {diff['rows_after']} rows | "
+        f"{len(diff['added'])} added | {len(diff['removed'])} removed | "
+        f"{len(diff['changed'])} cell(s) changed"
+        + (f"  (ignoring {', '.join(diff['ignored_columns'])})" if diff["ignored_columns"] else "")
+    )
+    for label, entries in (("ADDED", diff["added"]), ("REMOVED", diff["removed"]), ("CHANGED", diff["changed"])):
+        for entry in _truncate(entries, max_detail):
+            lines.append(f"  {label:<8} {entry}")
+    return "\n".join(lines)
 
 
 def exit_code(results: list[Result], strict: bool) -> int:
@@ -872,26 +1320,28 @@ def render_text(results: list[Result], meta: dict, verbose: bool) -> str:
             for detail in result.details:
                 lines.append(f"      {detail}")
     lines.append("")
-    tally = {s: sum(1 for r in results if r.status == s) for s in ("PASS", "WARN", "FAIL", "SKIP")}
+    # INFO and SKIP must be in the tally or they vanish from the count and the totals stop adding up.
+    tally = {s: sum(1 for r in results if r.status == s) for s in ("PASS", "INFO", "WARN", "FAIL", "SKIP")}
     lines.append(
         f"{tally['PASS']} passed | {tally['WARN']} warnings | {tally['FAIL']} failures"
+        + (f" | {tally['INFO']} informational" if tally["INFO"] else "")
         + (f" | {tally['SKIP']} skipped" if tally["SKIP"] else "")
     )
     return "\n".join(lines)
 
 
-def render_json(results: list[Result], meta: dict, strict: bool) -> str:
-    return json.dumps(
-        {
-            "ok": exit_code(results, strict) == 0,
-            "meta": meta,
-            "checks": [
-                {"name": r.name, "status": r.status, "summary": r.summary, "details": list(r.details)}
-                for r in results
-            ],
-        },
-        indent=2,
-    )
+def render_json(results: list[Result], meta: dict, strict: bool, diff: dict | None = None) -> str:
+    payload = {
+        "ok": exit_code(results, strict) == 0,
+        "meta": meta,
+        "checks": [
+            {"name": r.name, "status": r.status, "summary": r.summary, "details": list(r.details)}
+            for r in results
+        ],
+    }
+    if diff is not None:
+        payload["diff"] = diff
+    return json.dumps(payload, indent=2)
 
 
 def main() -> None:
@@ -904,6 +1354,8 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="show detail lines for passing checks too")
     parser.add_argument("--save-snapshot", metavar="PATH", help="also write the raw grids to a local JSON file")
     parser.add_argument("--from-snapshot", metavar="PATH", help="audit a saved snapshot offline (no credentials, no API calls)")
+    parser.add_argument("--compare", metavar="PATH", help="also report what changed vs an earlier --save-snapshot (added/removed/changed rows)")
+    parser.add_argument("--stale-days", type=int, default=3, help="warn when an OPEN row hasn't been re-scraped in this many days (default 3)")
     args = parser.parse_args()
 
     if args.from_snapshot:
@@ -923,13 +1375,21 @@ def main() -> None:
             json.dump(grids.to_snapshot(), f, indent=2, default=str)
 
     sheet = Sheet(grids)
-    opts = Options(expect_rows=args.expect_rows, strict=args.strict)
+    opts = Options(expect_rows=args.expect_rows, strict=args.strict, stale_days=args.stale_days)
     results = run_checks(sheet, opts)
 
+    diff = None
+    if args.compare:
+        with open(args.compare, encoding="utf-8") as f:
+            baseline = Grids.from_snapshot(json.load(f))
+        diff = diff_snapshots(baseline, grids)
+
     if args.json:
-        print(render_json(results, grids.meta, args.strict))
+        print(render_json(results, grids.meta, args.strict, diff))
     else:
         print(render_text(results, grids.meta, args.verbose))
+        if diff is not None:
+            print(render_diff(diff, args.compare, opts.max_detail))
     raise SystemExit(exit_code(results, args.strict))
 
 
