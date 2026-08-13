@@ -1,0 +1,382 @@
+"""Offline tests for the eligibility policy and the payout allocation. No sheet, no network.
+
+`plan_tracking_submissions` is a pure f(header, rows), so the whole "what gets posted where, and
+what deliberately doesn't" policy is testable without touching Google Sheets — the same shape as
+scripts/backfill_profit_columns.py:plan_profit_backfill.
+"""
+
+import pytest
+
+import sync_tracking
+
+from buying_groups.base import PayoutRecord
+from models.order import STATUSES
+from sheets.ledger_sync import HEADER
+from sync_tracking import (
+    INSURANCE_COL,
+    PAYOUT_AMOUNT_COL,
+    PAYOUT_DATE_COL,
+    STATUS_COL,
+    SUBMITTED_COL,
+    _first_n_packages,
+    _tick_submitted,
+    _status_rank,
+    allocate_payouts,
+    plan_tracking_submissions,
+)
+
+HEADER_LIST = list(HEADER)
+
+
+def row(**values) -> list:
+    """Build a full-width sheet row, positionally, from column names."""
+    cells = [""] * len(HEADER_LIST)
+    for name, value in values.items():
+        cells[HEADER_LIST.index(name)] = value
+    return cells
+
+
+def shipped(order_id, tracking, group="BFMR", **overrides):
+    base = dict(
+        **{"Order ID": order_id, "Order Date": "2026-08-01", "Item Name": "Widget",
+           "Quantity": 1, "Tracking Number": tracking, "Shipment": 1,
+           "Status": "shipped", "Total Cost": 100, "Buying Group": group}
+    )
+    base.update(overrides)
+    return row(**base)
+
+
+class TestEligibility:
+    def test_a_shipped_row_with_a_tracking_number_is_submitted(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [shipped("O1", "T1")])
+        assert [s.order_id for s in plan["by_group"]["BFMR"]] == ["O1"]
+
+    def test_a_delivered_row_is_still_submitted(self):
+        """A row that shipped AND delivered between two runs was never submitted. Filtering to
+        `shipped` only would drop it permanently, and with it the reimbursement."""
+        plan = plan_tracking_submissions(
+            HEADER_LIST, [shipped("O1", "T1", **{"Status": "delivered"})]
+        )
+        assert plan["by_group"]["BFMR"]
+
+    def test_a_cancelled_row_is_never_submitted(self):
+        plan = plan_tracking_submissions(
+            HEADER_LIST, [shipped("O1", "T1", **{"Status": "cancelled"})]
+        )
+        assert not plan["by_group"] and plan["skipped_cancelled"] == 1
+
+    def test_a_row_without_a_tracking_number_waits(self):
+        plan = plan_tracking_submissions(
+            HEADER_LIST, [shipped("O1", "", **{"Status": "ordered"})]
+        )
+        assert not plan["by_group"] and plan["skipped_no_tracking"] == 1
+
+    def test_a_blank_order_id_row_is_ignored_entirely(self):
+        """Same rule sync_csv_to_sheet applies: a row with no Order ID is not a real order."""
+        plan = plan_tracking_submissions(HEADER_LIST, [shipped("", "T1")])
+        assert not plan["by_group"]
+        assert plan["skipped_no_tracking"] == 0 and plan["skipped_cancelled"] == 0
+
+    @pytest.mark.parametrize("group", ["Unclassified", "", "SomeGroupWeDontSupport"])
+    def test_an_unroutable_group_is_counted_not_guessed_at(self, group):
+        """An Unclassified row is a real warehouse someone forgot to configure. Making it visible is
+        the whole point — silently picking a provider could ship someone else's package's payout."""
+        plan = plan_tracking_submissions(HEADER_LIST, [shipped("O1", "T1", group=group)])
+        assert not plan["by_group"]
+        assert sum(plan["skipped_unroutable"].values()) == 1
+
+    def test_the_example_configs_spelling_of_maxoutdeals_still_routes(self):
+        plan = plan_tracking_submissions(
+            HEADER_LIST, [shipped("O1", "T1", group="MaxOutDeals")]
+        )
+        assert list(plan["by_group"]) == ["MOD"]
+
+    def test_row_numbers_account_for_the_header_row(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [shipped("O1", "T1"), shipped("O2", "T2")])
+        assert [s.row_number for s in plan["by_group"]["BFMR"]] == [2, 3]
+
+
+class TestUnresolvedSplitQuantity:
+    def test_a_star_quantity_row_is_flagged_rather_than_submitted(self):
+        """The undisclosed-split safety net writes Quantity '*' when a retailer rotates a tracking
+        number on a same-SKU multi-box line. No API accepts '*' — but skipping it SILENTLY means
+        that box is never submitted and never paid, so the caller alerts on this list."""
+        plan = plan_tracking_submissions(
+            HEADER_LIST, [shipped("O1", "T1", **{"Quantity": "*", "Total Cost": ""})]
+        )
+        assert not plan["by_group"]
+        assert plan["unresolved_split"] == [(2, "O1", "T1")]
+
+    def test_a_normal_row_never_lands_in_the_unresolved_list(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [shipped("O1", "T1")])
+        assert plan["unresolved_split"] == []
+
+
+class TestPackageGrouping:
+    def test_rows_sharing_a_tracking_number_are_recorded_as_one_package(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [
+            shipped("O1", "T1", **{"Item Name": "A", "Total Cost": 800}),
+            shipped("O1", "T1", **{"Item Name": "B", "Total Cost": 200}),
+        ])
+        assert plan["rows_by_tracking"] == {"T1": [2, 3]}
+
+    def test_limit_takes_whole_packages_never_half_a_box(self):
+        """Submitting half a box would under-report its value to MOD (which sums per tracking
+        number) and strand the rest — the number would then read as already known."""
+        plan = plan_tracking_submissions(HEADER_LIST, [
+            shipped("O1", "T1", **{"Item Name": "A"}),
+            shipped("O1", "T1", **{"Item Name": "B"}),
+            shipped("O2", "T2"),
+        ])
+        kept = _first_n_packages(plan["by_group"]["BFMR"], 1)
+        assert [r.tracking_number for r in kept] == ["T1", "T1"]
+
+
+class TestPayoutAllocation:
+    def _plan(self):
+        return plan_tracking_submissions(HEADER_LIST, [
+            shipped("O1", "T1", **{"Item Name": "A", "Total Cost": 800}),
+            shipped("O1", "T1", **{"Item Name": "B", "Total Cost": 200}),
+        ])
+
+    def test_a_package_payout_is_split_pro_rata_and_sums_to_the_original(self):
+        """A payout arrives per PACKAGE but the ledger is per (shipment x item). Writing the full
+        amount onto both rows would book it twice in every column sum — the same trap order-level
+        shipping already avoids in ledger_sync._profit_formula."""
+        plan = self._plan()
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=1100.0, insurance=5.0, payout_date="2026-08-10")],
+            plan["rows_by_tracking"], plan["costs_by_row"],
+        )
+        assert writes[2][PAYOUT_AMOUNT_COL] == 880.0   # 800/1000 of 1100
+        assert writes[3][PAYOUT_AMOUNT_COL] == 220.0   # 200/1000 of 1100
+        assert sum(w[PAYOUT_AMOUNT_COL] for w in writes.values()) == 1100.0
+        assert sum(w[INSURANCE_COL] for w in writes.values()) == 5.0
+
+    def test_the_payout_date_is_repeated_on_every_row_of_the_package(self):
+        plan = self._plan()
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=10.0, payout_date="2026-08-10")],
+            plan["rows_by_tracking"], plan["costs_by_row"],
+        )
+        assert {w[PAYOUT_DATE_COL] for w in writes.values()} == {"2026-08-10"}
+
+    def test_several_records_for_one_package_are_summed_before_splitting(self):
+        """BFMR reports per deal line, so a box holding two deals returns two records for one
+        tracking number."""
+        plan = self._plan()
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=600.0), PayoutRecord("T1", payout_amount=400.0)],
+            plan["rows_by_tracking"], plan["costs_by_row"],
+        )
+        assert sum(w[PAYOUT_AMOUNT_COL] for w in writes.values()) == 1000.0
+
+    def test_unpriced_rows_split_evenly_instead_of_dividing_by_zero(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [
+            shipped("O1", "T1", **{"Item Name": "A", "Total Cost": ""}),
+            shipped("O1", "T1", **{"Item Name": "B", "Total Cost": ""}),
+        ])
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=100.0)],
+            plan["rows_by_tracking"], plan["costs_by_row"],
+        )
+        assert [w[PAYOUT_AMOUNT_COL] for w in writes.values()] == [50.0, 50.0]
+
+    def test_an_unpaid_package_gets_no_payout_cell_at_all(self):
+        """Not a zero. `_profit_formula` reads a blank Payout Amount as "not paid out yet" and
+        renders blank; a literal 0 makes it compute `0 - Total Cost - ...`, i.e. a large fictitious
+        LOSS on a perfectly healthy order."""
+        plan = self._plan()
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=None, status="")],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+        )
+        assert writes == {}
+
+    def test_a_settled_package_with_no_premium_records_a_real_zero(self):
+        """Once the group has PAID and still reports no premium line, there was never a charge —
+        0 is a fact, and a uniformly-filled column beats a sparse one."""
+        plan = self._plan()
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=100.0, insurance=None)],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+            plan["insurance_by_row"],
+        )
+        assert writes[2][INSURANCE_COL] == 0.0
+
+    def test_an_open_package_with_no_premium_is_left_untouched(self):
+        """BFMR posts the premium line BEFORE it pays, so a missing one on an unpaid package may
+        simply not have been posted yet. Writing 0 there would assert something not yet known."""
+        plan = self._plan()
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=None, insurance=None, status="")],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+            plan["insurance_by_row"],
+        )
+        assert writes == {}
+
+    def test_an_inferred_zero_never_overwrites_a_hand_typed_premium(self):
+        """Insurance was hand-entered for months. An inferred 0 written over a real figure would
+        erase a cost and overstate that row's profit by exactly what was paid to insure it."""
+        plan = plan_tracking_submissions(HEADER_LIST, [
+            shipped("O1", "T1", **{"Item Name": "A", "Total Cost": 800, "Insurance": 4.5}),
+            shipped("O1", "T1", **{"Item Name": "B", "Total Cost": 200}),
+        ])
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=100.0, insurance=None)],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+            plan["insurance_by_row"],
+        )
+        assert INSURANCE_COL not in writes[2], "the typed 4.5 survives"
+        assert writes[3][INSURANCE_COL] == 0.0, "the blank row still gets its zero"
+
+    def test_a_reported_premium_still_wins_over_a_typed_value(self):
+        """The group's own figure is authoritative; only the INFERRED zero defers to a human."""
+        plan = plan_tracking_submissions(
+            HEADER_LIST, [shipped("O1", "T1", **{"Total Cost": 100, "Insurance": 4.5})]
+        )
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=100.0, insurance=7.4)],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+            plan["insurance_by_row"],
+        )
+        assert writes[2][INSURANCE_COL] == 7.4
+
+    def test_a_reported_zero_insurance_is_written(self):
+        """MOD genuinely never charges insurance, so 0.0 is a fact worth recording — and it has to
+        be distinguishable from BFMR's "no idea"."""
+        plan = self._plan()
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=100.0, insurance=0.0)],
+            plan["rows_by_tracking"], plan["costs_by_row"],
+        )
+        assert writes[2][INSURANCE_COL] == 0.0
+
+    def test_a_payout_for_a_tracking_number_not_on_the_sheet_is_dropped(self):
+        """The group may hold packages we never recorded (bought outside this ledger). Writing them
+        somewhere would be worse than ignoring them."""
+        plan = self._plan()
+        writes = allocate_payouts(
+            [PayoutRecord("UNKNOWN", payout_amount=99.0)],
+            plan["rows_by_tracking"], plan["costs_by_row"],
+        )
+        assert writes == {}
+
+
+class TestStatusOnlyMovesForward:
+    """The groups own `paid` / `return`, but their reports are snapshots, so a write must never walk
+    a row backwards."""
+
+    def _plan(self, current_status="delivered"):
+        return plan_tracking_submissions(
+            HEADER_LIST,
+            [shipped("O1", "T1", group="MOD", **{"Status": current_status})],
+        )
+
+    def test_a_payout_advances_a_delivered_row_to_paid(self):
+        plan = self._plan("delivered")
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=100.0, status="paid")],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+        )
+        assert writes[2][STATUS_COL] == "paid"
+
+    def test_a_hand_typed_mod_return_survives_every_later_run(self):
+        """MOD publishes no return signal, so a return is typed on the sheet by hand — while MOD
+        goes on reporting that package as received (= paid) forever. Without this guard every run
+        would silently undo the correction."""
+        plan = self._plan("return")
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=100.0, status="paid")],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+        )
+        assert STATUS_COL not in writes[2]
+        assert writes[2][PAYOUT_AMOUNT_COL] == 100.0  # the money still updates
+
+    def test_a_group_with_no_opinion_never_touches_the_status(self):
+        plan = self._plan("shipped")
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=100.0, status="")],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+        )
+        assert STATUS_COL not in writes[2]
+
+    def test_a_return_still_overrides_an_earlier_paid(self):
+        plan = self._plan("paid")
+        writes = allocate_payouts(
+            [PayoutRecord("T1", payout_amount=100.0, status="return")],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+        )
+        assert writes[2][STATUS_COL] == "return"
+
+    def test_every_ledger_status_is_rankable(self):
+        """A status missing from _STATUS_RANK ranks -1, losing even to "ordered" — which is how
+        "paid" and "return" were silently demoted before this was noticed."""
+        assert all(_status_rank(s) >= 0 for s in STATUSES)
+
+
+class TestTrackingSubmittedCheckbox:
+    def _plan(self, **overrides):
+        return plan_tracking_submissions(HEADER_LIST, [shipped("O1", "T1", **overrides)])
+
+    def test_nothing_is_ticked_on_a_dry_run(self):
+        assert _tick_submitted({2}, self._plan(), apply=False) == {}
+
+    def test_an_accepted_row_writes_a_real_boolean(self):
+        """A real bool, not the string "TRUE" — a Google Sheets checkbox only ticks for a boolean,
+        and the RAW write that carries it stores a string as a string."""
+        assert _tick_submitted({2}, self._plan(), apply=True)[2][SUBMITTED_COL] is True
+
+    def test_an_already_ticked_row_is_left_alone(self):
+        """Re-writing True over True is harmless but would queue a cell write and a formula re-stamp
+        for every package on every run."""
+        assert _tick_submitted({2}, self._plan(**{"Tracking Submitted": True}), apply=True) == {}
+
+    def test_a_formatted_read_of_a_ticked_box_also_counts_as_ticked(self):
+        """A FORMATTED read returns the string "TRUE" where an unformatted one returns a bool; both
+        have to mean the same thing or the box gets re-written forever."""
+        assert _tick_submitted({2}, self._plan(**{"Tracking Submitted": "TRUE"}), apply=True) == {}
+
+    def test_an_unticked_box_does_not_block_a_later_tick(self):
+        plan = self._plan(**{"Tracking Submitted": False})
+        assert _tick_submitted({2}, plan, apply=True)[2][SUBMITTED_COL] is True
+
+    def test_a_row_that_was_not_submitted_is_not_ticked(self):
+        assert _tick_submitted(set(), self._plan(), apply=True) == {}
+
+
+class TestNeedsManualAlerting:
+    """A Best Buy combined carton can't be submitted by any retry of ours, so it gets its own alert.
+
+    These assert the WIRING — that `needs_manual` reaches an alert with an actionable subject and is
+    excluded from insurance — rather than re-testing the BFMR detection itself.
+    """
+
+    def test_a_needs_manual_result_alerts_separately_from_a_failure(self, monkeypatch):
+        from buying_groups.base import SubmissionResult
+
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append(subject))
+
+        result = SubmissionResult(needs_manual=[("T1", "duplicate tracking, resubmit as T1B")])
+        sync_tracking._alert(
+            True,
+            f"ACTION NEEDED — BFMR: {len(result.needs_manual)} package(s) could not be submitted",
+            "\n\n".join(r for _t, r in result.needs_manual),
+        )
+        assert sent and sent[0].startswith("ACTION NEEDED")
+
+    def test_the_summary_names_them_so_a_run_log_cannot_read_as_clean(self):
+        from buying_groups.base import SubmissionResult
+
+        summary = SubmissionResult(submitted=["A"], needs_manual=[("T1", "…")]).summary()
+        assert "1 need manual action" in summary
+
+
+class TestColumnsExist:
+    def test_the_columns_this_module_writes_are_real_schema_columns(self):
+        """These are looked up by name against HEADER at write time; a rename would otherwise fail
+        only at runtime, against the live sheet."""
+        for column in (INSURANCE_COL, PAYOUT_AMOUNT_COL, PAYOUT_DATE_COL,
+                       STATUS_COL, SUBMITTED_COL):
+            assert column in HEADER_LIST

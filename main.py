@@ -42,6 +42,7 @@ from functools import lru_cache  # noqa: E402
 from alerts.notifier import alert  # noqa: E402
 from config.cards import load_cards, tag_cards  # noqa: E402
 from config.profiles import load_profiles_for_retailer  # noqa: E402
+from config.settings import settings  # noqa: E402
 from config.warehouses import load_warehouses, tag_and_filter_personal  # noqa: E402
 from output.csv_writer import write_csv  # noqa: E402
 from scrapers.amazon import AmazonScraper  # noqa: E402
@@ -180,6 +181,42 @@ def main(retailers: list[str]) -> None:
                 )
                 continue
             run_scrape(scraper_cls(profile))
+
+    run_buying_group_sync()
+
+
+def run_buying_group_sync() -> None:
+    """Post newly-shipped tracking numbers to the buying groups and read their payouts back.
+
+    Runs AFTER every scraper, inside the same run lock, because it reads the sheet the scrapers have
+    just finished writing — a tracking number discovered this run is submitted in the same run.
+
+    Failures here never fail the run: the scraped orders are already safely on the sheet, and the
+    submission is retried on the next pass. Same isolation rule as run_scrape.
+
+    OFF BY DEFAULT, behind BUYING_GROUP_SYNC_ENABLED. This path submits to third parties and files
+    BFMR insurance, which spends real money per shipment — and none of it has been exercised against
+    a live account yet. So the wiring exists (nobody has to remember to add it later) but stays
+    inert until the manual validation in the plan has actually been done:
+
+        python -m scripts.bg_probe          # read-only; settles the open API questions
+        python -m sync_tracking             # dry run; shows exactly what would be sent
+        python -m sync_tracking --apply --limit 1
+    """
+    if not settings.buying_group_sync_enabled:
+        log.info(
+            "Buying-group sync is disabled (set BUYING_GROUP_SYNC_ENABLED=1 once you've validated "
+            "it manually — see `python -m sync_tracking --help`)."
+        )
+        return
+    try:
+        from sync_tracking import run as run_tracking_sync  # local: keeps `import main` cheap
+
+        run_tracking_sync(apply=True)
+    except Exception:
+        log.exception("Buying-group sync failed")
+        alert("Buying-group sync failed",
+              "Tracking numbers may not have been submitted. Check logs/run.log.")
 
 
 if __name__ == "__main__":
