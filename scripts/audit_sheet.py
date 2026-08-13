@@ -44,6 +44,7 @@ from sheets.ledger_sync import (
     HEADER,
     _INT_FIELDS,
     _NUMERIC_FIELDS,
+    _STATUS_RANK,
     _parse_display_number,
     _profit_formula,
 )
@@ -1106,6 +1107,73 @@ def check_no_formula_errors(sheet: Sheet, opts: Options) -> Result:
     )
 
 
+@check("payout_is_cost_weighted")
+def check_payout_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
+    """A payout arrives per PACKAGE, but the ledger is one row per (shipment x item).
+
+    So a box holding two items has two rows behind one tracking number, and `sync_tracking` splits the
+    payout between them by each row's share of the package's Total Cost — writing the full amount to
+    each would book the group's money twice. This asserts the split actually happened: rows sharing
+    `(Order ID, Tracking Number)` must show the same Payout/Cost ratio.
+
+    Nothing else can catch a double-booked payout. `Total Profit` reads Payout Amount straight from
+    the cell and re-derives nothing, so a doubled payout just reads as a larger, plausible profit.
+    """
+    packages: dict[tuple, list[tuple[int, float, float]]] = {}
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        key = sheet.tracking_key(sheet.grids.formatted, row_number)
+        if key is None:
+            continue
+        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount"))
+        cost = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Total Cost"))
+        if payout is None or not cost:
+            continue
+        packages.setdefault(key, []).append((row_number, payout, cost))
+
+    offenders, checked = [], 0
+    for key, rows in packages.items():
+        if len(rows) < 2:
+            continue
+        checked += 1
+        ratios = {round(payout / cost, 4) for _, payout, cost in rows}
+        if len(ratios) > 1:
+            detail = ", ".join(f"row {n}: {p}/{c}={p / c:.4f}" for n, p, c in rows)
+            offenders.append(f"order {key[0]} package {key[1]}: {detail}")
+    if not offenders:
+        return Result("payout_is_cost_weighted", "PASS", f"{checked} multi-row package(s) split pro-rata")
+    return Result(
+        "payout_is_cost_weighted", "FAIL",
+        f"{len(offenders)} package(s) don't split their payout by cost -- the money may be booked twice",
+        _truncate(offenders, opts.max_detail),
+    )
+
+
+@check("paid_rows_have_a_payout")
+def check_paid_rows_have_a_payout(sheet: Sheet, opts: Options) -> Result:
+    """A row the buying group reports as `paid` must carry the amount it was paid.
+
+    `paid` is terminal, so the row is never revisited — and `Total Profit` reads BLANK until Payout
+    Amount is filled. A paid row with no amount is therefore permanently missing from the P&L, which
+    is the one number this ledger exists to produce, with nothing to announce it.
+    """
+    offenders = []
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
+        if status != "paid":
+            continue
+        payout = sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount")
+        if payout == "" or payout is None:
+            order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
+            offenders.append(f"row {row_number}: order {order_id} is paid but has no Payout Amount")
+    if not offenders:
+        return Result("paid_rows_have_a_payout", "PASS", "every paid row carries its payout")
+    return Result(
+        "paid_rows_have_a_payout", "FAIL",
+        f"{len(offenders)} paid row(s) have no payout -- they're missing from the P&L permanently",
+        _truncate(offenders, opts.max_detail),
+    )
+
+
 @check("profit_blank_despite_payout")
 def check_profit_blank_despite_payout(sheet: Sheet, opts: Options) -> Result:
     """A paid-out row whose Total Profit renders BLANK — the real signature of a broken formula.
@@ -1334,7 +1402,7 @@ def diff_snapshots(before: Grids, after: Grids, ignore=_DIFF_IGNORED_COLUMNS) ->
     added = [describe(new, n) for k, n in new_rows.items() if k not in old_rows]
     removed = [describe(old, n) for k, n in old_rows.items() if k not in new_rows]
 
-    changed = []
+    changed, regressed = [], []
     columns = [c for c in new.header if c not in ignore]
     for key, new_row_number in new_rows.items():
         old_row_number = old_rows.get(key)
@@ -1345,11 +1413,23 @@ def diff_snapshots(before: Grids, after: Grids, ignore=_DIFF_IGNORED_COLUMNS) ->
             now = new.cell(new.grids.formatted, new_row_number, column)
             if str(was) != str(now):
                 changed.append(f"{key[0]} ship {key[3]} | {column}: {was!r} -> {now!r}")
+        # STATUS MUST ONLY MOVE FORWARD. sync_tracking drops any write that would walk a row
+        # backwards, and calls that guard load-bearing for MOD returns specifically: MOD publishes no
+        # return signal, so a return is typed onto the sheet BY HAND while MOD keeps reporting that
+        # package as received (= paid) forever. A regression here means the guard let one through and
+        # a human correction was silently undone -- which no single-snapshot check can ever see.
+        before = str(old.cell(old.grids.formatted, old_row_number, "Status")).strip().lower()
+        after = str(new.cell(new.grids.formatted, new_row_number, "Status")).strip().lower()
+        rank_before = _STATUS_RANK.get(before, -1)
+        rank_after = _STATUS_RANK.get(after, -1)
+        if before != after and rank_after < rank_before:
+            regressed.append(f"{key[0]} ship {key[3]}: status went BACKWARDS {before!r} -> {after!r}")
 
     return {
         "added": added,
         "removed": removed,
         "changed": changed,
+        "status_regressed": regressed,
         "rows_before": len(old_rows),
         "rows_after": len(new_rows),
         "ignored_columns": list(ignore),
@@ -1364,9 +1444,16 @@ def render_diff(diff: dict, source: str, max_detail: int) -> str:
         f"{len(diff['changed'])} cell(s) changed"
         + (f"  (ignoring {', '.join(diff['ignored_columns'])})" if diff["ignored_columns"] else "")
     )
-    for label, entries in (("ADDED", diff["added"]), ("REMOVED", diff["removed"]), ("CHANGED", diff["changed"])):
+    if diff.get("status_regressed"):
+        lines.append(f"  !! {len(diff['status_regressed'])} row(s) moved BACKWARDS in status")
+    for label, entries in (
+        ("REGRESSED", diff.get("status_regressed") or []),
+        ("ADDED", diff["added"]),
+        ("REMOVED", diff["removed"]),
+        ("CHANGED", diff["changed"]),
+    ):
         for entry in _truncate(entries, max_detail):
-            lines.append(f"  {label:<8} {entry}")
+            lines.append(f"  {label:<9} {entry}")
     return "\n".join(lines)
 
 

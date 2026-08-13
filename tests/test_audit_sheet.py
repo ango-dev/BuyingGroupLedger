@@ -740,6 +740,69 @@ class TestReviewFindings:
         assert "informational" in text
 
 
+class TestBuyingGroupPayouts:
+    """Money invariants introduced with the BFMR / MaxOutDeals posting step."""
+
+    def test_a_payout_written_in_full_to_every_row_of_one_package_is_caught(self):
+        """A payout arrives per PACKAGE; a box with two items has two rows behind one tracking
+        number. Writing the full amount to each books the group's money twice, and Total Profit
+        re-derives nothing -- it just reads as a larger, plausible profit."""
+        a = row_cells(2, **{"Order ID": Cell("O-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1"),
+                            "Total Cost": Cell(600.0), "Payout Amount": Cell(1000.0)})
+        b = row_cells(3, **{"Order ID": Cell("O-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1"),
+                            "Total Cost": Cell(400.0), "Payout Amount": Cell(1000.0)})
+        assert result_for(build(a, b), "payout_is_cost_weighted").status == "FAIL"
+
+    def test_a_correctly_split_payout_passes(self):
+        a = row_cells(2, **{"Order ID": Cell("O-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1"),
+                            "Total Cost": Cell(600.0), "Payout Amount": Cell(600.0)})
+        b = row_cells(3, **{"Order ID": Cell("O-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1"),
+                            "Total Cost": Cell(400.0), "Payout Amount": Cell(400.0)})
+        assert result_for(build(a, b), "payout_is_cost_weighted").status == "PASS"
+
+    def test_a_paid_row_with_no_payout_is_permanently_missing_from_the_pl(self):
+        """`paid` is terminal, so the row is never revisited, and Total Profit reads blank without an
+        amount -- the row drops out of the P&L for good with nothing to announce it."""
+        sheet = build(row_cells(2, Status=Cell("paid"), **{"Payout Amount": Cell("")}))
+        assert result_for(sheet, "paid_rows_have_a_payout").status == "FAIL"
+
+    def test_a_paid_row_with_its_payout_passes(self):
+        sheet = build(row_cells(2, Status=Cell("paid"), **{"Payout Amount": Cell(1200.0, fmt="currency")}))
+        assert result_for(sheet, "paid_rows_have_a_payout").status == "PASS"
+
+    def test_an_unpaid_row_without_a_payout_is_not_flagged(self):
+        assert result_for(build(row_cells(2, Status=Cell("shipped"))), "paid_rows_have_a_payout").status == "PASS"
+
+
+class TestStatusRegression:
+    """sync_tracking drops any write that walks a row backwards, and calls that guard load-bearing:
+    MOD publishes no return signal, so a return is typed in BY HAND while MOD keeps reporting the
+    package as received (= paid) forever. A regression means a human correction was silently undone --
+    which no single-snapshot check can see, only a before/after comparison."""
+
+    def test_a_status_walking_backwards_is_surfaced(self):
+        before = grids_for(row_cells(2, Status=Cell("return")))
+        after = grids_for(row_cells(2, Status=Cell("paid")))
+        diff = audit_sheet.diff_snapshots(before, after)
+        assert len(diff["status_regressed"]) == 1
+        assert "BACKWARDS" in diff["status_regressed"][0]
+
+    def test_normal_forward_progress_is_not_a_regression(self):
+        before = grids_for(row_cells(2, Status=Cell("shipped")))
+        after = grids_for(row_cells(2, Status=Cell("delivered")))
+        assert audit_sheet.diff_snapshots(before, after)["status_regressed"] == []
+
+    def test_an_unchanged_status_is_not_a_regression(self):
+        grids = grids_for(row_cells(2, Status=Cell("paid")))
+        assert audit_sheet.diff_snapshots(grids, grids)["status_regressed"] == []
+
+    def test_a_regression_is_called_out_in_the_rendered_diff(self):
+        before = grids_for(row_cells(2, Status=Cell("paid")))
+        after = grids_for(row_cells(2, Status=Cell("ordered")))
+        text = audit_sheet.render_diff(audit_sheet.diff_snapshots(before, after), "before.json", 8)
+        assert "BACKWARDS" in text and "REGRESSED" in text
+
+
 class TestCompare:
     """The before/after diff -- the thing that actually answers "did that run update or duplicate?"."""
 
