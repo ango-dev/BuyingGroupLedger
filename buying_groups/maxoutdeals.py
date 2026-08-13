@@ -238,6 +238,16 @@ def _tracking_object(number: str, members: list[TrackingSubmission]) -> dict:
     `amount` is the summed cost of everything in the box; `order` is the retailer order number
     (identical across members, since a package cannot span two orders); `notes` mirrors the shape
     MOD's own example uses ("2-Nintendo-switches") so the dashboard reads naturally.
+
+    **ONLY `tracking` MATTERS TO MOD**. They run their own cost calculator in the
+    receiving tab, and that — surfaced as `EXT TOTAL` in the received-items report — is what they
+    actually reimburse. Everything else here is for the user's own reference in the dashboard.
+
+    That is worth stating because of what it means for a CORRECTED cost. `addtracking` ignores a
+    tracking number already in the system and MOD has no update endpoint, so an `amount` can never be
+    revised after the fact: a discount netted late, a price adjustment, a partial cancel or a
+    ship-and-split re-cost all leave MOD's copy stale forever. Since MOD doesn't read the field, that
+    is cosmetic and needs no detection — do not add drift alerting for it.
     """
     amount = sum(m.total_cost for m in members if m.total_cost is not None)
     return {

@@ -9,7 +9,7 @@ import pytest
 
 import sync_tracking
 
-from buying_groups.base import PayoutRecord
+from buying_groups.base import PayoutRecord, SubmissionResult
 from models.order import STATUSES
 from sheets.ledger_sync import HEADER
 from sync_tracking import (
@@ -371,6 +371,49 @@ class TestNeedsManualAlerting:
 
         summary = SubmissionResult(submitted=["A"], needs_manual=[("T1", "…")]).summary()
         assert "1 need manual action" in summary
+
+
+class TestDeferredManualAlerts:
+    """BFMR's Best Buy check is ASYNCHRONOUS (their 2026-08-13 change), so a package can be absent
+    from My Tracker the instant we re-read after pushing and present a minute later. Alerting on that
+    cries wolf about something BFMR is in the middle of doing correctly — and BFMR emails on receipt
+    anyway. Delivery is the line: by then their side has definitively spoken.
+    """
+
+    @staticmethod
+    def _plan(status):
+        return {
+            "rows_by_tracking": {"T1": [2]},
+            "status_by_row": {2: status},
+        }
+
+    def test_an_undelivered_deferrable_package_holds_its_alert(self):
+        push = SubmissionResult(needs_manual=[("T1", "…")], deferrable={"T1"})
+        assert sync_tracking._is_held("T1", push, self._plan("shipped")) is True
+
+    def test_a_delivered_one_alerts(self):
+        """BFMR's "received" email has either arrived or it hasn't by now, and nothing else in the
+        system would ever mention a package they hold under no spelling."""
+        push = SubmissionResult(needs_manual=[("T1", "…")], deferrable={"T1"})
+        assert sync_tracking._is_held("T1", push, self._plan("delivered")) is False
+
+    def test_a_later_status_than_delivered_also_alerts(self):
+        push = SubmissionResult(needs_manual=[("T1", "…")], deferrable={"T1"})
+        assert sync_tracking._is_held("T1", push, self._plan("paid")) is False
+
+    def test_a_non_deferrable_reason_always_alerts_immediately(self):
+        """A cancelled or missing PURCHASE has nothing to do with timing — no amount of waiting
+        resolves it, so holding those would just delay the news."""
+        push = SubmissionResult(needs_manual=[("T1", "purchase cancelled")])
+        assert sync_tracking._is_held("T1", push, self._plan("shipped")) is False
+
+    def test_holding_the_alert_does_not_unblock_insurance(self):
+        """THE TRAP. `blocked` is built from `needs_manual`, so a deferred package must STAY there:
+        there is no shipment to insure until something lands, and filing against a number BFMR has no
+        record of is a 2xx matching nothing, reported as success, package uninsured."""
+        push = SubmissionResult(needs_manual=[("T1", "…")], deferrable={"T1"})
+        blocked = {t for t, _ in push.failed} | {t for t, _ in push.needs_manual}
+        assert "T1" in blocked
 
 
 class TestColumnsExist:

@@ -770,12 +770,13 @@ class TestSilentlyDroppedSubmission:
         result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
         assert result.submitted == []
         assert result.failed == [], "not a transient failure — no retry of ours can clear it"
-        assert "COMBINED PACKAGE" in result.needs_manual[0][1]
-        assert "529900000009B" in result.needs_manual[0][1]  # names the exact retry spellings
+        assert "NO spelling" in result.needs_manual[0][1]
 
-    def test_the_alert_names_all_three_manual_steps_and_the_article(self, bfmr, transport):
-        """The package is neither submitted NOR insured, and this tool will do neither for it. An
-        alert that only said "rejected" would leave the reader to work that out."""
+    def test_the_alert_leads_with_the_check_that_costs_nothing(self, bfmr, transport):
+        """Since BFMR automated the suffixing (2026-08-13), landing under no spelling at all is
+        AMBIGUOUS: either their Best Buy check is still running, or the submission was dropped. Those
+        want opposite responses, so the message must put the free check first and only then describe
+        the manual repair — the old text prescribed three steps BFMR now performs itself."""
         transport.responses = [
             tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
             FakeResponse(payload={"reservations_response": {}}),
@@ -784,13 +785,15 @@ class TestSilentlyDroppedSubmission:
         result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
         message = result.needs_manual[0][1]
 
-        assert "NOT SUBMITTED AND NOT INSURED" in message
-        assert "ADD THE TRACKING BY HAND" in message
-        assert "FILE THE INSURANCE BY HAND" in message
-        assert "SUPPORT TICKET" in message
-        assert "529900000009B" in message                       # a spelling to try
+        assert "LOOK IN MY TRACKER FIRST" in message
+        assert "RESOLVES ITSELF" in message
+        assert "IF IT IS STILL ABSENT ON THE NEXT RUN" in message
         assert "support.bfmr.com/hc/en-us/articles/50968170907547" in message
         assert "NOTHING TO EDIT ON THE SHEET" in message
+        # The instructions BFMR took over. Telling someone to do these by hand is now busy-work that
+        # also contradicts what their dashboard is already doing.
+        assert "FILE THE INSURANCE BY HAND" not in message
+        assert "ADD THE TRACKING BY HAND to the purchase" not in message
 
     def test_a_manual_fix_is_picked_up_on_the_next_run(self, bfmr, transport):
         """THE ROUND TRIP. Once the package exists in My Tracker under any letter, the next run must
@@ -816,9 +819,9 @@ class TestSilentlyDroppedSubmission:
         assert payout.payout_amount == 1584.0 and payout.status == "paid"
 
     def test_the_hint_does_not_auto_append_letters(self, bfmr, transport):
-        """BFMR pairs the suffixed resubmission with "submit a support ticket providing proof of
-        purchase". A bot that appends letters until something sticks would create records nobody has
-        told support about, on a package whose identity is genuinely ambiguous."""
+        """The suffix is BFMR's to assign, not ours to guess. Since 2026-08-13 they append it
+        server-side after their own Best Buy check, so a bot that sent letters until something stuck
+        would be racing that check and could claim a spelling for the wrong order."""
         transport.responses = [
             tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
             FakeResponse(payload={"reservations_response": {}}),
@@ -827,6 +830,65 @@ class TestSilentlyDroppedSubmission:
         bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
         posted = [b["tracker_data"][0]["tracking_number"] for b in transport.bodies()]
         assert posted == ["529900000009"], "only the number as the retailer printed it"
+
+
+class TestBfmrSuffixesDuplicatesItself:
+    """BFMR's 2026-08-13 change: submitting a tracking number another earner already used triggers a
+    Best Buy check, BFMR APPENDS THE LETTER ITSELF, and the suffixed number can be insured.
+
+    Before this, `_post_tracker_batch` confirmed a push by testing the BARE number against My
+    Tracker. That reading turns BFMR's success into a reported failure — and the damage is not just a
+    misleading alert: `sync_tracking._run_one_group` blocks anything in `needs_manual` from
+    `file_insurance`, so it would skip insuring exactly the cartons BFMR just made insurable.
+    """
+
+    def test_a_number_bfmr_recorded_with_its_own_letter_counts_as_submitted(self, bfmr, transport):
+        transport.responses = [
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
+            FakeResponse(payload={"reservations_response": {}}),
+            # BFMR ran its Best Buy check and stored the shipment under "…B".
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "shipment_id": "S1", "order_id": "O1",
+                     "tracking_number": "529900000009B", "qty": 4}),
+        ]
+        result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
+
+        assert result.submitted == ["529900000009"], "recorded under the LEDGER's spelling"
+        assert result.needs_manual == [], "BFMR's own suffixing is not a failure"
+        assert result.failed == []
+
+    def test_any_letter_in_the_alphabet_counts_not_just_b(self, bfmr, transport):
+        """A carton can hold more orders than BFMR's B/C/D example names, and we no longer choose the
+        letter, so the recogniser has to span the whole alphabet or it fails silently."""
+        transport.responses = [
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "shipment_id": "S1", "order_id": "O1",
+                     "tracking_number": "529900000009Q", "qty": 4}),
+        ]
+        result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
+        assert result.submitted == ["529900000009"]
+        assert result.needs_manual == []
+
+    def test_a_suffixed_package_is_no_longer_withheld_from_insurance(self, bfmr, transport):
+        """The point of the fix. `needs_manual` feeds sync_tracking's `blocked` set, so as long as a
+        BFMR-suffixed carton reads as unsubmitted it is also never insured."""
+        landed = tracker({"reserve_id": "R1", "purchase_id": "P1", "shipment_id": "S1",
+                          "order_id": "O1", "tracking_number": "529900000009B", "qty": 4,
+                          "insurance_status": ""})
+        transport.responses = [
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
+            FakeResponse(payload={"reservations_response": {}}),
+            landed,
+        ]
+        row = submission(order_id="O1", tracking_number="529900000009")
+        push = bfmr.submit_tracking([row])
+        blocked = {t for t, _ in push.failed} | {t for t, _ in push.needs_manual}
+        assert row.tracking_number not in blocked
+
+        transport.responses = [landed, FakeResponse(payload={"success": True})]
+        assert bfmr.file_insurance([row]).submitted == ["529900000009"]
+        filed = [c["data"]["tracking_number"] for c in transport.calls if c.get("data")]
+        assert filed == ["529900000009B"], "filed against the spelling BFMR holds, not the bare one"
 
 
 class TestBfmrPayoutsAndStatus:

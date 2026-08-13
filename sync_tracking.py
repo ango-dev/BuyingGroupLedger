@@ -412,15 +412,19 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
 
     for _tracking, reason in push.needs_manual:
         log.warning("%s: %s", group_key, reason)
-    if push.needs_manual:
+    announce = [
+        (tracking, reason) for tracking, reason in push.needs_manual
+        if not _is_held(tracking, push, plan)
+    ]
+    if announce:
         # Its own alert, deliberately not folded into the one above. This is not a transient error
         # to look at when convenient: the package stays unsubmitted — and therefore unreimbursed —
         # until someone performs the specific steps in the message. Burying it among retryable
         # failures is how a Best Buy combined carton goes unnoticed for weeks.
         _alert(
             apply,
-            f"ACTION NEEDED — {group_key}: {len(push.needs_manual)} package(s) could not be submitted",
-            "\n\n".join(reason for _t, reason in push.needs_manual),
+            f"ACTION NEEDED — {group_key}: {len(announce)} package(s) could not be submitted",
+            "\n\n".join(reason for _t, reason in announce),
         )
 
     insurance = None
@@ -448,6 +452,35 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
     }
     _merge_writes(all_writes, _tick_submitted(ticked, plan, apply))
     return {"push": push, "insurance": insurance, "payouts": payouts}
+
+
+def _is_held(tracking: str, push, plan: dict) -> bool:
+    """Should this package's manual-action alert wait for another run?
+
+    Only for the cases a provider marked `deferrable` — ones that may still resolve on their own —
+    and only while the package is not yet DELIVERED.
+
+    BFMR is the case this exists for. Since 2026-08-13 they handle a duplicate tracking number
+    themselves: a Best Buy check runs, they append a letter, and they email once the package is
+    received. That check is asynchronous, so a package can be genuinely absent from My Tracker the
+    instant we re-read after pushing, and present a minute later — alerting on that would cry wolf
+    about something BFMR is in the middle of doing correctly.
+
+    Delivery is the line because it is where BFMR's side has definitively spoken: their "received"
+    email has either arrived or it hasn't. A delivered package they hold under NO spelling is
+    unambiguous, and nothing else in the system would ever mention it.
+
+    Holding the alert changes NOTHING else. The package stays in `needs_manual`, so it stays out of
+    `file_insurance` — there is no shipment to insure until something lands — and its checkbox stays
+    unticked, which is exactly the at-a-glance signal an unticked box is for.
+    """
+    if tracking not in getattr(push, "deferrable", ()):
+        return False
+    statuses = [
+        plan["status_by_row"].get(row_number, "")
+        for row_number in plan["rows_by_tracking"].get(tracking, [])
+    ]
+    return not any(_status_rank(s) >= _status_rank("delivered") for s in statuses)
 
 
 def _tick_submitted(row_numbers, plan, apply) -> dict[int, dict]:
