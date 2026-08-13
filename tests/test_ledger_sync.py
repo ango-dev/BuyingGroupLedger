@@ -87,12 +87,21 @@ class FakeWorksheet:
                 row.append("")
             row[col_index] = entry["values"][0][0]
 
-    def profit_formulas(self):
-        """{row_number: formula} for every Total Profit cell written this sync."""
+    def _batched_formulas(self, field: str) -> dict:
+        """{row_number: value} for every cell of the given FIELDNAMES column written via
+        batch_update this sync. A single sync can batch-write more than one column now
+        (_reprorate_shipping's Shipping rewrite alongside _write_profit_formulas's Total Profit), so
+        this filters by column letter rather than assuming every batched entry is a profit formula."""
+        col = ledger_sync._COL[field]
         return {
             int("".join(c for c in e["range"] if c.isdigit())): e["values"][0][0]
             for e in self.batched
+            if "".join(c for c in e["range"] if c.isalpha()) == col
         }
+
+    def profit_formulas(self):
+        """{row_number: formula} for every Total Profit cell written this sync."""
+        return self._batched_formulas("total_profit")
 
     def sort(self, *specs, range=None):  # noqa: A002 -- gspread's own parameter name
         """Model gspread's sortRange: reorder rows within `range` by 1-based column specs.
@@ -706,6 +715,101 @@ class TestUndisclosedSplit:
         assert len(sheet.data_rows()) == 1
         assert sheet.data_rows()[0][FIELDNAMES.index("tracking_number")] == "128095"
         assert alerts == []
+
+
+class TestRepeatedTrackingNumberIsAMisRead:
+    """One tracking number on two BOXES of one order is impossible — carriers issue one per package.
+
+    OBSERVED LIVE: the Costco agent fallback returned …348 for both boxes of order
+    1399000007 and dropped …357 entirely. Shipment 2's number therefore "changed", which is exactly
+    the undisclosed-split signature, so the safety net appended a phantom `Quantity "*"` row for a box
+    that does not exist and left the real Shipment 2 alone. The API path had read both numbers
+    correctly minutes earlier.
+
+    The cost of getting this wrong is permanent: nothing ever deletes a row, and the phantom also
+    gives …348 two owning rows, which breaks the tracking-number defer rule on every later run.
+    """
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    def test_a_repeated_number_across_shipments_neither_appends_nor_overwrites(
+        self, sheet, tmp_path, alerts
+    ):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                status="shipped", tracking_number="...348", quantity="1", total_cost="1499.99"),
+            row(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="2",
+                status="shipped", tracking_number="...357", quantity="1", total_cost="1499.99"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                 status="shipped", tracking_number="...348", quantity="1", total_cost="999.99"),
+            dict(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="2",
+                 status="shipped", tracking_number="...348", quantity="1", total_cost="999.99"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
+        assert len(sheet.data_rows()) == 2, "no phantom third box"
+        assert rows[1][FIELDNAMES.index("tracking_number")] == "...348"
+        assert rows[2][FIELDNAMES.index("tracking_number")] == "...357", "the sheet's number wins"
+        # Only the TRACKING is in doubt. Refusing the corrected costs too would throw away the good
+        # data with the bad — and the cost correction is usually why the run happened at all.
+        assert rows[1][FIELDNAMES.index("total_cost")] == 999.99
+        assert rows[2][FIELDNAMES.index("total_cost")] == 999.99
+        assert len(alerts) == 1 and "Repeated tracking number" in alerts[0][0]
+
+    def test_two_skus_in_one_box_share_a_number_legitimately(self, sheet, tmp_path, alerts):
+        """The case the guard must not eat. Shipment is numbered per PHYSICAL PACKAGE, so two items
+        boxed together share a tracking number AND a shipment number — differing shipment values are
+        what makes a repeat impossible, not the repeat itself."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="C2", order_date="2026-08-11", item_name="Mouse", shipment="1",
+                status="ordered", tracking_number="", quantity="1"),
+            row(order_id="C2", order_date="2026-08-11", item_name="Keyboard", shipment="1",
+                status="ordered", tracking_number="", quantity="1"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="C2", order_date="2026-08-11", item_name="Mouse", shipment="1",
+                 status="shipped", tracking_number="1Z999", quantity="1"),
+            dict(order_id="C2", order_date="2026-08-11", item_name="Keyboard", shipment="1",
+                 status="shipped", tracking_number="1Z999", quantity="1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 2
+        for r in sheet.data_rows():
+            assert r[FIELDNAMES.index("tracking_number")] == "1Z999", "written, not suppressed"
+        assert alerts == []
+
+    def test_a_genuine_split_still_appends_its_placeholder_row(self, sheet, tmp_path, alerts):
+        """Regression guard on the safety net itself: a real rotation carries ONE number, so the
+        guard must not fire and the `Quantity "*"` row must still appear."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
+                status="shipped", tracking_number="086084", quantity="15"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
+                 status="shipped", tracking_number="128095", quantity="15"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 2
+        assert len(alerts) == 1 and "Split shipment" in alerts[0][0]
 
 
 class TestLoadOrderState:

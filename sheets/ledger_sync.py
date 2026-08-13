@@ -111,29 +111,22 @@ def _profit_formula(row_number: int) -> str:
     would be stale the moment either is entered, and a delivered row is terminal — never re-scraped —
     so it would stay stale forever.
 
-    SHIPPING IS ALLOCATED PRO-RATA, which is the one non-obvious part. Every retailer repeats the
-    ORDER-level shipping total on each of the order's rows (Best Buy `price.shippingTotal`, Costco
-    `shippingAndHandling`, both Amazon parsers, and all four agent prompts). Subtracting column N
-    as-is would therefore charge a 3-row order its shipping three times over, and credit cashback on
-    it three times, making the column's SUM wrong — the number this ledger exists to get right. So
-    each row takes the share of shipping matching its share of the order's Total Cost:
-
-        s = Shipping * Total Cost / SUMIF(all rows of this Order ID, Total Cost)
-
-    which sums back to exactly one shipping charge per order. IFERROR covers the degenerate case
-    where an order's costs are all blank (division by zero) -> 0.
+    Reads Shipping directly — NO proration happens here. Every scraper/agent emits the order-level
+    shipping total repeated on every row, but sync_csv_to_sheet's _reprorate_shipping rewrites each
+    row's Shipping cell to its own cost-weighted SHARE of that total before this formula ever runs —
+    so by the time it reads the cell, there's nothing left to divide out (2026-08-13; a live SUMIF-
+    based split used to live here, folded straight into this formula, but the user wanted the split
+    itself visible in Shipping rather than only showing up inside Total Profit — see _reprorate_shipping's
+    docstring for why that split has to be computed in Python at sync time, not as a sheet formula).
 
     Returns "" (blank cell, not 0) until Payout Amount is filled, so an un-paid-out row doesn't
     display a large fake loss that would poison a column sum.
     """
     n = row_number
-    oid, ship, cost = _COL["order_id"], _COL["shipping"], _COL["total_cost"]
+    cost, ship = _COL["total_cost"], _COL["shipping"]
     rate, ins, payout = _COL["cashback_rate"], _COL["insurance"], _COL["payout_amount"]
-    prorated_shipping = (
-        f"IFERROR({ship}{n}*{cost}{n}/SUMIF(${oid}$2:${oid},${oid}{n},${cost}$2:${cost}),0)"
-    )
-    profit = f"{payout}{n}+({cost}{n}+s)*{rate}{n}-{cost}{n}-s-{ins}{n}"
-    return f'=IF({payout}{n}="","",IFERROR(LET(s,{prorated_shipping},{profit}),""))'
+    profit = f"{payout}{n}+({cost}{n}+{ship}{n})*{rate}{n}-{cost}{n}-{ship}{n}-{ins}{n}"
+    return f'=IF({payout}{n}="","",IFERROR({profit},""))'
 
 # Furthest-along status wins when two rows of ONE shipment are collapsed in a single sync (see
 # _collapse_records). Mirrors _rollup_status's spirit: cancelled overrides, then the buying-group
@@ -348,6 +341,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     oid_field_idx = FIELDNAMES.index("order_id")
     qty_field_idx = FIELDNAMES.index("quantity")
     total_field_idx = FIELDNAMES.index("total_cost")
+    tracking_field_idx = FIELDNAMES.index("tracking_number")
     # Tracking-number index for the tracking-based deferral (Order ID + Tracking Number). The carrier
     # tracking number is an identity BOTH the API and the agent read identically, so it reconciles rows
     # even when their synthetic Shipment numbers diverge (e.g. Costco: the API numbers shipments by
@@ -381,6 +375,8 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     # 1:1 case (see below), so a shipment carrying two distinct products doesn't mis-merge.
     incoming_skey_count: dict[tuple, int] = {}
     incoming_tkey_count: dict[tuple, int] = {}
+    # Which SHIPMENTS each incoming tracking number claims, per order — the mis-read detector below.
+    incoming_tracking_shipments: dict[tuple, set] = {}
     for rec in collapsed:
         oid = str(rec.get("order_id", "")).strip()
         if oid:
@@ -390,6 +386,35 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             if trk:
                 tk = (rec.get("order_id", ""), trk)
                 incoming_tkey_count[tk] = incoming_tkey_count.get(tk, 0) + 1
+                incoming_tracking_shipments.setdefault(tk, set()).add(rec.get("shipment", ""))
+
+    # ONE TRACKING NUMBER ON TWO DIFFERENT BOXES OF ONE ORDER IS A SCRAPER MIS-READ, NOT A SPLIT.
+    # Two SKUs sharing a carton legitimately share both a tracking number AND a Shipment number
+    # (Shipment is numbered per physical package), so differing Shipment values are the tell.
+    #
+    # OBSERVED LIVE: the Costco AGENT fallback returned …348 for both boxes of order
+    # 1399000007, losing …357. Shipment 2's number therefore "changed", which is exactly the
+    # undisclosed-split signature — so the safety net below appended a phantom Quantity "*" row for a
+    # box that does not exist, left the real Shipment 2 untouched, and gave …348 two owning rows
+    # (which would go on to break the tracking-number defer rule on every later run). The API path
+    # read both numbers correctly minutes earlier, so this is the agent misreading, and the ledger
+    # must not turn a bad read into a permanent fictitious row.
+    #
+    # Scoped to the whole ORDER, not the one number: a path that repeated one number has shown it
+    # cannot be trusted about that order's tracking at all.
+    suspect_orders = {
+        order_id for (order_id, _trk), shipments in incoming_tracking_shipments.items()
+        if len(shipments) > 1
+    }
+    suspect_tracking: list[dict] = []
+    if suspect_orders:
+        for (order_id, trk), shipments in sorted(incoming_tracking_shipments.items()):
+            if len(shipments) > 1:
+                suspect_tracking.append({
+                    "order_id": order_id,
+                    "tracking_number": trk,
+                    "shipments": sorted(str(s) for s in shipments),
+                })
 
     updates = 0
     appends: list[list] = []
@@ -397,6 +422,11 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     written_rows: list[int] = []  # every row touched this sync -> gets its Total Profit formula
     split_events: list[dict] = []
     skipped_blank = 0
+    # Every order this sync touched, and the raw order-level shipping figure it sent for that order
+    # (every row of one order carries the same number) — fed to _reprorate_shipping after the write
+    # loop, once every row's final position on the sheet is settled.
+    touched_order_ids: set[str] = set()
+    raw_shipping_by_order: dict[str, float] = {}
     for record in collapsed:
         # A record with no Order ID can't form a valid upsert key (Order ID + Order Date + Item Name
         # + Shipment), so it never matches an existing row and appends as a permanent orphan/duplicate
@@ -411,11 +441,23 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                 record.get("item_name", ""), record.get("shipment", ""),
             )
             continue
+        touched_order_ids.add(record["order_id"])
+        if record["order_id"] not in raw_shipping_by_order:
+            raw_ship = _parse_display_number(record.get("shipping", ""))
+            if raw_ship is not None:
+                raw_shipping_by_order[record["order_id"]] = raw_ship
         # Driven off FIELDNAMES (the same list csv_writer writes) rather than a second literal
         # copy, so a new column can't land in one place and not the other. .get() tolerates
         # re-syncing an older CSV written before a column was added — the missing value arrives
         # blank, which _merge_row then refuses to write over existing data.
         sheet_row = [_coerce(field, record.get(field, "")) for field in FIELDNAMES]
+        # A mis-read order keeps whatever tracking the sheet already holds: blanking the incoming
+        # value hands the decision to _merge_row's blank-never-overwrites rule, which is exactly the
+        # right default here. Every other field still updates — only the tracking is in doubt, and a
+        # run that also refused the corrected costs would throw away good data with the bad.
+        suspect_tracking_row = record["order_id"] in suspect_orders
+        if suspect_tracking_row:
+            sheet_row[tracking_field_idx] = ""
         key = (
             record["order_id"],
             record["order_date"],
@@ -474,7 +516,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         # split already recorded it), update THAT row instead — so a stable rotated number doesn't
         # re-duplicate every run. Exact-key/shipment-line matches reach here; tracking-number matches
         # can't (they matched on an equal number).
-        if tracking_hdr_idx is not None:
+        if tracking_hdr_idx is not None and not suspect_tracking_row:
             existing_trk = existing_row[tracking_hdr_idx].strip() if tracking_hdr_idx < len(existing_row) else ""
             incoming_trk = str(record.get("tracking_number", "")).strip()
             if existing_trk and incoming_trk and existing_trk != incoming_trk:
@@ -527,6 +569,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         worksheet.update(range_name=f"A{start_row}", values=appends)
         written_rows.extend(range(start_row, start_row + len(appends)))
 
+    _reprorate_shipping(worksheet, touched_order_ids, raw_shipping_by_order)
     _write_profit_formulas(worksheet, written_rows)
 
     if split_events:
@@ -546,11 +589,32 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             "ORIGINAL row's quantity to match), then verify each tracking number:\n\n" + "\n".join(lines),
         )
 
+    if suspect_tracking:
+        lines = [
+            f"- Order {e['order_id']}: tracking {e['tracking_number']} was reported for "
+            f"shipments {', '.join(e['shipments'])}"
+            for e in suspect_tracking
+        ]
+        from alerts.notifier import alert
+
+        alert(
+            f"Repeated tracking number on {len(suspect_tracking)} order(s) — tracking not updated",
+            "One tracking number was reported for two different boxes of the same order, which is "
+            "impossible: a carrier issues one number per package. That means the scrape MIS-READ the "
+            "tracking (the Costco agent fallback has done this, repeating box 1's number for box 2 "
+            "and dropping box 2's).\n\n"
+            "The tracking numbers already on the sheet were LEFT ALONE for these orders, and no rows "
+            "were added. Everything else on those rows — cost, status, delivery date — did update.\n\n"
+            "Nothing to do if the sheet's numbers are right. If they aren't, re-run the retailer on "
+            "its API path (not the agent) and it will correct them:\n\n" + "\n".join(lines),
+        )
+
     log.info(
-        "Sheet sync: %d row(s) updated, %d row(s) appended%s%s.",
+        "Sheet sync: %d row(s) updated, %d row(s) appended%s%s%s.",
         updates,
         len(appends),
         f", {len(split_events)} split-box row(s) added" if split_events else "",
+        f", {len(suspect_tracking)} repeated tracking number(s) ignored" if suspect_tracking else "",
         f", {skipped_blank} skipped (blank Order ID)" if skipped_blank else "",
     )
     # Returned so the caller can decide whether a re-sort is needed: only APPENDS move rows out of
@@ -560,6 +624,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         "updated": updates,
         "appended": len(appends),
         "split_rows": len(split_events),
+        "suspect_tracking": suspect_tracking,
         "skipped_blank": skipped_blank,
     }
 
@@ -663,6 +728,11 @@ def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
     so _merge_row carries that number forward and the RAW row write would replace the formula with a
     frozen value. Re-stamping the formula last restores it.
 
+    Note this does NOT need to run again after _reprorate_shipping changes a sibling row's Shipping
+    value: _profit_formula reads that cell by reference (same-row, no SUMIF), so Sheets recalculates
+    Total Profit live the moment Shipping changes — no re-stamp required for rows this call doesn't
+    otherwise touch.
+
     A failure here is logged, not raised: the scraped data is already safely written, and the next
     sync re-stamps the formula.
     """
@@ -679,6 +749,75 @@ def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
         log.exception(
             "Could not write the Total Profit formula into %d row(s); the row data itself was "
             "written and the next sync will restore the formula.", len(data),
+        )
+
+
+def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
+    """Rewrite the Shipping cell of EVERY row belonging to `order_ids` to that row's cost-weighted
+    SHARE of the order's shipping total (weighted by Total Cost), replacing the
+    raw order-level value every scraper/agent emits.
+
+    Why this is Python at sync time, not a live sheet formula: the only place the true order-level
+    total is ever known is the freshly-scraped record itself — every row of an order carries the SAME
+    number (see OrderItem.shipping). Once this function overwrites a row's Shipping cell with its
+    share, that raw total is gone from the sheet; a live formula would need it to live SOMEWHERE else
+    to divide from (that's what a short-lived separate "Prorated Shipping" column existed for, added
+    then reverted the same day — the user wants the split to just BE the Shipping column, not a
+    second one). So it's computed once, here, from the total this sync just read off the CSV, and
+    applied to EVERY row of the order currently on the sheet — not only the rows this sync happened
+    to touch — so a shipment discovered LATER (the order grows a new box on a re-check) re-derives
+    the whole order's split fresh rather than leaving its older siblings stale.
+
+    _profit_formula reads Shipping directly (same-row reference, no SUMIF), and Sheets recalculates a
+    formula the instant a cell it references changes — so Total Profit updates for every affected
+    sibling row with no extra re-stamp needed here, even though this function never touches the Total
+    Profit column itself.
+
+    Runs AFTER every update/append this sync has already written, so the fresh read below sees final
+    row positions (including any rows just appended) rather than a stale pre-write snapshot. Skipped
+    entirely for an order this sync touched but sent no shipping figure for (a partial re-check that
+    only refreshes tracking, say) — its rows are left exactly as a previous sync last prorated them.
+
+    A failure here is logged, not raised: the scraped row data is already safely written: only the
+    Shipping split may still show the raw order-level number until the next sync repairs it.
+    """
+    if not order_ids:
+        return
+    grid = worksheet.get_all_values()
+    header = grid[0] if grid else []
+    if header != list(HEADER):
+        return  # sync_csv_to_sheet already refused to write in this case; nothing to reprorate
+    oid_i = header.index("Order ID")
+    ship_i = header.index("Shipping")
+    cost_i = header.index("Total Cost")
+    ship_col = _col_letter(ship_i)
+
+    rows_by_order: dict[str, list[int]] = {}
+    for row_number, row in enumerate(grid[1:], start=2):
+        oid = row[oid_i].strip() if oid_i < len(row) else ""
+        if oid in order_ids:
+            rows_by_order.setdefault(oid, []).append(row_number)
+
+    data = []
+    for oid, row_numbers in rows_by_order.items():
+        total = raw_shipping.get(oid)
+        if total is None:
+            continue
+        costs = {n: _parse_display_number(grid[n - 1][cost_i]) if cost_i < len(grid[n - 1]) else None
+                 for n in row_numbers}
+        cost_sum = sum(c for c in costs.values() if c)
+        for n in row_numbers:
+            share = round(total * (costs[n] or 0) / cost_sum, 2) if cost_sum else 0.0
+            data.append({"range": f"{ship_col}{n}", "values": [[share]]})
+
+    if not data:
+        return
+    try:
+        worksheet.batch_update(data, value_input_option="RAW")
+    except Exception:
+        log.exception(
+            "Could not reprorate Shipping for %d order(s); the raw order-level total may still be "
+            "sitting on some of their rows until the next sync.", len(rows_by_order),
         )
 
 
