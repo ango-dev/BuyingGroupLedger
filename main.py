@@ -49,7 +49,7 @@ from scrapers.amazon_business import AmazonBusinessScraper  # noqa: E402
 from scrapers.base import BaseRetailerScraper, LoggedOutError  # noqa: E402
 from scrapers.bestbuy import BestBuyScraper  # noqa: E402
 from scrapers.costco import CostcoScraper  # noqa: E402
-from sheets.ledger_sync import sync_csv_to_sheet  # noqa: E402
+from sheets.ledger_sync import sort_ledger_by_date_desc, sync_csv_to_sheet  # noqa: E402
 
 log = logging.getLogger("main")
 
@@ -137,11 +137,30 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
     log.info("Wrote %d line item(s) to %s", len(items), csv_path)
 
     try:
-        sync_csv_to_sheet(csv_path)
+        result = sync_csv_to_sheet(csv_path)
         log.info("Synced %s into the Google Sheet ledger.", csv_path.name)
     except Exception:
         log.exception("Sheet sync failed for %s", csv_path)
         alert("Sheet sync failed", f"Failed to sync {csv_path} into the ledger. Check logs/run.log.")
+        return
+
+    # Keep the ledger newest-first. Only APPENDS can put rows out of order — an update rewrites a row
+    # where it already sits — so the common re-check run (0 appended) skips this entirely rather than
+    # paying a full re-stamp of every formula each time. Sorting happens AFTER the sync so the row
+    # numbers sync cached from its pre-sync snapshot are never invalidated mid-write.
+    if (result or {}).get("appended"):
+        try:
+            sort_ledger_by_date_desc()
+        except Exception:
+            # The scraped rows are already safely written; a sort failure only leaves them out of
+            # order, which the next append-triggered sort (or scripts/sort_ledger.py) fixes.
+            log.exception("Ledger sort failed after syncing %s", csv_path)
+            alert(
+                "Ledger sort failed",
+                f"Rows from {csv_path.name} were written to the sheet, but the newest-first re-sort "
+                "afterwards failed, so the ledger may be out of order. The data itself is intact. "
+                "Run `python -m scripts.sort_ledger --apply` to fix. Check logs/run.log.",
+            )
 
 
 def main(retailers: list[str]) -> None:

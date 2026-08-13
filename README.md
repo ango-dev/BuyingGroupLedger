@@ -94,6 +94,14 @@ Order Link · Tracking Link · Delivery Address · Card Last 4 · Last Scraped A
 > **Adding** a column is the cheap case: append it to both lists and existing rows just gain a trailing
 > blank — no migration needed.
 
+**Rows are kept newest-first** (Order Date descending, then Order ID, then Shipment ascending — so a
+multi-shipment order's rows stay adjacent and in shipment order). New rows are still *written* at the
+bottom and the sheet is re-sorted afterwards, which is deliberate: the sync caches each matched row's
+number from its pre-sync snapshot and writes updates to that row, so moving rows mid-sync would put
+every update on the wrong one. Sorting only runs when a sync actually **appended** — an update rewrites
+a row where it already sits and can't change the order — so a routine re-check run skips it. Use
+`python -m scripts.sort_ledger` (dry run, then `--apply`) to sort by hand if the order ever drifts.
+
 **Total Cost is per row** = `Quantity × Cost Per Item` for that shipment line (computed in code, not
 trusted from the agent), so the column sums to the order total. **Status** is one of `ordered`,
 `shipped`, `delivered`, `cancelled`. `delivered` and `cancelled` are terminal — the order drops out of
@@ -573,6 +581,7 @@ buying_groups/          BFMR / MaxOutDeals API clients (placeholders)
 tests/                  offline pytest suite (no credentials/network needed)
 run.sh / run.ps1        scheduler entry points
 scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
+scripts/sort_ledger.py  one-off: sort the sheet newest-first (dry run by default)
 scripts/                create_profile, install_cron, install_task_windows
 Dockerfile / docker-compose.yml / docker/entrypoint.sh   containerized, self-scheduling
 ```

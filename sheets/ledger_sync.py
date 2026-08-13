@@ -507,6 +507,79 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         f", {len(split_events)} split-box row(s) added" if split_events else "",
         f", {skipped_blank} skipped (blank Order ID)" if skipped_blank else "",
     )
+    # Returned so the caller can decide whether a re-sort is needed: only APPENDS move rows out of
+    # order (an update rewrites a row in place). Previously returned None; adding a return value is
+    # additive, so callers that ignore it are unaffected.
+    return {
+        "updated": updates,
+        "appended": len(appends),
+        "split_rows": len(split_events),
+        "skipped_blank": skipped_blank,
+    }
+
+
+# Sort order for the ledger: newest orders at the top, and an order's rows kept together beneath it.
+# Order ID + Shipment are tie-breakers, not preferences — without them a multi-shipment order's rows
+# can be scattered among other orders placed the same day. gspread spells descending "des" (not
+# "desc") and raises ValueError on anything else.
+_SORT_SPEC = (("Order Date", "des"), ("Order ID", "asc"), ("Shipment", "asc"))
+
+
+def sort_ledger_by_date_desc(worksheet=None) -> dict:
+    """Sort the ledger newest-first, then re-stamp every Total Profit formula.
+
+    Sorting is done as a SEPARATE step after sync_csv_to_sheet rather than inside it, and that
+    ordering is load-bearing: sync caches each matched row's NUMBER from its pre-sync snapshot
+    (key_to_existing and friends) and writes updates to `A{row_number}`. Moving rows while those
+    numbers are in flight would write every update onto the wrong row — silently, since nothing
+    downstream re-reads to check. So rows only ever move once sync has finished writing.
+
+    This is also why appends still go to the BOTTOM (see sync_csv_to_sheet): a sort is a total
+    ordering, so the insert position can't affect the final result, and appending leaves the
+    "updates never add rows" invariant that the cached row numbers depend on completely intact.
+
+    RE-STAMPING EVERY DATA ROW is required, not optional. _profit_formula emits same-row relative
+    references (Payout/Total Cost/Shipping/Cashback Rate/Insurance all `{col}{n}`), so a row that
+    moves needs the formula for its NEW position. scripts/audit_sheet.py's check_profit_formula_literal
+    fails any row whose stored formula isn't exactly _profit_formula(row_number), which is the tripwire
+    for getting this wrong.
+
+    Returns {"sorted_rows": int, "already_sorted": bool}. Fails soft on the formula re-stamp only
+    (_write_profit_formulas logs rather than raises); a sort failure itself propagates.
+    """
+    worksheet = worksheet or _get_worksheet()
+    existing = worksheet.get_all_values()
+    if not existing or not any(str(cell).strip() for cell in existing[0]):
+        log.info("Ledger sort: sheet is empty, nothing to sort.")
+        return {"sorted_rows": 0, "already_sorted": True}
+
+    header = [str(c) for c in existing[0]]
+    # Same exact-order requirement as sync_csv_to_sheet: sorting addresses columns by position, so a
+    # sheet whose columns are in a different order would be sorted on the wrong ones.
+    if header != list(HEADER):
+        raise RuntimeError(
+            f"Worksheet '{settings.google_sheet_worksheet_name}' has the ledger's columns in a "
+            "different ORDER than the current schema, so sorting would target the wrong columns. "
+            "Nothing was sorted. Run `python -m scripts.reorder_sheet` first."
+        )
+
+    oid_idx = header.index("Order ID")
+    data_rows = [r for r in existing[1:] if oid_idx < len(r) and str(r[oid_idx]).strip()]
+    if len(data_rows) < 2:
+        log.info("Ledger sort: %d data row(s), nothing to reorder.", len(data_rows))
+        return {"sorted_rows": len(data_rows), "already_sorted": True}
+
+    last_row = len(data_rows) + 1  # +1 for the header; data occupies rows 2..last_row
+    # An EXPLICIT range matters: gspread's unranged sort spans the sheet's full row_count, which drags
+    # the trailing empty rows through the data block and would leave blank rows interleaved (which
+    # audit_sheet's check_content_outside_the_schema then flags).
+    cell_range = f"A2:{_col_letter(len(HEADER) - 1)}{last_row}"
+    specs = tuple((header.index(name) + 1, direction) for name, direction in _SORT_SPEC)
+
+    worksheet.sort(*specs, range=cell_range)
+    _write_profit_formulas(worksheet, list(range(2, last_row + 1)))
+    log.info("Ledger sort: %d row(s) sorted newest-first over %s.", len(data_rows), cell_range)
+    return {"sorted_rows": len(data_rows), "already_sorted": False}
 
 
 def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:

@@ -734,3 +734,61 @@ class TestCompare:
         before = grids_for(row_cells(2, **{"Last Scraped At": Cell("2026-08-01T00:00:00Z")}))
         after = grids_for(row_cells(2, **{"Last Scraped At": Cell("2026-08-12T00:00:00Z")}))
         assert audit_sheet.diff_snapshots(before, after)["changed"] == []
+
+
+class TestRowsAreDateDescending:
+    """The ledger is kept newest-first. This is a WARN, not a FAIL: position never affects the upsert
+    (which matches on key), so being out of order is only a readability problem — and it's expected to
+    drift, since main.run_scrape re-sorts only when a sync APPENDED rows."""
+
+    def test_newest_first_passes(self):
+        sheet = build(
+            row_cells(2, **{"Order Date": Cell("2026-08-11")}),
+            row_cells(3, **{"Order Date": Cell("2026-08-06")}),
+            row_cells(4, **{"Order Date": Cell("2026-08-02")}),
+        )
+
+        assert result_for(sheet, "rows_are_date_descending").status == "PASS"
+
+    def test_an_older_row_above_a_newer_one_warns(self):
+        sheet = build(
+            row_cells(2, **{"Order Date": Cell("2026-08-02")}),
+            row_cells(3, **{"Order Date": Cell("2026-08-11")}),
+        )
+
+        result = result_for(sheet, "rows_are_date_descending")
+        assert result.status == "WARN"
+        assert "sort_ledger" in result.summary
+
+    def test_same_order_shipments_out_of_sequence_warns(self):
+        # Shipment 2 above shipment 1 within one order: the tie-breaker exists to keep an order's rows
+        # adjacent AND in shipment order.
+        common = {"Order Date": Cell("2026-08-10"), "Order ID": Cell("BBY01-1")}
+        sheet = build(
+            row_cells(2, **common, **{"Shipment": Cell(2)}),
+            row_cells(3, **common, **{"Shipment": Cell(1)}),
+        )
+
+        assert result_for(sheet, "rows_are_date_descending").status == "WARN"
+
+    def test_same_date_different_orders_sort_by_order_id(self):
+        date = {"Order Date": Cell("2026-08-10")}
+        sheet = build(
+            row_cells(2, **date, **{"Order ID": Cell("AAA-1")}),
+            row_cells(3, **date, **{"Order ID": Cell("ZZZ-9")}),
+        )
+
+        assert result_for(sheet, "rows_are_date_descending").status == "PASS"
+
+    def test_a_single_row_passes(self):
+        assert result_for(build(row_cells(2)), "rows_are_date_descending").status == "PASS"
+
+    def test_it_never_fails_only_warns(self):
+        # Pinned deliberately: a FAIL here would make the audit red over something that cannot corrupt
+        # data, training the eye to ignore red.
+        sheet = build(
+            row_cells(2, **{"Order Date": Cell("2020-01-01")}),
+            row_cells(3, **{"Order Date": Cell("2026-08-11")}),
+        )
+
+        assert result_for(sheet, "rows_are_date_descending").status == "WARN"

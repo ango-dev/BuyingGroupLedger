@@ -752,6 +752,52 @@ def check_dates_are_iso_text(sheet: Sheet, opts: Options) -> Result:
     return Result("dates_are_iso_text", "PASS", f"{checked} date cell(s), all plain ISO text")
 
 
+@check("rows_are_date_descending")
+def check_rows_are_date_descending(sheet: Sheet, opts: Options) -> Result:
+    """The ledger is kept newest-first (Order Date DESC, then Order ID, then Shipment ASC).
+
+    WARN, not FAIL: being out of order is a readability problem, never a data-integrity one -- the
+    upsert matches on key, not position. Drift is expected and self-healing, because main.run_scrape
+    only re-sorts when a sync APPENDED rows (an update rewrites a row in place and can't reorder
+    anything). So a sheet that has only taken updates since its last append is legitimately stale here.
+
+    Worth checking anyway because the two ways it goes wrong are silent: scripts/retag_buying_groups.py
+    deletes rows without re-sorting, and a hand-edited Order Date moves a row's rightful position
+    without moving the row.
+    """
+    keys = []
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        shipment = sheet.cell(sheet.grids.unformatted, row_number, "Shipment")
+        ship_key = ((0, shipment) if isinstance(shipment, (int, float))
+                    and not isinstance(shipment, bool) else (1, str(shipment)))
+        keys.append((
+            row_number,
+            str(sheet.cell(sheet.grids.formatted, row_number, "Order Date")),
+            str(sheet.cell(sheet.grids.formatted, row_number, "Order ID")),
+            ship_key,
+        ))
+    if len(keys) < 2:
+        return Result("rows_are_date_descending", "PASS", f"{len(keys)} row(s), nothing to order")
+
+    offenders = []
+    for (row_a, date_a, oid_a, ship_a), (row_b, date_b, oid_b, ship_b) in zip(keys, keys[1:]):
+        if date_a < date_b:
+            offenders.append(f"row {row_b} ({date_b}) is NEWER than row {row_a} ({date_a}) above it")
+        elif date_a == date_b and (oid_a, ship_a) > (oid_b, ship_b):
+            offenders.append(
+                f"row {row_b} ({oid_b} ship {ship_b[1]}) sorts before row {row_a} "
+                f"({oid_a} ship {ship_a[1]}) on the same date {date_a}"
+            )
+    if offenders:
+        return Result(
+            "rows_are_date_descending", "WARN",
+            f"{len(offenders)} row(s) out of newest-first order -- "
+            "run `python -m scripts.sort_ledger --apply`",
+            _truncate(offenders, opts.max_detail),
+        )
+    return Result("rows_are_date_descending", "PASS", f"{len(keys)} row(s) in newest-first order")
+
+
 # --------------------------------------------------------------------------------------------------
 # Content sanity / anti-scramble canaries
 # --------------------------------------------------------------------------------------------------

@@ -40,6 +40,9 @@ class FakeWorksheet:
         # Total Profit formulas without them also having to land in self.rows.
         self.batched: list[dict] = []
         self.batch_input_options: list = []
+        # Every sort() call, so tests can assert the specs/range production asked for — not just the
+        # resulting row order.
+        self.sort_calls: list[dict] = []
 
     def get_all_values(self):
         # Real gspread ALWAYS returns strings here — it's a FORMATTED read, so a numeric cell comes
@@ -90,6 +93,38 @@ class FakeWorksheet:
             int("".join(c for c in e["range"] if c.isdigit())): e["values"][0][0]
             for e in self.batched
         }
+
+    def sort(self, *specs, range=None):  # noqa: A002 -- gspread's own parameter name
+        """Model gspread's sortRange: reorder rows within `range` by 1-based column specs.
+
+        Faithful in the two ways that matter here. (1) It sorts a SLICE — production always passes an
+        explicit `A2:Y{last}` range, and an unranged sort in real gspread would drag the sheet's
+        trailing blank rows through the data. (2) Ties fall through to the next spec, which is what
+        keeps a multi-shipment order's rows together.
+
+        Numbers sort before strings, matching Sheets' own type ordering — and, more importantly,
+        keeping this from raising TypeError on a mixed-type column the way a bare Python sort would.
+        """
+        first, last = 2, len(self.rows)
+        if range:
+            bounds = range.split(":")
+            first = int("".join(c for c in bounds[0] if c.isdigit()))
+            if len(bounds) > 1 and any(c.isdigit() for c in bounds[1]):
+                last = int("".join(c for c in bounds[1] if c.isdigit()))
+
+        def cell_key(row, column):
+            value = row[column - 1] if column - 1 < len(row) else ""
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return (0, value)
+            return (1, str(value))
+
+        block = self.rows[first - 1:last]
+        # Least-significant spec first, relying on sort stability — that's how a multi-key sort with
+        # mixed directions composes without building one combined key.
+        for column, direction in reversed(specs):
+            block.sort(key=lambda r, c=column: cell_key(r, c), reverse=(direction == "des"))
+        self.rows[first - 1:last] = block
+        self.sort_calls.append({"specs": specs, "range": range})
 
     def append_rows(self, rows):
         self.rows.extend([list(r) for r in rows])
