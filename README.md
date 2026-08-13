@@ -261,6 +261,39 @@ JSON parsing, status normalization, and prompt instructions that data integrity 
 that only a real page can prove — selector accuracy, whether an order actually splits — still needs a
 live run.
 
+### Auditing the sheet
+
+`pytest` proves the *code* is right; it can't see the live sheet. `scripts/audit_sheet.py` checks the
+sheet itself against every invariant the ledger depends on, and **writes nothing, ever** (it
+authenticates with a read-only scope, so it isn't merely well-behaved — it isn't permitted to write):
+
+```bash
+.venv/bin/python -m scripts.audit_sheet                  # Windows: .venv\Scripts\python -m ...
+.venv/bin/python -m scripts.audit_sheet --expect-rows 23 # also assert the row count
+```
+
+It's worth running **before and after** a live run — the diff is what proves a run updated rows
+instead of duplicating them. Exit code is `0` when nothing failed, `1` on a failure (or on a warning
+under `--strict`), so it can gate a scheduled run.
+
+What it checks, and why each one matters: the header matches `HEADER` **exactly** (right names in the
+wrong order is the one failure that scrambles every row with no error — see the column-order warning
+above); no duplicate upsert keys, on all three of the keys `sync_csv_to_sheet` uses; every row's
+`Total Profit` still holds the *live formula* rather than a number frozen from a past read, and that
+formula still points at the current columns; and that the cell **types** are intact — `Shipment` an
+int, `Card Last 4` text with its leading zeros, the money columns numeric rather than `"$1,299.00"`
+text, and the date columns plain ISO text.
+
+That last one is the one to care about. **`Order Date` is part of the upsert key**, so if the date
+columns are ever re-formatted as real Dates, a row without a tracking number will append a duplicate
+on its next re-check. A more general check catches the same class of bug for any key column: it
+builds each row's key twice — once from the displayed text and once from the stored value — and
+fails if they differ, i.e. if a row's identity depends on how you happen to have formatted it.
+
+Two flags make it free to iterate on: `--save-snapshot FILE` dumps the raw sheet, and
+`--from-snapshot FILE` re-audits that dump offline with no credentials and no API calls. `--json`
+emits the same results machine-readably, for diffing a before/after pair.
+
 ---
 
 ## Running
@@ -522,6 +555,7 @@ alerts/notifier.py      email + Discord alerts
 buying_groups/          BFMR / MaxOutDeals API clients (placeholders)
 tests/                  offline pytest suite (no credentials/network needed)
 run.sh / run.ps1        scheduler entry points
+scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
 scripts/                create_profile, install_cron, install_task_windows
 Dockerfile / docker-compose.yml / docker/entrypoint.sh   containerized, self-scheduling
 ```
