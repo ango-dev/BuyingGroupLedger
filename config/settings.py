@@ -16,6 +16,13 @@ def _get_float(name: str, default: float) -> float:
     return float(value) if value else default
 
 
+def _get_bool(name: str, default: bool) -> bool:
+    """Read a flag. Only the affirmative spellings are true — anything else, including a typo, is
+    false. A switch that guards spending money should fail closed."""
+    value = (os.getenv(name) or "").strip().lower()
+    return value in {"1", "true", "yes", "on"} if value else default
+
+
 def _get_rate(name: str, default: float) -> float:
     """Read a rate that may be written either as a decimal fraction (0.02) or a percentage ("2%").
 
@@ -68,6 +75,35 @@ class Settings:
     alert_email_to: str = os.getenv("ALERT_EMAIL_TO", "") or os.getenv("GMAIL_ADDRESS", "")
 
     discord_webhook_url: str = os.getenv("DISCORD_WEBHOOK_URL", "")
+
+    # --- Buying groups (see buying_groups/) -----------------------------------------------------
+    # Master switch for the scheduled buying-group sync in main.run_buying_group_sync. OFF by
+    # default because that path submits to third parties and files BFMR insurance, which spends
+    # real money per shipment — it should only run unattended after a manual dry run and a
+    # one-package live test have been done. `python -m sync_tracking` ignores this: an explicit
+    # command is already an explicit decision.
+    buying_group_sync_enabled: bool = _get_bool("BUYING_GROUP_SYNC_ENABLED", False)
+
+    # These were the last credentials in the repo still read by a bare os.getenv() inside the client
+    # itself, which also meant they depended on something else having imported this module first to
+    # get load_dotenv() called. They're read here like every other credential now.
+
+    # BFMR authenticates with TWO headers, API-KEY and API-SECRET — not a bearer token. Spec:
+    # https://api.bfmr.com/storage/api-docs.json (the page at https://api.bfmr.com/ just renders it).
+    bfmr_api_base_url: str = os.getenv("BFMR_API_BASE_URL", "https://api.bfmr.com")
+    bfmr_api_key: str = os.getenv("BFMR_API_KEY", "")
+    bfmr_api_secret: str = os.getenv("BFMR_API_SECRET", "")
+    # Only insure shipments worth at least this much. 0 (the default) insures every shipment, which
+    # is the intended behaviour — the knob exists so cheap boxes can be excluded later without a
+    # code change, since filing costs a real premium on every unattended run.
+    bfmr_min_insurance_value: float = _get_float("BFMR_MIN_INSURANCE_VALUE", 0.0)
+
+    # MaxOutDeals authenticates with a bearer token AND an IP allowlist (its profile has a firewall
+    # tab). `user` and `email` are required in the BODY of every request, not just the headers.
+    maxoutdeals_api_base_url: str = os.getenv("MAXOUTDEALS_API_BASE_URL", "https://www.maxoutdeals.com")
+    maxoutdeals_api_key: str = os.getenv("MAXOUTDEALS_API_KEY", "")
+    maxoutdeals_user_id: str = os.getenv("MAXOUTDEALS_USER_ID", "")
+    maxoutdeals_email: str = os.getenv("MAXOUTDEALS_EMAIL", "")
 
 
 settings = Settings()
