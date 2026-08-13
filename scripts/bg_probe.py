@@ -96,9 +96,16 @@ def probe_bfmr(tracking_number: str | None) -> None:
         print(f"  tracking_status values: {sorted({str(r.get('tracking_status')) for r in tracker})}")
         print(f"  insurance_status values:{sorted({str(r.get('insurance_status')) for r in tracker})}")
 
-    reservations = client.get_json("/api/v2/deal/reservations/active")
-    count = len(reservations.get("reservation_list") or [])
-    print(f"active reservations: {count} -> {_save('bfmr_reservations.json', reservations)}")
+    raw = client.get_json("/api/v2/deal/reservations/active")
+    reservations = client.active_reservations()
+    print(f"active reservations: {len(reservations)} -> {_save('bfmr_reservations.json', raw)}")
+    if reservations:
+        item = reservations[0].get("item") or {}
+        print(f"  reservation fields: {sorted(reservations[0])}")
+        print(f"  item fields:        {sorted(item) if isinstance(item, dict) else type(item).__name__}")
+    else:
+        print("  (none — so the empty-reservation matcher has no live shape to be written against;"
+              " re-run this once a reservation exists)")
 
     _probe_insurance_routes(client, tracker)
 

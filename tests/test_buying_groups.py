@@ -961,6 +961,79 @@ class TestModPaidStatus:
         assert parse_received_items_csv(csv_text)[0].status == "paid"
 
 
+class TestNothingEverCancels:
+    """Cancelling gives up the RESERVATION — the spot in the deal.
+
+    A retailer-cancelled order is often one worth re-ordering into that same spot, and a released
+    spot may not be reclaimable, while a cancellation certainly can't be undone. So the asymmetry
+    says: never cancel automatically, alert instead. BFMR exposes the endpoints; this pins that no
+    code path reaches them, which a reviewer adding "tidy up cancelled purchases" would otherwise
+    not think to check.
+    """
+
+    @pytest.mark.parametrize("endpoint", [
+        "my-tracker/purchase/cancel",
+        "my-tracker/reservation/cancel",
+    ])
+    def test_no_cancel_endpoint_is_referenced_anywhere(self, endpoint):
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parent.parent
+        sources = [*(root / "buying_groups").glob("*.py"), root / "sync_tracking.py",
+                   *(root / "scripts").glob("*.py")]
+        offenders = [
+            path.name for path in sources
+            if endpoint in path.read_text(encoding="utf-8")
+            and "never" not in path.read_text(encoding="utf-8").lower()
+        ]
+        assert offenders == [], f"{endpoint} must never be called: {offenders}"
+
+    def test_the_client_exposes_no_cancel_method(self, bfmr):
+        assert not [name for name in dir(bfmr) if "cancel" in name.lower()]
+
+
+class TestCancelledOrderDetection:
+    def test_an_active_purchase_for_a_cancelled_order_is_reported(self, bfmr, transport):
+        transport.responses = [tracker(
+            {"purchase_id": "P1", "order_id": "STILL-OPEN", "status": "shipped",
+             "deal_title": "PS5", "total_payout": "100.00"},
+            {"purchase_id": "P2", "order_id": "ALREADY-DEAD", "status": "cancelled",
+             "deal_title": "PS5", "total_payout": "100.00"},
+        )]
+        assert bfmr.active_purchases_for(["STILL-OPEN", "ALREADY-DEAD"]) == {"STILL-OPEN"}
+
+    def test_an_insurance_fee_row_cannot_be_mistaken_for_an_open_purchase(self, bfmr, transport):
+        """Fee rows carry no order number at all, which is what actually excludes them — the
+        `_is_insurance_fee_row` check alongside is belt-and-braces. Worth pinning either way: a fee
+        row counted as an open purchase would alert on every cancelled order forever."""
+        transport.responses = [tracker(
+            {"purchase_id": "P1", "order_id": None, "total_payout": "-7.40", "deal_title": None},
+        )]
+        assert bfmr.active_purchases_for(["O1"]) == set()
+
+    def test_an_order_with_no_tracker_row_at_all_is_not_reported(self, bfmr, transport):
+        transport.responses = [tracker()]
+        assert bfmr.active_purchases_for(["O1"]) == set()
+
+
+class TestEmptyReservations:
+    def test_no_reservations_is_a_STRING_not_an_empty_list(self, bfmr, transport):
+        """BFMR returns the string "No reservations available" in the same field that otherwise
+        holds a list. `len()` of it is 25 and iterating yields characters, so scripts/bg_probe.py
+        reported "active reservations: 25" against an account holding zero — a wrong number that
+        looked entirely plausible."""
+        transport.responses = [FakeResponse(payload={
+            "reservation_list": "No reservations available", "paging": {"total": 0},
+        })]
+        assert bfmr.active_reservations() == []
+
+    def test_a_real_list_passes_through(self, bfmr, transport):
+        transport.responses = [FakeResponse(payload={
+            "reservation_list": [{"reserve_id": "R1", "reserved_quantity": 2}],
+        })]
+        assert bfmr.active_reservations() == [{"reserve_id": "R1", "reserved_quantity": 2}]
+
+
 class TestSubmissionSummary:
     def test_skips_are_broken_out_by_reason(self):
         """A dry run skips everything for the reason "dry run". Reporting that as "already known"

@@ -102,6 +102,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
           "skipped_no_tracking": int,
           "skipped_unroutable":  {buying_group_as_written: count},
           "skipped_cancelled":   int,
+          "cancelled_by_group":  {group_key: [(row_number, order_id), ...]},
         }
     """
     idx = {name: header.index(name) for name in (
@@ -116,6 +117,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     insurance_by_row: dict[int, str] = {}
     submitted_by_row: dict[int, str] = {}
     unresolved_split: list[tuple] = []
+    cancelled_by_group: dict[str, list[tuple]] = {}
     skipped_unroutable: dict[str, int] = {}
     skipped_no_tracking = 0
     skipped_cancelled = 0
@@ -133,6 +135,11 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
 
         if cell("Status").lower() in _UNPOSTABLE_STATUSES:
             skipped_cancelled += 1
+            # Kept, not discarded. A cancelled RETAILER order whose buying-group purchase is still
+            # open is a live divergence someone has to resolve by hand — see _alert_on_cancelled.
+            group_key = resolve_group(cell("Buying Group"))
+            if group_key:
+                cancelled_by_group.setdefault(group_key, []).append((row_number, order_id))
             continue
 
         tracking = cell("Tracking Number")
@@ -187,6 +194,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "skipped_no_tracking": skipped_no_tracking,
         "skipped_unroutable": skipped_unroutable,
         "skipped_cancelled": skipped_cancelled,
+        "cancelled_by_group": cancelled_by_group,
     }
 
 
@@ -334,6 +342,40 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
     return {"plan": plan, "outcomes": outcomes, "writes": all_writes}
 
 
+def _alert_on_cancelled_orders(group_key, client, plan, apply) -> None:
+    """The retailer cancelled the order, but the buying group still holds an open purchase.
+
+    **THIS TOOL NEVER CANCELS ANYTHING, and that is a deliberate invariant, not an omission.**
+    BFMR exposes `purchase/cancel` and `reservation/cancel`; neither is called from anywhere in this
+    codebase, and `tests/test_buying_groups.py` asserts that stays true. Cancelling gives up the
+    RESERVATION — the spot in the deal — which is often still wanted, because a retailer-cancelled
+    order is usually one worth re-ordering. Reclaiming a lost spot may be impossible; undoing a
+    cancellation certainly is. So the asymmetry says alert, and let a human decide.
+    """
+    cancelled = plan["cancelled_by_group"].get(group_key) or []
+    if not cancelled or not hasattr(client, "active_purchases_for"):
+        return
+
+    still_open = client.active_purchases_for(order_id for _row, order_id in cancelled)
+    affected = [(row, order_id) for row, order_id in cancelled if order_id in still_open]
+    if not affected:
+        return
+
+    detail = "\n".join(f"  row {row}: order {order_id}" for row, order_id in affected)
+    log.warning("%s: %d cancelled order(s) still have an open purchase", group_key, len(affected))
+    _alert(
+        apply,
+        f"ACTION NEEDED — {group_key}: {len(affected)} cancelled order(s) still open there",
+        f"These orders are CANCELLED at the retailer, but {group_key} still shows an active "
+        f"purchase against the reservation:\n{detail}\n\n"
+        f"Decide and act by hand in My Tracker. This tool deliberately never cancels: cancelling "
+        f"releases the RESERVATION, and a retailer-cancelled order is often one you want to "
+        f"re-order into the same spot — which may not be reclaimable once given up.\n\n"
+        f"If you are not re-ordering, cancel the purchase there so it doesn't sit against your "
+        f"quota.",
+    )
+
+
 def _alert(apply: bool, subject: str, message: str) -> None:
     """Alert only on a real run.
 
@@ -396,6 +438,8 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
         plan["insurance_by_row"],
     ))
     log.info("%s: %d payout record(s) read back", group_key, len(payouts))
+
+    _alert_on_cancelled_orders(group_key, client, plan, apply)
 
     pushed = set(push.submitted)
     ticked = {

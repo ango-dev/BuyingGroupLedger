@@ -203,6 +203,38 @@ class BFMRClient(HttpClient):
                 held.add((order_id, number))
         return held
 
+    def active_purchases_for(self, order_ids) -> set[str]:
+        """Which of these orders BFMR still holds an ACTIVE (non-cancelled) purchase for.
+
+        Used to spot the divergence that costs a deal: the retailer cancelled the order, so the
+        ledger says `cancelled`, but BFMR still has the purchase open against the reservation.
+        """
+        wanted = {str(o).strip() for o in order_ids if str(o).strip()}
+        return {
+            order_id for entry in self.fetch_tracker()
+            if (order_id := _order_id_of(entry)) in wanted
+            and entry.get("purchase_id")
+            and not _is_cancelled_purchase(entry)
+            and not _is_insurance_fee_row(entry)
+        }
+
+    def active_reservations(self) -> list[dict]:
+        """Reservations not yet turned into purchases.
+
+        **`reservation_list` IS NOT ALWAYS A LIST.** When there are none, BFMR returns the STRING
+        `"No reservations available"` in the same field. `len()` of that is 25 and iterating it
+        yields characters, so `scripts/bg_probe.py` cheerfully reported "active reservations: 25"
+        against an account that had zero — a wrong number that looked entirely plausible. Anything
+        that isn't a list is normalised to `[]` here so no caller can inherit that.
+        """
+        payload = self.get_json("/api/v2/deal/reservations/active")
+        listing = payload.get("reservation_list")
+        if not isinstance(listing, list):
+            if listing:
+                log.info("BFMR reports no active reservations (%r)", listing)
+            return []
+        return listing
+
     def shipment_status(self, tracking_number: str) -> dict:
         """One ad-hoc lookup. A 404 means "BFMR has never heard of this", not a failure.
 
