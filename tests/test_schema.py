@@ -7,7 +7,7 @@ this codebase can have, and one no runtime error would announce. These tests are
 
 import csv
 
-from models.order import FIELDNAMES, STATUSES, OrderItem
+from models.order import FIELDNAMES, STATUSES, TERMINAL_STATUSES, OrderItem
 from output.csv_writer import write_csv
 from sheets.ledger_sync import HEADER
 
@@ -69,4 +69,25 @@ def test_csv_writer_emits_exactly_fieldnames(tmp_path):
 
 def test_statuses_vocabulary_is_what_the_rollup_expects():
     # load_order_state's rollup keys off these exact lowercase strings.
-    assert STATUSES == ("ordered", "shipped", "delivered", "cancelled")
+    assert STATUSES == ("ordered", "shipped", "delivered", "cancelled", "paid", "return")
+
+
+def test_every_status_is_either_terminal_or_a_scraped_lifecycle_state():
+    """The vocabulary splits cleanly in two, and the split is what decides re-check cost.
+
+    Anything not in TERMINAL_STATUSES keeps its order in load_order_state's open list, so it gets
+    re-read on every run forever. Adding a status without deciding which side it lands on is the
+    expensive mistake this pins.
+    """
+    scraped_lifecycle = {"ordered", "shipped"}
+
+    assert set(STATUSES) == scraped_lifecycle | set(TERMINAL_STATUSES)
+    assert not scraped_lifecycle & set(TERMINAL_STATUSES)
+
+
+def test_hand_entered_statuses_are_terminal():
+    """"paid" and "return" are hand-entered only — no scraper emits them and nothing transitions a
+    row into them, so if they were non-terminal nothing would ever correct the order back out of the
+    re-check list."""
+    for status in ("paid", "return"):
+        assert status in TERMINAL_STATUSES

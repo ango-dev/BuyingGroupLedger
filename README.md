@@ -102,11 +102,76 @@ every update on the wrong one. Sorting only runs when a sync actually **appended
 a row where it already sits and can't change the order — so a routine re-check run skips it. Use
 `python -m scripts.sort_ledger` (dry run, then `--apply`) to sort by hand if the order ever drifts.
 
+**Adding a row by hand** works, with two rules. Give it a real **Order ID** — the sort covers the whole
+block from row 2 to the last row that has one, and a row without one is invisible to the upsert forever
+(every future re-check appends beside it rather than updating it). And enter **Order Date as text** —
+typing `2026-08-12` makes Sheets store a real Date, which changes the upsert key and duplicates the row
+on its next re-check; type `'2026-08-12`, or format the column as plain text first. Get both right and
+the row is indistinguishable from a scraped one: it sorts into place and gets its Total Profit formula
+on the next append-triggered sort (`scripts/sort_ledger.py --apply` if you don't want to wait). Don't
+hand-write **Total Profit** — it's position-bound and re-stamped on every sort. **Insurance**, **Payout
+Amount** and **Payout Date** are exactly the columns meant for hand entry and are never overwritten by a
+re-check. A note or spacer row belongs *below* the last order, where the sort leaves it alone; put one
+inside the block and it gets shuffled in among the orders. `scripts/audit_sheet.py` flags all of this.
+
+**Status** is one of `ordered`, `shipped`, `delivered`, `cancelled`, `paid`, `return`. The first two are
+the live lifecycle the scrapers maintain; the other four are **terminal** — the order drops out of
+future runs. `paid` and `return` are **hand-entered only**: no scraper emits them and nothing
+transitions a row into them. Anything outside this vocabulary keeps the order **open forever**, so it
+gets re-read on every run indefinitely — which on an agent retailer is a recurring cost on an order
+that is already finished. `audit_sheet`'s `column_shape` fails an unknown status for exactly that
+reason.
+
+> **Only ever hand-import FINISHED orders** — `delivered`, `paid`, `return`, `cancelled`. Never import
+> `ordered` or `shipped` rows. A single run already keeps those current: the scrapers discover open
+> orders and re-check them to delivery on their own, so importing them by hand duplicates work the
+> ledger does for free, and any detail you get slightly wrong (a re-worded item name, a different
+> shipment number) becomes a duplicate row the next run appends beside yours. Terminal rows are the
+> safe class precisely because nothing will ever re-read them — they're history, and no scraper will
+> fight you over them.
+
+### Bulk-importing history by hand
+
+Pasting a batch of finished orders straight into the sheet is fine, and in one way safer than routing
+them through `sync_csv_to_sheet`: a paste doesn't go through the upsert, so a mistake can't silently
+overwrite an existing row. Errors just sit there as rows, and the audit names them.
+
+**Before you paste — format `Order Date`, `Delivery Date` and `Payout Date` as Plain text.** This is the
+one hard-to-undo step, because a Date-typed `Order Date` changes the row's upsert key. Convert to
+`YYYY-MM-DD` while you're there.
+
+Then, per row:
+
+| Column | What to put in it |
+|---|---|
+| `Cost Per Item` | `Total Cost ÷ Quantity` — `total_cost_matches_quantity` fails if it doesn't reconcile |
+| `Cashback Rate` | the **total** rate earned, as one number. If your source tracks base and bonus rates in separate columns, add them together |
+| `Insurance` | a **positive** cost. The profit formula subtracts it |
+| `Shipment` | `1`, unless one order has two rows with the **same item name** — then number them by tracking number, `1` and `2`, or they collide on one upsert key |
+| `Shipping` | `0` if your costs are already all-in |
+| `Total Profit` | nothing — it's a formula, re-stamped on every sort |
+
+Leave `Profile`, `Order Link`, `Tracking Link`, `Delivery Address`, `Card Last 4` and `Last Scraped At`
+blank if you don't have them; none of it is read for a terminal row. Fill `Card` and `Cashback Rate`
+directly, since `Card` is normally *derived* from `Card Last 4` and that only happens during a scrape.
+
+Finish with `python -m scripts.sort_ledger --apply`, then `python -m scripts.audit_sheet`.
+
+**What the audit will and won't catch.** It's a strong net for *mechanical* errors — Date-typed cells,
+duplicate keys, `Cost Per Item` not reconciling, text in numeric columns, embedded newlines, blank
+Order IDs, unknown statuses, non-integer Shipment. All FAIL-level, all named with a row number.
+
+It is blind to *semantic* ones. `cashback_rate_sane` only checks that a rate is plausible, so **1%
+where you meant 13.5% passes silently**, as does a negative Insurance. So verify those two by
+arithmetic instead: after pasting, compare the sheet's computed `Total Profit` against the profit your
+old records show, on two or three rows chosen to cover each rate structure you use. If those agree to
+the cent, the rate and sign mapping is right everywhere. It takes two minutes and it's the only check
+that proves the numbers rather than the shapes.
+
 **Total Cost is per row** = `Quantity × Cost Per Item` for that shipment line (computed in code, not
-trusted from the agent), so the column sums to the order total. **Status** is one of `ordered`,
-`shipped`, `delivered`, `cancelled`. `delivered` and `cancelled` are terminal — the order drops out of
-future runs. A `cancelled` order is only ever recorded via a re-check (an order first seen as `ordered`
-that the order page later shows cancelled); brand-new already-cancelled orders are ignored at discovery.
+trusted from the agent), so the column sums to the order total. A `cancelled` order is only ever
+recorded via a re-check (an order first seen as `ordered` that the order page later shows cancelled);
+brand-new already-cancelled orders are ignored at discovery.
 
 **Multiple shipments per order:** when an order splits across shipments, each shipment gets its own
 row(s) with that shipment's own status, tracking number and delivery date. The **Shipment** column is
@@ -538,6 +603,17 @@ scheduler on the new host. No re-login or re-sharing needed.
 
 **Open questions / smaller items**
 
+- **`scripts/import_history.py` — MAYBE, not needed yet.** A dry-run-default importer for a foreign
+  CSV: auto-map its headers onto `FIELDNAMES` (with `--map` overrides), normalise dates to ISO, derive
+  `Cost Per Item` from `Total Cost ÷ Quantity`, derive `Shipment` by grouping each order's rows by
+  tracking number, run `tag_cards` + `tag_and_filter_personal` so the derived columns fill themselves,
+  **refuse non-terminal rows** unless forced, preview update-vs-append counts against the live sheet,
+  then sync + sort. The feature that would justify it over hand-pasting: **reconcile its computed
+  profit against the source's own profit column and fail on a mismatch** — that's what catches a wrong
+  rate or a flipped Insurance sign, which the audit cannot (see "Bulk-importing history by hand").
+  Deferred because a one-off import of ~60 rows is faster to paste than to automate, and the manual
+  route has the same protection via a two-minute spot check. Worth building if imports become
+  recurring, or if a future import is large enough that hand-checking each row stops being realistic.
 - `delivery_date`: the prompts ask for `YYYY-MM-DD`, but the dormant CDP path writes the raw promise
   text ("Arriving Monday") into the same field. No live exposure while that path stays disabled —
   revisit only if it's ever re-enabled.

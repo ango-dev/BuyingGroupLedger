@@ -31,13 +31,23 @@ def normalize_shipment(value: str) -> str:
     """
     return _SHIPMENT_PREFIX.sub("", (value or "").strip()).strip()
 
-# The status values the ledger understands. load_order_state treats delivered and cancelled as
-# TERMINAL (the order drops out of future runs) and anything unrecognized as still-open — so an
+# The status values the ledger understands. load_order_state treats TERMINAL_STATUSES as finished
+# (the order drops out of future runs) and anything unrecognized as still-open — so an
 # out-of-vocabulary status silently keeps an order open forever. "cancelled" only ever appears via a
 # re-check: an order first seen as "ordered" that the order page later shows as cancelled. Brand-new
 # orders that are already cancelled are ignored at discovery and never recorded.
-STATUSES = ("ordered", "shipped", "delivered", "cancelled")
-TERMINAL_STATUSES = ("delivered", "cancelled")
+#
+# "paid" and "return" are HAND-ENTERED ONLY (added 2026-08-13). No scraper emits them and no code
+# transitions a row into them — they exist so a row imported by hand can say what became of an order
+# without leaving it open. Both are TERMINAL, which is the whole point: a hand-imported row is history,
+# and the alternative (an unrecognized status) would re-open it for re-checking on every run forever.
+#
+# NOTE "paid" overlaps the Payout Amount column, which already records the same fact more precisely.
+# It's here because a hand-import may know an order was paid out without knowing the amount; prefer
+# filling Payout Amount when you have it. Setting Status to "paid" on a row that has NOT been
+# delivered also discards its shipment state, so only use it on an order that already finished.
+STATUSES = ("ordered", "shipped", "delivered", "cancelled", "paid", "return")
+TERMINAL_STATUSES = ("delivered", "cancelled", "paid", "return")
 
 # CSV/Sheet column order — keep in sync with output/csv_writer.py and sheets/ledger_sync.py HEADER,
 # which is this same list in display-name form, positionally 1:1. tests/test_schema.py pins BOTH.

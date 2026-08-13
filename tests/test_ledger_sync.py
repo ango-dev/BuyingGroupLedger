@@ -738,6 +738,35 @@ class TestLoadOrderState:
         assert state["delivered_ids"] == ["A1"]
         assert state["open_orders"] == []
 
+    def test_a_hand_entered_terminal_status_takes_the_order_out_of_the_recheck_list(self, sheet):
+        """THE POINT OF "paid"/"return" BEING TERMINAL. These are hand-entered only, so nothing will
+        ever correct them: if such a row stayed open it would be re-read on every run forever, and
+        for an agent retailer that is a real recurring cost on an order that is already finished."""
+        for status in ("paid", "return"):
+            sheet.rows = [
+                list(HEADER),
+                row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
+                    status=status, profile_label="p1"),
+            ]
+
+            state = load_order_state("p1")
+
+            assert state["delivered_ids"] == ["A1"], f"{status} left the order open"
+            assert state["open_orders"] == []
+
+    def test_a_terminal_status_survives_the_rollup_unchanged(self, sheet):
+        """A uniform terminal status reports ITSELF. If the rollup downgraded "paid" to "ordered" the
+        order would silently re-open — the status would look right on the sheet while the re-check
+        list disagreed."""
+        assert ledger_sync._rollup_status(["paid"]) == "paid"
+        assert ledger_sync._rollup_status(["return"]) == "return"
+        assert ledger_sync._rollup_status(["cancelled"]) == "cancelled"
+        # A MIX of terminal states is reported as delivered — every box is finished.
+        assert ledger_sync._rollup_status(["paid", "delivered"]) == "delivered"
+        # Unchanged: a partly-open order is never terminal.
+        assert ledger_sync._rollup_status(["paid", "ordered"]) == "ordered"
+        assert ledger_sync._rollup_status(["delivered", "shipped"]) == "shipped"
+
     def test_retailer_scopes_state_on_a_multi_retailer_profile(self, sheet):
         """A profile hosting several retailers (e.g. profile-alpha = Best Buy + Amazon Business) must
         NOT leak one retailer's open orders into another's re-check. Without the retailer filter the

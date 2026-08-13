@@ -654,13 +654,18 @@ def _merge_row(existing_row: list, new_row: list) -> list:
 def _rollup_status(statuses: list[str]) -> str:
     """Collapse several shipment statuses into one for display.
 
-    Cancelled is order-level in practice (the whole order is cancelled), so it wins outright.
-    Otherwise delivered only when everything is; shipped if anything has shipped; else ordered.
+    A uniformly TERMINAL shipment reports that status back unchanged — all "cancelled" → "cancelled"
+    (cancellation is order-level in practice), all "paid" → "paid". That is load-bearing, not cosmetic:
+    load_order_state decides an order is finished from this rolled-up value, so a terminal status that
+    fell through to "ordered" below would re-open the order and put it back in the re-check list on
+    every run — the precise failure that marking a status terminal exists to prevent. It matters for
+    the hand-entered "paid"/"return" especially, since no scraper will ever correct them.
+
+    A MIX of terminal states reports "delivered": every box is finished, and delivered is the state
+    they all passed through on the way. Otherwise shipped if anything has shipped, else ordered.
     """
-    if statuses and all(s == "cancelled" for s in statuses):
-        return "cancelled"
-    if statuses and all(s in ("delivered", "cancelled") for s in statuses):
-        return "delivered"
+    if statuses and all(s in TERMINAL_STATUSES for s in statuses):
+        return statuses[0] if len(set(statuses)) == 1 else "delivered"
     if any(s in ("shipped", "delivered") for s in statuses):
         return "shipped"
     return "ordered"
