@@ -37,13 +37,19 @@ def normalize_shipment(value: str) -> str:
 # re-check: an order first seen as "ordered" that the order page later shows as cancelled. Brand-new
 # orders that are already cancelled are ignored at discovery and never recorded.
 #
-# "paid" and "return" are HAND-ENTERED ONLY (added 2026-08-13). No scraper emits them and no code
-# transitions a row into them — they exist so a row imported by hand can say what became of an order
-# without leaving it open. Both are TERMINAL, which is the whole point: a hand-imported row is history,
-# and the alternative (an unrecognized status) would re-open it for re-checking on every run forever.
+# "paid" and "return" are the BUYING GROUP's outcomes, not the retailer's (added 2026-08-13; the
+# buying-group sync began writing them the same day). No SCRAPER emits them — a retailer has no idea
+# whether a group paid you — so sync_tracking.py is their only automatic source, and a hand-import may
+# still set them directly. Both are TERMINAL, which is the point: the alternative (an unrecognized
+# status) would re-open the order for re-checking on every run forever.
 #
-# NOTE "paid" overlaps the Payout Amount column, which already records the same fact more precisely.
-# It's here because a hand-import may know an order was paid out without knowing the amount; prefer
+# Coverage differs by group, and the gap is deliberate rather than an oversight: BFMR reports both
+# outcomes on its tracker, while MOD confirms payment only by listing a package as received and
+# publishes NO return signal at all — so a returned MOD package must be set to "return" by hand.
+# ledger_sync._STATUS_RANK is what protects that edit: status only ever moves FORWARD, so MOD's
+# endless "still received" reports cannot walk it back to "paid".
+#
+# NOTE "paid" overlaps the Payout Amount column, which records the same fact more precisely. Prefer
 # filling Payout Amount when you have it. Setting Status to "paid" on a row that has NOT been
 # delivered also discards its shipment state, so only use it on an order that already finished.
 STATUSES = ("ordered", "shipped", "delivered", "cancelled", "paid", "return")
@@ -88,9 +94,12 @@ FIELDNAMES = [
     # (a partial re-check), so _merge_row preserves what the first full extraction recorded.
     "card_name",
     "cashback_rate",
-    # USER-ENTERED (and later filled by the BFMR / MaxOutDeals integration, the design notes). The scrapers
-    # always emit these blank, and _merge_row's blank-never-overwrites rule is what keeps a re-scrape
-    # from wiping numbers typed into the sheet by hand.
+    # Filled by the buying-group sync (sync_tracking.py), or by hand. The scrapers always emit these
+    # blank, and _merge_row's blank-never-overwrites rule is what keeps a re-scrape from wiping
+    # numbers typed into the sheet by hand.
+    # `insurance` is filled for BFMR from the negative FEE row on its tracker (its two documented
+    # insurance-READ endpoints are documented but NOT DEPLOYED), and written as 0 for MOD, which
+    # never charges a premium.
     "insurance",
     "payout_amount",
     "payout_date",
@@ -111,6 +120,16 @@ FIELDNAMES = [
     "delivery_address",
     "card_last4",
     "last_scraped_at",
+    # Has this row's tracking number been accepted by its buying group? A real BOOLEAN, so the
+    # column works as a Google Sheets checkbox.
+    #
+    # A DELIBERATE EXCEPTION to this project's "derive, don't store" rule. Whether a number has been
+    # submitted is something the group knows and is re-derived every run, which is why
+    # sync_tracking.py does NOT consult this column to decide what to send — a local mirror of remote
+    # state drifts the moment a post succeeds and the sheet write doesn't. It exists to be SEEN: an
+    # unticked box next to a shipped package is the thing worth noticing. It is a display of state,
+    # not a source of truth. Blank on every scraper path, so _merge_row preserves it.
+    "tracking_submitted",
 ]
 
 
@@ -145,6 +164,10 @@ class OrderItem(BaseModel):
     payout_amount: float | None = None
     # Always blank from here; sheets.ledger_sync writes a live formula into the cell instead.
     total_profit: float | None = None
+    # Always blank from a scraper; sync_tracking.py ticks it when a buying group accepts the tracking
+    # number. Typed as a string, not a bool, precisely so the scrapers' blank survives _merge_row —
+    # a default of False would tick nothing but would overwrite a real True on every re-scrape.
+    tracking_submitted: str = ""
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
                      "cashback_rate", "insurance", "payout_amount", "total_profit", mode="before")

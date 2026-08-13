@@ -147,6 +147,7 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
         "Delivery Address": Cell("1 Example Way, Testville TS 00000"),
         "Card Last 4": Cell("0315"),
         "Last Scraped At": Cell("2026-08-12T06:00:00Z"),
+        "Tracking Submitted": Cell(True),
     }
     for name, value in overrides.items():
         base[name] = value if isinstance(value, Cell) else Cell(value)

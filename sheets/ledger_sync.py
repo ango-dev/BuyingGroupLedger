@@ -48,6 +48,7 @@ HEADER = [
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Last Scraped At",
+    "Tracking Submitted",  # a checkbox; ticked by sync_tracking.py when a group accepts the number
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
@@ -68,6 +69,20 @@ _NUMERIC_FIELDS = {
 # Fields that must be a plain int rather than a float when coerced (quantity: "3", not "3.0"; shipment:
 # "2", not "2.0"). Every other numeric field is a currency/rate amount, where a float is correct.
 _INT_FIELDS = {"quantity", "shipment"}
+
+# Fields stored as a real BOOLEAN, so a Google Sheets checkbox actually ticks.
+#
+# This needs its own coercion because the round trip would otherwise destroy it. Rows are read
+# FORMATTED, where a boolean cell comes back as the STRING "TRUE"; _merge_row carries that string
+# forward for any column the scrapers leave blank (which is all of them here); and the row is written
+# back RAW, which stores a string as a string. The checkbox would silently turn into the text "TRUE"
+# on the first sync after it was ticked. Coercing on write is what keeps the cell a boolean.
+#
+# Blank stays BLANK rather than becoming False, so _merge_row's blank-never-overwrites rule still
+# protects a ticked box against a scraper that knows nothing about this column.
+_BOOL_FIELDS = {"tracking_submitted"}
+_TRUE_TEXT = {"true", "yes", "y", "1", "checked"}
+_FALSE_TEXT = {"false", "no", "n", "0", "unchecked"}
 
 
 def _col_letter(index: int) -> str:
@@ -121,9 +136,18 @@ def _profit_formula(row_number: int) -> str:
     return f'=IF({payout}{n}="","",IFERROR(LET(s,{prorated_shipping},{profit}),""))'
 
 # Furthest-along status wins when two rows of ONE shipment are collapsed in a single sync (see
-# _collapse_records). Mirrors _rollup_status's spirit: cancelled overrides, then delivered, then
-# shipped, then ordered.
-_STATUS_RANK = {"ordered": 0, "shipped": 1, "delivered": 2, "cancelled": 3}
+# _collapse_records). Mirrors _rollup_status's spirit: cancelled overrides, then the buying-group
+# outcomes, then delivered, then shipped, then ordered.
+#
+# EVERY member of STATUSES must appear here. The lookup falls back to -1, so a status missing from
+# this map can never win a collapse AND loses to "ordered" (rank 0) — i.e. a row that a buying group
+# had just marked "paid" would be quietly demoted back to "ordered" and re-enter the re-check list
+# forever. That is exactly what happened to "paid"/"return" between their introduction and this line.
+#
+# "return" outranks "paid" because a return REVERSES a payment: when a single sync somehow carries
+# both, the reversal is the one the user needs to see. "cancelled" stays on top as the order-level
+# override it has always been.
+_STATUS_RANK = {"ordered": 0, "shipped": 1, "delivered": 2, "paid": 3, "return": 4, "cancelled": 5}
 
 
 def _collapse_records(records: list[dict]) -> list[dict]:
@@ -216,7 +240,29 @@ def _parse_display_number(value: str):
     return -number if negative else number
 
 
+def _parse_checkbox(value):
+    """Read a checkbox cell in any spelling it can arrive in -> True / False / "" (untouched).
+
+    A boolean column reaches us three ways and they all have to land on the same value: a real
+    boolean from an UNFORMATTED read, the string "TRUE" from a FORMATTED one, and whatever a human
+    typed into the cell before ticking it. Blank returns blank, NOT False — that distinction is what
+    lets _merge_row leave a ticked box alone when a scraper sends nothing for the column.
+    """
+    if isinstance(value, bool):
+        return value
+    text = str(value if value is not None else "").strip().lower()
+    if not text:
+        return ""
+    if text in _TRUE_TEXT:
+        return True
+    if text in _FALSE_TEXT:
+        return False
+    return value  # unrecognised: hand it back rather than guessing a tick
+
+
 def _coerce(field: str, value: str):
+    if field in _BOOL_FIELDS:
+        return _parse_checkbox(value)
     if field in _NUMERIC_FIELDS:
         number = _parse_display_number(value)
         if number is None:
