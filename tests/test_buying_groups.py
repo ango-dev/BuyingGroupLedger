@@ -202,13 +202,48 @@ class TestBfmrSubmission:
 
     def test_an_order_bfmr_has_no_purchase_for_is_reported_not_invented(self, bfmr, transport):
         """v1 deliberately never creates a purchase: choosing the wrong reserve_id books the wrong
-        deal, and since qty only reduces, that is not cheaply undone."""
+        deal, and since qty only reduces, that is not cheaply undone.
+
+        The message says what a missing purchase IMPLIES, too. A reservation only stays valid if its
+        order number goes in right after ordering, so a shipped package without one means the
+        reservation lapsed — not that this tool skipped a step."""
         transport.responses = [FakeResponse(payload={"my_tracker": [
             {"reserve_id": "R9", "purchase_id": None, "order_no": "", "qty": 1},
         ]})]
         result = bfmr.submit_tracking([submission()])
         assert not result.submitted
-        assert "no purchase for order" in result.failed[0][1]
+        message = result.needs_manual[0][1]
+        assert "no purchase recorded" in message and "LAPSED" in message
+
+    def test_a_cancelled_purchase_is_not_misreported_as_a_combined_package(self, bfmr, transport):
+        """BFMR halts on an inactive purchase, so submitting against a CANCELLED one fails in exactly
+        the same accepted-but-absent way a Best Buy combined carton does. Diagnosing it as the carton
+        case would send the user off appending letters to a reservation that no longer exists."""
+        transport.responses = [FakeResponse(payload={"my_tracker": [
+            {"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 1,
+             "status": "cancelled", "deal_title": "PS5"},
+        ]})]
+        result = bfmr.submit_tracking([submission(order_id="O1")])
+
+        message = result.needs_manual[0][1]
+        assert "CANCELLED the purchase" in message
+        assert "NOT the Best Buy combined-package case" in message
+        assert len(transport.calls) == 1, "nothing was posted against a dead purchase"
+
+    def test_an_active_purchase_wins_over_a_cancelled_one_for_the_same_order(self, bfmr, transport):
+        """Re-ordering the same deal leaves both on the tracker; the live one must be chosen."""
+        transport.responses = [
+            FakeResponse(payload={"my_tracker": [
+                {"reserve_id": "R0", "purchase_id": "DEAD", "order_id": "O1", "qty": 1,
+                 "status": "cancelled", "deal_title": "PS5"},
+                {"reserve_id": "R1", "purchase_id": "LIVE", "order_id": "O1", "qty": 1,
+                 "status": "shipped", "deal_title": "PS5"},
+            ]}),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker({"tracking_number": "TBA1", "shipment_id": "S9"}),
+        ]
+        bfmr.submit_tracking([submission(order_id="O1")])
+        assert transport.bodies()[-1]["tracker_data"][0]["purchase_id"] == "LIVE"
 
     def test_a_rejected_object_is_attributed_to_its_own_row(self, bfmr, transport):
         transport.responses = [

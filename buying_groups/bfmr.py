@@ -239,11 +239,10 @@ class BFMRClient(HttpClient):
         for row in rows:
             purchase = purchases.get(row.order_id)
             if purchase is None:
-                result.failed.append((
-                    row.tracking_number,
-                    f"{row.describe()}: BFMR has no purchase for order {row.order_id}. Record the "
-                    f"purchase on BFMR first (this tool does not create purchases).",
-                ))
+                result.needs_manual.append((row.tracking_number, _no_purchase_hint(row)))
+                continue
+            if _is_cancelled_purchase(purchase):
+                result.needs_manual.append((row.tracking_number, _cancelled_purchase_hint(row)))
                 continue
 
             existing = _find_shipment(shipments, row.order_id, row.tracking_number)
@@ -523,15 +522,69 @@ def _batched(items: list, size: int):
 def _index_purchases_by_order(tracker: list[dict]) -> dict[str, dict]:
     """Map the retailer order number -> the BFMR purchase recorded against it.
 
-    Only rows that actually reached the Purchase stage qualify; a bare reservation has no
-    `purchase_id` and cannot receive a shipment.
+    Only rows that reached the Purchase stage qualify; a bare reservation has no `purchase_id` and
+    cannot receive a shipment.
+
+    AN ACTIVE PURCHASE ALWAYS WINS over a cancelled one for the same order. A cancelled purchase is
+    still indexed when it is the only one, so the caller can say *that* rather than guess: BFMR halts
+    on an inactive purchase, so submitting against one fails in exactly the same
+    accepted-but-absent way a Best Buy combined carton does — and reporting a cancellation as a
+    combined-carton problem would send someone off appending letters to a reservation that no longer
+    exists.
     """
     index: dict[str, dict] = {}
     for entry in tracker:
         order_id = _order_id_of(entry)
-        if order_id and entry.get("purchase_id"):
-            index.setdefault(order_id, entry)
+        if not order_id or not entry.get("purchase_id"):
+            continue
+        existing = index.get(order_id)
+        if existing is None or (
+            _is_cancelled_purchase(existing) and not _is_cancelled_purchase(entry)
+        ):
+            index[order_id] = entry
     return index
+
+
+def _is_cancelled_purchase(entry: dict) -> bool:
+    return str(entry.get("status") or "").lower() == "cancelled"
+
+
+def _no_purchase_hint(row) -> str:
+    """No purchase at all for this order.
+
+    Worth stating what that IMPLIES rather than just the fact. A reservation only stays valid if its
+    order number is submitted right after ordering, so by the time a package has shipped its purchase
+    should already exist — a missing one means the reservation lapsed or the number never went in,
+    not that this tool skipped a step.
+    """
+    return (
+        f"{row.tracking_number}: BFMR has no purchase recorded for order {row.order_id}, so there "
+        f"is nothing to attach the tracking to.\n"
+        f"\n"
+        f"A reservation only stays valid if its order number is submitted right after ordering, so a "
+        f"SHIPPED package with no purchase usually means the reservation LAPSED, or the order number "
+        f"was never entered. This tool does not create purchases: picking the right reservation "
+        f"means matching on item name alone, and a wrong pick books the wrong deal.\n"
+        f"\n"
+        f"Check My Tracker for order {row.order_id}. If the reservation is still live, enter the "
+        f"order number and the tracking number by hand — the next run picks it up with no sheet edit."
+    )
+
+
+def _cancelled_purchase_hint(row) -> str:
+    """The purchase exists but BFMR cancelled it, so tracking cannot be attached to it."""
+    return (
+        f"{row.tracking_number}: BFMR has CANCELLED the purchase for order {row.order_id}. Their own "
+        f"docs say the process halts on a purchase that is not active, so the tracking cannot be "
+        f"attached and this package will not be paid.\n"
+        f"\n"
+        f"The usual cause is tracking arriving after BFMR's deadline. This is NOT the Best Buy "
+        f"combined-package case — appending a letter will not help, because the problem is the "
+        f"reservation rather than the number.\n"
+        f"\n"
+        f"Check My Tracker for order {row.order_id}. If the package is genuinely on its way, raise a "
+        f"BFMR support ticket with proof of purchase and ask them to reinstate it."
+    )
 
 
 def _is_insurance_fee_row(entry: dict) -> bool:
@@ -567,9 +620,10 @@ def _duplicate_tracking_hint(tracking_number: str) -> str:
         f"rejected.\n"
         f"\n"
         f"THIS PACKAGE IS NOT SUBMITTED AND NOT INSURED. Three steps, all in BFMR:\n"
-        f"  1. ADD THE TRACKING BY HAND in My Tracker, with a letter appended — try {suggested}, "
-        f"and on through the alphabet if those are taken — until it is accepted. Put the order "
-        f"number on it, which is what lets this tool find it again.\n"
+        f"  1. ADD THE TRACKING BY HAND to the purchase already in My Tracker, with a letter "
+        f"appended — try {suggested}, and on through the alphabet if those are taken — until it is "
+        f"accepted. The purchase already carries the order number (submitted when you ordered), and "
+        f"that is what lets the next run match it back.\n"
         f"  2. FILE THE INSURANCE BY HAND on that same suffixed number. This tool deliberately "
         f"does not file for it: BFMR has no shipment to insure until step 1 is done, so an "
         f"automatic filing would post against nothing and report success.\n"
