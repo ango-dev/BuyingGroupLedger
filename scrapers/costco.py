@@ -267,6 +267,11 @@ SHIPMENT RULES (apply to every order-details page):
   number: number only the physical shipments you actually output.
 - Every physical entry for the order gets the tracking_number / tracking_url / delivery_date / status
   of ITS shipment.
+- EVERY physical shipment in a multi-box order has its OWN, DIFFERENT tracking number from every
+  other shipment in that same order — that is what makes it a separate shipment. If you find yourself
+  about to report the SAME tracking number for two different shipments, STOP: that is a read error,
+  not a real duplicate. Go back and re-open/re-read that specific shipment's own section individually
+  (do not reuse a number you already recorded for a different shipment) before reporting it.
 
 Fields for each entry:
 - retailer: "Costco"
@@ -294,7 +299,19 @@ Fields for each entry:
 - delivery_address: the shipping address for THIS shipment
 - item_name: the product name/title of this line item
 - quantity: integer quantity of this product IN THIS SHIPMENT (preserve the count; see shipment rules)
-- cost_per_item: price per unit, a number (no currency symbol)
+- cost_per_item: NET price actually paid per unit, a number (no currency symbol). Costco often
+  discounts an item (promo code, instant savings, bundle deal) and shows the discount as its own line
+  ("You Saved $X" / "Instant Savings -$X") rather than reducing the item's listed price. PREFER a
+  per-item figure if Costco shows one directly under this item: subtract it (divided by this
+  shipment's quantity) from the listed per-unit price. If Costco instead shows only ONE discount for
+  the WHOLE ORDER, that lump figure typically also covers making every digital/non-shippable item you
+  are skipping (gift cards, e-delivery software, memberships) fully free — Costco prices those at a
+  token amount (often $0.01 each) and the order discount includes rebating them to $0. Before applying
+  the order discount to a physical item, SUBTRACT the listed price of every skipped digital item in
+  the order from the order discount figure; apply only the remainder to the physical item(s) (split
+  proportionally by extended price — price x quantity — if there is more than one physical SKU). Do
+  NOT subtract the full order-level discount from the physical item alone — that overcounts by exactly
+  the digital items' price.
 - shipping: order shipping cost, a number (0 if free)
 - total_cost: leave "" — it is computed as quantity x cost_per_item for this line. Fill it only if
   you cannot determine cost_per_item but can read this line's own subtotal.

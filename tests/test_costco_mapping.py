@@ -139,6 +139,30 @@ def test_recorded_order_that_became_cancelled_is_emitted(details):
     assert "ReshipCo" in row.delivery_address
 
 
+def test_order_level_discount_is_netted_into_cost_per_item(details):
+    """Costco reports a discount as a per-LINE `discountAmount` against that line's (price x
+    quantity) total, not a reduced `price` field. cost_per_item must reflect what was actually
+    paid: (1499.99 x 2 - 1000.00) / 2 = 999.99, not the raw 1499.99 list price."""
+    rows = _rows_for(build_order_items(details, "p"), "1399000008")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.cost_per_item == 999.99
+    assert row.quantity == 2
+    assert row.total_cost == 1999.98  # quantity * discounted cost_per_item
+
+
+def test_digital_line_discount_does_not_leak_onto_physical_rows(details):
+    """The order's two 1-cent digital lines are ALSO discounted (to $0) via their own
+    discountAmount, and the digital lines are dropped from the ledger entirely. That digital
+    discount must never be attributed to the physical item — each SKU's discount comes only from
+    its own line(s), not a shared order-level pool. If it leaked, the physical row's cost_per_item
+    would be lower than 999.99."""
+    rows = _rows_for(build_order_items(details, "p"), "1399000008")
+    assert len(rows) == 1
+    assert rows[0].cost_per_item == 999.99
+    assert "Microsoft" not in rows[0].item_name and "McAfee" not in rows[0].item_name
+
+
 def test_every_row_has_the_costco_shipment_label_populated(details):
     items = build_order_items(details, "p", known_open_ids={"1399000001"})
     assert items, "fixture should produce rows"

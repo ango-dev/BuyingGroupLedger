@@ -109,6 +109,7 @@ query getOrderDetails($orderNumbers: [String]) {
                 itemDescription: sourceItemDescription
                 price: unitPrice
                 quantity: orderedTotalQuantity
+                discountAmount
                 isFeeItem
                 carrierItemCategory
                 orderedShipMethod

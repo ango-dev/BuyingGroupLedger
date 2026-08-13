@@ -508,5 +508,107 @@
         ]
       }
     ]
+  },
+  {
+    "orderNumber": "1399000008",
+    "orderPlacedDate": "2026-08-01T10:00:00.000",
+    "status": "Shipped",
+    "shippingAndHandling": 29.98,
+    "orderPayment": [
+      {
+        "paymentType": "Visa",
+        "cardNumber": "4444"
+      }
+    ],
+    "shipToAddress": [
+      {
+        "firstName": "Test",
+        "lastName": "Buyer",
+        "line1": "100 Test St",
+        "line2": "Unit 1",
+        "line3": "",
+        "city": "Testville",
+        "state": "DE",
+        "postalCode": "19700",
+        "countryCode": "US",
+        "orderLineItems": [
+          {
+            "itemNumber": "2099999",
+            "itemDescription": "Test Gaming Desktop - High End Build",
+            "price": 1499.99,
+            "quantity": 2,
+            "discountAmount": 1000.0,
+            "isFeeItem": false,
+            "carrierItemCategory": "Small Package",
+            "orderedShipMethod": "UP3",
+            "itemStatus": {
+              "cancelled": [],
+              "delivered": []
+            },
+            "shipment": [
+              {
+                "trackingNumber": "1Z9999TEST0000001",
+                "trackingSiteUrl": "https://shipmenttracking.costco.com/us/odn/1399000008?l=en&fid=1",
+                "carrierName": "United Parcel Service",
+                "packageNumber": "00009999990000000001",
+                "shippedDate": "2026-08-02T10:00:00",
+                "estimatedArrivalDate": "2026-08-04T00:00:00",
+                "deliveredDate": null
+              }
+            ]
+          },
+          {
+            "itemNumber": "1889168",
+            "itemDescription": "Microsoft 365 Personal Subscription (e-delivery)",
+            "price": 0.01,
+            "quantity": 1,
+            "discountAmount": 0.01,
+            "isFeeItem": false,
+            "carrierItemCategory": "Digital",
+            "orderedShipMethod": "EDG",
+            "itemStatus": {
+              "cancelled": [],
+              "delivered": []
+            },
+            "shipment": [
+              {
+                "trackingNumber": "1099000002",
+                "trackingSiteUrl": "",
+                "carrierName": "Electronic Delivery Service",
+                "packageNumber": "1099000002",
+                "shippedDate": "2026-08-01T10:05:00",
+                "estimatedArrivalDate": null,
+                "deliveredDate": null
+              }
+            ]
+          },
+          {
+            "itemNumber": "1513304",
+            "itemDescription": "McAfee Total Protection, 1 Devices 1-Year Subscription with Auto-Renewal (E-delivery)",
+            "price": 0.01,
+            "quantity": 1,
+            "discountAmount": 0.01,
+            "isFeeItem": false,
+            "carrierItemCategory": "Digital",
+            "orderedShipMethod": "EDG",
+            "itemStatus": {
+              "cancelled": [],
+              "delivered": []
+            },
+            "shipment": [
+              {
+                "trackingNumber": "00009999990000000003",
+                "trackingSiteUrl": "",
+                "carrierName": "Electronic Delivery Service",
+                "packageNumber": "D21499999",
+                "shippedDate": "2026-08-01T00:00:00",
+                "estimatedArrivalDate": null,
+                "deliveredDate": null
+              }
+            ]
+          }
+        ]
+      }
+    ]
   }
 ]

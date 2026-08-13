@@ -24,6 +24,10 @@ Row model (matches how Amazon/Best Buy rows are keyed — Order ID + Order Date 
   is small, and the item-number suffix keeps same-box distinct SKUs from colliding regardless.)
 - Digital / non-shippable lines are dropped (gift cards, e-delivery software, memberships, and fee
   lines) — they're never resold and carry no carrier tracking.
+- `cost_per_item` is NET of any discount (promo code, instant savings, bundle deal). Costco reports
+  a discount per LINE, as a `discountAmount` against that line's (price x quantity) total — never a
+  reduced `price` field — so the raw `price` alone overstates what was actually paid. A SKU's rows
+  divide (gross total - discount total) back out over quantity to get the true per-unit cost.
 
 `build_order_items` is the entry point. `known_open_ids` are order numbers already recorded and still
 open in the sheet; a brand-new fully-cancelled order (not in that set) is ignored at discovery, while
@@ -173,7 +177,11 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
                 group = {
                     "item_number": item_number,
                     "description": description,
-                    "unit_price": _num(line_item.get("price")),
+                    # Accumulated across every line sharing this SKU (a SKU can appear on more than one
+                    # order line) and netted into a single "unit_price" below, once the loop is done,
+                    # rather than trusted from a single line's raw price.
+                    "gross_total": 0.0,
+                    "discount_total": 0.0,
                     "quantity": 0,
                     "packages": [],
                     "package_keys": set(),
@@ -182,7 +190,11 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
                 }
                 groups[key] = group
                 order_keys.append(key)
-            group["quantity"] += _int(line_item.get("quantity"))
+            line_quantity = _int(line_item.get("quantity"))
+            line_price = _num(line_item.get("price")) or 0.0
+            group["gross_total"] += line_price * line_quantity
+            group["discount_total"] += _num(line_item.get("discountAmount")) or 0.0
+            group["quantity"] += line_quantity
             if _order_cancelled(line_item):
                 group["cancelled"] = True
             for package in line_item.get("shipment") or []:
@@ -202,6 +214,21 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
                         "address": address,
                     }
                 )
+
+    # Net each group's per-unit price: Costco applies discounts (promo codes, instant savings) as a
+    # per-LINE `discountAmount` against that line's total (price x quantity), not a reduced `price`
+    # field — so the raw `price` alone overstates what was actually paid. Divide the discounted total
+    # back out over quantity to get the true per-unit cost. (`discountAmount` is fetched even on the
+    # DIGITAL lines skipped above, e.g. a $0.01 e-delivery item discounted to $0 — but that money never
+    # reaches this loop, since digital lines never become a group, so it's correctly excluded here.)
+    for key in order_keys:
+        group = groups[key]
+        if group["quantity"]:
+            group["unit_price"] = round(
+                (group["gross_total"] - group["discount_total"]) / group["quantity"], 2
+            )
+        else:
+            group["unit_price"] = None
 
     # Number shipments at the ORDER level, one number per distinct physical package (tracking
     # number), so items boxed together share a number and items in different boxes get different
