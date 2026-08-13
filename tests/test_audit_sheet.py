@@ -390,6 +390,34 @@ def test_a_blank_order_id_row_is_a_permanent_orphan():
     assert result_for(sheet, "blank_order_id_rows").status == "FAIL"
 
 
+def test_an_orphan_inside_the_sorted_block_is_reported_as_one_the_sort_will_move():
+    """The second consequence, and the surprising one: sort_ledger_by_date_desc sorts everything from
+    row 2 down to the last row that HAS an Order ID, so an orphan in that span gets shuffled."""
+    sheet = build(
+        row_cells(2),
+        row_cells(3, **{"Order ID": Cell("")}),  # orphan between two real rows
+        row_cells(4),
+    )
+
+    result = result_for(sheet, "blank_order_id_rows")
+
+    assert result.status == "FAIL"
+    assert "sort" in result.summary
+    assert any("row 3" in d and "sort will move it" in d for d in result.details)
+
+
+def test_a_note_row_below_the_last_order_is_not_reported_as_movable():
+    """Below the block is where a hand-written note belongs — the sort range stops at the last order,
+    so it stays put. Still an orphan (it's not a ledger row), just not a movable one."""
+    sheet = build(row_cells(2), row_cells(3, **{"Order ID": Cell("")}))
+
+    result = result_for(sheet, "blank_order_id_rows")
+
+    assert result.status == "FAIL"
+    assert "sort" not in result.summary
+    assert not any("sort will move it" in d for d in result.details)
+
+
 def test_trailing_whitespace_in_a_key_cell_is_an_invisible_duplicate():
     """ledger_sync.py:319 builds the key with no .strip()."""
     sheet = build(row_cells(2, **{"Item Name": Cell("ASUS Vivobook 15 ")}))

@@ -564,22 +564,44 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
         )
 
     oid_idx = header.index("Order ID")
-    data_rows = [r for r in existing[1:] if oid_idx < len(r) and str(r[oid_idx]).strip()]
-    if len(data_rows) < 2:
-        log.info("Ledger sort: %d data row(s), nothing to reorder.", len(data_rows))
-        return {"sorted_rows": len(data_rows), "already_sorted": True}
 
-    last_row = len(data_rows) + 1  # +1 for the header; data occupies rows 2..last_row
-    # An EXPLICIT range matters: gspread's unranged sort spans the sheet's full row_count, which drags
-    # the trailing empty rows through the data block and would leave blank rows interleaved (which
-    # audit_sheet's check_content_outside_the_schema then flags).
+    def ledger_row_numbers(grid) -> list[int]:
+        """1-based row numbers of the rows the ledger owns. Same rule as sync_csv_to_sheet: a row
+        with no Order ID isn't one (it can never be matched or updated)."""
+        return [
+            n for n, r in enumerate(grid[1:], start=2)
+            if oid_idx < len(r) and str(r[oid_idx]).strip()
+        ]
+
+    row_numbers = ledger_row_numbers(existing)
+    if len(row_numbers) < 2:
+        log.info("Ledger sort: %d data row(s), nothing to reorder.", len(row_numbers))
+        return {"sorted_rows": len(row_numbers), "already_sorted": True}
+
+    # The range ends at the POSITION of the last ledger row, not at the ledger row COUNT. Those agree
+    # only when every row in the block carries an Order ID, and a hand-added sheet doesn't have to:
+    # a spacer, a note, a half-typed row all count as neither. Each one made the old count-derived
+    # bound fall a row short, leaving that many rows off the bottom of the range — excluded from this
+    # sort and every future one, silently, since being out of order is only a WARN in audit_sheet and
+    # drift between appends is expected anyway. Locating the last row also keeps a note BELOW the
+    # block outside the range, which simply using len(existing) would sweep into the middle of it.
+    last_row = row_numbers[-1]
+    # An EXPLICIT range matters for the same family of reasons: gspread's unranged sort spans the
+    # sheet's full row_count, which drags the trailing empty rows through the data block and would
+    # leave blank rows interleaved (which audit_sheet's check_content_outside_the_schema then flags).
     cell_range = f"A2:{_col_letter(len(HEADER) - 1)}{last_row}"
     specs = tuple((header.index(name) + 1, direction) for name, direction in _SORT_SPEC)
 
     worksheet.sort(*specs, range=cell_range)
-    _write_profit_formulas(worksheet, list(range(2, last_row + 1)))
-    log.info("Ledger sort: %d row(s) sorted newest-first over %s.", len(data_rows), cell_range)
-    return {"sorted_rows": len(data_rows), "already_sorted": False}
+    # Re-read instead of reusing row_numbers: the sort just moved the rows those numbers described.
+    # Non-ledger rows inside the block move too, and not always to the bottom — Sheets orders EMPTY
+    # cells last, but a row blank only in Order ID still sorts on its Order Date and can land
+    # mid-block. So which rows are ledger rows now is a fact about the sheet AFTER the sort, and
+    # stamping a position-bound formula anywhere else is exactly what audit_sheet's
+    # check_no_stray_formulas fails on. One extra read buys correctness in every arrangement.
+    _write_profit_formulas(worksheet, ledger_row_numbers(worksheet.get_all_values()))
+    log.info("Ledger sort: %d row(s) sorted newest-first over %s.", len(row_numbers), cell_range)
+    return {"sorted_rows": len(row_numbers), "already_sorted": False}
 
 
 def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:

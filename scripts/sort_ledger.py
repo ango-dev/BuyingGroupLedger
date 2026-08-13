@@ -79,10 +79,19 @@ def _print_plan(plan: dict, header: list[str], apply: bool) -> None:
 
     date_i, oid_i, ship_i, item_i = (header.index(c) for c in
                                      ("Order Date", "Order ID", "Shipment", "Item Name"))
+    # Sheet row numbers are only predictable when every row in the block is a ledger row. A row with
+    # no Order ID still sorts on whatever it DOES hold — a stray Order Date lands it mid-block rather
+    # than at the bottom — which shifts every row beneath it. Fall back to a position index rather
+    # than print a row number that would turn out to be wrong; a preview that lies about where rows
+    # land is worse than one that declines to say.
+    exact_rows = plan["non_ledger_rows"] == 0
     print(f"\n  Resulting order (first 15 of {len(plan['ordered'])}):")
-    print(f"    {'row':>4}  {'Order Date':<12}{'Order ID':<22}{'Ship':>5}  Item")
+    if not exact_rows:
+        print("    (position within the sorted ledger, NOT the sheet row number — the blank-Order-ID "
+              "row(s)\n     noted above sort in among these and shift the rows below them)")
+    print(f"    {'row' if exact_rows else '#':>4}  {'Order Date':<12}{'Order ID':<22}{'Ship':>5}  Item")
     print("    " + "-" * 76)
-    for n, r in enumerate(plan["ordered"][:15], start=2):
+    for n, r in enumerate(plan["ordered"][:15], start=2 if exact_rows else 1):
         def cell(i):
             return str(r[i]) if i < len(r) else ""
         print(f"    {n:>4}  {cell(date_i):<12}{cell(oid_i)[:20]:<22}{cell(ship_i):>5}  {cell(item_i)[:34]}")

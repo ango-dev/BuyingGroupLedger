@@ -104,6 +104,12 @@ class FakeWorksheet:
 
         Numbers sort before strings, matching Sheets' own type ordering — and, more importantly,
         keeping this from raising TypeError on a mixed-type column the way a bare Python sort would.
+
+        (3) EMPTY cells go last in BOTH directions, which is Sheets' rule and not Python's — a plain
+        reverse sort would float them to the top of a descending column. It matters because the sheet
+        can hold rows that are blank in one sort column but not another (a hand-typed row missing its
+        Order ID still has an Order Date), and where those land decides which rows the post-sort
+        formula re-stamp has to cover.
         """
         first, last = 2, len(self.rows)
         if range:
@@ -112,8 +118,11 @@ class FakeWorksheet:
             if len(bounds) > 1 and any(c.isdigit() for c in bounds[1]):
                 last = int("".join(c for c in bounds[1] if c.isdigit()))
 
+        def cell(row, column):
+            return row[column - 1] if column - 1 < len(row) else ""
+
         def cell_key(row, column):
-            value = row[column - 1] if column - 1 < len(row) else ""
+            value = cell(row, column)
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 return (0, value)
             return (1, str(value))
@@ -123,6 +132,9 @@ class FakeWorksheet:
         # mixed directions composes without building one combined key.
         for column, direction in reversed(specs):
             block.sort(key=lambda r, c=column: cell_key(r, c), reverse=(direction == "des"))
+            # Then lift the blanks out to the end. A second STABLE sort on a 0/1 key preserves the
+            # ordering just established among the non-blanks, so this is a partition, not a re-sort.
+            block.sort(key=lambda r, c=column: str(cell(r, c)).strip() == "")
         self.rows[first - 1:last] = block
         self.sort_calls.append({"specs": specs, "range": range})
 

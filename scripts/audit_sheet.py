@@ -483,19 +483,33 @@ def check_blank_order_id_rows(sheet: Sheet, opts: Options) -> Result:
     """A row with no Order ID can never be updated again -- both ledger_sync.py:317 and :360 skip it.
 
     It's a permanent orphan: every future re-check appends alongside it instead of updating it.
+
+    It has a SECOND consequence that's easy to miss, so it's reported here too: the newest-first sort
+    covers the whole block from row 2 down to the last row that HAS an Order ID, so an orphan sitting
+    inside that span gets shuffled around by every sort. It won't necessarily sink to the bottom
+    either -- Sheets orders empty cells last, but a row blank only in Order ID still sorts on its
+    Order Date and can land back in the middle of the orders. A note row below the last order is left
+    alone, which is where one belongs.
     """
-    offenders = []
-    for row_number, row in sheet.rows(sheet.grids.formatted):
+    grid = sheet.grids.formatted
+    last_ledger_row = max((n for n, _ in sheet.ledger_rows(grid)), default=1)
+    offenders, inside = [], 0
+    for row_number, row in sheet.rows(grid):
         if not any(str(c).strip() for c in row):
             continue  # a wholly blank row is padding, not an orphan
-        if not str(sheet.cell(sheet.grids.formatted, row_number, "Order ID")).strip():
-            item = sheet.cell(sheet.grids.formatted, row_number, "Item Name")
-            offenders.append(f"row {row_number}: {item!r}")
+        if not str(sheet.cell(grid, row_number, "Order ID")).strip():
+            item = sheet.cell(grid, row_number, "Item Name")
+            where = ""
+            if row_number < last_ledger_row:
+                inside += 1
+                where = " -- inside the sorted block, so the sort will move it"
+            offenders.append(f"row {row_number}: {item!r}{where}")
     if not offenders:
         return Result("blank_order_id_rows", "PASS", "every non-empty row carries an Order ID")
     return Result(
         "blank_order_id_rows", "FAIL",
-        f"{len(offenders)} orphan row(s) with no Order ID -- they can never be updated",
+        f"{len(offenders)} orphan row(s) with no Order ID -- they can never be updated"
+        + (f" ({inside} of them inside the sorted block, so the sort moves them)" if inside else ""),
         _truncate(offenders, opts.max_detail),
     )
 

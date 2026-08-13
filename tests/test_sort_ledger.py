@@ -187,6 +187,110 @@ class TestGuardsAndNoOps:
         assert sheet.sort_calls[-1]["range"].endswith("3")
 
 
+class TestRowsAddedByHand:
+    """A row typed straight into the sheet is a first-class citizen — the sort covers the whole block,
+    not just rows a scrape wrote — but only if it carries an Order ID.
+
+    A row WITHOUT one is where this used to go wrong. The sort range was derived from the ledger row
+    COUNT (`len(data_rows) + 1`), which equals the last ledger row's POSITION only when every row in
+    the block has an Order ID. Each row that doesn't shortened the range by one, so that many rows
+    fell off the bottom of every future sort and stayed stranded there — silently, since
+    check_rows_are_date_descending only WARNs and drift between appends is expected anyway.
+    """
+
+    def test_a_blank_row_in_the_middle_does_not_strand_the_rows_below_it(self, sheet):
+        # THE REGRESSION. With a count-derived range this sorted rows 2-3 only, leaving B — the newest
+        # order — marooned at the bottom no matter how often the sort ran.
+        sheet.rows = [
+            list(HEADER),
+            seeded(order_id="A", order_date="2026-08-02"),
+            [""] * len(HEADER),
+            seeded(order_id="B", order_date="2026-08-11"),
+        ]
+
+        sort_ledger_by_date_desc(sheet)
+
+        oid = FIELDNAMES.index("order_id")
+        # Both ledger rows sorted, newest first, and the blank pushed below them.
+        assert [r[oid] for r in sheet.data_rows()[:2]] == ["B", "A"]
+
+    def test_the_range_ends_at_the_last_ledger_rows_position(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            seeded(order_id="A", order_date="2026-08-02"),
+            [""] * len(HEADER),
+            seeded(order_id="B", order_date="2026-08-11"),
+        ]
+
+        sort_ledger_by_date_desc(sheet)
+
+        # Position (4), not count (2 ledger rows -> would have been 3).
+        assert sheet.sort_calls[-1]["range"].endswith("4")
+
+    def test_the_shortfall_scales_with_the_number_of_blank_rows(self, sheet):
+        # The old bug lost one row per blank row, so a single-blank test could pass by luck.
+        sheet.rows = [
+            list(HEADER),
+            seeded(order_id="A", order_date="2026-08-02"),
+            [""] * len(HEADER),
+            [""] * len(HEADER),
+            [""] * len(HEADER),
+            seeded(order_id="B", order_date="2026-08-11"),
+        ]
+
+        sort_ledger_by_date_desc(sheet)
+
+        oid = FIELDNAMES.index("order_id")
+        assert sheet.sort_calls[-1]["range"].endswith("6")
+        assert [r[oid] for r in sheet.data_rows()[:2]] == ["B", "A"]
+
+    def test_a_note_row_below_the_block_is_left_where_it_is(self, sheet):
+        # The other direction: ending the range at len(existing) instead would sweep a trailing note
+        # into the sorted block and scatter it into the middle of the orders.
+        note = [""] * len(HEADER)
+        note[FIELDNAMES.index("item_name")] = "-- my notes below --"
+        sheet.rows = [
+            list(HEADER),
+            seeded(order_id="A", order_date="2026-08-02"),
+            seeded(order_id="B", order_date="2026-08-11"),
+            list(note),
+        ]
+
+        sort_ledger_by_date_desc(sheet)
+
+        assert sheet.sort_calls[-1]["range"].endswith("3")
+        assert sheet.rows[3] == note
+
+    def test_formulas_follow_the_ledger_rows_and_skip_the_rest(self, sheet):
+        # audit_sheet checks BOTH halves of this: profit_formula_literal fails a ledger row whose
+        # formula doesn't match its row number, and no_stray_formulas fails a formula on a non-row.
+        sheet.rows = [
+            list(HEADER),
+            seeded(order_id="A", order_date="2026-08-02"),
+            [""] * len(HEADER),
+            seeded(order_id="B", order_date="2026-08-11"),
+        ]
+
+        sort_ledger_by_date_desc(sheet)
+
+        assert sheet.profit_formulas() == {2: _profit_formula(2), 3: _profit_formula(3)}
+
+    def test_a_hand_added_row_is_sorted_like_any_other(self, sheet):
+        # The plain case, and the answer to "will it fix itself?": a typed row with an Order ID and a
+        # plain-text ISO date is indistinguishable from a scraped one.
+        sheet.rows = [
+            list(HEADER),
+            seeded(order_id="A", order_date="2026-08-02"),
+            seeded(order_id="B", order_date="2026-08-11"),
+            seeded(order_id="HAND", order_date="2026-08-07"),  # typed in at the bottom
+        ]
+
+        sort_ledger_by_date_desc(sheet)
+
+        oid = FIELDNAMES.index("order_id")
+        assert [r[oid] for r in sheet.data_rows()] == ["B", "HAND", "A"]
+
+
 class TestSyncReportsWhatItDid:
     """main.run_scrape only re-sorts when rows were APPENDED — an update rewrites a row in place and
     can't change the order, so the common re-check run skips the sort entirely."""
@@ -263,6 +367,29 @@ class TestDryRunPreviewMatchesReality:
 
         assert len(plan["ordered"]) == 4
         assert plan["non_ledger_rows"] == 1
+
+    def test_preview_prints_real_row_numbers_on_a_clean_sheet(self, capsys):
+        from scripts.sort_ledger import _print_plan, plan_sort
+
+        _print_plan(plan_sort(list(HEADER), self._rows()), list(HEADER), apply=False)
+
+        out = capsys.readouterr().out
+        assert "NOT the sheet row number" not in out
+        # The newest order is listed first, so it lands on sheet row 2 (row 1 is the header).
+        newest = next(ln for ln in out.splitlines() if "ZZZ-1" in ln)
+        assert newest.split()[0] == "2"
+
+    def test_preview_stops_claiming_row_numbers_it_cannot_know(self, capsys):
+        # With a non-ledger row in the block, sheet positions depend on where that row sorts, which
+        # this read-only preview can't determine. Say so rather than print a number that's off by one.
+        from scripts.sort_ledger import _print_plan, plan_sort
+
+        rows = self._rows() + [[""] * len(HEADER)]
+        _print_plan(plan_sort(list(HEADER), rows), list(HEADER), apply=False)
+
+        out = capsys.readouterr().out
+        assert "NOT the sheet row number" in out
+        assert "1 row(s) with a blank Order ID" in out
 
 
 class TestRunScrapeTriggersTheSort:
