@@ -1,2 +1,10 @@
 # Shell scripts must keep LF endings — CRLF breaks them in the Linux Docker container / cron.
+# (A CRLF script fails as `no such file or directory`, because the \r becomes part of the interpreter
+# path on the shebang line.)
 *.sh text eol=lf
+
+# Same reasoning for the container build files. Docker's parser mishandles a CRLF line ending on a
+# line continued with a backslash, and the Dockerfile's supercronic install is one long `\` chain.
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

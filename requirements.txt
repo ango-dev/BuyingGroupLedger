@@ -11,3 +11,9 @@ PyJWT>=2.8.0
 # Amazon deterministic path: Amazon has no order JSON endpoint (its order pages are server-rendered
 # HTML), so scrapers/amazon_mapping.py parses that HTML with BeautifulSoup.
 beautifulsoup4>=4.12.0
+# scrapers/cdp.py connects to the Browser-Use CLOUD browser over CDP. Playwright is used purely as a
+# CDP *client* — no browser is ever launched locally, so `playwright install` is NOT needed and the
+# image stays small. It is not a dependency of browser-use-sdk, so it must be declared here: without
+# it, `_scrape_via_api` raises ImportError, the scrapers' catch-all degrades to the Browser-Use agent,
+# and Amazon / Amazon Business / Best Buy silently run on the PAID path forever.
+playwright>=1.40.0

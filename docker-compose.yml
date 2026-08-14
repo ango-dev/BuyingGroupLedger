@@ -1,5 +1,8 @@
 # One service = one instance. Run more instances by copying this with different mounted
 # profiles.json / .env (e.g. per proxy pool). Secrets are injected at runtime, never baked in.
+#
+# Works as-is on a Raspberry Pi (64-bit OS): the image builds for the host's own architecture, and
+# no browser runs locally — Browser-Use Cloud holds it. See "Raspberry Pi" in README.md.
 services:
   ledger:
     build: .
@@ -13,7 +16,9 @@ services:
     environment:
       RUN_INTERVAL_HOURS: "6"     # every 6h = 4x/day; change to taste
       RUN_ON_START: "false"       # set "true" to also run once when the container starts
-      # TZ: "America/New_York"    # optional: align the cron schedule to your local time
+      PREFLIGHT_STRICT: "false"   # "true" = refuse to start when preflight fails, instead of
+                                  # alerting and running degraded (see docker/entrypoint.sh)
+      TZ: "America/New_York"      # the cron schedule follows this; UTC if unset
     volumes:
       - ./profiles.json:/app/profiles.json:ro
       - ./service_account.json:/app/service_account.json:ro
@@ -21,8 +26,16 @@ services:
       # Buying-group warehouses and credit-card cashback rates. Both are OPTIONAL — but a bind mount
       # whose host file is missing makes Docker create an empty DIRECTORY there, so either create the
       # file on the host (even as `[]`) or delete the line. Without them the run still works: every
-      # address tags Unclassified and every card falls back to DEFAULT_CASHBACK_RATE.
+      # address tags Unclassified and every card falls back to DEFAULT_CASHBACK_RATE. Preflight
+      # reports this on every container start rather than letting it pass as "not configured".
       - ./warehouses.json:/app/warehouses.json:ro
       - ./cards.json:/app/cards.json:ro
       - ./data:/app/data          # generated CSVs (optional; Sheet is source of truth)
-      - ./logs:/app/logs          # run.log + the overlap lock
+      - ./logs:/app/logs          # run.log, the overlap lock, and the .last_run heartbeat
+    # Docker's default json-file driver grows without bound. On a Pi that means an SD card filling
+    # up months later and taking the whole host down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
