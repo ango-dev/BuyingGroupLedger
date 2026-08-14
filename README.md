@@ -627,13 +627,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_task_windows
 ```
 
 Both call the platform runner (`run.sh` / `run.ps1`), which `cd`s to the project root and appends to
-`logs/cron.log`. To watch a run live on Linux: `tail -f logs/cron.log`, or `screen -S ledger ./run.sh`
-to start one that survives your SSH session dropping (detach with `Ctrl-A D`, reattach with
-`screen -r ledger`).
+`logs/cron.log`. To watch a run live on Linux: `tail -f logs/cron.log`, or run it inside
+`tmux new -s ledger` so it survives your SSH session dropping (detach with `Ctrl-B D`, reattach with
+`tmux attach -t ledger`).
 
-`run.sh` rotates `logs/cron.log` at 10 MB — left unbounded it fills a small disk months later, long
-after anyone is watching — and always records how a run *ended*, including its exit code. It also
-stamps `logs/.last_run`, the same heartbeat the container healthcheck uses: if that file is stale, the
+**Both runners behave identically**, so a host is diagnosable the same way whichever platform it's
+on. They rotate `logs/cron.log` at 10 MB — left unbounded it fills a small disk months later, long
+after anyone is watching — and always record how a run *ended*, including its exit code. They also
+stamp `logs/.last_run`, the same heartbeat the container healthcheck uses: if that file is stale, the
 scheduler has stopped firing, which is otherwise a completely silent failure. Check it with
 `cat logs/.last_run`, and cross-check the data side with
 `python -m scripts.audit_sheet --stale-days 2`.

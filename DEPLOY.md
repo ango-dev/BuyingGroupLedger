@@ -187,7 +187,7 @@ unhealthy once that's older than two intervals.
 Simpler to poke at over SSH. Ubuntu 24.04 ships Python 3.12, so this needs no deadsnakes PPA:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y python3-venv
+sudo apt-get update && sudo apt-get install -y python3-venv tmux
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m scripts.preflight
@@ -211,12 +211,17 @@ one, that's the first suspect. Reproduce it with `env -i ./run.sh`.
 tail -f logs/cron.log                # follow the scheduled runs
 ./run.sh amazon                      # run one retailer in the foreground
 
-screen -S ledger ./run.sh            # detach with Ctrl-A D, reattach with `screen -r ledger`
+tmux new -s ledger                   # then: ./run.sh
+#   Ctrl-B then D  -> detach; the run keeps going
+tmux attach -t ledger                # reattach later, from any SSH connection
 ```
 
-`screen` matters over SSH: a run started in a plain SSH session dies with the connection. `screen` (or
-`tmux new -s ledger`) survives it. For Docker the equivalent is just `docker compose logs -f`, since
-the container isn't tied to your session at all.
+`tmux` matters over SSH: a run started in a plain SSH session **dies with the connection**, and a
+scrape killed halfway can leave the run lock behind (it self-expires after 3h). tmux survives the
+disconnect. It's also what §6 uses for the Claude session, so it's one tool rather than two.
+
+For Docker none of this applies — the container isn't tied to your session at all, so
+`docker compose logs -f` is the whole story.
 
 ---
 
