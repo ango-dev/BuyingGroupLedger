@@ -872,3 +872,31 @@ scripts/sort_ledger.py  one-off: sort the sheet newest-first (dry run by default
 scripts/                create_profile, install_cron, install_task_windows
 Dockerfile / docker-compose.yml / docker/entrypoint.sh   containerized, self-scheduling
 ```
+
+---
+
+## License
+
+Copyright (C) 2026 Alpha
+
+This program is free software: you can redistribute it and/or modify it under the terms of the **GNU
+General Public License** as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but **WITHOUT ANY WARRANTY**; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this program. If not,
+see <https://www.gnu.org/licenses/>.
+
+The full text is in [LICENSE](LICENSE).
+
+> **What GPL-3.0 means here, in one line:** anyone may use, study, modify and redistribute this, but a
+> distributed derivative must ship its source under the same license. It does not restrict running the
+> software, and it places no obligation on you for changes you keep to yourself.
+
+**Nothing in this repository is a credential.** No API key, token, service-account file, session
+cookie or account password is committed, and none ever has been — every one of them is gitignored and
+injected at runtime. Running this requires your own accounts and your own config files, none of which
+are included; see [Install](#install).
