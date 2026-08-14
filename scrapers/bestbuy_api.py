@@ -193,7 +193,41 @@ def _click_continue(page) -> bool:
     return False
 
 
-def _log_signin_diagnostics(page, what_failed: str) -> None:
+#: Hosts whose failure explains an auth rejection. tmx.bestbuy.com is ThreatMetrix — Best Buy's
+#: device-fingerprinting script. When it cannot load, the sign-in POST arrives without a valid
+#: fingerprint and Best Buy rejects it, which surfaces as the page's own "Failed to fetch" rather
+#: than anything our selectors can see.
+_AUTH_CRITICAL_HOSTS = ("identity/authenticate", "gateway/graphql", "tmx.bestbuy.com")
+
+
+def _watch_failed_requests(page) -> list:
+    """Collect network-level request failures during sign-in.
+
+    Diagnosed live: every click and fill worked, and sign-in still failed because
+    `POST /identity/authenticate` died with ERR_HTTP2_PROTOCOL_ERROR while the ThreatMetrix script
+    failed to tunnel at all. None of that is visible from the DOM — the page just says "Failed to
+    fetch" — so without this the failure is indistinguishable from a selector problem and sends you
+    hunting in the wrong place.
+    """
+    failed: list = []
+
+    def record(request):
+        try:
+            if len(failed) < 20:
+                failed.append({"url": request.url[:120],
+                               "type": request.resource_type,
+                               "error": request.failure or ""})
+        except Exception:  # noqa: BLE001 — never let telemetry break a login
+            pass
+
+    try:
+        page.on("requestfailed", record)
+    except Exception:  # noqa: BLE001 — a page without event support still logs DOM diagnostics
+        pass
+    return failed
+
+
+def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None = None) -> None:
     """Say WHY sign-in stalled, since the caller can only return False.
 
     A bare `return False` costs the whole run for that retailer and tells you nothing — you cannot
@@ -225,6 +259,20 @@ def _log_signin_diagnostics(page, what_failed: str) -> None:
     except Exception:  # noqa: BLE001 — diagnostics must never mask the original failure
         log.warning("Best Buy sign-in: %s (page state unreadable).", what_failed, exc_info=True)
 
+    if not failed_requests:
+        return
+    critical = [f for f in failed_requests
+                if any(h in f.get("url", "") for h in _AUTH_CRITICAL_HOSTS)]
+    if critical:
+        log.warning(
+            "Best Buy sign-in: %d auth-critical request(s) FAILED at the network layer — this is a "
+            "connectivity/anti-bot problem, NOT a page-shape one, so the agent fallback cannot fix "
+            "it either: %s", len(critical), critical[:6],
+        )
+    else:
+        log.warning("Best Buy sign-in: %d request(s) failed (none auth-critical): %s",
+                    len(failed_requests), failed_requests[:6])
+
 
 def _deterministic_login(page, auth) -> bool:
     """Best Buy's 3-screen password login, agent-free (proven live). Returns True if it
@@ -233,6 +281,7 @@ def _deterministic_login(page, auth) -> bool:
     Passkey/Apple/Google buttons — then `#password-radio` ("Use password", below the fold)."""
     if auth is None or auth.method != "password" or not auth.username:
         return False
+    failed_requests = _watch_failed_requests(page)
     _dismiss_survey(page)
 
     # Screen 1: email (typed if editable, else already prefilled) -> Continue.
@@ -244,7 +293,7 @@ def _deterministic_login(page, auth) -> bool:
             log.warning("Best Buy sign-in page has no email field and no prefilled email.")
             return False
     if not _click_continue(page):
-        _log_signin_diagnostics(page, "could not click Continue on the email screen")
+        _log_signin_diagnostics(page, "could not click Continue on the email screen", failed_requests)
         return False
 
     # Screen 2: method chooser -> "Use password".
@@ -271,6 +320,7 @@ def _deterministic_login(page, auth) -> bool:
             except Exception:
                 continue
     except Exception:
+        _log_signin_diagnostics(page, "password field never appeared", failed_requests)
         return False
 
     try:
@@ -278,7 +328,12 @@ def _deterministic_login(page, auth) -> bool:
                           timeout=45000)
     except Exception:
         pass
-    return not _looks_logged_out(page)
+    if _looks_logged_out(page):
+        # Everything clicked and filled, yet we are still on a sign-in URL. Live this was
+        # the auth POST being rejected at the network layer, which no selector work can fix.
+        _log_signin_diagnostics(page, "submitted the password but stayed logged out", failed_requests)
+        return False
+    return True
 
 
 _INPAGE_FETCH_JS = """

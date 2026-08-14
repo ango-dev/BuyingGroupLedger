@@ -32,6 +32,10 @@ class FakePage:
         self.clicks: list[str] = []
         self.survey_removals = 0
         self.evaluated: list[str] = []
+        self.handlers: dict[str, list] = {}
+
+    def on(self, event, handler):
+        self.handlers.setdefault(event, []).append(handler)
 
     # --- the bits _dismiss_survey / diagnostics use ---
     def evaluate(self, script):
@@ -145,3 +149,56 @@ class TestSigninDiagnostics:
 @pytest.mark.parametrize("auth", [None])
 def test_login_declines_without_password_auth(auth):
     assert bestbuy_api._deterministic_login(FakePage(), auth) is False
+
+
+class TestFailedRequestReporting:
+    """Diagnosed live: every click and fill worked and sign-in STILL failed.
+
+    `POST /identity/authenticate` died with ERR_HTTP2_PROTOCOL_ERROR while Best Buy's ThreatMetrix
+    fingerprint script failed to tunnel. None of that is visible from the DOM — the page only says
+    "Failed to fetch" — so a run reporting just "login did not succeed" sends you hunting through
+    selectors for a problem that lives in the network.
+    """
+
+    class _Req:
+        def __init__(self, url, resource_type, failure):
+            self.url = url
+            self.resource_type = resource_type
+            self.failure = failure
+
+    def test_auth_critical_failures_are_called_out_as_not_a_page_shape_problem(self, caplog):
+        page = FakePage()
+        failed = bestbuy_api._watch_failed_requests(page)
+        for handler in page.handlers["requestfailed"]:
+            handler(self._Req("https://www.bestbuy.com/identity/authenticate", "fetch",
+                              "net::ERR_HTTP2_PROTOCOL_ERROR"))
+            handler(self._Req("https://tmx.bestbuy.com/abc.js", "script",
+                              "net::ERR_TUNNEL_CONNECTION_FAILED"))
+
+        with caplog.at_level(logging.WARNING, logger=bestbuy_api.__name__):
+            bestbuy_api._log_signin_diagnostics(page, "stayed logged out", failed)
+
+        assert "auth-critical" in caplog.text
+        assert "identity/authenticate" in caplog.text
+        # The operative conclusion: don't go looking at selectors, and the agent won't help either.
+        assert "NOT a page-shape one" in caplog.text
+
+    def test_incidental_failures_are_not_dressed_up_as_auth_failures(self, caplog):
+        page = FakePage()
+        failed = bestbuy_api._watch_failed_requests(page)
+        for handler in page.handlers["requestfailed"]:
+            handler(self._Req("https://www.googletagmanager.com/gtag/js", "script",
+                              "net::ERR_TUNNEL_CONNECTION_FAILED"))
+
+        with caplog.at_level(logging.WARNING, logger=bestbuy_api.__name__):
+            bestbuy_api._log_signin_diagnostics(page, "stayed logged out", failed)
+
+        assert "none auth-critical" in caplog.text
+
+    def test_a_page_without_event_support_still_works(self):
+        class NoEvents(FakePage):
+            def on(self, event, handler):
+                raise RuntimeError("unsupported")
+
+        # Telemetry must never be what breaks a login.
+        assert bestbuy_api._watch_failed_requests(NoEvents()) == []
