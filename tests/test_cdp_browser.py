@@ -126,3 +126,61 @@ class TestScreenSizeIsDeliberatelyUnset:
     def test_allow_resizing_is_not_sent(self, created):
         """The v4 docs say enabling it 'reduces stealthiness', and we never resize mid-session."""
         assert "allowResizing" not in created(_profile())
+
+
+class TestConnectFailureDoesNotLeakAPaidBrowser:
+    """POST /browsers starts a cloud browser that BILLS. If connecting afterwards raises, `with` never
+    opens, so __exit__ never runs and that browser is left running in the cloud — plus a started
+    Playwright driver subprocess, which is the usual source of the "Task was destroyed but it is
+    pending" records seen at interpreter shutdown on 2026-08-14.
+    """
+
+    @staticmethod
+    def _wire(monkeypatch, fail_at):
+        http = FakeHttp()
+        closed = {"client": False}
+
+        class FakeClient:
+            _http = http
+
+            def close(self):
+                closed["client"] = True
+
+        class Exploding:
+            class chromium:
+                @staticmethod
+                def connect_over_cdp(url):
+                    raise RuntimeError("cdp refused")
+
+            def stop(self):
+                closed["playwright"] = True
+
+        monkeypatch.setattr(cdp, "BrowserUseV2", lambda: FakeClient())
+        if fail_at == "start":
+            def _boom():
+                raise RuntimeError("driver would not start")
+            monkeypatch.setattr(cdp, "sync_playwright",
+                                lambda: type("F", (), {"start": staticmethod(_boom)})())
+        else:
+            monkeypatch.setattr(cdp, "sync_playwright",
+                                lambda: type("F", (), {"start": staticmethod(Exploding)})())
+        return http, closed
+
+    @pytest.mark.parametrize("fail_at", ["start", "connect"])
+    def test_the_cloud_browser_is_stopped_when_connecting_fails(self, monkeypatch, fail_at):
+        http, closed = self._wire(monkeypatch, fail_at)
+
+        with pytest.raises(RuntimeError):
+            with cdp.CdpBrowser(_profile()):
+                pytest.fail("the context body must never run")
+
+        stops = [c for c in http.calls if c[0] == "PATCH" and c[2] == {"action": "stop"}]
+        assert stops, "the paid cloud browser must be handed back, not left running"
+        assert closed["client"], "the SDK client must be closed too"
+
+    def test_the_original_error_still_propagates(self, monkeypatch):
+        """Cleaning up must not swallow the failure — the caller has to see why it could not connect."""
+        self._wire(monkeypatch, "connect")
+        with pytest.raises(RuntimeError, match="cdp refused"):
+            with cdp.CdpBrowser(_profile()):
+                pass

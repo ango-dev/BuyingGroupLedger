@@ -11,10 +11,17 @@ cookie (Akamai-guarded) — so the reads happen INSIDE the page:
      {credentials:'include'})` run in-page returns the full ss-api order JSON (tracking#, per-item cost,
      card, shipment groups). scrapers/bestbuy_mapping.py turns those into ledger rows.
 
-If the session has lapsed (Best Buy dies ~20 min), `_ensure_logged_in` logs back in deterministically
-with the profile's `auth.bestbuy` password creds — the exact 3-screen flow proven live (prefilled
-email -> Continue -> #password-radio -> password). Any failure raises `BestBuyApiError`, and
-scrapers/bestbuy.py then falls back to the Browser-Use agent (like Costco).
+If the session has lapsed (Best Buy dies ~20 min), `_deterministic_login` logs back in with the
+profile's `auth.bestbuy` password creds — the exact 3-screen flow proven live (prefilled email ->
+Continue -> #password-radio -> password).
+
+WHICH ERROR IS RAISED DECIDES WHETHER MONEY IS SPENT, so the two are kept strictly apart:
+  - `ApiLoginError` -> scrapers/bestbuy.py alerts and SKIPS. The agent is never run for an auth
+    failure, because it cannot fix one — it would just spend ~$0.02 rediscovering the logout.
+  - `BestBuyApiError` -> falls back to the Browser-Use agent (like Costco). Reserved for a genuine
+    page/shape change, which is the one thing the agent CAN adapt to.
+The hard case is discovery coming back empty, which both causes produce identically; see
+`_signin_affordances` for how they are told apart.
 
 The flight reassembly / order-id extraction is pure and unit-tested (tests/test_bestbuy_api.py); the
 mapping is pure and unit-tested (tests/test_bestbuy_mapping.py). Only the browser mechanics need a live
@@ -24,6 +31,7 @@ run to prove.
 import json
 import logging
 import re
+from typing import NamedTuple
 
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
@@ -34,10 +42,27 @@ PURCHASE_HISTORY_URL = "https://www.bestbuy.com/purchasehistory/purchases"
 ORDER_DETAIL_PATH = "/profile/ss/api/v1/orders/{}"
 _SIGNIN_MARKERS = ("identity/signin", "/login", "signin/options")
 
+# Things a page shows only when it wants you to sign in. Used ONLY as corroboration once discovery
+# has already found zero orders -- deliberately NOT folded into _looks_logged_out, because a false
+# positive THERE would send a perfectly good session into a doomed self-login and end in
+# skip-with-alert, i.e. a silently missed run. Here the run is failing either way and the only open
+# question is whether to spend money on an agent, so the safe direction is to assume logged out.
+_SIGNIN_CTA_SELECTORS = (
+    ".cia-signin",
+    "#fld-e",
+    *(f'a[href*="{marker}"]' for marker in _SIGNIN_MARKERS),
+)
+
 
 class BestBuyApiError(Exception):
     """The deterministic path could not run (login failed, page shape changed, network) — the caller
     should fall back to the agent."""
+
+
+class _AuthTransportError(Exception):
+    """INTERNAL: sign-in failed because the auth requests died at the network layer (the proxy), not
+    because of anything on the page. Never escapes fetch_order_payloads — it only routes the retry to
+    the off-proxy sign-in."""
 
 
 # --- pure flight parsing (unit-tested) ----------------------------------------------------------
@@ -154,6 +179,41 @@ def _looks_logged_out(page) -> bool:
         return False
 
 
+def _discover_orders(page) -> dict:
+    """Scroll the lazily-rendered purchase list, then parse order ids + dates out of the flight data.
+
+    Extracted so it can be run a SECOND time after a late-detected logout is self-healed -- otherwise
+    recovering the session would still return the empty result parsed before signing in.
+    """
+    for _ in range(5):
+        try:
+            page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+        except Exception:
+            pass
+        page.wait_for_timeout(1200)
+    return _order_ids_and_dates(page.content())
+
+
+def _signin_affordances(page) -> list[str]:
+    """Which sign-in CTAs the page is showing, if any.
+
+    This exists because a silently-expired session and a genuine markup change look IDENTICAL at the
+    point discovery comes back empty, and they have opposite correct responses: a logout must skip
+    for free (the agent cannot fix an auth failure), while a shape change is exactly what the paid
+    agent is for. Live the logged-out purchase-history page tripped neither URL redirect
+    nor the sign-in form selectors, so `not dates` fired, the agent ran, cost $0.02, and concluded
+    "logged out" anyway -- rediscovering for money what this catches for free.
+    """
+    found = []
+    for selector in _SIGNIN_CTA_SELECTORS:
+        try:
+            if page.locator(selector).count() > 0:
+                found.append(selector)
+        except Exception:  # noqa: BLE001 -- a selector engine hiccup must not mask the real failure
+            continue
+    return found
+
+
 def _dismiss_survey(page) -> None:
     try:
         page.evaluate("() => { const s = document.getElementById('survey_window'); if (s) s.remove(); }")
@@ -227,6 +287,25 @@ def _watch_failed_requests(page) -> list:
     return failed
 
 
+def _auth_critical(failed_requests: list | None) -> list:
+    """The subset of failed requests that explain an auth rejection (see _AUTH_CRITICAL_HOSTS)."""
+    return [f for f in (failed_requests or [])
+            if any(h in f.get("url", "") for h in _AUTH_CRITICAL_HOSTS)]
+
+
+class LoginOutcome(NamedTuple):
+    """Result of a sign-in attempt.
+
+    `transport_failed` separates the two failures that look identical from the DOM but have opposite
+    fixes: a page/selector change (retrying elsewhere won't help) versus auth requests dying at the
+    NETWORK layer, which the profile's proxy does intermittently — retrying the login off-proxy fixes
+    that one. See reference-isp-proxy-breaks-post.
+    """
+
+    ok: bool
+    transport_failed: bool = False
+
+
 def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None = None) -> None:
     """Say WHY sign-in stalled, since the caller can only return False.
 
@@ -274,13 +353,16 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
                     len(failed_requests), failed_requests[:6])
 
 
-def _deterministic_login(page, auth) -> bool:
-    """Best Buy's 3-screen password login, agent-free (proven live). Returns True if it
-    lands authenticated. Handles the fresh (#fld-e editable) and remembered (email prefilled as static
-    text, just click Continue) variants. Uses `button.cia-form__controls__submit` — NOT the
-    Passkey/Apple/Google buttons — then `#password-radio` ("Use password", below the fold)."""
+def _deterministic_login(page, auth) -> LoginOutcome:
+    """Best Buy's 3-screen password login, agent-free (proven live). Handles the fresh
+    (#fld-e editable) and remembered (email prefilled as static text, just click Continue) variants.
+    Uses `button.cia-form__controls__submit` — NOT the Passkey/Apple/Google buttons — then
+    `#password-radio` ("Use password", below the fold).
+
+    Returns a LoginOutcome; `transport_failed` tells the caller the auth requests died at the network
+    layer, which is recoverable by retrying off-proxy rather than a reason to give up."""
     if auth is None or auth.method != "password" or not auth.username:
-        return False
+        return LoginOutcome(False)
     failed_requests = _watch_failed_requests(page)
     _dismiss_survey(page)
 
@@ -291,10 +373,10 @@ def _deterministic_login(page, auth) -> bool:
     except Exception:
         if page.locator(".prefilled-value, .cia-signin__username").count() == 0:
             log.warning("Best Buy sign-in page has no email field and no prefilled email.")
-            return False
+            return LoginOutcome(False)
     if not _click_continue(page):
         _log_signin_diagnostics(page, "could not click Continue on the email screen", failed_requests)
-        return False
+        return LoginOutcome(False, bool(_auth_critical(failed_requests)))
 
     # Screen 2: method chooser -> "Use password".
     try:
@@ -321,7 +403,7 @@ def _deterministic_login(page, auth) -> bool:
                 continue
     except Exception:
         _log_signin_diagnostics(page, "password field never appeared", failed_requests)
-        return False
+        return LoginOutcome(False, bool(_auth_critical(failed_requests)))
 
     try:
         page.wait_for_url(lambda u: "bestbuy.com" in u and not any(m in u for m in _SIGNIN_MARKERS),
@@ -332,8 +414,8 @@ def _deterministic_login(page, auth) -> bool:
         # Everything clicked and filled, yet we are still on a sign-in URL. Live this was
         # the auth POST being rejected at the network layer, which no selector work can fix.
         _log_signin_diagnostics(page, "submitted the password but stayed logged out", failed_requests)
-        return False
-    return True
+        return LoginOutcome(False, bool(_auth_critical(failed_requests)))
+    return LoginOutcome(True)
 
 
 _INPAGE_FETCH_JS = """
@@ -360,24 +442,81 @@ class BestBuyApiClient:
         self, since_date: str, open_ids, terminal_ids
     ) -> list[dict]:
         """Return the ss-api payload for every order placed on/after `since_date` plus every still-open
-        order, minus terminal ones. Discovery + details all happen in one logged-in CDP session."""
+        order, minus terminal ones. Discovery + details all happen in one logged-in CDP session.
+
+        If signing in fails because the auth requests died at the NETWORK layer, the sign-in is retried
+        once in a separate session with the profile's proxy stripped, and the scrape then runs through
+        the proxy as usual — see _login_without_proxy for why.
+        """
+        try:
+            return self._fetch_once(self.profile, since_date, open_ids, terminal_ids, allow_login=True)
+        except _AuthTransportError:
+            if not self._login_without_proxy():
+                raise ApiLoginError(
+                    "Best Buy session is logged out; sign-in failed through the proxy (auth requests "
+                    "died at the network layer) and the off-proxy retry did not succeed either."
+                ) from None
+            # The profile now holds a valid session; scrape through the proxy exactly as normal. A
+            # session obtained off-proxy works through it — Best Buy does not bind it to the login IP
+            # (proven live).
+            return self._fetch_once(self.profile, since_date, open_ids, terminal_ids, allow_login=False)
+
+    def _login_without_proxy(self) -> bool:
+        """Sign in once with the profile's proxy stripped, persisting the session to the profile.
+
+        The static ISP proxy intermittently breaks HTTP/2 requests that carry a BODY, so the sign-in
+        POSTs (/identity/authenticate, /gateway/graphql) die with ERR_HTTP2_PROTOCOL_ERROR while every
+        GET — and therefore the whole scrape — sails through. Diagnosed live with an A/B on
+        the same flow minutes apart: proxy on = "Failed to fetch" and still logged out; proxy off = 200
+        and signed in. Only the sign-in bypasses the proxy, so normal traffic keeps the ISP identity.
+        """
+        if not (self.profile.proxy and self.profile.proxy.host):
+            return False  # no proxy to bypass — the failure is something else
+        auth = self.profile.auth.get("bestbuy")
+        if auth is None:
+            return False
+        log.warning(
+            "Best Buy [%s]: sign-in failed through the proxy at the network layer; retrying the "
+            "sign-in OFF-PROXY (the scrape still runs through the proxy).", self.profile.label,
+        )
+        direct = self.profile.model_copy(update={"proxy": None})
+        try:
+            with CdpBrowser(direct) as page:
+                page.goto(PURCHASE_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(3000)
+                if not _looks_logged_out(page):
+                    log.info("Best Buy [%s]: session already valid off-proxy.", self.profile.label)
+                    return True
+                outcome = _deterministic_login(page, auth)
+        except Exception:  # noqa: BLE001 — the caller reports the original auth failure
+            log.warning("Best Buy [%s]: off-proxy sign-in attempt errored.", self.profile.label,
+                        exc_info=True)
+            return False
+        log.info("Best Buy [%s]: off-proxy sign-in %s.", self.profile.label,
+                 "succeeded" if outcome.ok else "did not succeed")
+        return outcome.ok
+
+    def _fetch_once(
+        self, profile, since_date: str, open_ids, terminal_ids, allow_login: bool
+    ) -> list[dict]:
         open_ids = set(open_ids or [])
         terminal_ids = set(terminal_ids or [])
 
-        with CdpBrowser(self.profile) as page:
+        with CdpBrowser(profile) as page:
             page.goto(PURCHASE_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
 
-            if _looks_logged_out(page):
-                # Best Buy sessions die ~20-25 min, so a scheduled run routinely lands here and must
-                # self-heal. Log it so the self-login is visible in run logs (and distinguishable from
-                # a warm session, which skips this block entirely).
-                log.info("Best Buy [%s]: session logged out; attempting deterministic self-login.",
-                         self.profile.label)
+            def sign_in_here() -> None:
+                """Self-heal a lapsed session, raising the right error if it can't."""
                 auth = self.profile.auth.get("bestbuy")
-                if not _deterministic_login(page, auth):
+                outcome = _deterministic_login(page, auth)
+                if not outcome.ok:
                     log.warning("Best Buy [%s]: deterministic self-login did not succeed.",
                                 self.profile.label)
+                    # A network-layer auth failure is the proxy's doing and is retryable off-proxy;
+                    # anything else (page shape, bad credentials) is not, so it fails outright.
+                    if outcome.transport_failed and allow_login:
+                        raise _AuthTransportError()
                     raise ApiLoginError(
                         "Best Buy session is logged out and deterministic login did not succeed."
                     )
@@ -385,15 +524,38 @@ class BestBuyApiClient:
                 page.goto(PURCHASE_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
 
-            # Lazy-load the list so older in-window orders render into the flight data.
-            for _ in range(5):
-                try:
-                    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
-                except Exception:
-                    pass
-                page.wait_for_timeout(1200)
+            attempted_login = False
+            if _looks_logged_out(page):
+                # Best Buy sessions die ~20-25 min, so a scheduled run routinely lands here and must
+                # self-heal. Log it so the self-login is visible in run logs (and distinguishable from
+                # a warm session, which skips this block entirely).
+                log.info("Best Buy [%s]: session logged out; attempting deterministic self-login.",
+                         self.profile.label)
+                sign_in_here()
+                attempted_login = True
 
-            dates = _order_ids_and_dates(page.content())
+            dates = _discover_orders(page)
+
+            # DISCOVERY CAME BACK EMPTY. Two causes, opposite responses, and they are indistinguishable
+            # from the parse alone -- which is what the old "(shape changed?)" hedge was admitting.
+            # A logout must never reach the agent (it cannot fix an auth failure and costs ~$0.02 to
+            # confirm what we already know); a real markup change is precisely what the agent is for.
+            if not dates and (affordances := _signin_affordances(page)):
+                log.info("Best Buy [%s]: no orders parsed and the page is offering to sign in (%s) -- "
+                         "treating as a lapsed session, not a shape change.",
+                         self.profile.label, ", ".join(affordances))
+                if not attempted_login:
+                    # The session expired without tripping _looks_logged_out. Try to recover it here
+                    # rather than skipping: a successful login turns a lost run into a normal one.
+                    sign_in_here()
+                    attempted_login = True
+                    dates = _discover_orders(page)
+                if not dates:
+                    raise ApiLoginError(
+                        "Best Buy purchase history is empty and still showing a sign-in prompt; the "
+                        "session is logged out. Not running the agent -- it cannot fix an auth failure."
+                    )
+
             if not dates:
                 raise BestBuyApiError("No orders found in the purchase-history page (shape changed?).")
 

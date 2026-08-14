@@ -136,15 +136,25 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
         log.info("No orders found for %s (nothing new in the lookback window).", label)
         return
 
-    items = _classify_and_drop_personal(items, label)
-    if not items:
-        log.info("Nothing to record for %s (all scraped rows were personal addresses).", label)
+    # Guarded for the same reason scrape() is: this ran UNPROTECTED until 2026-08-14, so a bad address
+    # in warehouses.json, an unreadable cards.json or a disk error in write_csv would propagate out of
+    # run_scrape, out of main()'s loop, and take every remaining retailer AND the buying-group sync
+    # with it — from a failure that only concerned one retailer.
+    try:
+        items = _classify_and_drop_personal(items, label)
+        if not items:
+            log.info("Nothing to record for %s (all scraped rows were personal addresses).", label)
+            return
+
+        # After the personal-address drop, so no work is spent resolving cards for rows we discard.
+        _tag_cards(items, label)
+
+        csv_path = write_csv(items)
+    except Exception:
+        log.exception("Post-scrape processing failed for %s", label)
+        alert(f"{label}: post-scrape processing failed",
+              "Orders were scraped but could not be classified/tagged/written. Check logs/run.log.")
         return
-
-    # After the personal-address drop, so no work is spent resolving cards for rows we discard.
-    _tag_cards(items, label)
-
-    csv_path = write_csv(items)
     log.info("Wrote %d line item(s) to %s", len(items), csv_path)
 
     try:
@@ -190,8 +200,21 @@ def main(retailers: list[str]) -> None:
                     name,
                 )
                 continue
-            run_scrape(scraper_cls(profile))
+            # Backstop for the per-retailer isolation this loop promises. run_scrape guards its own
+            # steps, but a failure in the scraper's CONSTRUCTOR — or anything new added here later —
+            # would otherwise abort the whole run. Live a Best Buy sign-in took the rest of
+            # a run with it (Costco never ran, and neither did the sync), so the isolation is worth
+            # asserting here rather than trusting every callee to keep it.
+            try:
+                run_scrape(scraper_cls(profile))
+            except Exception:
+                log.exception("Retailer '%s' [%s] failed; continuing with the rest of the run.",
+                              name, profile.label)
+                alert(f"{name} [{profile.label}]: run failed",
+                      "That retailer was skipped; the rest of the run continued. Check logs/run.log.")
 
+    # Deliberately outside the loop AND reached even if every retailer failed: the sync submits
+    # tracking for rows already on the sheet from earlier runs, so it has work to do regardless.
     run_buying_group_sync()
 
 

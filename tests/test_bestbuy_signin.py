@@ -148,7 +148,11 @@ class TestSigninDiagnostics:
 
 @pytest.mark.parametrize("auth", [None])
 def test_login_declines_without_password_auth(auth):
-    assert bestbuy_api._deterministic_login(FakePage(), auth) is False
+    outcome = bestbuy_api._deterministic_login(FakePage(), auth)
+    assert outcome.ok is False
+    # Nothing was attempted, so this is NOT a transport problem — it must not trigger the off-proxy
+    # retry, which would spend a second cloud browser to fail the same way.
+    assert outcome.transport_failed is False
 
 
 class TestFailedRequestReporting:

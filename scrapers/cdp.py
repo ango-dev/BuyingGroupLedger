@@ -52,24 +52,37 @@ class CdpBrowser:
         data = self._client._http.request("POST", "/browsers", json=body)
         self._browser_id = data["id"]
 
-        self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.connect_over_cdp(data["cdpUrl"])
-        ctx = self._browser.contexts[0] if self._browser.contexts else self._browser.new_context()
-
-        # Block heavy resources we never read — cuts proxy bandwidth (billed per GB) and speeds
-        # loads. Our reads use text selectors on the DOM, which resolve without images/media/fonts.
+        # PAST THIS POINT A CLOUD BROWSER IS RUNNING AND BILLING, so every remaining step has to clean
+        # up after itself. If connecting raises here, `with` never opens and __exit__ never runs — the
+        # browser would be left running in the cloud, the Playwright driver subprocess left started,
+        # and the SDK client left open. That orphaned driver is also the usual source of the
+        # "Task was destroyed but it is pending" records that appear at interpreter shutdown.
         try:
-            ctx.route(
-                "**/*",
-                lambda route: route.abort()
-                if route.request.resource_type in ("image", "media", "font")
-                else route.continue_(),
-            )
-        except Exception:
-            log.warning("Could not install resource-blocking route; continuing without it.", exc_info=True)
+            self._pw = sync_playwright().start()
+            self._browser = self._pw.chromium.connect_over_cdp(data["cdpUrl"])
+            ctx = self._browser.contexts[0] if self._browser.contexts else self._browser.new_context()
 
-        self.page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        return self.page
+            # Block heavy resources we never read — cuts proxy bandwidth (billed per GB) and speeds
+            # loads. Our reads use text selectors on the DOM, which resolve without images/media/fonts.
+            try:
+                ctx.route(
+                    "**/*",
+                    lambda route: route.abort()
+                    if route.request.resource_type in ("image", "media", "font")
+                    else route.continue_(),
+                )
+            except Exception:
+                log.warning("Could not install resource-blocking route; continuing without it.",
+                            exc_info=True)
+
+            self.page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            return self.page
+        except BaseException:
+            # BaseException, not Exception: a KeyboardInterrupt or a driver-level failure mid-connect
+            # must still hand the cloud browser back rather than leaking a paid session.
+            log.warning("CDP connect failed after the browser was created; cleaning up.", exc_info=True)
+            self.__exit__(None, None, None)
+            raise
 
     def __exit__(self, *exc):
         try:
