@@ -1050,6 +1050,29 @@ class TestBfmrPayoutsAndStatus:
         assert record.status == "paid"
         assert record.payout_amount == 905.0  # amount_paid arrives as a STRING
 
+    def test_paid_with_a_zero_amount_means_not_settled_yet_not_paid_nothing(self, bfmr, transport):
+        """BFMR flips `status` to paid BEFORE `amount_paid` is populated, so a paid row routinely
+        still reads "0.00".
+
+        Writing that zero is far worse than writing nothing. `_profit_formula` renders BLANK while
+        Payout Amount is empty, but a literal 0 makes it compute `0 - Total Cost - Insurance` -- a
+        large fictitious LOSS on a perfectly healthy order. Live three packages landed this
+        way, one showing **-$1,678.46** against a $1,796 order BFMR simply had not paid yet.
+
+        The status is suppressed with the amount, because `paid` is TERMINAL: recording it would stop
+        the retailer re-checking a row whose money never arrived.
+        """
+        transport.responses = [self._payout_row(amount_paid="0.00")]
+        record = bfmr.fetch_payouts(["TBA1"])[0]
+        assert record.payout_amount is None, "a zero must not reach the sheet as a payout"
+        assert record.status != "paid", "'paid' is terminal -- don't close a row that wasn't paid"
+
+    def test_a_real_payout_is_still_recorded_normally(self, bfmr, transport):
+        """The guard must not swallow genuine money -- the case it exists to protect."""
+        transport.responses = [self._payout_row(amount_paid="905.00")]
+        record = bfmr.fetch_payouts(["TBA1"])[0]
+        assert record.payout_amount == 905.0 and record.status == "paid"
+
     def test_a_thousands_separator_does_not_zero_the_payout(self, bfmr, transport):
         """BFMR formats money as "2,210.00". A bare float() raises, the caller swallows it to None,
         and the amount silently becomes 0 — so every payout over $999 vanished while the small

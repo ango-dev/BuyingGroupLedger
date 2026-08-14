@@ -1156,22 +1156,36 @@ def check_paid_rows_have_a_payout(sheet: Sheet, opts: Options) -> Result:
     Amount is filled. A paid row with no amount is therefore permanently missing from the P&L, which
     is the one number this ledger exists to produce, with nothing to announce it.
     """
-    offenders = []
+    zeros, blanks = [], []
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
         if status != "paid":
             continue
-        payout = sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount")
-        if payout == "" or payout is None:
-            order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
-            offenders.append(f"row {row_number}: order {order_id} is paid but has no Payout Amount")
-    if not offenders:
-        return Result("paid_rows_have_a_payout", "PASS", "every paid row carries its payout")
-    return Result(
-        "paid_rows_have_a_payout", "FAIL",
-        f"{len(offenders)} paid row(s) have no payout -- they're missing from the P&L permanently",
-        _truncate(offenders, opts.max_detail),
-    )
+        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount"))
+        order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
+        if payout is None:
+            blanks.append(f"row {row_number}: order {order_id} is paid but has no Payout Amount")
+        elif payout == 0:
+            # A ZERO is the worse case, and an earlier version of this check missed it by testing only
+            # for blank. Blank makes Total Profit render blank; a literal 0 makes it compute
+            # `0 - Total Cost - Insurance`, i.e. a large fictitious LOSS. Live BFMR reported
+            # three packages as paid while amount_paid was still "0.00", and one booked -$1,678.46.
+            cost = sheet.cell(sheet.grids.formatted, row_number, "Total Cost")
+            zeros.append(f"row {row_number}: order {order_id} is paid for $0 against a cost of {cost} "
+                         "-- Total Profit is showing a fictitious loss")
+    if zeros:
+        return Result(
+            "paid_rows_have_a_payout", "FAIL",
+            f"{len(zeros)} paid row(s) have a ZERO payout", _truncate(zeros + blanks, opts.max_detail),
+        )
+    if blanks:
+        # WARN, not FAIL: a group can legitimately mark a package paid minutes before it settles, and
+        # the next sync fills it. It only becomes wrong if it never does -- which staleness catches.
+        return Result(
+            "paid_rows_have_a_payout", "WARN",
+            f"{len(blanks)} paid row(s) have no payout yet", _truncate(blanks, opts.max_detail),
+        )
+    return Result("paid_rows_have_a_payout", "PASS", "every paid row carries its payout")
 
 
 @check("profit_blank_despite_payout")

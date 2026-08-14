@@ -760,11 +760,22 @@ class TestBuyingGroupPayouts:
                             "Total Cost": Cell(400.0), "Payout Amount": Cell(400.0)})
         assert result_for(build(a, b), "payout_is_cost_weighted").status == "PASS"
 
-    def test_a_paid_row_with_no_payout_is_permanently_missing_from_the_pl(self):
-        """`paid` is terminal, so the row is never revisited, and Total Profit reads blank without an
-        amount -- the row drops out of the P&L for good with nothing to announce it."""
+    def test_a_paid_row_with_a_zero_payout_is_a_fictitious_loss(self):
+        """The case an earlier version of this check MISSED by testing only for blank.
+
+        Blank makes Total Profit render blank; a literal 0 makes it compute `0 - Total Cost -
+        Insurance`. Live BFMR reported three packages as paid while `amount_paid` was
+        still "0.00", and the sheet booked -$1,678.46 against a $1,796 order.
+        """
+        sheet = build(row_cells(2, Status=Cell("paid"), **{"Payout Amount": Cell(0)}))
+        result = result_for(sheet, "paid_rows_have_a_payout")
+        assert result.status == "FAIL" and "fictitious" in result.details[0]
+
+    def test_a_paid_row_awaiting_settlement_only_warns(self):
+        """A group can mark a package paid minutes before it settles, and the next sync fills it -- so
+        a blank is worth noticing but is not yet wrong. Staleness catches one that never fills."""
         sheet = build(row_cells(2, Status=Cell("paid"), **{"Payout Amount": Cell("")}))
-        assert result_for(sheet, "paid_rows_have_a_payout").status == "FAIL"
+        assert result_for(sheet, "paid_rows_have_a_payout").status == "WARN"
 
     def test_a_paid_row_with_its_payout_passes(self):
         sheet = build(row_cells(2, Status=Cell("paid"), **{"Payout Amount": Cell(1200.0, fmt="currency")}))

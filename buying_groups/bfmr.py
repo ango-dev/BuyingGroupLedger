@@ -410,6 +410,31 @@ class BFMRClient(HttpClient):
 
             status = LEDGER_STATUS_BY_BFMR_STATUS.get(str(entry.get("status") or "").lower(), "")
             paid = status == "paid"
+
+            # BFMR FLIPS `status` TO "paid" BEFORE `amount_paid` IS POPULATED, so a paid row routinely
+            # still reports "0.00". The
+            # docstring above already noted amount_paid reads "0.00" until BFMR pays — what was missing
+            # is that `status` does NOT wait for it, so the two disagree for a while.
+            #
+            # A zero here is therefore "not settled yet", NOT "paid nothing". The distinction is the
+            # whole ballgame: _profit_formula renders BLANK while Payout Amount is empty, but a literal
+            # 0 makes it compute `0 - Total Cost - Insurance` — a large fictitious LOSS on a perfectly
+            # healthy order. Live it put **-$1,678.46** against a $1,796 order that BFMR had not yet
+            # paid. No buying group pays $0 for a package it accepted, so reading 0 as "not yet" can
+            # never discard a real payout.
+            #
+            # The amount, the date and the `paid` status are suppressed TOGETHER. Recording "paid" on
+            # a row with no money is not just cosmetically odd — `paid` is TERMINAL, so it would stop
+            # the retailer re-checking a row whose payout had never arrived. All three land together on
+            # a later sync once BFMR settles; if that never happens, the row simply stays open and
+            # `audit_sheet`'s open_row_staleness surfaces it rather than it going quietly wrong.
+            settled = parse_money(entry.get("amount_paid")) if paid else None
+            if paid and not settled:
+                # Scoped to `paid` deliberately: a `returned` package reports no amount either, and
+                # blanking its status here would silently drop the one outcome BFMR is authoritative
+                # about besides payment.
+                paid, status, settled = False, "", None
+
             records.append(PayoutRecord(
                 tracking_number=number,
                 # `amount_paid`, not `total_payout`: the latter is what the deal is WORTH and is
@@ -418,7 +443,7 @@ class BFMRClient(HttpClient):
                 # "0.00" until BFMR actually pays. And only when BFMR says paid at all: a `returned`
                 # package's figures are ambiguous, and a blank cell correctly reads "not paid out"
                 # where a wrong number would quietly overstate profit.
-                payout_amount=parse_money(entry.get("amount_paid")) if paid else None,
+                payout_amount=settled,
                 payout_date=_bfmr_date_to_iso(entry.get("date_paid")) if paid else "",
                 insurance=None,
                 order_id=_order_id_of(entry),
