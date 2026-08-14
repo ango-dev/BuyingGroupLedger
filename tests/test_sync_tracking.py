@@ -447,3 +447,67 @@ class TestColumnsExist:
         for column in (INSURANCE_COL, PAYOUT_AMOUNT_COL, PAYOUT_DATE_COL,
                        STATUS_COL, SUBMITTED_COL):
             assert column in HEADER_LIST
+
+
+class TestSettledPackagesAreNotReSubmitted:
+    """A package the group has PAID for needs no further submitting -- being paid is proof they hold
+    the number, which is far stronger evidence than the `Tracking Submitted` checkbox this module
+    deliberately refuses to trust (a local mirror drifts both ways; a payout cannot).
+
+    It matters most for MOD, whose `already_submitted` is empty BY DESIGN -- it has no way to answer
+    the question, so every run re-posted every number ever recorded. One batched call hides that
+    today, but the batch grows with the ledger forever.
+    """
+
+    @staticmethod
+    def _rows(status, payout):
+        header = list(HEADER)
+        row = [""] * len(header)
+
+        def put(name, value):
+            row[header.index(name)] = value
+
+        put("Order ID", "O-1")
+        put("Order Date", "2026-08-10")
+        put("Item Name", "Thing")
+        put("Quantity", "1")
+        put("Tracking Number", "1Z1")
+        put("Shipment", "1")
+        put("Status", status)
+        put("Total Cost", "100.00")
+        put("Buying Group", "MOD")
+        put("Payout Amount", payout)
+        return header, [row]
+
+    def test_a_paid_package_with_money_is_settled(self):
+        header, rows = self._rows("paid", "95.00")
+        plan = plan_tracking_submissions(header, rows)
+        assert ("O-1", "1Z1") in plan["settled_keys"]
+
+    def test_paid_with_a_ZERO_payout_is_NOT_settled(self):
+        """The load-bearing half. BFMR marks a package paid BEFORE amount_paid lands, so keying on
+        `paid` alone would stop submitting packages the group has not actually settled."""
+        header, rows = self._rows("paid", "0")
+        plan = plan_tracking_submissions(header, rows)
+        assert ("O-1", "1Z1") not in plan["settled_keys"]
+
+    def test_paid_with_a_blank_payout_is_NOT_settled(self):
+        header, rows = self._rows("paid", "")
+        plan = plan_tracking_submissions(header, rows)
+        assert ("O-1", "1Z1") not in plan["settled_keys"]
+
+    def test_an_unpaid_package_is_never_settled(self):
+        header, rows = self._rows("delivered", "")
+        plan = plan_tracking_submissions(header, rows)
+        assert plan["settled_keys"] == set()
+
+    def test_a_settled_row_is_still_read_for_payouts(self):
+        """Deliberately NOT dropped from the payout read. BFMR reports `returned`, which outranks
+        `paid`, so a post-payment CLAWBACK is a real forward transition -- and dropping settled rows
+        from the read is the one way to never see it. The read is bulk for both providers, so keeping
+        them costs nothing.
+        """
+        header, rows = self._rows("paid", "95.00")
+        plan = plan_tracking_submissions(header, rows)
+        assert plan["rows_by_tracking"].get("1Z1") == [2]
+        assert plan["by_group"]["MOD"], "the row stays in the group's list for the payout read"

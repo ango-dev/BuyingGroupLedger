@@ -19,6 +19,18 @@ each run asks. `Tracking Submitted` is a CHECKBOX written for the reader's benef
 consulted to decide what to send — an unticked box beside a shipped package is the thing worth
 noticing at a glance. It is ticked once and never cleared.
 
+WITH ONE EXCEPTION: A PACKAGE THE GROUP HAS PAID FOR IS NOT RE-SUBMITTED. That is not a local mirror
+being trusted — a payout is proof the group holds the number, which is exactly the evidence the
+checkbox lacks. It exists because MOD's `already_submitted` is empty BY DESIGN (it has no endpoint
+that can answer the question), so every run re-posted every number ever recorded
+that was 17 packages per run, of which 3 were actually new. One batched call hides the cost today,
+but the batch grows with the ledger forever. "Paid" alone is NOT enough — BFMR flips the status
+before `amount_paid` lands — so a non-zero payout is required too.
+
+Settled packages are still READ for payouts, deliberately. BFMR reports `returned`, which outranks
+`paid`, so a post-payment clawback is a real forward transition; dropping settled rows from the read
+is the one way to never see it. Both providers' reads are bulk, so keeping them costs nothing.
+
 STATUS ONLY MOVES FORWARD. The groups own the two outcomes a retailer scrape can never see — `paid`
 and `return` — but their reports are snapshots, so a write that would walk a row BACKWARDS is
 dropped. That guard is load-bearing for MOD returns specifically: MOD publishes no return signal at
@@ -109,6 +121,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     idx = {name: header.index(name) for name in (
         "Order ID", "Order Date", "Item Name", "Quantity", "Tracking Number",
         "Shipment", "Status", "Total Cost", "Buying Group", SUBMITTED_COL, INSURANCE_COL,
+        PAYOUT_AMOUNT_COL,
     )}
 
     by_group: dict[str, list[TrackingSubmission]] = {}
@@ -123,6 +136,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     skipped_unroutable: dict[str, int] = {}
     skipped_no_tracking = 0
     skipped_cancelled = 0
+    settled_keys: set[tuple[str, str]] = set()
 
     for offset, row in enumerate(data_rows):
         row_number = offset + 2  # row 1 is the header
@@ -179,6 +193,20 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         submitted_by_row[row_number] = _is_ticked(cell(SUBMITTED_COL))
         rows_by_tracking.setdefault(tracking, []).append(row_number)
 
+        # SETTLED = paid, with money actually recorded. Such a package needs no further SUBMITTING:
+        # being paid for it is proof the group holds the number, which is far stronger evidence than
+        # the `Tracking Submitted` checkbox this module deliberately refuses to trust (a local mirror
+        # drifts both ways; a payout cannot).
+        #
+        # This matters most for MOD, whose `already_submitted` is empty BY DESIGN — it has no way to
+        # answer the question, so every run re-posted every number ever recorded. One batched call
+        # hides the cost today, but that batch grows with the ledger forever.
+        #
+        # The zero check is load-bearing: BFMR marks a package paid BEFORE `amount_paid` lands, so
+        # "paid" alone would drop packages the group has not actually settled.
+        if status_by_row[row_number] == "paid" and (_as_float(cell(PAYOUT_AMOUNT_COL)) or 0.0) != 0.0:
+            settled_keys.add((order_id, tracking))
+
         by_group.setdefault(group_key, []).append(TrackingSubmission(
             row_number=row_number,
             order_id=order_id,
@@ -204,6 +232,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "skipped_unroutable": skipped_unroutable,
         "skipped_cancelled": skipped_cancelled,
         "cancelled_by_group": cancelled_by_group,
+        "settled_keys": settled_keys,
     }
 
 
@@ -405,9 +434,19 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
     # Keyed on (order_id, tracking_number), not tracking alone: a Best Buy COMBINED BOX puts two
     # orders under one tracking number, and each still needs its own submission.
     known = client.already_submitted(rows)
-    fresh = [r for r in rows if (r.order_id, r.tracking_number) not in known]
+    # A SETTLED package is not re-submitted: the group paid for it, which is proof it holds the
+    # number. This is the ledger answering a question MOD cannot — its `already_submitted` is empty
+    # by design, so without this every run re-posted every number ever recorded, in a batch that
+    # grows with the sheet forever.
+    settled = plan.get("settled_keys") or set()
+    fresh = [r for r in rows
+             if (r.order_id, r.tracking_number) not in known
+             and (r.order_id, r.tracking_number) not in settled]
     if known:
         log.info("%s: %d package(s) already recorded there", group_key, len(known))
+    settled_here = sum(1 for r in rows if (r.order_id, r.tracking_number) in settled)
+    if settled_here:
+        log.info("%s: %d package(s) already paid, not re-submitting", group_key, settled_here)
 
     push = client.submit_tracking(fresh)
     log.info("%s push: %s", group_key, push.summary())
@@ -445,7 +484,11 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
         # Only for shipments the group now has on file — insurance is filed against a known
         # shipment, so a row whose submission just failed must not be insured.
         blocked = {t for t, _ in push.failed} | {t for t, _ in push.needs_manual}
-        insurable = [r for r in rows if r.tracking_number not in blocked]
+        # Settled packages are excluded too — insuring one BFMR has already paid out is pointless, and
+        # BFMR reports them `not_eligible` anyway (its own `status` is past the insurable window).
+        insurable = [r for r in rows
+                     if r.tracking_number not in blocked
+                     and (r.order_id, r.tracking_number) not in settled]
         insurance = client.file_insurance(insurable)
         log.info("%s insurance: %s", group_key, insurance.summary())
 
