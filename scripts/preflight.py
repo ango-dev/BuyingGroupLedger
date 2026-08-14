@@ -1,0 +1,259 @@
+"""Fail loudly, at startup, on the kinds of misconfiguration that otherwise fail SILENTLY.
+
+Run it before trusting an unattended deployment:
+
+    python -m scripts.preflight            # human-readable report; exit 1 if anything FAILED
+    python -m scripts.preflight --alert     # also fire the email/Discord alert on failure
+
+It is completely offline and free: no network, no Browser-Use run, no Sheets call. It only imports
+modules, stats files, and reads env vars. That is deliberate — it has to be cheap enough to run on
+every container start.
+
+WHY THIS EXISTS. Every check here corresponds to a real failure mode where the run keeps *working*
+and quietly does the wrong thing, so no exception ever surfaces:
+
+- **A missing deterministic-path import.** `scrape()` on Amazon / Amazon Business / Best Buy wraps
+  `_scrape_via_api` in a catch-all that degrades to the Browser-Use agent. An `ImportError` is
+  caught by that catch-all, so a dependency missing from the image doesn't crash anything — it just
+  moves three retailers onto the PAID agent path, forever, at roughly $0.01-0.10 per retailer per
+  run. `playwright` was exactly this: used by scrapers/cdp.py, installed in the dev venv by
+  accident, and absent from requirements.txt.
+- **A bind mount whose host file is missing.** Docker creates an empty DIRECTORY at that path. The
+  loaders test `is_file()`, so an optional config silently reads as "not configured" — every address
+  tags `Unclassified` and every card falls back to DEFAULT_CASHBACK_RATE, quietly misstating profit.
+- **A missing Costco refresh token.** Costco alerts and falls back to the agent, which works, so the
+  only symptom is a recurring bill.
+
+The rule this file encodes: on an unattended host, "still works but costs money" is a failure.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+# The project root, regardless of where this is invoked from.
+ROOT = Path(__file__).resolve().parent.parent
+
+OK, WARN, FAIL = "OK", "WARN", "FAIL"
+
+
+@dataclass
+class Result:
+    level: str
+    name: str
+    detail: str
+
+
+# Modules that make up the deterministic (agent-free) paths, and what falls back to the paid agent
+# if the import breaks. Imported for real — a stale transitive dependency shows up here.
+DETERMINISTIC_IMPORTS = {
+    "scrapers.cdp": "Amazon, Amazon Business and Best Buy (the CDP browser client)",
+    "scrapers.amazon_api": "Amazon",
+    "scrapers.amazon_mapping": "Amazon",
+    "scrapers.amazon_business_api": "Amazon Business",
+    "scrapers.amazon_business_mapping": "Amazon Business",
+    "scrapers.bestbuy_api": "Best Buy",
+    "scrapers.bestbuy_mapping": "Best Buy",
+    "scrapers.costco_api": "Costco",
+    "scrapers.costco_mapping": "Costco",
+}
+
+
+def check_deterministic_imports() -> list[Result]:
+    """Import every deterministic-path module. A failure here is the expensive-but-silent one."""
+    out: list[Result] = []
+    for module, covers in DETERMINISTIC_IMPORTS.items():
+        try:
+            importlib.import_module(module)
+        except Exception as exc:  # noqa: BLE001 — any import problem has the same consequence
+            out.append(Result(
+                FAIL, f"import {module}",
+                f"{type(exc).__name__}: {exc} — {covers} would fall back to the PAID Browser-Use "
+                f"agent on every run, without raising.",
+            ))
+        else:
+            out.append(Result(OK, f"import {module}", covers))
+    return out
+
+
+def _check_path(path: Path, *, required: bool, what: str, parses_json: bool = False) -> Result:
+    """Stat a config path, distinguishing 'missing' from Docker's empty-directory bind-mount trap."""
+    name = path.name
+    if path.is_dir():
+        return Result(
+            FAIL, name,
+            f"is a DIRECTORY, not a file. This is Docker's bind-mount behaviour when the host file "
+            f"does not exist: create {path} on the host (even as an empty stub) or remove its "
+            f"volume line from docker-compose.yml. Until then: {what}",
+        )
+    if not path.exists():
+        level = FAIL if required else WARN
+        return Result(level, name, f"missing. {what}")
+    if parses_json:
+        try:
+            json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return Result(FAIL, name, f"is not valid JSON ({exc}).")
+    return Result(OK, name, "present")
+
+
+def check_config_files(root: Path = ROOT) -> list[Result]:
+    out = [
+        _check_path(root / "profiles.json", required=True, parses_json=True,
+                    what="no profile can be loaded, so NOTHING is scraped."),
+        _check_path(root / "warehouses.json", required=False, parses_json=True,
+                    what="every address tags Unclassified, so no order routes to a buying group."),
+        _check_path(root / "cards.json", required=False, parses_json=True,
+                    what="every row falls back to DEFAULT_CASHBACK_RATE, misstating profit."),
+    ]
+
+    # The service-account key is env-configurable, so resolve it the way settings.py does.
+    sa = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
+    sa_path = Path(sa) if Path(sa).is_absolute() else root / sa
+    out.append(_check_path(sa_path, required=True, parses_json=True,
+                           what="the Sheet cannot be read or written, so every run fails at sync."))
+    return out
+
+
+def check_costco_tokens(root: Path = ROOT) -> list[Result]:
+    """Costco's API path needs a stored refresh token per profile, or it silently uses the agent."""
+    try:
+        from config.profiles import load_profiles_for_retailer
+        profiles = load_profiles_for_retailer("costco")
+    except Exception as exc:  # noqa: BLE001 — a broken profiles.json is already reported above
+        return [Result(WARN, "costco token", f"could not read profiles ({exc}); skipped.")]
+
+    if not profiles:
+        return [Result(OK, "costco token", "no profile lists costco; nothing to check.")]
+
+    out = []
+    for profile in profiles:
+        token = root / ".costco" / f"{profile.label}.json"
+        if token.is_file():
+            out.append(Result(OK, f"costco token [{profile.label}]", "present"))
+        else:
+            out.append(Result(
+                FAIL, f"costco token [{profile.label}]",
+                f"{token} is missing — Costco falls back to the PAID agent every run. Fix with "
+                f"`python -m scripts.costco_token --label {profile.label} --token '<REFRESH_TOKEN>'`, "
+                f"and check the ./.costco volume is mounted if this is a container.",
+            ))
+    return out
+
+
+# Env vars with no safe default: without them a run either cannot start or cannot record anything.
+REQUIRED_ENV = {
+    "BROWSER_USE_API_KEY": "no cloud browser can be created, so no retailer can be read.",
+    "GOOGLE_SHEET_ID": "there is no ledger to write to; every run fails at sync.",
+}
+
+
+def check_env() -> list[Result]:
+    out = [
+        Result(FAIL, name, f"is unset — {why}") if not (os.getenv(name) or "").strip()
+        else Result(OK, name, "set")
+        for name, why in REQUIRED_ENV.items()
+    ]
+
+    # Alerts are how an unattended host tells you anything at all. Neither channel configured means
+    # a silent failure stays silent until you happen to look at the sheet.
+    email = (os.getenv("GMAIL_ADDRESS") or "").strip() and (os.getenv("GMAIL_APP_PASSWORD") or "").strip()
+    discord = (os.getenv("DISCORD_WEBHOOK_URL") or "").strip()
+    if email or discord:
+        channels = ", ".join(c for c, on in (("email", email), ("Discord", discord)) if on)
+        out.append(Result(OK, "alerts", f"configured ({channels})"))
+    else:
+        out.append(Result(
+            WARN, "alerts",
+            "neither Gmail nor Discord is configured. On an unattended host this means a logged-out "
+            "session or a failing run reports to nobody. Test with `python -m alerts.notifier`.",
+        ))
+    return out
+
+
+def check_money_switches() -> list[Result]:
+    """Not errors — the settings that spend real money unattended, surfaced so they're never a surprise."""
+    try:
+        from config.settings import settings
+    except Exception as exc:  # noqa: BLE001
+        # config/settings.py validates at IMPORT time and deliberately raises rather than guessing
+        # — e.g. DEFAULT_CASHBACK_RATE=2 is rejected because it reads equally as 2% or 200%. That
+        # makes every run die on import, so preflight has to name it rather than die the same way.
+        return [Result(
+            FAIL, ".env values",
+            f"config/settings.py could not be loaded: {type(exc).__name__}: {exc}. Every run fails "
+            f"at import until this is fixed.",
+        )]
+
+    if not settings.buying_group_sync_enabled:
+        return [Result(WARN, "buying-group sync", "DISABLED — tracking numbers are not submitted and "
+                                                  "no payout is read back (set BUYING_GROUP_SYNC_ENABLED=1).")]
+
+    out = [Result(OK, "buying-group sync", "ENABLED — every run submits tracking and files BFMR "
+                                           "insurance unattended, spending real money.")]
+    if (settings.maxoutdeals_api_key or "").strip():
+        out.append(Result(
+            WARN, "MaxOutDeals IP allowlist",
+            "MOD rejects any call from an unregistered IP, whatever the token. This host's public IP "
+            "must be added under the firewall tab in your MOD profile — re-check it after ANY move "
+            "to a new machine, ISP or container host.",
+        ))
+    return out
+
+
+def run_checks() -> list[Result]:
+    results: list[Result] = []
+    results += check_deterministic_imports()
+    results += check_config_files()
+    results += check_env()
+    results += check_costco_tokens()
+    results += check_money_switches()
+    return results
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--alert", action="store_true",
+                        help="send the configured email/Discord alert if any check FAILS")
+    parser.add_argument("--strict", action="store_true", help="treat warnings as failures too")
+    args = parser.parse_args(argv)
+
+    # The detail strings contain em-dashes. A legacy Windows console (cp1252) mangles or raises on
+    # those, and a preflight that crashes while reporting is worse than useless.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 — not all streams support it (pytest capture, pipes)
+            pass
+
+    results = run_checks()
+    failures = [r for r in results if r.level == FAIL]
+    warnings = [r for r in results if r.level == WARN]
+
+    width = max(len(r.name) for r in results)
+    for r in results:
+        print(f"[{r.level:4}] {r.name.ljust(width)}  {r.detail}")
+
+    print(f"\n{len(results) - len(failures) - len(warnings)} ok, {len(warnings)} warning(s), "
+          f"{len(failures)} failure(s)")
+
+    if failures and args.alert:
+        try:
+            from alerts.notifier import alert
+            body = "\n".join(f"- {r.name}: {r.detail}" for r in failures)
+            alert("Preflight FAILED — the ledger is misconfigured",
+                  f"{len(failures)} check(s) failed on this host:\n\n{body}")
+        except Exception:  # noqa: BLE001 — an unsendable alert must not mask the real failures
+            print("(could not send the alert; the failures above still stand)", file=sys.stderr)
+
+    return 1 if failures or (args.strict and warnings) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
