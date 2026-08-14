@@ -717,6 +717,85 @@ class TestUndisclosedSplit:
         assert alerts == []
 
 
+class TestStatusOnlyMovesForwardOnTheSheet:
+    """A row's lifecycle is monotonic, so a scrape reporting an EARLIER status is a mis-read.
+
+    OBSERVED LIVE. A forced agent run couldn't see the second box's tracking number,
+    concluded the shipment hadn't shipped, and wrote `shipped` -> `ordered` over a row that had
+    already been DELIVERED. `_collapse_records` had always applied this rule to two incoming records;
+    it was never applied against the sheet, which is where it matters more — the sheet is the
+    accumulated truth of every previous run, and a scraper sees only one moment.
+    """
+
+    def test_a_scrape_cannot_walk_a_row_backwards(self, sheet, tmp_path):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                status="delivered", tracking_number="1Z999", quantity="1"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                 status="ordered", tracking_number="", quantity="1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "delivered"
+
+    def test_forward_progress_still_writes(self, sheet, tmp_path):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                status="ordered", tracking_number="", quantity="1"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                 status="shipped", tracking_number="1Z999", quantity="1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "shipped"
+
+    def test_a_hand_typed_return_survives_a_scrape(self, sheet, tmp_path):
+        """Section 12b's hand-import rule. MOD publishes no return signal, so a return is typed in by
+        hand while the retailer goes on reporting the package as delivered forever."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                status="return", tracking_number="1Z999", quantity="1"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                 status="delivered", tracking_number="1Z999", quantity="1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "return"
+
+    def test_a_blank_existing_status_is_not_treated_as_backwards(self, sheet, tmp_path):
+        """Blank ranks below `ordered`, so there is nothing to move backwards from — a first write
+        must land."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                status="", tracking_number="1Z999", quantity="1"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="C1", order_date="2026-08-11", item_name="Desktop", shipment="1",
+                 status="ordered", tracking_number="1Z999", quantity="1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "ordered"
+
+
 class TestRepeatedTrackingNumberIsAMisRead:
     """One tracking number on two BOXES of one order is impossible — carriers issue one per package.
 

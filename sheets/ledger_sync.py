@@ -821,19 +821,49 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
         )
 
 
+_STATUS_FIELD_IDX = FIELDNAMES.index("status")
+
+
 def _merge_row(existing_row: list, new_row: list) -> list:
     """Overlay new_row onto existing_row, but never overwrite an existing non-empty cell with a
     blank. This makes partial refreshes safe: a tracking-only re-check leaves the static columns
     (item name, cost, address, ...) blank, and those blanks must not wipe already-captured data —
-    while real new values (status, tracking, delivery date, last scraped at) still update."""
+    while real new values (status, tracking, delivery date, last scraped at) still update.
+
+    STATUS IS THE ONE FIELD THAT ALSO ONLY MOVES FORWARD. A row's lifecycle is monotonic — nothing a
+    retailer can report legitimately walks it back — so a scrape claiming an earlier status is a
+    mis-read, not news.
+
+    OBSERVED LIVE: a forced agent run couldn't see the second box's tracking number,
+    concluded the shipment hadn't shipped, and wrote `shipped` -> `ordered` over a row that had
+    already been delivered. `_collapse_records` has always applied this rule when merging two
+    INCOMING records against each other; it was never applied against what the sheet already holds,
+    which is where it matters more — the sheet is the accumulated truth of every prior run.
+
+    It also protects the hand-typed values (section 12b): `return` and `paid` outrank everything a
+    scraper reports, so a MOD return typed in by hand survives a scrape that still sees `delivered`.
+    That is the same guarantee sync_tracking.allocate_payouts documents for the payout path, which
+    until now the far more frequent scraper path did not have.
+    """
     merged = []
     for i, new_val in enumerate(new_row):
         old_val = existing_row[i] if i < len(existing_row) else ""
         if str(new_val).strip() == "" and str(old_val).strip() != "":
             merged.append(old_val)
+        elif i == _STATUS_FIELD_IDX and _rank_of(new_val) < _rank_of(old_val):
+            merged.append(old_val)
         else:
             merged.append(new_val)
     return merged
+
+
+def _rank_of(status) -> int:
+    """How far through the lifecycle a status is; unknown/blank ranks lowest (-1).
+
+    Blank ranking below `ordered` is what keeps the guard from firing on a row the sheet has no
+    status for yet — there is nothing to move backwards from.
+    """
+    return _STATUS_RANK.get(str(status or "").strip().lower(), -1)
 
 
 def _rollup_status(statuses: list[str]) -> str:
