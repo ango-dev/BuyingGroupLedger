@@ -627,7 +627,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_task_windows
 ```
 
 Both call the platform runner (`run.sh` / `run.ps1`), which `cd`s to the project root and appends to
-`logs/cron.log`. To watch a run live on Linux: `tail -f logs/cron.log` (or `screen -S ledger ./run.sh`).
+`logs/cron.log`. To watch a run live on Linux: `tail -f logs/cron.log`, or `screen -S ledger ./run.sh`
+to start one that survives your SSH session dropping (detach with `Ctrl-A D`, reattach with
+`screen -r ledger`).
+
+`run.sh` rotates `logs/cron.log` at 10 MB — left unbounded it fills a small disk months later, long
+after anyone is watching — and always records how a run *ended*, including its exit code. It also
+stamps `logs/.last_run`, the same heartbeat the container healthcheck uses: if that file is stale, the
+scheduler has stopped firing, which is otherwise a completely silent failure. Check it with
+`cat logs/.last_run`, and cross-check the data side with
+`python -m scripts.audit_sheet --stale-days 2`.
+
+**Before trusting either scheduler on a new machine, run `python -m scripts.preflight`** — it's
+offline and free, and it catches the misconfigurations that keep working while doing the wrong thing
+(see the Docker section below). For a Raspberry Pi specifically, follow **[DEPLOY.md](DEPLOY.md)**.
 
 ---
 
@@ -660,16 +673,51 @@ Adjust the schedule in `docker-compose.yml` (`RUN_INTERVAL_HOURS`, default 6 = 4
 time. To run **multiple instances**, copy the compose service with a different `profiles.json`/`.env`
 mounted per instance (e.g. one per proxy pool).
 
+The image builds for the host's own architecture (amd64 and arm64 both work — see
+**[DEPLOY.md](DEPLOY.md)** for the Raspberry Pi runbook), and smoke-tests its scheduler binary during
+the build so a wrong-architecture image fails loudly at build time rather than crash-looping later.
+
+**Two things run automatically that are worth knowing about:**
+
+- **Preflight, on every container start.** `scripts/preflight.py` checks the things that otherwise
+  fail *silently* — a deterministic-path dependency that would degrade three retailers to the paid
+  agent without raising, a bind mount whose missing host file became an empty directory, a missing
+  Costco token. It **alerts and continues** rather than aborting, because a container that refuses to
+  start also stops scraping; set `PREFLIGHT_STRICT: "true"` to fail fast instead. Run it by hand any
+  time — it's offline and free:
+  ```bash
+  docker compose run --rm --entrypoint python ledger -m scripts.preflight
+  ```
+- **A heartbeat + healthcheck.** `docker ps` reporting "Up 3 weeks" proves the scheduler process is
+  alive, not that it ever ran anything — a wedged lock or a failing job leaves the container happily
+  "Up" while the ledger goes stale. Every completed run stamps `logs/.last_run`, and the container
+  reports `(unhealthy)` once that's older than two intervals.
+
+Container logs are capped (10 MB × 5) rather than left to Docker's unbounded default, which otherwise
+fills a small disk months later.
+
 ---
 
 ## Moving to another machine
 
 Everything except the local environment is cloud-side (profiles, sheet, proxies), so migration is just:
 copy the project **except** `.venv/`, `__pycache__/`, `data/`, `logs/`; be sure to bring the gitignored
-`.env`, `service_account.json`, `profiles.json`, and (if you use them) `warehouses.json` / `cards.json`
-— the first three hold live credentials, so move them securely;
-then recreate the venv (`python -m venv .venv && …/pip install -r requirements.txt`) and re-install the
-scheduler on the new host. No re-login or re-sharing needed.
+`.env`, `service_account.json`, `profiles.json`, `.costco/` (if you use Costco), and (if you use them)
+`warehouses.json` / `cards.json` — all of those except the last two hold live credentials, so move them
+securely; then recreate the venv (`python -m venv .venv && …/pip install -r requirements.txt`) and
+re-install the scheduler on the new host. No re-login or re-sharing needed.
+
+**Two things do not travel with the files:**
+
+- ⚠️ **MaxOutDeals allowlists by IP.** A new machine has a new egress IP, so tracking pushes start
+  failing however valid the token. Add the new host under the firewall tab in your MOD profile
+  (`curl -s https://api.ipify.org` tells you what to add). BFMR has no allowlist, and Costco egresses
+  through the profile's own static ISP proxy, so neither is affected.
+- **Stop the old scheduler before starting the new one.** The overlap lock is a file in `logs/`, so it
+  is per-machine and will not stop two hosts scraping the same sheet at once.
+
+Then run `python -m scripts.preflight` on the new host before trusting it. Raspberry Pi hosts have
+their own runbook: **[DEPLOY.md](DEPLOY.md)**.
 
 ---
 
