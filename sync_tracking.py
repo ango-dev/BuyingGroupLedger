@@ -99,6 +99,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
           "insurance_by_row":    {row_number: str},     # so an inferred 0 can't clobber a typed one
           "submitted_by_row":    {row_number: bool},    # already ticked? don't re-tick
           "unresolved_split":    [(row_number, order_id, tracking_number), ...],   # Quantity "*"
+          "unroutable_tracked":  [(row_number, order_id, tracking_number, group_as_written), ...],
           "skipped_no_tracking": int,
           "skipped_unroutable":  {buying_group_as_written: count},
           "skipped_cancelled":   int,
@@ -117,6 +118,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     insurance_by_row: dict[int, str] = {}
     submitted_by_row: dict[int, str] = {}
     unresolved_split: list[tuple] = []
+    unroutable_tracked: list[tuple] = []
     cancelled_by_group: dict[str, list[tuple]] = {}
     skipped_unroutable: dict[str, int] = {}
     skipped_no_tracking = 0
@@ -152,6 +154,12 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         if not group_key:
             label = group_written or "(blank)"
             skipped_unroutable[label] = skipped_unroutable.get(label, 0) + 1
+            # A SHIPPED package routing to no group is unsubmittable to ANY of them, which is the
+            # same loss as a rejected submission and needs the same urgency — see
+            # _alert_on_unroutable. Only rows that HAVE a tracking number are collected: an
+            # unclassified row with nothing to submit yet is a config gap to fix at leisure, while
+            # this one has a clock on it.
+            unroutable_tracked.append((row_number, order_id, tracking, label))
             continue
 
         quantity_text = cell("Quantity")
@@ -191,6 +199,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "insurance_by_row": insurance_by_row,
         "submitted_by_row": submitted_by_row,
         "unresolved_split": unresolved_split,
+        "unroutable_tracked": unroutable_tracked,
         "skipped_no_tracking": skipped_no_tracking,
         "skipped_unroutable": skipped_unroutable,
         "skipped_cancelled": skipped_cancelled,
@@ -318,6 +327,7 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
     plan = plan_tracking_submissions(header, existing[1:])
     _report_plan(plan, apply)
     _alert_on_unresolved_splits(plan, apply)
+    _alert_on_unroutable(plan, apply)
 
     all_writes: dict[int, dict] = {}
     outcomes: dict[str, dict] = {}
@@ -412,19 +422,22 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
 
     for _tracking, reason in push.needs_manual:
         log.warning("%s: %s", group_key, reason)
-    announce = [
-        (tracking, reason) for tracking, reason in push.needs_manual
-        if not _is_held(tracking, push, plan)
-    ]
-    if announce:
+    if push.needs_manual:
         # Its own alert, deliberately not folded into the one above. This is not a transient error
         # to look at when convenient: the package stays unsubmitted — and therefore unreimbursed —
         # until someone performs the specific steps in the message. Burying it among retryable
         # failures is how a Best Buy combined carton goes unnoticed for weeks.
+        #
+        # FIRED IMMEDIATELY, NEVER HELD. An earlier version waited until the package was `delivered`
+        # to avoid crying wolf while BFMR's asynchronous Best Buy check was still running. That was
+        # backwards: **most buying groups only insure a package if its tracking number was submitted
+        # BEFORE delivery**, so delivery is precisely the moment the alert stops
+        # being actionable. Waiting for certainty costs the cover the alert exists to protect, while
+        # a false alarm costs one glance at My Tracker.
         _alert(
             apply,
-            f"ACTION NEEDED — {group_key}: {len(announce)} package(s) could not be submitted",
-            "\n\n".join(reason for _t, reason in announce),
+            f"ACTION NEEDED — {group_key}: {len(push.needs_manual)} package(s) could not be submitted",
+            "\n\n".join(reason for _t, reason in push.needs_manual),
         )
 
     insurance = None
@@ -452,35 +465,6 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
     }
     _merge_writes(all_writes, _tick_submitted(ticked, plan, apply))
     return {"push": push, "insurance": insurance, "payouts": payouts}
-
-
-def _is_held(tracking: str, push, plan: dict) -> bool:
-    """Should this package's manual-action alert wait for another run?
-
-    Only for the cases a provider marked `deferrable` — ones that may still resolve on their own —
-    and only while the package is not yet DELIVERED.
-
-    BFMR is the case this exists for. Since 2026-08-13 they handle a duplicate tracking number
-    themselves: a Best Buy check runs, they append a letter, and they email once the package is
-    received. That check is asynchronous, so a package can be genuinely absent from My Tracker the
-    instant we re-read after pushing, and present a minute later — alerting on that would cry wolf
-    about something BFMR is in the middle of doing correctly.
-
-    Delivery is the line because it is where BFMR's side has definitively spoken: their "received"
-    email has either arrived or it hasn't. A delivered package they hold under NO spelling is
-    unambiguous, and nothing else in the system would ever mention it.
-
-    Holding the alert changes NOTHING else. The package stays in `needs_manual`, so it stays out of
-    `file_insurance` — there is no shipment to insure until something lands — and its checkbox stays
-    unticked, which is exactly the at-a-glance signal an unticked box is for.
-    """
-    if tracking not in getattr(push, "deferrable", ()):
-        return False
-    statuses = [
-        plan["status_by_row"].get(row_number, "")
-        for row_number in plan["rows_by_tracking"].get(tracking, [])
-    ]
-    return not any(_status_rank(s) >= _status_rank("delivered") for s in statuses)
 
 
 def _tick_submitted(row_numbers, plan, apply) -> dict[int, dict]:
@@ -544,6 +528,40 @@ def _write_payout_cells(worksheet, writes: dict[int, dict], apply: bool) -> None
         worksheet.batch_update(data, value_input_option=ValueInputOption.raw)
         log.info("Wrote %d payout cell(s) across %d row(s).", len(data), len(writes))
     _write_profit_formulas(worksheet, sorted(writes))
+
+
+def _alert_on_unroutable(plan: dict, apply: bool) -> None:
+    """A SHIPPED package whose Buying Group routes to no provider — unsubmittable to ANY of them.
+
+    Until now this was only printed in the run summary, on the reasoning that an unrecognised
+    warehouse is a config gap rather than an error. That reasoning holds for a row with nothing to
+    submit yet; it does not hold once the package is in the carrier's hands, because then it is the
+    same loss as a rejected submission — the group never learns about the package, so it is neither
+    reimbursed nor insured — and it carries the same deadline (see `_run_one_group`: most groups only
+    insure a package whose tracking number arrived BEFORE delivery).
+
+    The fix is quick, which is exactly why it is worth interrupting someone for: add the warehouse's
+    address to warehouses.json, or set the row's Buying Group by hand, and the next run submits it.
+    """
+    rows = plan.get("unroutable_tracked") or []
+    if not rows:
+        return
+    detail = "\n".join(
+        f"  row {n}: order {oid}, tracking {t}, Buying Group {label!r}"
+        for n, oid, t, label in rows
+    )
+    log.warning("%d shipped row(s) route to no buying group", len(rows))
+    _alert(
+        apply,
+        f"ACTION NEEDED — {len(rows)} shipped package(s) route to no buying group",
+        "These rows have a tracking number but their Buying Group matches no configured provider, "
+        "so they cannot be submitted anywhere. Nobody is expecting these packages, and no insurance "
+        "can be filed on them.\n\n"
+        "MOST GROUPS ONLY INSURE A PACKAGE IF ITS TRACKING NUMBER WAS SUBMITTED BEFORE DELIVERY, so "
+        "this is worth fixing now rather than at the end of the week.\n\n"
+        "Add the delivery address to warehouses.json (or set Buying Group on the row by hand) and "
+        f"the next run will submit them:\n{detail}",
+    )
 
 
 def _alert_on_unresolved_splits(plan: dict, apply: bool) -> None:

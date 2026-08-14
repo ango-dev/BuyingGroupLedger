@@ -348,14 +348,12 @@ class BFMRClient(HttpClient):
                 # still running, or a genuine silent drop. Reported as needing a human rather than as
                 # a failure, because no retry of ours distinguishes the two.
                 #
-                # DEFERRABLE, because the first of those resolves itself: their check is
-                # asynchronous, so a package can be absent the moment we re-read and present a minute
-                # later. The caller holds the alert until the package is DELIVERED — by then BFMR's
-                # own "received" email has either arrived or it hasn't, so silence means a real drop.
-                # It stays in `needs_manual` regardless, which is what keeps it out of insurance:
-                # there is no shipment to insure until something lands.
+                # ALERTED IMMEDIATELY, not once the package is delivered. Their check being
+                # asynchronous means this can occasionally clear itself on the next run — but MOST
+                # BUYING GROUPS ONLY INSURE A PACKAGE WHOSE TRACKING NUMBER ARRIVED BEFORE DELIVERY,
+                #so waiting for certainty would forfeit exactly the cover this
+                # is meant to protect. A false alarm costs one glance at My Tracker.
                 result.needs_manual.append((number, _duplicate_tracking_hint(number)))
-                result.deferrable.add(number)
 
     # --- payouts and insurance --------------------------------------------------------------
 

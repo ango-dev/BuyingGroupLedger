@@ -373,47 +373,71 @@ class TestNeedsManualAlerting:
         assert "1 need manual action" in summary
 
 
-class TestDeferredManualAlerts:
-    """BFMR's Best Buy check is ASYNCHRONOUS (their 2026-08-13 change), so a package can be absent
-    from My Tracker the instant we re-read after pushing and present a minute later. Alerting on that
-    cries wolf about something BFMR is in the middle of doing correctly — and BFMR emails on receipt
-    anyway. Delivery is the line: by then their side has definitively spoken.
+class TestUnsubmittableAlertsImmediately:
+    """A tracking number that cannot be submitted is alerted RIGHT AWAY, never held.
+
+    An earlier version waited for `delivered` to avoid crying wolf while BFMR's asynchronous Best Buy
+    check was still running. That was backwards: **most buying groups only insure a package if its
+    tracking number was submitted BEFORE delivery**, so delivery is precisely the
+    moment the alert stops being actionable. Waiting for certainty costs the cover the alert exists to
+    protect; a false alarm costs one glance at My Tracker.
     """
 
     @staticmethod
-    def _plan(status):
-        return {
-            "rows_by_tracking": {"T1": [2]},
-            "status_by_row": {2: status},
+    def _plan(**over):
+        base = {
+            "by_group": {}, "rows_by_tracking": {}, "costs_by_row": {}, "status_by_row": {},
+            "insurance_by_row": {}, "submitted_by_row": {}, "unresolved_split": [],
+            "unroutable_tracked": [], "skipped_no_tracking": 0, "skipped_unroutable": {},
+            "skipped_cancelled": 0, "cancelled_by_group": {},
         }
+        base.update(over)
+        return base
 
-    def test_an_undelivered_deferrable_package_holds_its_alert(self):
-        push = SubmissionResult(needs_manual=[("T1", "…")], deferrable={"T1"})
-        assert sync_tracking._is_held("T1", push, self._plan("shipped")) is True
+    def test_the_hold_is_gone(self):
+        """Asserted by ABSENCE so the deferral cannot be reintroduced without this failing."""
+        assert not hasattr(sync_tracking, "_is_held")
+        assert "deferrable" not in SubmissionResult().__dataclass_fields__
 
-    def test_a_delivered_one_alerts(self):
-        """BFMR's "received" email has either arrived or it hasn't by now, and nothing else in the
-        system would ever mention a package they hold under no spelling."""
-        push = SubmissionResult(needs_manual=[("T1", "…")], deferrable={"T1"})
-        assert sync_tracking._is_held("T1", push, self._plan("delivered")) is False
+    def test_an_unroutable_shipped_row_alerts(self, monkeypatch):
+        """Unsubmittable to ANY group is the same loss as a rejected submission, and carries the same
+        deadline. Previously this was only printed in the run summary."""
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
 
-    def test_a_later_status_than_delivered_also_alerts(self):
-        push = SubmissionResult(needs_manual=[("T1", "…")], deferrable={"T1"})
-        assert sync_tracking._is_held("T1", push, self._plan("paid")) is False
+        sync_tracking._alert_on_unroutable(
+            self._plan(unroutable_tracked=[(7, "ORDER-1", "1Z999", "Unclassified")]), apply=True)
 
-    def test_a_non_deferrable_reason_always_alerts_immediately(self):
-        """A cancelled or missing PURCHASE has nothing to do with timing — no amount of waiting
-        resolves it, so holding those would just delay the news."""
-        push = SubmissionResult(needs_manual=[("T1", "purchase cancelled")])
-        assert sync_tracking._is_held("T1", push, self._plan("shipped")) is False
+        subject, body = sent[0]
+        assert subject.startswith("ACTION NEEDED")
+        assert "route to no buying group" in subject
+        assert "BEFORE DELIVERY" in body, "the deadline is why this interrupts someone"
+        assert "row 7" in body and "1Z999" in body and "Unclassified" in body
 
-    def test_holding_the_alert_does_not_unblock_insurance(self):
-        """THE TRAP. `blocked` is built from `needs_manual`, so a deferred package must STAY there:
-        there is no shipment to insure until something lands, and filing against a number BFMR has no
-        record of is a 2xx matching nothing, reported as success, package uninsured."""
-        push = SubmissionResult(needs_manual=[("T1", "…")], deferrable={"T1"})
-        blocked = {t for t, _ in push.failed} | {t for t, _ in push.needs_manual}
-        assert "T1" in blocked
+    def test_an_untracked_unroutable_row_does_not_alert(self, monkeypatch):
+        """An unclassified row with nothing to submit yet is a config gap to fix at leisure — no
+        package is in the carrier's hands, so no clock is running. Only the planner decides this, by
+        collecting rows that HAVE a tracking number."""
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append(subject))
+        sync_tracking._alert_on_unroutable(self._plan(), apply=True)
+        assert sent == []
+
+    def test_the_planner_only_collects_unroutable_rows_that_shipped(self):
+        rows = [
+            shipped("A", "1Z999", group="Unclassified"),
+            shipped("B", "", group="Unclassified", **{"Status": "ordered"}),
+        ]
+        plan = plan_tracking_submissions(list(HEADER), rows)
+        assert [r[1] for r in plan["unroutable_tracked"]] == ["A"]
+        assert plan["skipped_unroutable"] == {"Unclassified": 1}
+
+    def test_a_dry_run_still_sends_nothing(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append(subject))
+        sync_tracking._alert_on_unroutable(
+            self._plan(unroutable_tracked=[(7, "ORDER-1", "1Z999", "Unclassified")]), apply=False)
+        assert sent == []
 
 
 class TestColumnsExist:

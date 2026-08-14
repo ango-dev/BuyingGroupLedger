@@ -152,13 +152,6 @@ class SubmissionResult:
     #: package quietly goes unsubmitted for weeks. The Best Buy combined-carton case is the one that
     #: prompted it; any provider may add others.
     needs_manual: list[tuple[str, str]] = field(default_factory=list)
-    #: The subset of `needs_manual` that MIGHT still resolve on its own, so the caller can hold the
-    #: alert without weakening anything else. These stay in `needs_manual` — that is deliberate and
-    #: load-bearing: `sync_tracking` builds its insurance `blocked` set from `needs_manual`, so
-    #: moving a merely-deferred package out of it would file insurance against a shipment the group
-    #: has no record of. A 2xx matching nothing, reported as success, package uninsured — the exact
-    #: bug that `_held_spelling` was written to fix. Quieter alerting must not become looser blocking.
-    deferrable: set[str] = field(default_factory=set)
 
     def summary(self) -> str:
         """Skips are summarised BY REASON, not lumped together.
