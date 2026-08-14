@@ -143,6 +143,53 @@ class TestCostcoTokens:
         assert "scripts.costco_token" in result.detail
         assert "PAID agent" in result.detail
 
+    def test_a_present_but_unwritable_token_dir_fails(self, tmp_path, monkeypatch):
+        """docker-compose mounted ./.costco as :ro.
+
+        Costco ROTATES its refresh token and _save_auth persists the new one, so a read-only mount
+        raises OSError, degrades Costco to the PAID agent every run, and throws the rotation away.
+        Checking only that the file EXISTS misses it completely — which is what happened.
+        """
+        class _Profile:
+            label = "profile-alpha"
+
+        monkeypatch.setattr("config.profiles.load_profiles_for_retailer", lambda key: [_Profile()])
+        (tmp_path / ".costco").mkdir()
+        (tmp_path / ".costco" / "profile-alpha.json").write_text("{}", encoding="utf-8")
+
+        # Simulate the read-only mount: the probe write is what fails, not the read.
+        real_touch = preflight.Path.touch
+
+        def deny(self, *args, **kwargs):
+            if self.name == ".preflight_write_probe":
+                raise OSError(30, "Read-only file system")
+            return real_touch(self, *args, **kwargs)
+
+        monkeypatch.setattr(preflight.Path, "touch", deny)
+
+        result = _by_name(preflight.check_costco_tokens(root=tmp_path),
+                          "costco token [profile-alpha]")
+
+        assert result.level == FAIL
+        assert "NOT WRITABLE" in result.detail
+        assert ":ro" in result.detail          # names the exact fix
+
+    def test_a_writable_token_dir_passes(self, tmp_path, monkeypatch):
+        class _Profile:
+            label = "profile-alpha"
+
+        monkeypatch.setattr("config.profiles.load_profiles_for_retailer", lambda key: [_Profile()])
+        (tmp_path / ".costco").mkdir()
+        (tmp_path / ".costco" / "profile-alpha.json").write_text("{}", encoding="utf-8")
+
+        result = _by_name(preflight.check_costco_tokens(root=tmp_path),
+                          "costco token [profile-alpha]")
+
+        assert result.level == OK
+        assert "writable" in result.detail
+        # The probe must not leave litter behind in a directory full of secrets.
+        assert not (tmp_path / ".costco" / ".preflight_write_probe").exists()
+
     def test_no_costco_profile_is_not_a_problem(self, tmp_path, monkeypatch):
         monkeypatch.setattr("config.profiles.load_profiles_for_retailer", lambda key: [])
 

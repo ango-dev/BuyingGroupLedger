@@ -136,7 +136,26 @@ def check_costco_tokens(root: Path = ROOT) -> list[Result]:
     for profile in profiles:
         token = root / ".costco" / f"{profile.label}.json"
         if token.is_file():
-            out.append(Result(OK, f"costco token [{profile.label}]", "present"))
+            # Present is not enough: Costco ROTATES the refresh token on every refresh and
+            # _save_auth persists the new one. A read-only mount (the natural-looking `:ro` for a
+            # file full of secrets) turns that write into an OSError, so Costco degrades to the
+            # PAID agent on every run AND the rotated token is thrown away, which can strand the
+            # stored one. Probe the directory rather than trusting permission bits, since a
+            # container running as root reads as writable right up until the mount refuses.
+            probe = token.parent / ".preflight_write_probe"
+            try:
+                probe.touch()
+                probe.unlink()
+            except OSError as exc:
+                out.append(Result(
+                    FAIL, f"costco token [{profile.label}]",
+                    f"present but its directory is NOT WRITABLE ({exc.strerror}). Costco rotates "
+                    f"its refresh token and must save the new one, so this degrades Costco to the "
+                    f"PAID agent every run and discards the rotation. In Docker, drop the `:ro` "
+                    f"from the ./.costco volume in docker-compose.yml.",
+                ))
+            else:
+                out.append(Result(OK, f"costco token [{profile.label}]", "present and writable"))
         else:
             out.append(Result(
                 FAIL, f"costco token [{profile.label}]",

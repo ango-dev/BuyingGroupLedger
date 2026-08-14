@@ -161,6 +161,71 @@ def _dismiss_survey(page) -> None:
         pass
 
 
+def _click_continue(page) -> bool:
+    """Click Continue on the email screen, re-dismissing the survey modal before each attempt.
+
+    Dismissing the survey ONCE when the page loads is not enough. `#survey_window` renders lazily
+    and intermittently, so it can appear between that call and this click; it overlays the button,
+    Playwright's actionability check keeps waiting for a clear hit target, and the attempt times out.
+    Re-dismissing immediately before each try is what makes this survive the modal.
+
+    The last strategy dispatches the click on the element directly. That bypasses hit-testing
+    altogether, so it still works if something we don't know about is covering the button — worth
+    having as a fallback because the alternative is losing the whole run.
+    """
+    strategies = (
+        ("css button.cia-form__controls__submit",
+         lambda: page.locator("button.cia-form__controls__submit").first.click(timeout=8000)),
+        ("role=button[name~=Continue]",
+         lambda: page.get_by_role("button", name="Continue", exact=False).first.click(timeout=8000)),
+        ("dispatched el.click()",
+         lambda: page.eval_on_selector("button.cia-form__controls__submit", "el => el.click()")),
+    )
+    for label, attempt in strategies:
+        _dismiss_survey(page)
+        try:
+            attempt()
+        except Exception as exc:  # noqa: BLE001 — try the next strategy, report only if all fail
+            log.debug("Best Buy sign-in: Continue via %s failed: %s", label, exc)
+            continue
+        log.info("Best Buy sign-in: clicked Continue via %s.", label)
+        return True
+    return False
+
+
+def _log_signin_diagnostics(page, what_failed: str) -> None:
+    """Say WHY sign-in stalled, since the caller can only return False.
+
+    A bare `return False` costs the whole run for that retailer and tells you nothing — you cannot
+    tell a survey overlay from a disabled button from a CAPTCHA interstitial from a changed DOM, and
+    those have completely different fixes. Best Buy sessions die in ~20 minutes, so this path runs on
+    most scheduled runs and a silent failure is one you'd be guessing at for days.
+    """
+    try:
+        info = page.evaluate(
+            """() => {
+                const b = document.querySelector('button.cia-form__controls__submit');
+                const text = (document.body && document.body.innerText) || '';
+                return {
+                    url: location.href,
+                    title: document.title,
+                    button: b ? {
+                        text: (b.innerText || '').trim().slice(0, 40),
+                        disabled: !!b.disabled,
+                        visible: !!(b.offsetWidth || b.offsetHeight),
+                    } : null,
+                    survey_present: !!document.getElementById('survey_window'),
+                    password_radio: !!document.getElementById('password-radio'),
+                    looks_like_challenge:
+                        /captcha|unusual activity|verify it'?s you|are you a human/i.test(text),
+                };
+            }"""
+        )
+        log.warning("Best Buy sign-in: %s. Page state: %s", what_failed, info)
+    except Exception:  # noqa: BLE001 — diagnostics must never mask the original failure
+        log.warning("Best Buy sign-in: %s (page state unreadable).", what_failed, exc_info=True)
+
+
 def _deterministic_login(page, auth) -> bool:
     """Best Buy's 3-screen password login, agent-free (proven live). Returns True if it
     lands authenticated. Handles the fresh (#fld-e editable) and remembered (email prefilled as static
@@ -178,18 +243,8 @@ def _deterministic_login(page, auth) -> bool:
         if page.locator(".prefilled-value, .cia-signin__username").count() == 0:
             log.warning("Best Buy sign-in page has no email field and no prefilled email.")
             return False
-    clicked = False
-    for attempt in (
-        lambda: page.locator("button.cia-form__controls__submit").first.click(timeout=8000),
-        lambda: page.get_by_role("button", name="Continue", exact=False).first.click(timeout=8000),
-    ):
-        try:
-            attempt()
-            clicked = True
-            break
-        except Exception:
-            continue
-    if not clicked:
+    if not _click_continue(page):
+        _log_signin_diagnostics(page, "could not click Continue on the email screen")
         return False
 
     # Screen 2: method chooser -> "Use password".

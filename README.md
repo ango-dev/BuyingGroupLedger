@@ -655,9 +655,16 @@ the venv + Task Scheduler path is simpler.
 
 Prereqs on the host: `.env`, `service_account.json`, and `profiles.json` present in the project dir
 (they're mounted/injected at runtime and are excluded from the image via `.dockerignore` — secrets are
-never baked in). If you use Costco, also have `.costco/<label>.json` present — it's mounted read-only so
-the container can use the GraphQL API path; without it, Costco falls back to the agent every run. (Not
-using Costco? Drop the `./.costco` volume line from `docker-compose.yml`.)
+never baked in). If you use Costco, also have `.costco/<label>.json` present, so the container can use
+the GraphQL API path; without it, Costco falls back to the agent every run. (Not using Costco? Drop the
+`./.costco` volume line from `docker-compose.yml`.)
+
+> ⚠️ **The `.costco` mount must stay writable — do not add `:ro` to it.** It looks like it should be
+> read-only, since it holds nothing but secrets, but Costco **rotates its refresh token** on every
+> refresh and the client saves the new one back. Mounted read-only that write raises
+> `OSError: Read-only file system`, Costco silently falls back to the paid agent on every run, and the
+> rotated token is discarded — which can strand the stored one and force a manual re-grab. Preflight
+> now probes the directory for writability rather than only checking the file exists.
 
 `warehouses.json` and `cards.json` are mounted the same way. Both are optional, **but a bind mount
 whose host file is missing makes Docker create an empty directory in its place** — so either create the

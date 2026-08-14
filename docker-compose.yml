@@ -26,7 +26,12 @@ services:
     volumes:
       - ./profiles.json:/app/profiles.json:ro
       - ./service_account.json:/app/service_account.json:ro
-      - ./.costco:/app/.costco:ro # Costco refresh tokens (.costco/<label>.json); omit if not using Costco
+      # Costco refresh tokens (.costco/<label>.json); omit this line if not using Costco.
+      # MUST be writable — NOT :ro. Costco ROTATES the refresh token on every refresh and
+      # CostcoApiClient._save_auth persists the new one alongside the cached id_token. Mounted
+      # read-only, the write raises OSError, Costco falls back to the PAID agent every run, and the
+      # rotated token is lost — which can strand the stored one and force a manual re-grab.
+      - ./.costco:/app/.costco
       # Buying-group warehouses and credit-card cashback rates. Both are OPTIONAL — but a bind mount
       # whose host file is missing makes Docker create an empty DIRECTORY there, so either create the
       # file on the host (even as `[]`) or delete the line. Without them the run still works: every
