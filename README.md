@@ -670,7 +670,11 @@ docker compose logs -f            # watch runs
 docker compose down               # stop
 ```
 
-Adjust the schedule in `docker-compose.yml` (`RUN_INTERVAL_HOURS`, default 6 = 4x/day). Set
+Adjust the schedule in `docker-compose.yml` (`RUN_INTERVAL_HOURS`, currently 3 = 8x/day), then
+`docker compose up -d` to apply it — `docker compose restart` reuses the old environment and would
+silently keep the previous schedule. **3h is the practical floor**: every run spends one of
+MaxOutDeals' 10 daily received-items calls, so running more often makes payout write-back start
+failing (see "Choosing an interval" in [DEPLOY.md](DEPLOY.md)). Set
 `RUN_ON_START: "true"` to also run once at container start, and `TZ` to align the schedule to local
 time. To run **multiple instances**, copy the compose service with a different `profiles.json`/`.env`
 mounted per instance (e.g. one per proxy pool).

@@ -158,10 +158,47 @@ Settings live in `docker-compose.yml`:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `RUN_INTERVAL_HOURS` | `6` | 4×/day. Rejected and reset to 6 if not 1–23. |
+| `RUN_INTERVAL_HOURS` | `3` | 8×/day. Rejected and reset to 6 if not 1–23. See below before lowering. |
 | `RUN_ON_START` | `false` | `true` = also run once at container start. Useful for the first cutover. |
 | `TZ` | `America/New_York` | The cron schedule follows this. |
 | `PREFLIGHT_STRICT` | `false` | `true` = refuse to start when preflight fails. |
+
+Change the interval by editing `docker-compose.yml` and recreating the container:
+
+```bash
+docker compose up -d          # re-reads the compose file; `docker compose restart` does NOT
+docker compose logs | grep "scheduled every"
+```
+
+`docker compose restart` reuses the container's existing environment, so it will silently keep the
+old schedule — always use `up -d`.
+
+### Choosing an interval
+
+**A third party sets the floor, not this code.** MaxOutDeals allows **10 received-items calls per
+day**, and every run spends exactly one, so:
+
+| Interval | Runs/day | MOD receipts used | Headroom |
+|---|---|---|---|
+| 6h | 4 | 4 of 10 | comfortable |
+| 4h | 6 | 6 of 10 | fine |
+| **3h** | **8** | **8 of 10** | **2 spare — the practical floor** |
+| 2h | 12 | over quota | payout write-back fails daily |
+
+Two things make that tighter than it looks:
+
+- **A dry run spends one too.** `fetch_payouts` is a non-mutating read, and `dry_run` only suppresses
+  *mutating* calls — so `python -m sync_tracking` with no `--apply` still costs a receipts call, as
+  does `scripts.bg_probe`. At 3h you have room for about two of those a day.
+- **Nothing local stops you.** `DailyCallBudget` is deliberately per-process, so it bounds one run's
+  behaviour and cannot see the day's total across scheduled runs. MOD's server is the only real
+  authority, and it just starts refusing.
+
+The failure mode is contained: going over affects only the payout/premium/status **write-back**, not
+tracking submission (the 30/day push limit stays comfortable at 8 runs). Payouts simply stop updating
+until the daily reset, and the run alerts rather than failing silently. Still, if you want to run
+more often than 3h, raise the interval back up and let the retailers' own delivery signal carry the
+status — it's free, and it's already what the scrapers read.
 
 **Preflight runs on every container start and alerts but does not abort.** That's deliberate and it
 matches the project's "reliability beats cost" rule: a container that refuses to start also stops
