@@ -294,35 +294,31 @@ Fill a profile's `proxy` in `profiles.json` (leave `profile_id` blank), then:
 It opens a live browser URL — log into the retailer(s) there, press Enter, and it saves the
 `profile_id` back into `profiles.json`. Re-run it any time to log back in if a session expires.
 
-**Auto-auth for Best Buy (Sign in with Google).** Best Buy web sessions die in ~20–25 min, which
-would break hands-off scheduling. To let the agent log itself back in, give the profile an `auth`
-block keyed by retailer and log into Gmail in the same `create_profile` session:
+**Auto-auth for Best Buy (username + password).** Best Buy web sessions die in ~20–25 min, which
+would break hands-off scheduling, so give the profile an `auth` block and both Best Buy paths log
+themselves back in:
 
 ```json
-"auth": { "bestbuy": { "method": "google", "google_email": "you@gmail.com" } }
+"auth": { "bestbuy": { "method": "password", "username": "you@example.com", "password": "…" } }
 ```
 
-The agent then clicks "Continue with Google" whenever it hits the Best Buy sign-in page, riding the
-profile's long-lived Google session — no Best Buy password or 2FA/TOTP is stored (passkeys aren't
-usable: Browser-Use's cloud agent has no WebAuthn support). Verify once that "Sign in with Google"
-lands in the Best Buy account holding your orders. If the Google session is *also* dead, the agent
-reports logged-out and alerts, as before. Without an `auth` block, a profile behaves the same as
-before (reports logged-out, doesn't log in).
+> ⚠️ **Turn 2-step verification OFF on the Best Buy account** (Account Settings → Sign-in &
+> Security). Nothing here can answer a challenge. If it's on, sign-in stops at the challenge screen,
+> the run alerts as logged out, and no orders are read.
 
-**Password + 2FA fallback** (for accounts not linked to Google):
+`password` is the only supported method. Google SSO, Apple and authenticator-app TOTP were removed in
+2026-08-13: each was a second login path that had to keep working, exercised only when a session
+happened to die, so a break in one surfaced days later as a mystery logout. Passkeys were never
+usable — Browser-Use's cloud agent has no WebAuthn support.
 
-```json
-"auth": { "bestbuy": { "method": "password", "username": "you@example.com",
-                       "password": "…", "totp_secret": "BASE32SEED" } }
-```
+Where the password goes depends on which path runs:
 
-The agent enters the credentials and, if 2-step verification is requested, computes the current
-authenticator code **in the browser at that moment** (Web Crypto — a code baked into the prompt would
-be expired by the time the agent reaches the field). `totp_secret` is the base32 seed shown when you
-set up the authenticator app; it only covers authenticator-app 2FA, not SMS/email codes. ⚠️ Because
-Browser-Use v4 has no secret-injection channel, the password **and** the TOTP secret go into the
-agent's task prompt and Browser-Use's cloud run history — so `method: "google"` (no stored secret) is
-preferred where the account supports it.
+- the **deterministic path** (normal case) types it into a CDP browser on your machine — it builds no
+  prompt, so the password never leaves the host;
+- the **agent fallback** puts it in the task prompt, because Browser-Use v4 has no secret-injection
+  channel — so it's visible to the LLM and kept in the cloud run history.
+
+Without an `auth` block a profile just reports logged-out and alerts, without trying to log in.
 
 ### Tests
 

@@ -221,69 +221,55 @@ def test_bestbuy_without_auth_still_reports_logged_out():
     assert "Continue with Google" not in prompt
 
 
-def test_bestbuy_with_google_auth_self_heals_via_google():
-    """With Google auto-auth, the agent logs itself back in via 'Continue with Google' instead of
-    stopping, but still falls back to logged_out if Google itself is also expired."""
+def test_bestbuy_password_auth_supplies_credentials():
+    """The agent gets username + password and the exact 3-screen click path.
+
+    Naming the steps and ids is what keeps this cheap: "Use password" is the LAST radio on the
+    method chooser and sits below the fold, so left to itself the agent burns ~40 steps and a pile
+    of screenshots hunting for it.
+    """
     prompt = build(
         BestBuyScraper,
-        auth={"bestbuy": RetailerAuth(method="google", google_email="me@gmail.com")},
+        auth={"bestbuy": RetailerAuth(
+            method="password", username="me@example.com", password="hunter2")},
     )
-    assert "Continue with Google" in prompt
-    assert "me@gmail.com" in prompt
-    # No Best Buy password / TOTP is ever stored or prompted.
-    assert "password" in prompt  # only in the "only if Google asks for a password" fallback wording
-    # Still able to report the truly-stuck case (Google session also dead).
+    assert "me@example.com" in prompt
+    assert "hunter2" in prompt
+    assert "Keep me signed in" in prompt
+    assert "password-radio" in prompt
+    # Still able to bail out cleanly if login fails.
     assert '{"logged_out": true, "items": []}' in prompt
     # f-string braces stay balanced with the JSON in the sign-in block.
     assert "{{" not in prompt and "}}" not in prompt
     assert prompt.count("{") == prompt.count("}")
 
 
-def test_bestbuy_google_auth_falls_back_to_generic_account_wording_without_email():
-    prompt = build(BestBuyScraper, auth={"bestbuy": RetailerAuth(method="google")})
-    assert "Continue with Google" in prompt
-    assert "there should be only one signed in" in prompt
+def test_the_removed_auth_methods_leave_no_trace_in_the_prompt():
+    """Google SSO, Apple and in-browser TOTP were removed.
 
-
-def test_bestbuy_password_auth_supplies_credentials_and_totp():
-    """Password fallback: the agent gets username+password and, for authenticator 2FA, an in-browser
-    snippet that computes a FRESH code at the moment it's asked for (the prompt is built once, minutes
-    before the code is needed, so a pre-baked code would be stale)."""
+    Asserted on the PROMPT, not just the config, because the prompt is the whole product of this
+    module — a stray "or use Google" line would send the agent down a path nothing supports, and it
+    would only ever be discovered on a run where the session had actually lapsed.
+    """
     prompt = build(
         BestBuyScraper,
-        auth={
-            "bestbuy": RetailerAuth(
-                method="password",
-                username="me@example.com",
-                password="hunter2",
-                totp_secret="JBSWY3DPEHPK3PXP",
-            )
-        },
+        auth={"bestbuy": RetailerAuth(
+            method="password", username="me@example.com", password="hunter2")},
     )
-    assert "me@example.com" in prompt
-    assert "hunter2" in prompt
-    assert "Keep me signed in" in prompt
-    # The real TOTP secret is embedded (v4 has no secret channel) and computed in-browser, fresh.
-    assert "JBSWY3DPEHPK3PXP" in prompt
-    assert "crypto.subtle" in prompt
-    assert "changes every 30 seconds" in prompt
-    # Still able to bail out cleanly if login fails.
-    assert '{"logged_out": true, "items": []}' in prompt
-    # f-string braces stay balanced with the JS + JSON in the sign-in block.
-    assert "{{" not in prompt and "}}" not in prompt
-    assert prompt.count("{") == prompt.count("}")
     assert "Continue with Google" not in prompt
+    assert "crypto.subtle" not in prompt          # the TOTP generator
+    assert "changes every 30 seconds" not in prompt
 
 
-def test_bestbuy_password_auth_without_totp_bails_on_2fa():
-    """No totp_secret = can't answer a 2FA challenge; the agent must report logged_out rather than
-    loop, and no crypto snippet is embedded."""
+def test_a_2fa_challenge_bails_out_instead_of_looping():
+    """Nothing can answer a challenge now, so 2-step verification must be OFF on the account. The
+    agent has to report logged_out rather than sit on the challenge screen burning steps."""
     prompt = build(
         BestBuyScraper,
         auth={"bestbuy": RetailerAuth(method="password", username="u", password="p")},
     )
-    assert "crypto.subtle" not in prompt
-    assert "you " in prompt and "cannot complete it" in prompt
+    assert "cannot complete it" in prompt
+    assert "2-step verification is supposed to be OFF" in prompt
     assert '{"logged_out": true, "items": []}' in prompt
 
 

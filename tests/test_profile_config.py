@@ -1,13 +1,15 @@
 """Profile config + per-retailer auth round-trip.
 
-`auth` carries the auto-auth config the Best Buy scraper reads to log itself back in via Google.
-It must survive save_profiles -> load_profiles unchanged (that pair is how create_profile persists
-edits), and default to empty for the many profiles that don't set it.
+`auth` carries the credentials the Best Buy paths use to log themselves back in — username and
+password, the only supported method since 2026-08-13. It must survive save_profiles ->
+load_profiles unchanged (that pair is how create_profile persists edits), and default to empty for
+the many profiles that don't set it.
 """
 
 import json
 
 import pytest
+from pydantic import ValidationError
 
 import config.profiles as profiles_mod
 from models.profile import ProfileConfig, ProxyConfig, RetailerAuth
@@ -44,15 +46,29 @@ def test_auth_block_validates_from_json():
         {
             "label": "profile-alpha",
             "retailers": ["bestbuy"],
-            "auth": {"bestbuy": {"method": "google", "google_email": "you@gmail.com"}},
+            "auth": {"bestbuy": {"method": "password", "username": "me@example.com",
+                                 "password": "hunter2"}},
         }
     )
-    assert p.auth["bestbuy"].method == "google"
-    assert p.auth["bestbuy"].google_email == "you@gmail.com"
+    assert p.auth["bestbuy"].method == "password"
+    assert p.auth["bestbuy"].username == "me@example.com"
 
 
-def test_retailer_auth_method_defaults_to_google():
-    assert RetailerAuth().method == "google"
+def test_password_is_the_only_method():
+    """Google SSO, Apple and TOTP were removed. Rejecting them at VALIDATION
+    rather than ignoring them at runtime is the point: an old profiles.json still naming
+    method="google" would otherwise load fine and then silently produce a sign-in block that no
+    longer exists, i.e. a profile that can never log itself back in."""
+    assert RetailerAuth().method == "password"
+    for dropped in ("google", "apple"):
+        with pytest.raises(ValidationError):
+            RetailerAuth(method=dropped)
+
+
+def test_the_totp_field_is_gone():
+    """Pydantic ignores unknown fields by default, so a leftover totp_secret would look accepted
+    while doing nothing — assert it genuinely isn't part of the model."""
+    assert "totp_secret" not in RetailerAuth.model_fields
 
 
 def test_auth_round_trips_through_save_and_load(tmp_path, monkeypatch):
@@ -62,7 +78,8 @@ def test_auth_round_trips_through_save_and_load(tmp_path, monkeypatch):
             label="profile-alpha",
             profile_id="pid",
             retailers=["bestbuy"],
-            auth={"bestbuy": RetailerAuth(method="google", google_email="you@gmail.com")},
+            auth={"bestbuy": RetailerAuth(
+                method="password", username="me@example.com", password="hunter2")},
         )
     ]
 
@@ -70,8 +87,8 @@ def test_auth_round_trips_through_save_and_load(tmp_path, monkeypatch):
     loaded = profiles_mod.load_profiles()
 
     assert len(loaded) == 1
-    assert loaded[0].auth["bestbuy"].method == "google"
-    assert loaded[0].auth["bestbuy"].google_email == "you@gmail.com"
+    assert loaded[0].auth["bestbuy"].method == "password"
+    assert loaded[0].auth["bestbuy"].username == "me@example.com"
 
 
 # --- amazon vs amazon-business mutual exclusion --------------------------------------------------

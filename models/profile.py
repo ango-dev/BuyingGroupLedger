@@ -29,27 +29,34 @@ class ProxyConfig(BaseModel):
 
 
 class RetailerAuth(BaseModel):
-    """How the agent should re-authenticate this retailer if it lands on a sign-in page.
+    """How to re-authenticate this retailer when a run lands on a sign-in page.
 
-    Best Buy web sessions die fast (~20-25 min), so hands-off scheduling needs the agent to log
-    itself back in. The robust path is "Sign in with Google": the profile stays logged into Gmail
-    (a long-lived Google session), so a dead Best Buy session self-heals with one "Continue with
-    Google" click — no Best Buy password or 2FA/TOTP code in the prompt. `google_email` only names
-    which account to pick in Google's chooser; it is not a secret.
+    **USERNAME + PASSWORD IS THE ONLY SUPPORTED METHOD**. Google SSO, Apple and
+    authenticator-app TOTP were all removed rather than left as options: each was a second login path
+    that had to keep working, and every one of them is exercised only when a session happens to die,
+    so a break in one would surface days later as a mystery logout.
 
-    `method="password"` (with `username`/`password`, and optionally `totp_secret` for authenticator-
-    app 2FA) is the fallback for accounts not linked to Google. NOTE: Browser-Use v4 has no
-    secret-injection channel, so anything stored here — password AND the TOTP secret — ends up in the
-    agent's task prompt (visible to the LLM and stored in the cloud run history). Prefer
-    `method="google"`, which stores no secret. `totp_secret` is the base32 seed shown when you set up
-    the authenticator app (only works for authenticator-app 2FA, NOT SMS/email codes).
+    **YOU MUST DISABLE 2-STEP VERIFICATION ON THE BEST BUY ACCOUNT.** There is no code path that
+    answers a 2FA challenge any more. Best Buy's own prompt calls it "Sign in with a verification
+    code"; turn it off under Account Settings → Sign-in & Security. If it is on, the login stops at
+    the challenge screen, the run alerts as logged out, and no order is ever read.
+
+    The password reaches Best Buy two ways, and they are not equally exposed:
+
+    - **The deterministic path (`scrapers/bestbuy_api.py`, primary)** types it into a CDP browser on
+      this machine. It never builds a prompt, so the password never leaves the host.
+    - **The agent fallback (`scrapers/bestbuy.py`)** puts it in the task prompt, because Browser-Use
+      v4 has no secret-injection channel — unknown kwargs to `runs.create` 422. So it is visible to
+      the LLM and stored in the cloud run history.
+
+    That second exposure is the accepted cost of dropping SSO, and it is much smaller than it was
+    when SSO was chosen: since the deterministic path landed (2026-08-10) the agent only runs when
+    that path fails outright.
     """
 
-    method: Literal["google", "apple", "password"] = "google"
-    google_email: str = ""  # account to pick in Google's chooser (method "google"/"apple" via Google)
-    username: str = ""  # method="password" only
-    password: str = ""  # method="password" only
-    totp_secret: str = ""  # method="password" only: base32 authenticator seed for 2FA (optional)
+    method: Literal["password"] = "password"
+    username: str = ""
+    password: str = ""
 
 
 class ProfileConfig(BaseModel):

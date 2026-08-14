@@ -10,7 +10,7 @@
     },
     "retailers": ["amazon", "bestbuy", "walmart"],
     "auth": {
-      "bestbuy": { "method": "google", "google_email": "you@gmail.com" }
+      "bestbuy": { "method": "password", "username": "you@example.com", "password": "…" }
     }
   },
   {

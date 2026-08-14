@@ -91,16 +91,17 @@ def main() -> None:
         print(f"Open that URL in your own browser and log into: {retailers}")
         print("You can log into more than one retailer in the same session if this profile covers several.")
 
-        # Retailers set to auto-auth via Google (see models.profile.RetailerAuth) re-log-in by
-        # riding this profile's long-lived Google session, so that Google login must exist here.
-        google_retailers = [r for r, a in profile.auth.items() if a.method in ("google", "apple")]
-        if google_retailers:
+        # Retailers with stored credentials re-log-in on their own (see models.profile.RetailerAuth).
+        # The one prerequisite is on the ACCOUNT, not in this session: 2-step verification has to be
+        # off, because no path here can answer a challenge.
+        auto_auth = [r for r, a in profile.auth.items() if a.username and a.password]
+        if auto_auth:
             print()
             print(
-                f"IMPORTANT: {', '.join(sorted(google_retailers))} auto-auth via Google in this profile — "
-                "ALSO log into your Google/Gmail account in this same session, and verify 'Sign in with "
-                "Google' on that retailer lands in the account holding your orders. Auto-auth rides this "
-                "Google session; without it the agent can't self-heal a lapsed retailer session."
+                f"IMPORTANT: {', '.join(sorted(auto_auth))} auto-auth with a stored username + password "
+                "in this profile. TURN 2-STEP VERIFICATION OFF on those accounts (Account Settings -> "
+                "Sign-in & Security) — nothing here can answer a verification code, so with it on a "
+                "lapsed session stops at the challenge screen and the run reports logged-out instead."
             )
         print()
         input("Press Enter here once you're done logging in (this stops the session and saves cookies)... ")
