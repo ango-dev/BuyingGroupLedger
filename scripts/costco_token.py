@@ -15,9 +15,12 @@ reconnects to that Browser-Use profile over CDP and (a) intercepts the token end
 refreshes on load, else (b) scans local storage / IndexedDB:
     python -m scripts.costco_token --label profile-alpha --grab
 
-  NOTE: --grab is best-effort. On the Browser-Use cloud profile Costco stores its MSAL cache
-  ENCRYPTED (opaque localStorage blobs, no IndexedDB) and doesn't always refresh on a plain page
-  load, so the grab can come up empty — in that case use the manual --token method above (proven).
+  NOTE: --grab works, but it is OPPORTUNISTIC. Costco's MSAL cache is stored ENCRYPTED (opaque
+  localStorage blobs, no IndexedDB), so (b) is a dead end and everything rides on (a) — and (a) needs
+  the app to actually perform a refresh while we watch. If the profile's token is still valid, MSAL
+  correctly does nothing and the grab comes up empty. So it succeeds precisely when the cached token
+  has EXPIRED, which is when you need a new one anyway. An empty grab means "the session is still
+  warm", not "this is broken" — retry later, or use the manual --token method above.
 
 THEN SAVE IT (run from the project root), keyed to the profile that owns this Costco membership:
     python -m scripts.costco_token --label profile-2 --token "<REFRESH_TOKEN>"
