@@ -32,6 +32,11 @@ class CdpBrowser:
     def __enter__(self):
         self._client = BrowserUseV2()
 
+        # NB: browserScreenWidth/Height are NOT set here. The API accepts them, but a profileId
+        # OVERRIDES them — measured 2026-08-14: profile-less + 1024x768 gives screen 1024x768, while
+        # profile + 1024x768 (even with allowResizing) still gives 1536x864. Every session here uses
+        # a profile, so the setting would be inert. The default is fine anyway: 1536x864 @ dPR 1.25
+        # is exactly what a 1920x1080 display at 125% scaling reports, the commonest desktop setup.
         body: dict = {}
         if self.profile.profile_id:
             body["profileId"] = self.profile.profile_id
