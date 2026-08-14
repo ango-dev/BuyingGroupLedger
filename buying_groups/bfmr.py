@@ -75,6 +75,14 @@ LEDGER_STATUS_BY_BFMR_STATUS = {
     "returned": "return",  # the ledger spells it "return"
 }
 
+#: BFMR statuses past the point where insuring a package makes sense — the purchase is settled.
+#:
+#: This is what `insurance_status: "not_eligible"` actually tracks. The probe (2026-08-13) found it
+#: on 62 rows, every one of them in one of these states, and 58 of those were INSURED — so it marks
+#: the end of the lifecycle, not a refusal to cover. Keying off BFMR's own `status` says that
+#: plainly, and stops "not eligible" being read as "BFMR won't insure this".
+_TERMINAL_BFMR_STATUSES = {"paid", "returned", "cancelled"}
+
 #: BFMR's handling of the **Best Buy duplicate tracking issue**:
 #: https://support.bfmr.com/hc/en-us/articles/50968170907547
 #:
@@ -380,6 +388,7 @@ class BFMRClient(HttpClient):
         lookup = _spelling_lookup(tracking_numbers)
 
         records: list[PayoutRecord] = []
+        fee_row_premiums: dict[str, int] = {}   # ledger number -> its index in `records`
         for entry in self.fetch_tracker():
             spelling = _tracking_of(entry)
             number = lookup.get(spelling, "")
@@ -387,6 +396,7 @@ class BFMRClient(HttpClient):
                 continue
 
             if _is_insurance_fee_row(entry):
+                fee_row_premiums[number] = len(records)
                 # `total_payout`, not `amount_paid`: the premium is committed when the package is
                 # insured, whereas `amount_paid` stays "0.00" until BFMR settles the whole package.
                 # Recording it early costs nothing — Total Profit stays blank until Payout Amount
@@ -414,21 +424,86 @@ class BFMRClient(HttpClient):
                 order_id=_order_id_of(entry),
                 status=status,
             ))
+
+        # The insurance list is authoritative for the premium, and unlike the fee row it exists from
+        # the moment a package is insured. Both sources agreed on all 30 real filings to the cent
+        # (2026-08-13), so this is about TIMING rather than accuracy: a package insured DURING this
+        # run gets its Insurance cell filled the same run instead of waiting for BFMR to post the fee
+        # line. Read second, and only used to OVERRIDE — so a package the list doesn't mention keeps
+        # its fee-row figure, and a read failure changes nothing at all.
+        try:
+            for spelling, premium in self.insured_shipments().items():
+                number = lookup.get(spelling, "")
+                index = fee_row_premiums.get(number)
+                if premium is None or not number:
+                    continue
+                if index is None:
+                    records.append(PayoutRecord(tracking_number=number, insurance=premium))
+                else:
+                    records[index] = PayoutRecord(tracking_number=number, insurance=premium)
+        except Exception as exc:  # noqa: BLE001 — the fee rows already covered this; don't fail a run
+            log.info("BFMR: insured list unavailable (%s); premiums came from the fee rows.", exc)
         return records
 
+    def insured_shipments(self) -> dict[str, float | None]:
+        """`{tracking_number: premium}` for every shipment BFMR has insured. THE authoritative read.
+
+        `GET /api/v2/insurance/shipments` came back to life on 2026-08-13 (it 404'd with a Laravel
+        route-not-found when this adapter was written, which is why everything below used to be
+        inferred). Paginated, 20 per page, and `insurance.paging.last_page` must be followed — a
+        single-page read would silently report the older half of the account as UNINSURED, which on
+        the filing path means paying a second premium for each one.
+
+        THE LIST, NOT THE PER-TRACKING ENDPOINT, and that is a correctness choice rather than a
+        performance one. `GET /api/v2/insurance/shipments/{tracking}` demands the exact spelling BFMR
+        holds: `…/529900000009B` returns the record while `…/529900000009` — the bare number our
+        ledger stores — returns 404 "Insurance not found". Since BFMR now picks the duplicate letter
+        itself we never know which spelling to ask for, so a per-number lookup would have to try all
+        27. The list returns every spelling BFMR actually used and lets `bfmr_spellings` do the join
+        locally, exactly as `fetch_payouts` does.
+
+        NB the two endpoints spell the same fields differently, and the single-record one is a trap:
+
+            list                    single           meaning
+            cost_of_insurance       insured_amount   THE PREMIUM — not the coverage, despite the name
+            package_value           package_cost     declared value
+            certificate_number      cert_no          certificate
+
+        Returns `{}` only when the account genuinely has none; a transport failure RAISES, because
+        callers must be able to tell "nothing is insured" from "I could not find out" — see
+        `file_insurance`, where confusing the two costs a duplicate premium.
+        """
+        insured: dict[str, float | None] = {}
+        page = 1
+        while True:
+            payload = self.get_json("/api/v2/insurance/shipments", params={"page": page})
+            block = payload.get("insurance") or {}
+            for entry in block.get("shipments") or []:
+                number = str(entry.get("tracking_number") or "").strip()
+                if number:
+                    insured[number] = parse_money(entry.get("cost_of_insurance"))
+            paging = block.get("paging") or {}
+            last = _as_int(paging.get("last_page"), default=page)
+            if page >= last:
+                return insured
+            page += 1
+
     def insured_tracking_numbers(self) -> dict[str, str]:
-        """`{tracking_number: insurance_status}` from My Tracker — the ONLY working insurance read.
+        """`{tracking_number: insurance_status}` from My Tracker. NOT a record of what is insured.
 
-        BOTH documented insurance-read endpoints 404 against the live API (verified 2026-08-13):
+        Kept because it is the only insurance-ish signal that survives if the real endpoint vanishes
+        again — but it must never be used to decide whether to FILE, and the live data shows why:
 
-            GET /api/v2/insurance/shipments            -> 404 "route could not be found"
-            GET /api/v2/shipment/insured/{tracking}    -> 404 "route could not be found"
+            insured  insurance_status  BFMR status        rows
+            yes      not_eligible      paid / processed     58
+            yes      insured           shipped               3
+            no       not_eligible      paid / returned       4
 
-        That mattered far more than a missing feature. `file_insurance` used the first of those as
-        its never-double-file guard, and a guard that raises on every run would have made an
-        automatic filing pass file the SAME shipment again on every scheduled run — paying a real
-        premium each time. My Tracker's own `insurance_status` field replaces it, observed as
-        `insured` or `not_eligible`.
+        It is a LIFECYCLE field — `insured` while the purchase is open, flipping to `not_eligible`
+        once it is terminal — so it reads `not_eligible` for all 30 genuinely insured shipments.
+        `file_insurance` used it as the never-double-file guard and survived only because `insured`
+        and `not_eligible` both happen to skip; it cannot tell "already insured" from "not
+        insurable", which is exactly why nothing was ever filed. Use `insured_shipments()` instead.
         """
         return {
             number: str(entry.get("insurance_status") or "")
@@ -437,41 +512,63 @@ class BFMRClient(HttpClient):
         }
 
     def file_insurance(self, rows: list[TrackingSubmission]) -> SubmissionResult:
-        """File insurance for shipments that don't already have it.
+        """File insurance for open shipments BFMR has no insurance record for.
 
-        THIS SPENDS REAL MONEY on an unattended schedule, so four things are deliberate:
+        THIS SPENDS REAL MONEY on an unattended schedule, so every decision here is deliberate:
 
+        - **Already insured is decided by `insured_shipments()`, never by `insurance_status`.** The
+          old guard read the latter and worked only by coincidence — it says `not_eligible` for all
+          30 genuinely insured shipments, and survived purely because `insured` and `not_eligible`
+          both skipped. See `insured_tracking_numbers` for the live distribution.
+        - **A TERMINAL purchase is skipped, on BFMR's own `status`.** That is what `not_eligible`
+          actually meant: it flips once the purchase is paid/returned/cancelled, not because BFMR
+          refuses to insure. Reading it as "uninsurable" is why this pass had never once filed
+          anything — an open shipment reads `insured` only when it already is, so every row hit one
+          skip or the other.
+        - **If the authoritative set cannot be read, NOTHING is filed.** These routes have vanished
+          before, and the fallback provably cannot tell uninsured from ineligible, so degrading to it
+          would risk a second premium on an already-insured package. Never spend money on a guess.
         - `package_value` is NOT sent. BFMR derives it from the shipment items it already holds,
           which removes any chance of over-declaring and overpaying a premium we invented.
-        - Already-insured numbers are filtered out first, from My Tracker's `insurance_status`, so a
-          re-run can never double-file. (The endpoint originally used for this 404s — see
-          `insured_tracking_numbers` for why that was dangerous rather than merely broken.)
-        - **`not_eligible` is skipped.** BFMR reports this on 73 of 76 real rows, so in practice
-          almost nothing is filable and this pass is close to a no-op. Trying anyway would burn a
-          call per row to earn an error.
-        - `bfmr_min_insurance_value` gates the rest. The default is 0 — insure everything.
-
-        NB `POST /api/v2/insurance/file` itself is UNVERIFIED: the sibling read routes are absent, so
-        it may well 404 too. A 404 is harmless here (it raises, nothing is charged), but it does mean
-        a successful filing has never actually been observed.
+        - `bfmr_min_insurance_value` gates the rest. BFMR charges ~0.45% with a $2.00 MINIMUM, so
+          below roughly $450 the floor dominates and the effective rate passes 1%.
+        - **A filing is confirmed by RE-READING, not by the response.** BFMR has already once
+          returned success for a my-tracker submission it silently dropped; here real money moved, so
+          a filing that does not appear in the insured set afterwards is reported rather than
+          counted.
         """
         result = SubmissionResult()
         if not rows:
             return result
 
-        insurance_status = self.insured_tracking_numbers()
+        # ONE tracker read for both maps. `fetch_tracker` is uncached and paginated, so deriving
+        # these from separate calls would re-download the whole account twice per run for nothing.
+        tracker = self.fetch_tracker()
+        terminal = _index_terminal_purchases(tracker)
+        spellings = _index_tracker_spellings(tracker)
+
+        try:
+            insured = self.insured_shipments()
+        except Exception as exc:  # noqa: BLE001 — deliberate: unknown state must not spend money
+            log.error(
+                "BFMR: could not read the insured-shipment list (%s); filing NOTHING this run. "
+                "Insurance is only skipped, never duplicated, so the next run picks it up.", exc,
+            )
+            result.skipped.extend(
+                (row.tracking_number, "insured-shipment list unavailable — not filing on a guess")
+                for row in rows
+            )
+            return result
+        filed_spellings: list[tuple[str, str]] = []
         for row in rows:
-            state = _lookup_any_spelling(insurance_status, row.tracking_number, "")
-            # File against the spelling BFMR actually HOLDS. Sending the ledger's bare number for a
-            # package they filed under "…B" posts against a shipment they have no record of: a 2xx
-            # that matches nothing, reported as success, leaving the package uninsured. Observed
-            # live on 529900000009 (BFMR holds 529900000009B).
-            spelling = _held_spelling(insurance_status, row.tracking_number)
-            if state == "insured":
+            if _has_any_spelling(insured, row.tracking_number):
                 result.skipped.append((row.tracking_number, "already insured"))
                 continue
-            if state == "not_eligible":
-                result.skipped.append((row.tracking_number, "BFMR reports it as not eligible"))
+            if _has_any_spelling(terminal, row.tracking_number):
+                result.skipped.append((
+                    row.tracking_number,
+                    "BFMR's purchase is already terminal (paid/returned/cancelled)",
+                ))
                 continue
             if (row.total_cost or 0) < self.min_insurance_value:
                 result.skipped.append((
@@ -479,6 +576,11 @@ class BFMRClient(HttpClient):
                     f"below the BFMR_MIN_INSURANCE_VALUE threshold of {self.min_insurance_value}",
                 ))
                 continue
+            # File against the spelling BFMR actually HOLDS. Sending the ledger's bare number for a
+            # package they filed under "…B" posts against a shipment they have no record of: a 2xx
+            # that matches nothing, reported as success, leaving the package uninsured. Observed
+            # live on 529900000009 (BFMR holds 529900000009B).
+            spelling = _held_spelling(spellings, row.tracking_number)
             response = self.request(
                 "POST",
                 "/api/v2/insurance/file",
@@ -488,8 +590,38 @@ class BFMRClient(HttpClient):
             if response is None:
                 result.skipped.append((row.tracking_number, "dry run"))
             else:
-                result.submitted.append(row.tracking_number)
+                filed_spellings.append((row.tracking_number, spelling))
+
+        if filed_spellings:
+            self._confirm_filings(filed_spellings, result)
         return result
+
+    def _confirm_filings(self, filed: list[tuple[str, str]], result: SubmissionResult) -> None:
+        """Re-read the insured set and only count a filing that actually landed.
+
+        One extra pair of GETs after a run that spent money — cheap next to a premium that bought
+        nothing. A filing that does not appear is reported as needing a human rather than as a
+        failure: nothing we can retry distinguishes "BFMR dropped it" from "it has not propagated",
+        and retrying is the one response that could double-charge.
+        """
+        try:
+            insured_now = self.insured_shipments()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("BFMR: filed insurance but could not verify it (%s).", exc)
+            result.submitted.extend(number for number, _ in filed)
+            return
+
+        for number, spelling in filed:
+            if spelling in insured_now or _has_any_spelling(insured_now, number):
+                result.submitted.append(number)
+            else:
+                result.needs_manual.append((
+                    number,
+                    f"{number}: BFMR accepted an insurance filing for {spelling} but the shipment is "
+                    f"not in their insured list afterwards. IT MAY OR MAY NOT BE COVERED, AND IT IS "
+                    f"NOT RETRIED — a retry is the one thing that could charge you twice. Check the "
+                    f"package in BFMR's insurance list and file it by hand if it is genuinely absent.",
+                ))
 
     def void_insurance(self, tracking_numbers: list[str]) -> SubmissionResult:
         """Undo a filing. Exists from day one so a mistaken automatic run is reversible.
@@ -499,7 +631,17 @@ class BFMRClient(HttpClient):
         that quietly fails is worse than one that errors.
         """
         result = SubmissionResult()
-        held = self.insured_tracking_numbers()
+        # The INSURED list, not My Tracker: a void targets an insurance record, and that record is
+        # where the authoritative spelling lives. Falls back to the tracker's spellings if the route
+        # is unavailable — a void that misses is recoverable, unlike a duplicate filing, so this one
+        # does not refuse to act on partial information.
+        held = _index_tracker_spellings(self.fetch_tracker())
+        try:
+            # The insurance record's own spelling wins where the two differ — a void targets an
+            # insurance record, so that is the authoritative place to read it from.
+            held.update({number: number for number in self.insured_shipments()})
+        except Exception as exc:  # noqa: BLE001
+            log.warning("BFMR: insured list unavailable (%s); resolving the void from My Tracker.", exc)
         for number in tracking_numbers:
             spelling = _held_spelling(held, number)
             if spelling != number:
@@ -569,6 +711,26 @@ def _reductions_first(objects: list[dict]) -> list[dict]:
 def _batched(items: list, size: int):
     for start in range(0, len(items), size):
         yield items[start:start + size]
+
+
+def _index_terminal_purchases(tracker: list[dict]) -> dict[str, str]:
+    """`{tracking_number: bfmr_status}` for purchases past the point of insuring.
+
+    Keyed on BFMR's own `status`, NOT on `insurance_status`. The probe (2026-08-13) showed the latter
+    flips to `not_eligible` on exactly these rows, which is what made it look like an eligibility
+    signal and kept `file_insurance` from ever filing anything.
+    """
+    return {
+        number: status
+        for entry in tracker
+        if (number := _tracking_of(entry))
+        and (status := str(entry.get("status") or "").lower()) in _TERMINAL_BFMR_STATUSES
+    }
+
+
+def _index_tracker_spellings(tracker: list[dict]) -> dict[str, str]:
+    """`{tracking_number: itself}` for every spelling My Tracker holds, for `_held_spelling`."""
+    return {number: number for entry in tracker if (number := _tracking_of(entry))}
 
 
 def _index_purchases_by_order(tracker: list[dict]) -> dict[str, dict]:
@@ -712,6 +874,17 @@ def _held_spelling(index: dict, tracking_number: str) -> str:
         if spelling in index:
             return spelling
     return tracking_number
+
+
+def _has_any_spelling(index: dict, tracking_number: str) -> bool:
+    """Is this package present under ANY spelling BFMR might have used?
+
+    Deliberately separate from `_lookup_any_spelling`: presence and value are different questions,
+    and conflating them costs money here. `insured_shipments()` maps a tracking number to its
+    PREMIUM, and a premium that failed to parse is `None` — so a `lookup(...) is not None` test would
+    read a genuinely insured package as uninsured and file it a second time.
+    """
+    return any(spelling in index for spelling in bfmr_spellings(tracking_number))
 
 
 def _lookup_any_spelling(index: dict, tracking_number: str, default):

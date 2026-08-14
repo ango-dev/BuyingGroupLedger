@@ -307,56 +307,186 @@ def tracker(*rows):
     return FakeResponse(payload={"my_tracker": list(rows)})
 
 
-class TestBfmrInsurance:
-    """Insurance dedupe reads `insurance_status` off My Tracker, NOT the documented endpoints.
+def insured(*shipments, last_page=1):
+    """A `GET /api/v2/insurance/shipments` page — the authoritative record of what is insured."""
+    return FakeResponse(payload={
+        "message": "List of insured shipments",
+        "insurance": {
+            "shipments": [
+                {"tracking_number": t, "cost_of_insurance": c, "package_value": v}
+                for t, c, v in shipments
+            ],
+            "paging": {"current_page": 1, "last_page": last_page, "total": len(shipments)},
+        },
+    })
 
-    Both `GET /api/v2/insurance/shipments` and `GET /api/v2/shipment/insured/{n}` 404 on the live
-    API. That was a safety bug, not a missing feature: the first was the never-double-file guard, so
-    an automatic filing pass would have re-filed the same shipment — and paid again — every run.
+
+class TestBfmrInsurance:
+    """Whether a package is insured is decided by `GET /api/v2/insurance/shipments` — the real record.
+
+    That route 404'd when this adapter was written, so the guard used My Tracker's `insurance_status`
+    instead. Probing it live once it returned (2026-08-13) showed the substitute had been wrong the
+    whole time:
+
+        insured  insurance_status  BFMR status        rows
+        yes      not_eligible      paid / processed     58
+        yes      insured           shipped               3
+        no       not_eligible      paid / returned       4
+
+    It is a LIFECYCLE field, reading `not_eligible` for all 30 genuinely insured shipments. The guard
+    survived only because `insured` and `not_eligible` both happened to skip — and because it could
+    not tell "already insured" from "not insurable", `file_insurance` had never once filed anything.
     """
 
     def test_an_already_insured_shipment_is_never_filed_twice(self, bfmr, transport):
-        transport.responses = [
-            tracker({"tracking_number": "TBA1", "insurance_status": "insured"})
-        ]
+        transport.responses = [tracker({"tracking_number": "TBA1"}), insured(("TBA1", 8.18, 1796))]
         result = bfmr.file_insurance([submission(tracking_number="TBA1")])
         assert result.skipped[0][1] == "already insured"
-        assert len(transport.calls) == 1  # the pre-check only; no filing was attempted
+        assert [c["method"] for c in transport.calls] == ["GET", "GET"]  # no filing attempted
 
-    def test_a_shipment_bfmr_calls_not_eligible_is_skipped(self, bfmr, transport):
-        """73 of 76 real rows read `not_eligible`, so trying anyway would burn a call per row to
-        earn an error."""
+    def test_not_eligible_no_longer_blocks_an_open_shipment(self, bfmr, transport):
+        """THE CHANGE THAT UNBLOCKS FILING. `not_eligible` marks a TERMINAL purchase, not an
+        uninsurable one, so an open shipment carrying it must still be filed."""
         transport.responses = [
-            tracker({"tracking_number": "TBA1", "insurance_status": "not_eligible"})
+            tracker({"tracking_number": "TBA1", "insurance_status": "not_eligible",
+                     "status": "shipped"}),
+            insured(),
+            FakeResponse(payload={"message": "filed"}),
+            insured(("TBA1", 4.0, 900)),
+        ]
+        assert bfmr.file_insurance([submission(tracking_number="TBA1")]).submitted == ["TBA1"]
+
+    def test_a_terminal_purchase_is_skipped(self, bfmr, transport):
+        """Decided on BFMR's own `status`, which is what `not_eligible` was really tracking."""
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "status": "paid"}),
+            insured(),
         ]
         result = bfmr.file_insurance([submission(tracking_number="TBA1")])
-        assert "not eligible" in result.skipped[0][1]
-        assert len(transport.calls) == 1
+        assert "terminal" in result.skipped[0][1]
+        assert [c["method"] for c in transport.calls] == ["GET", "GET"]
+
+    def test_pagination_is_followed_or_older_shipments_read_as_uninsured(self, bfmr, transport):
+        """A single-page read would report the older half of the account as uninsured — which on the
+        filing path means paying a second premium for each one."""
+        transport.responses = [
+            tracker({"tracking_number": "OLD"}),
+            insured(("NEW", 8.18, 1796), last_page=2),
+            insured(("OLD", 2.0, 219), last_page=2),
+        ]
+        result = bfmr.file_insurance([submission(tracking_number="OLD")])
+        assert result.skipped[0][1] == "already insured"
+
+    def test_an_unreadable_insured_list_files_NOTHING(self, bfmr, transport):
+        """FAIL SAFE. These routes have vanished before, and the fallback provably cannot tell
+        uninsured from ineligible — so filing on it would risk a duplicate premium."""
+        transport.responses = [
+            tracker({"tracking_number": "TBA1"}),
+            FakeResponse(status_code=500, text="boom"),
+        ]
+        result = bfmr.file_insurance([submission(tracking_number="TBA1")])
+        assert result.submitted == []
+        assert "not filing on a guess" in result.skipped[0][1]
+        assert "POST" not in [c["method"] for c in transport.calls]
+
+    def test_a_filing_that_never_lands_is_reported_not_counted(self, bfmr, transport):
+        """BFMR has already once returned success for a submission it dropped. Here money moved, so
+        success is confirmed by re-reading — and it is NOT retried, since a retry is the one thing
+        that could charge twice."""
+        transport.responses = [
+            tracker({"tracking_number": "TBA1"}),
+            insured(),
+            FakeResponse(payload={"message": "filed"}),
+            insured(),  # still absent afterwards
+        ]
+        result = bfmr.file_insurance([submission(tracking_number="TBA1")])
+        assert result.submitted == []
+        assert "MAY OR MAY NOT BE COVERED" in result.needs_manual[0][1]
 
     def test_package_value_is_never_sent(self, bfmr, transport):
         """BFMR derives the value from the shipment items it already holds. Declaring our own
         number risks over-declaring and paying a bigger premium than the box warrants."""
-        transport.responses = [tracker(), FakeResponse(payload={"message": "filed"})]
+        transport.responses = [
+            tracker(), insured(), FakeResponse(payload={"message": "filed"}),
+            insured(("TBA1", 6.0, 1299)),
+        ]
         bfmr.file_insurance([submission(total_cost=1299.0)])
-        assert transport.calls[-1]["data"] == {"tracking_number": "TBA1"}
+        posted = [c for c in transport.calls if c["method"] == "POST"]
+        assert posted[0]["data"] == {"tracking_number": "TBA1"}
 
     def test_the_value_threshold_excludes_cheap_shipments(self, bfmr, transport, monkeypatch):
         monkeypatch.setattr(bfmr, "min_insurance_value", 500.0)
-        transport.responses = [tracker()]
+        transport.responses = [tracker(), insured()]
         result = bfmr.file_insurance([submission(total_cost=100.0)])
         assert "threshold" in result.skipped[0][1]
-        assert len(transport.calls) == 1
+        assert "POST" not in [c["method"] for c in transport.calls]
 
     def test_the_default_threshold_of_zero_insures_everything(self, bfmr, transport):
-        transport.responses = [tracker(), FakeResponse(payload={"message": "filed"})]
+        transport.responses = [
+            tracker(), insured(), FakeResponse(payload={"message": "filed"}),
+            insured(("TBA1", 2.0, 0.01)),
+        ]
         assert bfmr.file_insurance([submission(total_cost=0.01)]).submitted == ["TBA1"]
 
     def test_a_dry_run_files_nothing(self, bfmr, transport):
         bfmr.dry_run = True
-        transport.responses = [tracker()]
+        transport.responses = [tracker(), insured()]
         result = bfmr.file_insurance([submission()])
         assert result.skipped[0][1] == "dry run"
-        assert [c["method"] for c in transport.calls] == ["GET"]  # never a POST
+        assert "POST" not in [c["method"] for c in transport.calls]
+
+
+class TestInsurancePremiumSource:
+    """The premium now comes from BFMR's insurance record, with the fee row as the fallback."""
+
+    def test_the_authoritative_premium_wins_over_the_fee_row(self, bfmr, transport):
+        """Both sources agreed on all 30 real filings, so this is about TIMING: a package insured
+        during this run has an insurance record immediately, while its fee row appears later."""
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "total_payout": "-7.40"}),
+            insured(("TBA1", 7.4, 1599.96)),
+        ]
+        records = bfmr.fetch_payouts(["TBA1"])
+        premiums = [r.insurance for r in records if r.insurance is not None]
+        assert premiums == [7.4], "one record, not two — the fee row must not be booked as well"
+
+    def test_the_fee_row_still_covers_a_package_the_list_does_not_mention(self, bfmr, transport):
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "total_payout": "-7.40"}),
+            insured(),
+        ]
+        assert [r.insurance for r in bfmr.fetch_payouts(["TBA1"])] == [7.4]
+
+    def test_an_unreadable_list_leaves_the_fee_row_premium_alone(self, bfmr, transport):
+        """A read failure here is not fatal — unlike on the filing path — because the fee rows
+        already produced the right answer."""
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "total_payout": "-7.40"}),
+            FakeResponse(status_code=500, text="boom"),
+        ]
+        assert [r.insurance for r in bfmr.fetch_payouts(["TBA1"])] == [7.4]
+
+
+class TestInsuredPresenceIsNotValue:
+    """Presence and value are different questions, and conflating them costs a duplicate premium.
+
+    `insured_shipments()` maps a tracking number to its PREMIUM, and an unparseable premium is
+    `None`. A `lookup(...) is not None` test would then read a genuinely insured package as
+    uninsured and file it a SECOND TIME — a real charge. `_has_any_spelling` tests membership.
+    """
+
+    def test_an_insured_package_with_an_unreadable_premium_is_still_not_re_filed(
+        self, bfmr, transport
+    ):
+        transport.responses = [
+            tracker({"tracking_number": "TBA1"}),
+            FakeResponse(payload={"insurance": {"shipments": [
+                {"tracking_number": "TBA1", "cost_of_insurance": "n/a"}   # unparseable
+            ], "paging": {"last_page": 1}}}),
+        ]
+        result = bfmr.file_insurance([submission(tracking_number="TBA1")])
+        assert result.skipped[0][1] == "already insured"
+        assert "POST" not in [c["method"] for c in transport.calls]
 
 
 class TestBfmrReads:
@@ -655,17 +785,24 @@ class TestBestBuyDuplicateTrackingSuffix:
         against a shipment they have no record of — a 2xx that matches nothing, reported as success,
         leaving the package uninsured. Seen live on 529900000009."""
         transport.responses = [
-            tracker(self._row(insurance_status="")),          # known to BFMR, not yet insured
+            tracker(self._row()),                             # known to BFMR, not yet insured
+            insured(),                                        # BFMR's insurance list: empty
             FakeResponse(payload={"message": "filed"}),
+            insured((self.BFMR, 7.4, 1599.96)),               # ...and it landed
         ]
         result = bfmr.file_insurance([submission(tracking_number=self.LEDGER)])
-        assert transport.calls[-1]["data"] == {"tracking_number": self.BFMR}
+        posted = [c for c in transport.calls if c["method"] == "POST"]
+        assert posted[0]["data"] == {"tracking_number": self.BFMR}
         assert result.submitted == [self.LEDGER], "reported under the ledger's spelling"
 
     def test_a_package_bfmr_has_never_seen_is_filed_under_our_own_number(self, bfmr, transport):
-        transport.responses = [tracker(), FakeResponse(payload={"message": "filed"})]
+        transport.responses = [
+            tracker(), insured(), FakeResponse(payload={"message": "filed"}),
+            insured(("BRAND-NEW", 2.0, 100)),
+        ]
         bfmr.file_insurance([submission(tracking_number="BRAND-NEW")])
-        assert transport.calls[-1]["data"] == {"tracking_number": "BRAND-NEW"}
+        posted = [c for c in transport.calls if c["method"] == "POST"]
+        assert posted[0]["data"] == {"tracking_number": "BRAND-NEW"}
 
     def test_a_void_also_targets_bfmrs_spelling(self, bfmr, transport):
         transport.responses = [
@@ -677,10 +814,13 @@ class TestBestBuyDuplicateTrackingSuffix:
 
     def test_an_already_insured_suffixed_package_is_not_insured_again(self, bfmr, transport):
         """This one costs money: a second filing on an already-insured package is a real premium."""
-        transport.responses = [tracker(self._row(insurance_status="insured"))]
+        transport.responses = [
+            tracker(self._row()),
+            insured((self.BFMR, 7.4, 1599.96)),   # insured under BFMR's OWN spelling
+        ]
         result = bfmr.file_insurance([submission(tracking_number=self.LEDGER)])
         assert result.skipped[0][1] == "already insured"
-        assert len(transport.calls) == 1  # nothing was filed
+        assert "POST" not in [c["method"] for c in transport.calls]  # nothing was filed
 
     def test_a_second_order_in_the_same_box_is_not_marked_done_by_the_first(self, bfmr, transport):
         """THE COMBINED-BOX CASE, and the reason submitted-state is keyed on (order, tracking).
@@ -810,7 +950,7 @@ class TestSilentlyDroppedSubmission:
         transport.responses = [after_manual_fix]
         assert bfmr.already_submitted([row]) == {("O1", "529900000009")}, "recognised, not resubmitted"
 
-        transport.responses = [after_manual_fix]
+        transport.responses = [after_manual_fix, insured(("529900000009B", 7.4, 1599.96))]
         assert bfmr.file_insurance([row]).skipped[0][1] == "already insured"
 
         transport.responses = [after_manual_fix]
@@ -885,7 +1025,10 @@ class TestBfmrSuffixesDuplicatesItself:
         blocked = {t for t, _ in push.failed} | {t for t, _ in push.needs_manual}
         assert row.tracking_number not in blocked
 
-        transport.responses = [landed, FakeResponse(payload={"success": True})]
+        transport.responses = [
+            landed, insured(), FakeResponse(payload={"success": True}),
+            insured(("529900000009B", 7.4, 1599.96)),
+        ]
         assert bfmr.file_insurance([row]).submitted == ["529900000009"]
         filed = [c["data"]["tracking_number"] for c in transport.calls if c.get("data")]
         assert filed == ["529900000009B"], "filed against the spelling BFMR holds, not the bare one"

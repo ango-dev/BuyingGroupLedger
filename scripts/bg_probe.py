@@ -38,8 +38,8 @@ import json
 import logging
 from pathlib import Path
 
-from buying_groups.base import BuyingGroupError
-from buying_groups.bfmr import BFMRClient
+from buying_groups.base import BuyingGroupError, parse_money
+from buying_groups.bfmr import BFMRClient, _is_insurance_fee_row
 from buying_groups.maxoutdeals import MaxOutDealsClient, parse_received_items_csv
 
 log = logging.getLogger("bg_probe")
@@ -122,47 +122,72 @@ def probe_bfmr(tracking_number: str | None) -> None:
 
 
 def _probe_insurance_routes(client, tracker: list[dict]) -> None:
-    """Are BFMR's two documented insurance READS deployed yet? Today: no.
+    """Read BFMR's insurance record and cross-check it against what My Tracker implies.
 
-    THE DISTINCTION THAT MATTERS is which KIND of 404 comes back, because they mean opposite things:
+    BOTH routes were absent when this adapter was written and CAME BACK on 2026-08-13. The probe
+    still distinguishes the two kinds of 404, because they mean opposite things and both render as
+    "404" to a caller that only reads the status code:
 
-      - Laravel's "The route ... could not be found"  -> the endpoint DOES NOT EXIST. Documented,
-        never deployed. Nothing to read, for any shipment.
-      - the spec's own documented 404, "Insurance not found" -> the route works; THIS shipment just
-        isn't insured.
+      - Laravel's "The route ... could not be found"  -> the endpoint DOES NOT EXIST again.
+      - the spec's own "Insurance not found"          -> the route works; this shipment isn't insured.
 
-    Both render as "404" to a caller that only reads the status code, and conflating them is how
-    "BFMR has no insurance data at all" gets mistaken for "this package isn't insured". While the
-    routes are absent, the premium comes from the negative FEE row on My Tracker instead (see
-    `buying_groups/bfmr.py:_is_insurance_fee_row`) — the only source that actually works.
+    Conflating them is how "BFMR has no insurance data at all" gets mistaken for "this package isn't
+    insured" — and on the FILING path that mistake pays a second premium, which is why
+    `file_insurance` refuses to file at all when this read fails.
 
-    Re-run this after any BFMR API update: the day the route appears, `/insurance/shipments` gives
-    an authoritative `cost_of_insurance`, plus certificate numbers and links the fee row cannot.
+    The cross-check is the point of running it. My Tracker's `insurance_status` is a LIFECYCLE field
+    (`insured` while open, `not_eligible` once terminal), so it reads `not_eligible` for genuinely
+    insured shipments; the counts printed below are what proves that, and what would show it changing.
     """
-    insured = next(
-        (r for r in tracker if r.get("insurance_status") == "insured" and r.get("tracking_number")),
-        None,
-    )
-    sample = insured["tracking_number"] if insured else "TEST"
-    print(f"  insurance routes (probing with {sample!r}, insurance_status="
-          f"{insured.get('insurance_status') if insured else 'n/a'}):")
+    print("  insurance record:")
+    try:
+        insured = client.insured_shipments()
+    except BuyingGroupError as exc:
+        message = str(exc)
+        if "could not be found" in message:
+            print("    NOT-BUILT  /insurance/shipments  (Laravel route missing — GONE AGAIN)")
+            print("      !! file_insurance will refuse to file while this is true — by design.")
+        else:
+            print(f"    ERROR      /insurance/shipments: {message[:160]}")
+        return
 
-    for path, params in (
-        (f"/api/v2/shipment/insured/{sample}", None),
-        ("/api/v2/insurance/shipments", {"tracking_numbers": sample, "per_page": 50}),
-    ):
+    total = sum(v for v in insured.values() if v is not None)
+    print(f"    {len(insured)} insured shipment(s), premiums totalling ${total:,.2f}")
+    print(f"    -> {_save('bfmr_insurance.json', {k: v for k, v in insured.items()})}")
+
+    status_by = {
+        number: str(row.get("insurance_status") or "-")
+        for row in tracker if (number := row.get("tracking_number"))
+    }
+    mislabelled = sum(1 for n in insured if status_by.get(n) == "not_eligible")
+    print(f"    of those, My Tracker calls {mislabelled} 'not_eligible' and "
+          f"{sum(1 for n in insured if status_by.get(n) == 'insured')} 'insured'"
+          "  <- why insurance_status must not gate filing")
+
+    fee_rows = {
+        number: abs(parse_money(row.get("total_payout")) or 0)
+        for row in tracker
+        if _is_insurance_fee_row(row) and (number := row.get("tracking_number"))
+    }
+    disagree = [
+        (n, insured[n], fee_rows[n])
+        for n in insured
+        if n in fee_rows and insured[n] is not None and abs(insured[n] - fee_rows[n]) > 0.005
+    ]
+    print(f"    fee-row cross-check: {len(fee_rows)} fee row(s), "
+          f"{len(disagree)} disagree with the insurance record")
+    for number, authoritative, fee in disagree[:5]:
+        print(f"      MISMATCH {number}: record={authoritative} fee_row={fee}")
+
+    # The per-tracking route demands BFMR's OWN spelling — the bare number 404s — which is why the
+    # adapter uses the list and joins locally. Prove that here rather than leaving it as a claim.
+    sample = next(iter(insured), None)
+    if sample:
         try:
-            payload = client.get_json(path, params=params)
-            print(f"    DEPLOYED   {path} -> {_save('bfmr_insurance.json', payload)}")
-            print("      !! The route now exists — switch the premium source off the fee row.")
+            client.get_json(f"/api/v2/insurance/shipments/{sample}")
+            print(f"    per-tracking route OK for {sample!r}")
         except BuyingGroupError as exc:
-            message = str(exc)
-            if "could not be found" in message:
-                print(f"    NOT-BUILT  {path}  (Laravel route missing — documented, not deployed)")
-            elif "404" in message:
-                print(f"    NO-RECORD  {path}  (route works; this shipment simply isn't insured)")
-            else:
-                print(f"    ERROR      {path}: {message[:120]}")
+            print(f"    per-tracking route for {sample!r}: {str(exc)[:120]}")
 
 
 def probe_mod(tracking_numbers: list[str]) -> None:
