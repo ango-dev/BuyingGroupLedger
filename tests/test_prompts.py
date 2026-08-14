@@ -327,6 +327,35 @@ def test_costco_never_infers_ordered_from_a_failed_tracking_read():
     assert "SAME tracking number for two different shipments" in prompt
 
 
+def test_costco_knows_one_track_link_can_cover_several_boxes():
+    """THE ROOT CAUSE of both bad agent runs, found by reading real order-details JSON.
+
+    `trackingSiteUrl` belongs to the ORDER LINE, not the package: order 1399000004 has one line whose
+    `shipment` list holds TWO packages sharing `fid=399000001`. So a quantity-2 single-SKU order that
+    ships in two boxes shows ONE product row with ONE "Track" link, and that link's page lists both
+    packages.
+
+    The prompt used to assert the opposite — that each shipment has "its OWN status, tracking number,
+    tracking link" — and told the agent to follow the link "once to read it". Between them, those made
+    the correct read impossible to describe: the agent found one number where it needed two, and had
+    to either duplicate it or leave it blank. Both happened, on consecutive runs.
+    """
+    prompt = build(CostcoScraper)
+    assert "ONE \"Track\" LINK CAN COVER SEVERAL BOXES" in prompt
+    assert "read EVERY package listed on it" in prompt
+    # A shared tracking_url is now stated to be NORMAL, so it can't be read as evidence of a bad read.
+    assert "identical tracking_url is never a reason to doubt your read" in prompt
+    # And the old false claim is gone.
+    assert "OWN status, tracking number,\n  tracking link" not in prompt
+
+
+def test_costco_prefers_a_blank_tracking_number_over_a_duplicated_one():
+    """The two failures are not equally bad and the prompt must say so: a blank is corrected next
+    run, a duplicate manufactures a box that does not exist."""
+    prompt = build(CostcoScraper)
+    assert "Never duplicate a number to fill the gap" in prompt
+
+
 def test_costco_prompt_gives_an_efficient_method():
     """Costco has no cheap CDP path, so the whole re-check rides the agent — keep step count low the
     same way Best Buy does: handle lazy-loading in one pass and read compact JSON, not full-page blobs."""

@@ -320,9 +320,18 @@ SHIPMENT RULES (apply to every order-details page):
 - An order can split into multiple shipments. A physical SHIPMENT is the set of items that share the
   SAME tracking number: items under the same tracking number are ONE shipment; items under DIFFERENT
   tracking numbers are DIFFERENT shipments. That is what "splitting" means — units that ship in
-  separate boxes get separate tracking numbers. Each shipment has its OWN status, tracking number,
-  tracking link, and estimated/actual delivery date. Whatever heading Costco prints above a group (if
+  separate boxes get separate tracking numbers. Whatever heading Costco prints above a group (if
   any), ignore it and use the numbering rule below instead.
+- **ONE "Track" LINK CAN COVER SEVERAL BOXES, AND THIS IS THE EASIEST THING TO GET WRONG HERE.** The
+  tracking link belongs to the ORDER LINE, not to the box: when you buy quantity 2 of one product and
+  Costco ships them separately, the order page still shows ONE product row with ONE "Track" link, and
+  the tracking page it opens lists BOTH packages — each with its own carrier tracking number, usually
+  labelled like "Package 1 of 2" / "Package 2 of 2".
+  So when you open a tracking page, read EVERY package listed on it, not just the first. Each package
+  is a separate shipment and needs its own entry, even though they all came from one product row and
+  one link. Two shipments therefore SHARE a tracking_url while having DIFFERENT tracking numbers —
+  that is normal and expected, so an identical tracking_url is never a reason to doubt your read.
+  If a tracking page lists N packages, that product row produced N shipments. Do not report fewer.
 - IGNORE digital items entirely — do NOT output any entry for them. A group is digital if it is a gift
   card, membership, digital download/eBook, redemption code, or any non-shippable line (a Same-Day/
   Instacart grocery order also does not belong here — see SCOPE above). Digital items are never resold,
@@ -338,13 +347,19 @@ SHIPMENT RULES (apply to every order-details page):
   wording — always use this numbering, so the same shipment gets the same label on every re-check and
   updates its existing row instead of creating a duplicate. Skipped digital groups do not consume a
   number: number only the physical shipments you actually output.
-- Every physical entry for the order gets the tracking_number / tracking_url / delivery_date / status
-  of ITS shipment.
+- Every physical entry for the order gets the tracking_number / delivery_date / status of ITS
+  shipment. tracking_url may legitimately be shared with a sibling shipment (see the "Track" link
+  rule above).
 - EVERY physical shipment in a multi-box order has its OWN, DIFFERENT tracking number from every
   other shipment in that same order — that is what makes it a separate shipment. If you find yourself
   about to report the SAME tracking number for two different shipments, STOP: that is a read error,
-  not a real duplicate. Go back and re-open/re-read that specific shipment's own section individually
+  not a real duplicate. Almost always it means two boxes shared one "Track" link and you read only the
+  first package on that tracking page — go back to that page and read the OTHER package's number
   (do not reuse a number you already recorded for a different shipment) before reporting it.
+  If after re-reading you still cannot find a second distinct number, report that shipment with
+  tracking_number "" and its real status. Never duplicate a number to fill the gap: a blank is
+  corrected on the next run, whereas a duplicate invents a box that does not exist and permanently
+  corrupts the ledger.
 
 Fields for each entry:
 - retailer: "Costco"
@@ -370,7 +385,8 @@ Fields for each entry:
   every shipment of the order
 - tracking_number: the carrier tracking number shown for THIS shipment; "" if not shipped yet, and ""
   also if it HAS shipped but you could not read its number. Costco shows it on the order-details /
-  shipment view; if the number only appears behind a "Track" link, follow that link once to read it,
+  shipment view; if the number only appears behind a "Track" link, follow that link and read EVERY
+  package listed on the page it opens (one link can cover several boxes — see the SHIPMENT RULES),
   then come back. Leaving it "" is safe — the recorded number is kept and the next run fills it in.
   Reporting another shipment's number is NOT safe: it invents a box that does not exist.
 - tracking_url: the full URL of the carrier tracking / "Track" link for this shipment. Capture it EVEN
