@@ -640,7 +640,8 @@ scheduler has stopped firing, which is otherwise a completely silent failure. Ch
 
 **Before trusting either scheduler on a new machine, run `python -m scripts.preflight`** — it's
 offline and free, and it catches the misconfigurations that keep working while doing the wrong thing
-(see the Docker section below). For a Raspberry Pi specifically, follow **[DEPLOY.md](DEPLOY.md)**.
+(see the Docker section below). For a dedicated Linux host — an Ubuntu VM or a Raspberry Pi — follow
+**[DEPLOY.md](DEPLOY.md)**.
 
 ---
 
@@ -674,8 +675,8 @@ time. To run **multiple instances**, copy the compose service with a different `
 mounted per instance (e.g. one per proxy pool).
 
 The image builds for the host's own architecture (amd64 and arm64 both work — see
-**[DEPLOY.md](DEPLOY.md)** for the Raspberry Pi runbook), and smoke-tests its scheduler binary during
-the build so a wrong-architecture image fails loudly at build time rather than crash-looping later.
+**[DEPLOY.md](DEPLOY.md)** for the server runbook), and smoke-tests its scheduler binary during the
+build so a wrong-architecture image fails loudly at build time rather than crash-looping later.
 
 **Two things run automatically that are worth knowing about:**
 
@@ -716,8 +717,8 @@ re-install the scheduler on the new host. No re-login or re-sharing needed.
 - **Stop the old scheduler before starting the new one.** The overlap lock is a file in `logs/`, so it
   is per-machine and will not stop two hosts scraping the same sheet at once.
 
-Then run `python -m scripts.preflight` on the new host before trusting it. Raspberry Pi hosts have
-their own runbook: **[DEPLOY.md](DEPLOY.md)**.
+Then run `python -m scripts.preflight` on the new host before trusting it. Moving to a dedicated
+Linux host has its own runbook: **[DEPLOY.md](DEPLOY.md)**.
 
 ---
 
