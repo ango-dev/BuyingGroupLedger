@@ -194,6 +194,65 @@ class TestMoneySwitches:
         assert "not submitted" in result.detail
 
 
+class TestRunInterval:
+    """The schedule is bounded by MaxOutDeals' daily quota, not by anything in this repo."""
+
+    @pytest.mark.parametrize("hours,expected", [
+        (1, 24), (2, 12), (3, 8), (4, 6), (6, 4), (8, 3), (12, 2), (23, 2),
+        # Intervals that do NOT divide 24 evenly are the ones a 24/H formula gets wrong: cron
+        # enumerates multiples within 0-23, so H=5 fires at 0,5,10,15,20 — five times, not 4.8.
+        (5, 5), (7, 4), (9, 3), (10, 3), (11, 3),
+    ])
+    def test_runs_per_day_matches_how_cron_actually_steps(self, hours, expected):
+        assert preflight.runs_per_day(hours) == expected
+
+    def _interval(self, monkeypatch, hours, sync="1"):
+        import sys
+        monkeypatch.delitem(sys.modules, "config.settings", raising=False)
+        monkeypatch.setenv("RUN_INTERVAL_HOURS", str(hours))
+        monkeypatch.setenv("BUYING_GROUP_SYNC_ENABLED", sync)
+        return preflight.check_run_interval()
+
+    def test_three_hours_is_inside_the_quota_and_reports_the_headroom(self, monkeypatch):
+        result = _by_name(self._interval(monkeypatch, 3), "run interval")
+
+        assert result.level == OK
+        assert "8 run(s)/day" in result.detail
+        assert "2 spare" in result.detail
+
+    def test_two_hours_warns_because_it_outruns_the_payout_quota(self, monkeypatch):
+        result = _by_name(self._interval(monkeypatch, 2), "run interval")
+
+        assert result.level == WARN
+        assert "12 runs/day" in result.detail
+        # Says what actually breaks, and what does not.
+        assert "Payout Amount" in result.detail
+        assert "tracking submission is unaffected" in result.detail
+        # And what to do instead: 24/10 rounded up = 3h.
+        assert "Use 3h or longer" in result.detail
+
+    def test_no_warning_when_the_buying_group_sync_is_off(self, monkeypatch):
+        """Nothing calls MOD, so the quota is irrelevant however often it runs."""
+        result = _by_name(self._interval(monkeypatch, 1, sync="0"), "run interval")
+
+        assert result.level == OK
+        assert "MaxOutDeals" not in result.detail
+
+    def test_unset_interval_is_not_reported_at_all(self, monkeypatch):
+        monkeypatch.delenv("RUN_INTERVAL_HOURS", raising=False)
+        # The native cron path has no such variable; install_cron.sh does this check itself.
+        assert preflight.check_run_interval() == []
+
+    @pytest.mark.parametrize("bad", ["0", "24", "abc", "4.5", "-1"])
+    def test_an_unusable_interval_warns_and_names_the_fallback(self, monkeypatch, bad):
+        monkeypatch.setenv("RUN_INTERVAL_HOURS", bad)
+
+        result = _by_name(preflight.check_run_interval(), "RUN_INTERVAL_HOURS")
+
+        assert result.level == WARN
+        assert "fall back to 6" in result.detail
+
+
 class TestExitCode:
     """The container and cron both branch on this, so the exit code is part of the contract."""
 

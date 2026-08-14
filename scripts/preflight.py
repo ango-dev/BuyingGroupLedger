@@ -207,6 +207,72 @@ def check_money_switches() -> list[Result]:
     return out
 
 
+def runs_per_day(hours: int) -> int:
+    """How many times `0 */H * * *` actually fires in a day.
+
+    NOT 24/H. Cron's step operator enumerates multiples of H within the hour field's 0-23 range, so
+    an interval that doesn't divide 24 evenly gives an uneven day: H=5 fires at 0,5,10,15,20 — five
+    times, not 24/5. The last gap is short and the count is what the quota cares about.
+    """
+    return (23 // hours) + 1
+
+
+def check_run_interval() -> list[Result]:
+    """Warn when the schedule would outrun MaxOutDeals' daily quota.
+
+    The interval is bounded by a THIRD PARTY, not by anything here: MOD allows a fixed number of
+    received-items calls per day and every run spends exactly one. Two things stop that being
+    self-correcting, which is why it needs saying out loud at startup:
+
+    - `DailyCallBudget` is deliberately per-process, so it bounds a single run and cannot see the
+      day's total across scheduled runs. MOD's server is the only real authority, and it simply
+      starts refusing.
+    - A DRY RUN spends one too — `fetch_payouts` is a non-mutating read, and the client only
+      short-circuits when the call is BOTH mutating and dry-run.
+
+    Going over is contained rather than dangerous: it stops the payout/premium/status write-back,
+    not tracking submission (whose separate push limit is far higher). Payouts just stop updating
+    until the daily reset. So this is a WARNING, not a failure — the user may well accept it to get
+    fresher shipment status.
+    """
+    raw = (os.getenv("RUN_INTERVAL_HOURS") or "").strip()
+    if not raw:
+        # Not a container deployment (the native cron path takes its interval as an argument to
+        # scripts/install_cron.sh, which does this same check itself).
+        return []
+
+    if not raw.isdigit() or not 1 <= int(raw) <= 23:
+        return [Result(WARN, "RUN_INTERVAL_HOURS",
+                       f"{raw!r} is not a whole number of hours from 1 to 23; the container will "
+                       f"fall back to 6.")]
+
+    hours = int(raw)
+    per_day = runs_per_day(hours)
+
+    try:
+        from buying_groups.maxoutdeals import RECEIVED_ITEMS_DAILY_LIMIT as limit
+        from config.settings import settings
+        sync_on = settings.buying_group_sync_enabled
+    except Exception:  # noqa: BLE001 — reported by check_money_switches; don't fail twice
+        return []
+
+    if not sync_on or per_day <= limit:
+        spare = limit - per_day
+        detail = f"every {hours}h = {per_day} run(s)/day"
+        if sync_on:
+            detail += f"; uses {per_day} of MaxOutDeals' {limit} daily payout reads ({spare} spare)"
+        return [Result(OK, "run interval", detail)]
+
+    return [Result(
+        WARN, "run interval",
+        f"every {hours}h = {per_day} runs/day, but MaxOutDeals allows only {limit} payout reads per "
+        f"day and each run spends one. Roughly {per_day - limit} run(s)/day will fail to read "
+        f"payouts, so Payout Amount / Insurance / paid status stop updating until the daily reset "
+        f"(tracking submission is unaffected). A manual `sync_tracking` spends one too, even as a "
+        f"DRY RUN. Use {-(-24 // limit)}h or longer to stay inside the quota.",
+    )]
+
+
 def run_checks() -> list[Result]:
     results: list[Result] = []
     results += check_deterministic_imports()
@@ -214,6 +280,7 @@ def run_checks() -> list[Result]:
     results += check_env()
     results += check_costco_tokens()
     results += check_money_switches()
+    results += check_run_interval()
     return results
 
 

@@ -14,12 +14,11 @@ services:
     env_file:
       - .env
     environment:
-      # Every 3h = 8 runs/day. NOT free to lower further: each run spends one of MaxOutDeals'
-      # 10 daily received-items calls, so 8/day leaves only 2 spare for any manual
-      # `python -m sync_tracking` (a DRY RUN spends one too — the read is non-mutating, so
-      # dry_run doesn't suppress it). At 2h this exceeds the quota and payout write-back
-      # starts failing daily. See "Choosing an interval" in DEPLOY.md.
-      RUN_INTERVAL_HOURS: "3"
+      # Set RUN_INTERVAL_HOURS in .env to change the schedule without editing this file; 3 (= 8
+      # runs/day) is the default if it isn't set. Each run spends one of MaxOutDeals' 10 daily
+      # received-items calls, so preflight WARNS in the log when the interval implies more than
+      # that. See "Choosing an interval" in DEPLOY.md.
+      RUN_INTERVAL_HOURS: "${RUN_INTERVAL_HOURS:-3}"
       RUN_ON_START: "false"       # set "true" to also run once when the container starts
       PREFLIGHT_STRICT: "false"   # "true" = refuse to start when preflight fails, instead of
                                   # alerting and running degraded (see docker/entrypoint.sh)

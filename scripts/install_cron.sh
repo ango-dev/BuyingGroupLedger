@@ -27,6 +27,25 @@ if [ ! -f "$RUN" ]; then
 fi
 chmod +x "$RUN"
 
+# How many times `0 */H * * *` actually fires: cron enumerates multiples of H within 0-23, so an
+# interval that doesn't divide 24 evenly gives an uneven day (H=5 -> 0,5,10,15,20 = 5, not 4.8).
+RUNS_PER_DAY=$(( 23 / HOURS + 1 ))
+
+# MaxOutDeals allows 10 received-items calls a day and every run spends exactly one, so the schedule
+# is bounded by a third party rather than by anything here. Warn rather than refuse: going over only
+# stops the payout/premium/status write-back (tracking submission has a far higher limit), and the
+# user may accept that for fresher shipment status. Mirrors scripts/preflight.py's check, which
+# covers the Docker path.
+MOD_DAILY_PAYOUT_READS=10
+if [ "$RUNS_PER_DAY" -gt "$MOD_DAILY_PAYOUT_READS" ]; then
+    echo "WARNING: every ${HOURS}h is ${RUNS_PER_DAY} runs/day, but MaxOutDeals allows only" >&2
+    echo "         ${MOD_DAILY_PAYOUT_READS} payout reads per day and each run spends one." >&2
+    echo "         Payout Amount / Insurance / paid status will stop updating once the quota is" >&2
+    echo "         gone (tracking submission is unaffected). A manual sync_tracking spends one" >&2
+    echo "         too, even as a DRY RUN. Use 3h or longer to stay inside it." >&2
+    echo >&2
+fi
+
 MARKER="# buying-group-ledger"
 CRON_LINE="0 */$HOURS * * * $RUN $MARKER"
 
