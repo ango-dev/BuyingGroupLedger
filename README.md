@@ -1,76 +1,124 @@
 # Buying Group Ledger
 
-Automated order tracking for buying-group reselling. It logs into retailer accounts (Amazon, Amazon
-Business, Best Buy, and Costco today; Walmart planned), captures new orders and their shipment status,
-and keeps a Google Sheet ledger up to date — cheaply and hands-off.
+Automated order tracking, reconciliation and payout settlement for buying-group reselling. It reads
+order history from four retailer accounts (Amazon, Amazon Business, Best Buy, Costco), keeps a Google
+Sheet ledger current as a live P&L, posts shipped tracking numbers to two buying-group APIs, files
+shipment insurance, and reads payouts back — unattended, on a schedule.
 
-It runs on **Browser-Use Cloud** (the browser runs in their cloud, not on your machine) and uses a
-layered design so the expensive AI agent is only used where it's actually needed.
+**The design problem is cost against reliability.** A browser-driving LLM agent can read any retailer's
+order page, but it bills real money on every run. A hand-written scraper is free but breaks *silently*
+when a page changes — and a silently missed order is missed reimbursement, which is a worse outcome
+than an expensive one. So every retailer has a **deterministic, agent-free primary path** and falls
+back to the LLM agent automatically, with an alert, when that path fails. Normal runs cost
+approximately nothing; a site change degrades cost instead of losing data.
+
+The second theme is that **the failures worth engineering against here are silent**. Nothing throws
+when a scraper reads page 1 of a paginated order history and misses the rest, or when a re-check
+overwrites a good tracking number with a blank. Most of the work below is invariants, idempotency and
+auditing aimed squarely at that class of bug — see **[Design notes](#design-notes)**.
+
+> **Status:** running in production against real accounts. `pytest` runs 803 offline tests that need
+> no credentials and no network.
+
+---
+
+## Design notes
+
+The parts worth reading if you're here to look at the engineering rather than to run it:
+
+| Idea | Where | Why it exists |
+|---|---|---|
+| Deterministic primary, agent fallback | `scrapers/<retailer>{,_api,_mapping}.py` | Cost is a per-run tax; silent data loss is unbounded. Only the fallback costs money, and it fires loudly. |
+| The schema is a wire format | `models/order.py` `FIELDNAMES`, `sheets/ledger_sync.py` `HEADER` | Rows are written *positionally*. Reordering columns without migrating scrambles every historical row with no error, so a test pins the pairing and the sync refuses to write a mismatched header. |
+| Idempotent upsert, blanks never overwrite | `ledger_sync.py` `_merge_row`, `_collapse_records` | Re-checks return partial data. A blank field must never erase a known-good value, and two paths reporting the same row in one sync must collapse rather than clobber. |
+| Reconcile on tracking number first | `ledger_sync.py` `sync_csv_to_sheet` | The deterministic path and the agent legitimately disagree about shipment *numbering*. Tracking number is an identity both read identically, so it beats the synthetic key. |
+| Undisclosed-split safety net | `ledger_sync.py` | A retailer API that exposes one tracking number per line and rotates it will silently lose a box. An update that changes a non-blank tracking number to a *different* one appends instead of overwriting, and alerts. |
+| Audit the live data, not just the code | `scripts/audit_sheet.py` | Tests prove the code; they can't see the sheet. 31 invariant checks, authenticated **read-only** so it cannot write even by accident. |
+| Catch silent misconfiguration at boot | `scripts/preflight.py`, `docker/healthcheck.sh` | A missing dependency degrades three retailers to the paid agent without raising; a dead scheduler produces no signal at all. Both now announce themselves. |
+
+> **A note on `the design notes §N` references.** Code and test comments cite section numbers in `the design notes`, an
+> internal engineering journal that records why each of these decisions was made and what live run
+> proved it. That file is not published — it contains real order and payout data. The reasoning it
+> holds is summarized in this README; the citations are left in place because they're accurate in the
+> private repository the code is developed in.
 
 ---
 
 ## How it works
 
-Each run makes **one agent call per profile** that does two jobs: scan for **new** orders (JOB 1) and
-re-check **already-recorded, not-yet-delivered** orders (JOB 2). Results are upserted into the Sheet.
+Each run, for every configured profile × retailer: read the Sheet to decide what's new versus what
+needs re-checking, fetch through that retailer's **deterministic path**, and upsert the results back.
+The LLM agent enters only when the deterministic path raises.
 
 ```mermaid
 flowchart TD
-    A[Scheduler: cron / Task Scheduler] --> B[main.py]
+    A[Scheduler: cron / Task Scheduler / container] --> B[main.py]
     B --> C{for each profile x retailer}
     C -->|profile_id blank| C0[skip - not set up]
     C -->|configured| D[load order state from Sheet]
     D --> E[open orders = recorded and NOT delivered]
-    D --> F[delivered order ids]
-    E --> I[Agent run: JOB 2 re-check open orders + JOB 1 scan today+yesterday for NEW orders]
-    F --> H[Agent skips delivered ids in the new-order scan]
-    H --> I
-    I --> K[write CSV]
+    D --> F[delivered ids = terminal, skipped]
+    E --> G[deterministic path: discovery + order details]
+    F --> G
+    G -->|success| K[write CSV]
+    G -->|ANY failure| Z[alert + Browser-Use agent fallback]
+    Z --> K
     K --> L[Upsert into Google Sheet]
+    L --> M[post tracking to buying groups, read payouts back]
 ```
+
+### The four deterministic paths
+
+**No browser runs locally on any of them** — Playwright is used only as a CDP *client* to a cloud
+browser, which is why this runs happily on a Raspberry Pi.
+
+| Retailer | Primary path | Why it's shaped that way |
+|---|---|---|
+| **Costco** | Private GraphQL API over `curl_cffi` with a stored refresh token | No browser at all. Needs TLS impersonation to pass Costco's fingerprint check. |
+| **Best Buy** | Cloud CDP browser → in-page `fetch` of `/profile/ss/api/v1/orders/<id>` | The endpoint is Akamai-guarded, so the read rides the logged-in session cookie *from inside the page* rather than replaying it out-of-band. |
+| **Amazon** | CDP browser parsing server-rendered order-details HTML, then a hop to the package-tracking page | A network capture proved there is no order JSON to read — every JSON response was telemetry or recommendation carousels. The tracking number lives only on a separate page. |
+| **Amazon Business** | Same parser; its own discovery and click-through pagination | Order details are identical to consumer Amazon; only discovery and pagination diverge, so it's a separate scraper that can't regress the consumer one. |
 
 ### Cost model
 
-Browser-Use bills mostly by **input tokens** — every agent step ships the whole page to the model.
-Because both jobs share one agent call per profile, more open orders add *steps*, not extra runs.
+Browser-Use bills mostly by **input tokens** — every agent step ships the whole page to the model, so
+cost is step-count × per-step page context. That makes the agent the expensive component, and is the
+reason the deterministic paths exist: a normal run now spends no tokens at all.
 
-Work is split by what each tool is actually good at. The **agent** sees *structure* — how many
-shipments an order has, which changes when it splits. **CDP + CSS selectors** read a known page
-cheaply — the tracking number, which Amazon shows only on a separate tracking page.
+The agent is kept for the two things it's genuinely better at:
+
+- **Fallback.** Any failure in a deterministic path — a layout change, a logged-out session, an API
+  outage — alerts and defers to the agent instead of recording nothing. Cost degrades; data doesn't.
+- **Structure, when a page changes shape.** The agent sees how many shipments an order has, which is
+  exactly what changes when an order splits at ship time.
+
+When it does run, it's one call per profile covering both jobs — scan for new orders (JOB 1) and
+re-check open ones (JOB 2) — so more open orders add *steps*, not extra runs. Pinning the exact click
+path through Best Buy's sign-in flow (instead of letting the agent screenshot its way to the password
+field) took a representative run from 3.35M to 932K tokens and $0.128 to $0.053, 54 steps to 34.
+
+**A shipment's lifecycle:**
 
 ```mermaid
 flowchart LR
     subgraph Per shipment over its lifetime
-      N[New order] -->|agent: full extraction| O[ordered, no tracking #]
-      O -->|agent: re-read order details| O
-      O -->|CDP: read its tracking page| S[shipped, has tracking #]
-      S -->|CDP only - agent no longer involved| DEL[delivered]
-      DEL -->|skipped forever| X[done]
+      N[New order] --> O[ordered, no tracking #]
+      O -->|re-checked each run| O
+      O --> S[shipped, has tracking #]
+      S --> DEL[delivered]
+      DEL -->|terminal - skipped forever| X[done]
     end
 ```
 
-- **New-order discovery + first extraction** → agent. A silently-broken selector here would mean a
-  *permanently missed order* (missed reimbursement), so adaptability wins.
-- **Re-checking whether an order split** → agent, but **only while some shipment still has no
-  tracking number**. Amazon splits an order into its final shipments *at ship time*, so once every
-  shipment is tracked the structure is settled and the agent stops being asked about that order.
-  It re-reads the order-details page only — it never opens tracking pages.
-- **Reading tracking numbers and watching for delivery** → CDP + selectors, **per shipment**. A split
-  order has one tracking page per shipment; each is read on its own. An empty selector escalates that
-  order to the agent rather than being reported as "not shipped".
-- **Delivered orders** → skipped entirely; an order counts as delivered only once **every** shipment
-  row is delivered.
+An order is terminal only once **every** one of its shipment rows is delivered, so a split order stays
+open until the last box lands. Terminal orders drop out of later runs entirely — which is what stops a
+growing ledger from making every run slower and more expensive.
 
-> **Best Buy and Costco both have a deterministic API primary path** (no agent, no CDP selectors) and
-> fall back to the agent only if that path breaks. Costco reads its own GraphQL API with a stored
-> token; Best Buy reads its own private order endpoints from inside a logged-in CDP browser (the order
-> list from the purchase-history page's embedded data, each order's detail from
-> `/profile/ss/api/v1/orders/<id>`). Only Amazon uses the agent/CDP split — it has the "tracking number
-> lives on another in-site page" problem, which is exactly what selectors are for.
-
-The next cheaper tier is a **REST tracking API** (17TRACK bills ~$0.024 per shipment *once*, then
-status polling is free) to replace the CDP delivery-watch. Gated on confirming it actually covers
-Amazon Logistics `TBA…` numbers — test that against the free quota before building it.
+A **REST tracking API** tier (17TRACK, EasyPost) was evaluated as a cheaper delivery-watch and
+**rejected**. Now that every retailer has a deterministic path, `shipped → delivered` already comes
+free in the read being done anyway, so a per-shipment fee would buy a signal that's already there —
+and the coverage it's weakest at, Amazon Logistics `TBA…` numbers, is the one gap it would have had to
+fill. Its only real edge, real-time webhooks, doesn't matter against a multi-hour poll.
 
 ### Data model / Sheet columns
 
@@ -449,7 +497,7 @@ at the repo root (gitignored — it holds real addresses). Copy `warehouses.exam
       { "label": "BFMR-B", "street": "500 Warehouse Blvd", "zip": "07004" }
     ] },
   { "buying_group": "Personal",
-    "jigs": [ { "label": "home", "zip": "94103", "name_contains": "Test Buyer" } ] }
+    "jigs": [ { "label": "home", "zip": "94103", "name_contains": "Your Name" } ] }
 ]
 ```
 
@@ -613,7 +661,7 @@ rows record a real `0`.
 Once you've done a dry run and a one-package live test, set `BUYING_GROUP_SYNC_ENABLED=1` to let the
 scheduled run do it too — it's off by default because it spends real money unattended.
 
-### Automatic running (~4×/day, 6h apart — adjustable)
+### Automatic running (every few hours — adjustable, with a floor)
 
 **Linux (cron):**
 ```bash
@@ -738,26 +786,27 @@ Linux host has its own runbook: **[DEPLOY.md](DEPLOY.md)**.
 
 **Next up**
 
-- **BFMR + MaxOutDeals integration — BUILT, read side live-validated.** See "Buying groups" above.
-  What's left: BFMR credentials (its half is entirely unvalidated), one `scripts.bg_probe` run to
-  settle how BFMR's tracker joins back to a ledger row, and a `--limit 1` live test per group.
 - **Event-driven re-checks from retailer emails.** Ingest Amazon / Best Buy shipped + delivered +
   order-update emails (Gmail API or IMAP) to trigger a targeted re-check of just that order, instead of
-  or alongside the 6-hour poll. Faster status, fewer wasted agent runs.
+  or alongside the multi-hour poll. Faster status, fewer wasted runs.
+- **More retailers: Walmart.** The four current ones each took a network capture first to decide
+  whether the path was JSON or HTML; Walmart would follow the same decision gate.
 
-**Needs live validation**
+**Built and live-validated; still accumulating evidence**
 
-- **Best Buy deterministic path over time** — the ss-api primary path is live-validated end-to-end
-  (discovery, detail fetch, mapping all correct on a real account), but only on a warm session and the
-  order states captured so far. Still worth watching: a cold scheduled run that must log itself back in,
-  and the agent fallback firing on a real API outage.
-- **Costco split lifecycle across runs** — the API path and agent fallback are both live-validated
-  end-to-end (discovery, detail fetch, mapping, and the agent extracting a real 2-shipment order all
-  match). Still worth watching over time: an order observed while still *unshipped* transitioning to
-  shipped/split on a later run, and the refresh-token rotation surviving many days of scheduled runs.
-- **The Amazon split lifecycle** — a single-shipment order, an agent re-check that catches the
-  ship-time split, shipment `1` updating in place while `2`/`3` append, and the order staying
-  open until every shipment is delivered.
+Everything below works end to end against real accounts. What's listed is the *specific state
+transition* that hasn't happened to occur yet during a run — these ride real orders, so they close on
+their own schedule rather than being work items.
+
+- **Amazon / Amazon Business split lifecycle** — a single-shipment order splitting at ship time, with
+  shipment `1` updating in place while `2`/`3` append, and the order staying open until every shipment
+  delivers. Validated on Costco and Best Buy; both Amazons share the code path but haven't yet had an
+  order actually split mid-run. The digital-item skip is likewise unexercised on a real digital order.
+- **Best Buy cold-start over time** — the deterministic path is validated including a genuine
+  logged-out self-login. Still worth watching: the agent fallback firing on a real API outage.
+- **Costco refresh-token rotation over many days** of scheduled runs.
+- **arm64 / Raspberry Pi.** The container builds and runs correctly on amd64, and a build-time smoke
+  test makes a wrong-architecture image fail loudly, but it has not yet run on a real Pi.
 
 **Open questions / smaller items**
 
@@ -775,10 +824,9 @@ Linux host has its own runbook: **[DEPLOY.md](DEPLOY.md)**.
 - `delivery_date`: the prompts ask for `YYYY-MM-DD`, but the dormant CDP path writes the raw promise
   text ("Arriving Monday") into the same field. No live exposure while that path stays disabled —
   revisit only if it's ever re-enabled.
-- More retailers: Walmart. (Amazon Business is built — see the retailer list above.)
-- Optional delivery-watch cost optimization: revive the dormant CDP fast-path, or use a REST tracking
-  API (17TRACK / TrackingMore) — verify Amazon Logistics TBA coverage before committing to one.
-  Currently shelved: reliability beat the saving once already.
+- **The healthcheck's unhealthy state notifies nobody.** It shows in `docker ps` / `docker inspect`.
+  Wiring unhealthy → an alert (a sidecar, or an autoheal container) is the obvious next step if a
+  silent scheduler death ever actually happens.
 
 **Known wrinkle.** A *legacy* Amazon row written before the Shipment column existed (blank shipment)
 will orphan once if that order later splits: the scraper emits `1`… and the blank row goes stale
