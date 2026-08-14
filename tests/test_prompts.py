@@ -307,6 +307,26 @@ def test_costco_ignores_page_wording_for_labels():
     assert "ignore it and use the numbering rule" in prompt
 
 
+def test_costco_never_infers_ordered_from_a_failed_tracking_read():
+    """OBSERVED LIVE, twice, with two different symptoms.
+
+    Run 1: the agent reported box 1's tracking number for BOTH boxes. The prompt gained an explicit
+    "if you are about to report the SAME tracking number for two shipments, STOP" rule, and run 2
+    obeyed it — by reporting the second box's number BLANK instead. Blank is the safe failure (the
+    ledger keeps what it already had); a duplicate manufactures a box that does not exist.
+
+    But blank then cascaded: the prompt defined "ordered" as "not shipped yet: no tracking number",
+    so a failed READ was reported as a fact about the WORLD, and a delivered row was walked back to
+    `ordered`. Status is now judged from the shipment's own status text, and "ordered" needs positive
+    evidence.
+    """
+    prompt = build(CostcoScraper)
+    assert "NEVER use \"ordered\" merely because you could not find a tracking number" in prompt
+    assert "POSITIVE evidence" in prompt
+    # The rule that turned the dangerous failure into the safe one must stay.
+    assert "SAME tracking number for two different shipments" in prompt
+
+
 def test_costco_prompt_gives_an_efficient_method():
     """Costco has no cheap CDP path, so the whole re-check rides the agent — keep step count low the
     same way Best Buy does: handle lazy-loading in one pass and read compact JSON, not full-page blobs."""

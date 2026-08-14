@@ -73,15 +73,39 @@ class CostcoScraper(BaseRetailerScraper):
         try:
             return self._scrape_via_api()
         except ApiLoginError as exc:
+            # FIRST, TRY TO FIX IT OURSELVES. A dead refresh token is the one auth failure that is
+            # recoverable without a human: the Browser-Use profile is still logged into Costco, so
+            # reconnecting over CDP and capturing a fresh token from the app's own silent refresh
+            # turns a run-ending failure into a few seconds of work. Proven live — a grab
+            # took 12s and the retried API path scraped normally.
+            #
+            # This is also exactly when the grab WORKS. It captures the token endpoint's response, so
+            # it needs the app to actually perform a refresh — which it only does when the cached
+            # token has expired. That is precisely the state we are in here, so the opportunistic
+            # weakness of `--grab` disappears at this call site.
+            if self._refresh_token_via_browser():
+                try:
+                    return self._scrape_via_api()
+                except Exception:
+                    log.warning(
+                        "Costco [%s]: API still failing after a token refresh.",
+                        self.profile.label, exc_info=True,
+                    )
+
             # Auth failure (dead/rotated refresh token) is NOT a schema change the agent can fix — do
             # NOT run the (paid) agent; alert and skip so the user re-authorizes the token.
             log.warning("Costco [%s]: API auth failed (%s); NOT running the agent.",
                         self.profile.label, exc)
             alert(
                 f"Costco [{self.profile.label}]: API auth failed — agent NOT run",
-                f"The Costco API could not authenticate ({exc}). Re-authorize with "
-                f"`python -m scripts.costco_token --label {self.profile.label} ...`. The agent was "
-                f"deliberately not run — an auth failure is not something the agent can fix.",
+                f"The Costco API could not authenticate ({exc}), and the automatic token refresh "
+                f"over CDP did not recover it — which usually means the Browser-Use profile's own "
+                f"Costco session is logged out, since that session is what the refresh reads from.\n\n"
+                f"Log the profile back into costco.com:\n"
+                f"  python -m scripts.create_profile --label {self.profile.label}\n"
+                f"then either re-run, or grab a token directly:\n"
+                f"  python -m scripts.costco_token --label {self.profile.label} --grab\n\n"
+                f"The agent was deliberately not run — an auth failure is not something it can fix.",
             )
             raise LoggedOutError(f"Costco:{self.profile.label}") from exc
         except Exception as exc:  # noqa: BLE001 — a NON-auth failure (schema/network) degrades to the agent
@@ -118,6 +142,55 @@ class CostcoScraper(BaseRetailerScraper):
                 f"`python -m scripts.costco_token --label {self.profile.label} ...`.",
             )
             return super().scrape()
+
+    def _refresh_token_via_browser(self) -> bool:
+        """Capture a fresh Costco refresh token over CDP and save it. True if one was stored.
+
+        Reuses `scripts.costco_token` rather than reimplementing the capture — that module owns both
+        the interception strategy and the on-disk format, and a second copy of either would drift.
+        Imported lazily: it pulls in the CDP browser stack, which a normal run has no reason to load.
+
+        Never raises. This runs on a path that is already failing, so a broken recovery must not
+        replace the real diagnosis with its own — the caller alerts about the original auth failure
+        either way.
+        """
+        try:
+            from scripts.costco_token import _grab_refresh_token, _load, _save
+        except Exception:
+            log.warning("Costco [%s]: token-refresh helper unavailable.",
+                        self.profile.label, exc_info=True)
+            return False
+
+        log.info("Costco [%s]: attempting an automatic token refresh over CDP.", self.profile.label)
+        try:
+            token = _grab_refresh_token(self.profile.label)
+        except SystemExit:
+            # _grab_refresh_token exits the process on a missing/unconfigured profile. Fine for the
+            # CLI, fatal here — a scheduled run would die mid-way through its retailers.
+            log.warning("Costco [%s]: profile not usable for a CDP token grab.", self.profile.label)
+            return False
+        except Exception:
+            log.warning("Costco [%s]: automatic token refresh failed.",
+                        self.profile.label, exc_info=True)
+            return False
+
+        if not token:
+            # The grab is opportunistic: it captures the token endpoint's RESPONSE, so it comes up
+            # empty when the app had no reason to refresh. Reaching here means the profile's own
+            # Costco session is dead too, which genuinely needs a human.
+            log.warning("Costco [%s]: no refresh token captured — the profile's Costco session is "
+                        "probably logged out too.", self.profile.label)
+            return False
+
+        data = _load(self.profile.label)
+        data["refresh_token"] = token
+        # Drop the cached id_token: it was minted from the OLD refresh token and is what failed.
+        # Leaving it would have the retry present the same dead credential and fail identically.
+        data.pop("id_token", None)
+        _save(self.profile.label, data)
+        log.info("Costco [%s]: captured a fresh refresh token (%d chars); retrying the API path.",
+                 self.profile.label, len(token))
+        return True
 
     def _api_window(self) -> tuple[str, str]:
         """(start, end) YYYY-MM-DD for getOnlineOrders. end is tomorrow so same-day orders (the API
@@ -281,17 +354,25 @@ Fields for each entry:
   single-shipment order is "Shipment 1"). Never Costco's own wording.
 - status: judged from THIS shipment's status text on the order-details page:
     * "delivered" — the shipment says "Delivered" / "Delivered <date>"
-    * "shipped"   — a tracking number IS shown and it says "Shipped" / "Out for delivery" / "Arriving
-      <date>" but not yet delivered. An arrival estimate with NO tracking number is still "ordered".
-    * "ordered"   — not shipped yet: no tracking number (e.g. "Preparing", "Order received", an arrival
-      estimate only)
+    * "shipped"   — the page says "Shipped" / "Out for delivery" / "Arriving <date>" and it is not yet
+      delivered. Judge this from the SHIPMENT'S OWN STATUS TEXT, not from whether you managed to read
+      a tracking number.
+    * "ordered"   — POSITIVE evidence it has not shipped: the page itself says "Preparing" / "Order
+      received", or there is no shipment section at all.
+      NEVER use "ordered" merely because you could not find a tracking number. "I could not read it"
+      and "it has not shipped" are different facts, and reporting the second when you mean the first
+      walks a delivered order backwards on the ledger. If the status text says shipped or delivered
+      but you cannot read the number, report THAT status with tracking_number "" — a missing number
+      is recoverable on the next run, a wrong status is not.
     * "cancelled" — the whole order (or this shipment) shows Cancelled. Only use this on a re-check of
       an order already recorded; a brand-new cancelled order is skipped in JOB 1, not recorded.
 - order_url: the full URL of this order's details page (address bar URL while viewing it) — same for
   every shipment of the order
-- tracking_number: the carrier tracking number shown for THIS shipment; "" if not shipped yet. Costco
-  shows it on the order-details / shipment view; if the number only appears behind a "Track" link,
-  follow that link once to read it, then come back.
+- tracking_number: the carrier tracking number shown for THIS shipment; "" if not shipped yet, and ""
+  also if it HAS shipped but you could not read its number. Costco shows it on the order-details /
+  shipment view; if the number only appears behind a "Track" link, follow that link once to read it,
+  then come back. Leaving it "" is safe — the recorded number is kept and the next run fills it in.
+  Reporting another shipment's number is NOT safe: it invents a box that does not exist.
 - tracking_url: the full URL of the carrier tracking / "Track" link for this shipment. Capture it EVEN
   IF not shipped yet when a link exists; leave "" if there is genuinely none.
 - delivery_date: estimated arrival date if "shipped", actual delivery date if "delivered" (YYYY-MM-DD);

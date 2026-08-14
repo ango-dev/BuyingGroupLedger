@@ -63,6 +63,90 @@ def test_non_login_failure_still_falls_back_to_the_agent(monkeypatch, module, cl
     assert scraper.scrape() == ["AGENT_RAN"], "a non-login failure must still use the agent fallback"
 
 
+class TestCostcoSelfHealsADeadToken:
+    """A dead refresh token is the one auth failure recoverable without a human: the Browser-Use
+    profile is still logged into Costco, so a CDP reconnect can capture a fresh token from the app's
+    own silent refresh. Proven live — 12 seconds, and the retried API path scraped.
+
+    It is also exactly when the grab works: it captures the token endpoint's RESPONSE, so it needs
+    the app to actually refresh, which it only does once the cached token has expired. That is the
+    state this call site is in by definition.
+    """
+
+    @staticmethod
+    def _scraper():
+        profile = ProfileConfig(label="p", profile_id="x", retailers=["costco"])
+        return costco.CostcoScraper(profile, lookback_days=1)
+
+    def test_a_dead_token_is_refreshed_and_the_api_retried(self, monkeypatch):
+        scraper = self._scraper()
+        calls = []
+
+        def _api():
+            calls.append("api")
+            if len(calls) == 1:
+                raise ApiLoginError("id_token exchange failed")
+            return ["ROWS"]
+
+        monkeypatch.setattr(scraper, "_scrape_via_api", _api)
+        monkeypatch.setattr(scraper, "_refresh_token_via_browser", lambda: True)
+        monkeypatch.setattr(BaseRetailerScraper, "scrape",
+                            lambda self: pytest.fail("the agent must never run on an auth failure"))
+        alerts = []
+        monkeypatch.setattr(costco, "alert", lambda subject, body: alerts.append(subject))
+
+        assert scraper.scrape() == ["ROWS"]
+        assert calls == ["api", "api"], "the API path is retried once after the refresh"
+        assert alerts == [], "a self-healed run is not worth waking anyone for"
+
+    def test_a_failed_refresh_still_alerts_and_never_runs_the_agent(self, monkeypatch):
+        scraper = self._scraper()
+        monkeypatch.setattr(scraper, "_scrape_via_api",
+                            lambda: (_ for _ in ()).throw(ApiLoginError("dead token")))
+        monkeypatch.setattr(scraper, "_refresh_token_via_browser", lambda: False)
+        monkeypatch.setattr(BaseRetailerScraper, "scrape",
+                            lambda self: pytest.fail("the agent must never run on an auth failure"))
+        alerts = []
+        monkeypatch.setattr(costco, "alert", lambda subject, body: alerts.append((subject, body)))
+
+        with pytest.raises(LoggedOutError):
+            scraper.scrape()
+        subject, body = alerts[0]
+        assert "API auth failed" in subject
+        # The refresh reads from the profile's Costco session, so its failure narrows the diagnosis:
+        # point at re-logging the PROFILE in, not just at pasting a token.
+        assert "create_profile" in body
+
+    def test_a_refresh_that_blows_up_does_not_replace_the_real_diagnosis(self, monkeypatch):
+        """The recovery runs on an already-failing path. If it throws, the caller must still report
+        the ORIGINAL auth failure rather than surfacing the recovery's own error."""
+        scraper = self._scraper()
+        monkeypatch.setattr(scraper, "_scrape_via_api",
+                            lambda: (_ for _ in ()).throw(ApiLoginError("dead token")))
+        monkeypatch.setattr(
+            costco.CostcoScraper, "_refresh_token_via_browser",
+            lambda self: (_ for _ in ()).throw(RuntimeError("CDP exploded")))
+        monkeypatch.setattr(costco, "alert", lambda subject, body: None)
+
+        with pytest.raises(RuntimeError):
+            scraper.scrape()
+
+    def test_the_stale_id_token_is_dropped_when_a_new_refresh_token_lands(self, monkeypatch, tmp_path):
+        """The cached id_token was minted from the OLD refresh token and is what just failed —
+        leaving it would have the retry present the same dead credential."""
+        import scripts.costco_token as token_mod
+
+        saved = {}
+        monkeypatch.setattr(token_mod, "_grab_refresh_token", lambda label: "FRESH")
+        monkeypatch.setattr(token_mod, "_load", lambda label: {"refresh_token": "OLD",
+                                                              "id_token": "STALE"})
+        monkeypatch.setattr(token_mod, "_save", lambda label, data: saved.update(data))
+
+        assert self._scraper()._refresh_token_via_browser() is True
+        assert saved["refresh_token"] == "FRESH"
+        assert "id_token" not in saved
+
+
 class TestCostcoSharedProxyFailure:
     """A transport failure through the profile's proxy must not reach the agent either.
 
