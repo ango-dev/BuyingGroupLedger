@@ -55,15 +55,25 @@ class FakeWorksheet:
         # The unformatted/formula render options DO return real types, so this one is verbatim.
         return [list(r) for r in self.rows]
 
-    def update(self, range_name, values):
+    def update(self, range_name, values, value_input_option=None):
         # Real gspread writes the whole 2D `values` block starting at the range's top-left cell, so a
         # multi-row block lands on consecutive rows (that's how ledger_sync now appends).
+        #
+        # A None cell means SKIP, NOT CLEAR — verified against the live API 2026-08-14: a seeded value
+        # survived a None write. ledger_sync._blank_to_none relies on that to stop RAW ""-writes
+        # stripping a column's number format, and the whole safety argument for it is that a blank
+        # only ever reaches the block where the cell is ALREADY empty. Modelling None as "clear" here
+        # would hide the one way that argument can break.
         start = int(range_name.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
         for offset, value in enumerate(values):
             idx = start - 1 + offset
             while len(self.rows) <= idx:
                 self.rows.append([])
-            self.rows[idx] = list(value)
+            existing = self.rows[idx]
+            self.rows[idx] = [
+                (existing[i] if i < len(existing) else "") if cell is None else cell
+                for i, cell in enumerate(value)
+            ]
         self.update_calls += 1
 
     def batch_update(self, data, value_input_option=None):
@@ -1450,3 +1460,50 @@ class TestShipmentStoredAsANumber:
         value = sheet.data_rows()[0][FIELDNAMES.index("quantity")]
         assert value == 3
         assert isinstance(value, int)
+
+
+class TestBlankCellsDoNotStripNumberFormatting:
+    """Writing "" with RAW CLEARS a cell's number format; writing None preserves it.
+
+    Measured against the live sheet 2026-08-14:
+        RAW ""  -> format cleared      RAW None -> format preserved
+
+    That is why Insurance / Payout Amount / Total Profit kept reverting to raw floats while Total Cost
+    never did: the scrapers always emit those three blank, so every append rewrote them as "" and
+    stripped the currency format off the new row, and _write_profit_formulas then stamped the formula
+    into an unformatted cell. Formatting the COLUMN cannot fix it -- the write clears it afterwards.
+    """
+
+    def test_blanks_are_sent_as_none_not_empty_string(self):
+        row = ["A", "", 3, None, "B"]
+        assert ledger_sync._blank_to_none(row) == ["A", None, 3, None, "B"]
+
+    def test_whitespace_only_counts_as_blank(self):
+        assert ledger_sync._blank_to_none(["  "]) == [None]
+
+    def test_real_values_are_untouched_including_zero(self):
+        """0 and False are FALSY but are real data -- Insurance legitimately records a real 0, and
+        Tracking Submitted records a real False. Blanking either would be silent data loss."""
+        assert ledger_sync._blank_to_none([0, False, 0.0]) == [0, False, 0.0]
+
+    def test_an_appended_row_sends_none_for_its_blank_cells(self, sheet, tmp_path):
+        """End to end: the append path is where a brand-new row gets its formatting stripped."""
+        sent = []
+        original = sheet.update
+
+        def spy(range_name, values, **kw):
+            sent.extend(values)
+            return original(range_name, values, **kw)
+
+        sheet.update = spy
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(tmp_path, dict(
+            order_id="N1", order_date="2026-08-13", item_name="Thing", shipment="1",
+            status="shipped", tracking_number="1Z1", quantity="1", cost_per_item="10.00"))
+
+        sync_csv_to_sheet(path)
+
+        appended = [r for r in sent if r and r[FIELDNAMES.index("order_id")] == "N1"]
+        assert appended, "the row should have been appended"
+        profit = appended[0][FIELDNAMES.index("total_profit")]
+        assert profit is None, "a blank Total Profit must be sent as None, or its format is stripped"

@@ -554,7 +554,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         # (e.g. a quantity carried over from a prior run) is written as a number, not text —
         # otherwise Sheets stores it as text and shows a leading-apostrophe '1.
         merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
-        worksheet.update(range_name=f"A{row_number}", values=[merged])
+        worksheet.update(range_name=f"A{row_number}", values=[_blank_to_none(merged)])
         claimed_rows.add(row_number)
         written_rows.append(row_number)
         updates += 1
@@ -566,7 +566,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         # of the first empty row keeps every row aligned to the header. `existing` was read before any
         # updates and updates never add rows, so len(existing)+1 is the first free row.
         start_row = len(existing) + 1
-        worksheet.update(range_name=f"A{start_row}", values=appends)
+        worksheet.update(range_name=f"A{start_row}", values=[_blank_to_none(r) for r in appends])
         written_rows.extend(range(start_row, start_row + len(appends)))
 
     _reprorate_shipping(worksheet, touched_order_ids, raw_shipping_by_order)
@@ -822,6 +822,33 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
 
 
 _STATUS_FIELD_IDX = FIELDNAMES.index("status")
+
+
+def _blank_to_none(row: list) -> list:
+    """Send empty cells as None rather than "" — otherwise the write STRIPS their number format.
+
+    Measured against the live sheet 2026-08-14:
+
+        RAW ""            -> number format cleared
+        RAW None          -> number format preserved
+        USER_ENTERED ""   -> number format preserved
+
+    This is why `Insurance`, `Payout Amount` and `Total Profit` kept reverting to raw floats while
+    `Total Cost` never did: the scrapers always emit those three blank, so every append rewrote them
+    as "" and wiped the currency format off the new row, and `_write_profit_formulas` then stamped the
+    formula into an unformatted cell. Total Cost always carries a number, so it was never stripped.
+    Formatting the column does not help — the write actively clears it afterwards.
+
+    RAW cannot be swapped for USER_ENTERED here: the data rows are RAW deliberately, so a long numeric
+    tracking number is not reinterpreted into scientific notation.
+
+    SAFETY, and it rests entirely on _merge_row: None means "leave this cell alone", NOT "clear it"
+    (verified live — a seeded value survived a None write). That is only equivalent to "" because
+    _merge_row never emits a blank over a non-blank cell, so a "" in this block always means the cell
+    is ALREADY empty. Appends are trivially safe for the same reason: the row does not exist yet.
+    If that invariant ever changes, this must change with it.
+    """
+    return [None if (v is None or (isinstance(v, str) and v.strip() == "")) else v for v in row]
 
 
 def _merge_row(existing_row: list, new_row: list) -> list:
