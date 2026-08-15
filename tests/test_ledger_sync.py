@@ -36,6 +36,11 @@ class FakeWorksheet:
     def __init__(self, rows=None):
         self.rows = [list(r) for r in (rows or [])]
         self.update_calls = 0
+        # A real sheet has a FIXED grid and rejects a write past it with a 400 — which is exactly how
+        # an append died live on 2026-08-15. Modelling the grid is what lets a test prove the code
+        # grows the sheet first instead of discovering the limit through a failed sync.
+        self.row_count = 1000
+        self.added_rows = 0
         # Every {"range": ..., "values": ...} dict passed to batch_update, so tests can assert on the
         # Total Profit formulas without them also having to land in self.rows.
         self.batched: list[dict] = []
@@ -55,6 +60,10 @@ class FakeWorksheet:
         # The unformatted/formula render options DO return real types, so this one is verbatim.
         return [list(r) for r in self.rows]
 
+    def add_rows(self, count):
+        self.row_count += count
+        self.added_rows += count
+
     def update(self, range_name, values, value_input_option=None):
         # Real gspread writes the whole 2D `values` block starting at the range's top-left cell, so a
         # multi-row block lands on consecutive rows (that's how ledger_sync now appends).
@@ -65,6 +74,12 @@ class FakeWorksheet:
         # only ever reaches the block where the cell is ALREADY empty. Modelling None as "clear" here
         # would hide the one way that argument can break.
         start = int(range_name.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+        if start + len(values) - 1 > self.row_count:
+            # Mirrors the real API's refusal, verbatim in spirit:
+            #   APIError: [400]: Range (Sheet1!A992) exceeds grid limits. Max rows: 991
+            raise AssertionError(
+                f"Range (A{start}) exceeds grid limits. Max rows: {self.row_count}"
+            )
         for offset, value in enumerate(values):
             idx = start - 1 + offset
             while len(self.rows) <= idx:
@@ -1507,3 +1522,70 @@ class TestBlankCellsDoNotStripNumberFormatting:
         assert appended, "the row should have been appended"
         profit = appended[0][FIELDNAMES.index("total_profit")]
         assert profit is None, "a blank Total Profit must be sent as None, or its format is stripped"
+
+
+class TestAppendAnchorAndGridLimits:
+    """An append died live on 2026-08-15 with:
+
+        APIError: [400]: Range (Sheet1!A992) exceeds grid limits. Max rows: 991
+
+    `Tracking Submitted` carries checkbox data validation, and an EMPTY cell under a checkbox
+    materialises as a real `False`. So get_all_values() reported every grid row as non-empty,
+    `len(existing) + 1` anchored the append one row past the end of the sheet, and the whole Amazon
+    Business sync failed -- 4 scraped rows lost for that run. Only Amazon Business was hit because it
+    was the only retailer APPENDING; an update writes to a row number it already knows.
+    """
+
+    def test_a_trailing_unticked_checkbox_is_not_content(self):
+        checkbox = FIELDNAMES.index("tracking_submitted")
+        blank_but_checkboxed = [""] * len(HEADER)
+        blank_but_checkboxed[checkbox] = False
+        existing = [list(HEADER), row(order_id="A1"), list(blank_but_checkboxed),
+                    list(blank_but_checkboxed)]
+        assert ledger_sync._last_occupied_row(existing) == 2, \
+            "rows holding only an unticked checkbox must not push the append anchor down"
+
+    def test_a_real_note_below_the_ledger_still_counts(self):
+        """Deliberately narrow: appends must still land AFTER a note someone parked below the data,
+        which is the behaviour len(existing) was chosen for."""
+        note = [""] * len(HEADER)
+        note[FIELDNAMES.index("item_name")] = "my notes"
+        existing = [list(HEADER), row(order_id="A1"), list(note)]
+        assert ledger_sync._last_occupied_row(existing) == 3
+
+    def test_a_ticked_checkbox_is_content(self):
+        checkbox = FIELDNAMES.index("tracking_submitted")
+        ticked = [""] * len(HEADER)
+        ticked[checkbox] = True
+        existing = [list(HEADER), row(order_id="A1"), list(ticked)]
+        assert ledger_sync._last_occupied_row(existing) == 3
+
+    def test_the_sheet_is_grown_before_an_append_would_run_off_the_end(self, sheet, tmp_path):
+        checkbox = FIELDNAMES.index("tracking_submitted")
+        sheet.rows = [list(HEADER), row(order_id="A1", order_date="2026-08-10")]
+        # A full grid, exactly as live: every remaining row carries a materialised False.
+        filler = [""] * len(HEADER)
+        filler[checkbox] = False
+        sheet.rows += [list(filler) for _ in range(8)]
+        sheet.row_count = len(sheet.rows)
+
+        path = write_csv_file(tmp_path, dict(
+            order_id="NEW-1", order_date="2026-08-13", item_name="Thing", shipment="1",
+            status="shipped", tracking_number="1Z9", quantity="1", cost_per_item="5.00"))
+
+        sync_csv_to_sheet(path)  # must not raise the grid-limit error
+
+        written = [r for r in sheet.data_rows() if r[FIELDNAMES.index("order_id")] == "NEW-1"]
+        assert written, "the appended row must actually land"
+
+    def test_a_genuinely_full_grid_is_expanded_rather_than_erroring(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER)] + [row(order_id=f"A{i}", order_date="2026-08-10")
+                                       for i in range(1, 5)]
+        sheet.row_count = len(sheet.rows)  # not one spare row
+        path = write_csv_file(tmp_path, dict(
+            order_id="NEW-2", order_date="2026-08-13", item_name="Thing", shipment="1",
+            status="shipped", tracking_number="1Z8", quantity="1", cost_per_item="5.00"))
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.added_rows > 0, "the sheet must be grown before writing past its last row"

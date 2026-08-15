@@ -565,7 +565,10 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         # wrong column (observed shifting rows 10 columns right into K:AB). Positioning from column A
         # of the first empty row keeps every row aligned to the header. `existing` was read before any
         # updates and updates never add rows, so len(existing)+1 is the first free row.
-        start_row = len(existing) + 1
+        # NOT len(existing): a checkbox column materialises a real False in every empty row it covers,
+        # which made len(existing) the GRID height rather than the data height — see _last_occupied_row.
+        start_row = _last_occupied_row(existing) + 1
+        _ensure_grid_rows(worksheet, start_row + len(appends) - 1)
         worksheet.update(range_name=f"A{start_row}", values=[_blank_to_none(r) for r in appends])
         written_rows.extend(range(start_row, start_row + len(appends)))
 
@@ -822,6 +825,50 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
 
 
 _STATUS_FIELD_IDX = FIELDNAMES.index("status")
+
+
+def _last_occupied_row(existing: list[list]) -> int:
+    """The last row that really holds something — ignoring a row whose ONLY content is an unticked
+    checkbox.
+
+    `Tracking Submitted` carries checkbox data validation. An EMPTY cell under a checkbox
+    materialises as a real `False`, so `get_all_values()` reports such a row as non-empty and
+    `len(existing)` counts every grid row that the checkbox range covers, not just the data.
+
+    OBSERVED LIVE: the grid was 991 rows, the checkbox had materialised `False` down to
+    row 991, so `len(existing) + 1` anchored the append at A992 and the whole Amazon Business sync
+    died with `Range (Sheet1!A992) exceeds grid limits`. Only Amazon Business was affected because it
+    was the only retailer APPENDING that run — an update writes to a row number it already knows.
+
+    Deliberately narrow: a row is only skipped when its sole non-blank cell is a FALSE checkbox. A
+    genuine note parked below the ledger still counts, so appends continue to land after it rather
+    than overwriting it — which is the behaviour `len(existing)` was chosen for in the first place.
+    """
+    checkbox = FIELDNAMES.index("tracking_submitted")
+    for number in range(len(existing), 0, -1):
+        row = existing[number - 1]
+        for i, cell in enumerate(row):
+            if not str(cell).strip():
+                continue
+            if i == checkbox and str(cell).strip().lower() in ("false", "unchecked"):
+                continue  # an empty checkbox cell, not content
+            return number
+    return 0
+
+
+def _ensure_grid_rows(worksheet, needed: int) -> None:
+    """Grow the sheet if an append would land past the last row that exists.
+
+    Sheets rejects a write beyond the grid outright (HTTP 400), and the rows are lost for that run —
+    so capacity is checked BEFORE writing rather than discovered by a failed sync. Extra headroom is
+    added so this is not paid once per append as the ledger fills up.
+    """
+    have = worksheet.row_count
+    if needed <= have:
+        return
+    grow_by = needed - have + 200
+    log.info("Ledger: growing the sheet by %d row(s) to fit an append at row %d.", grow_by, needed)
+    worksheet.add_rows(grow_by)
 
 
 def _blank_to_none(row: list) -> list:

@@ -185,6 +185,27 @@ def read_grids(worksheet, spreadsheet_title: str = "") -> Grids:
 # --------------------------------------------------------------------------------------------------
 
 
+def _is_effectively_blank(sheet, grid, row_number: int) -> bool:
+    """Is this row empty in every way that matters?
+
+    A row whose ONLY content is an unticked `Tracking Submitted` checkbox is EMPTY. That column
+    carries checkbox validation, so Sheets materialises a real `False` into every row the validation
+    covers -- which is most of the grid, not just the data. Counting those as content would make
+    `blank_order_id_rows` report hundreds of "orphans" and `content_outside_the_schema` warn about
+    empty space, i.e. exactly the noise that gets an auditor ignored.
+
+    Mirrors sheets.ledger_sync._last_occupied_row, which anchors appends on the same rule.
+    """
+    for index, value in enumerate(grid[row_number - 1] if row_number - 1 < len(grid) else []):
+        if not str(value).strip():
+            continue
+        name = sheet.header[index] if index < len(sheet.header) else ""
+        if name == "Tracking Submitted" and str(value).strip().lower() in ("false", "unchecked"):
+            continue
+        return False
+    return True
+
+
 def _text(value) -> str:
     """Stringify an unformatted cell the way a FORMATTED read would render it.
 
@@ -496,7 +517,7 @@ def check_blank_order_id_rows(sheet: Sheet, opts: Options) -> Result:
     last_ledger_row = max((n for n, _ in sheet.ledger_rows(grid)), default=1)
     offenders, inside = [], 0
     for row_number, row in sheet.rows(grid):
-        if not any(str(c).strip() for c in row):
+        if _is_effectively_blank(sheet, grid, row_number):
             continue  # a wholly blank row is padding, not an orphan
         if not str(sheet.cell(grid, row_number, "Order ID")).strip():
             item = sheet.cell(grid, row_number, "Item Name")
@@ -1062,7 +1083,7 @@ def check_content_outside_the_schema(sheet: Sheet, opts: Options) -> Result:
         if len(row) > width and any(str(c).strip() for c in row[width:]):
             extra = [c for c in row[width:] if str(c).strip()]
             wide.append(f"row {row_number}: {len(row) - width} cell(s) past column {_col_letter(width - 1)}: {extra[:3]}")
-        populated = any(str(c).strip() for c in row)
+        populated = not _is_effectively_blank(sheet, grid, row_number)
         if last_ledger_row and row_number > last_ledger_row and populated:
             below.append(f"row {row_number}: content below the last ledger row ({last_ledger_row})")
         if last_ledger_row and row_number < last_ledger_row and not populated:
