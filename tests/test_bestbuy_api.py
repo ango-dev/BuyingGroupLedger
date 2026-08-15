@@ -193,98 +193,59 @@ class TestEmptyDiscoveryIsNotAlwaysAShapeChange:
         assert bestbuy_api._signin_affordances(_Exploding()) == []
 
 
-class TestOffProxyLoginFallback:
-    """The profile's static ISP proxy intermittently breaks HTTP/2 requests that carry a BODY, so the
-    sign-in POSTs die (ERR_HTTP2_PROTOCOL_ERROR) while every GET — and the whole scrape — works.
-    Diagnosed live by an A/B on the same flow: proxy on = still logged out; proxy off = 200
-    and signed in. So a NETWORK-layer sign-in failure retries the sign-in off-proxy, then scrapes
-    through the proxy as normal. See reference-isp-proxy-breaks-post.
+class TestNoOffProxySignInRetry:
+    """An off-proxy sign-in retry was added 2026-08-14 and REMOVED 2026-08-15 after it fired for real.
+
+    The theory was that the static ISP proxy broke the HTTP/2 auth POSTs (ERR_HTTP2_PROTOCOL_ERROR on
+    /identity/authenticate while every GET sailed through). When it finally fired, it failed
+    IDENTICALLY off-proxy -- same error, same endpoint. So the rejection travels with the BROWSER
+    (TLS/HTTP2 fingerprint, or the Browser-Use cloud range), not the egress IP, and the retry bought
+    nothing while roughly doubling sign-in wall-clock (5m26s vs a normal ~2m50s).
+
+    These tests exist so the idea is not re-introduced from first principles: it is an appealing theory
+    that the evidence refutes. The same result also rules out proxy ROTATION as a fix.
     """
 
     @staticmethod
-    def _client(with_proxy=True):
+    def _client():
         auth = RetailerAuth(method="password", username="u@example.com", password="pw")
-        profile = ProfileConfig(
+        return bestbuy_api.BestBuyApiClient(ProfileConfig(
             label="p", profile_id="x", retailers=["bestbuy"], auth={"bestbuy": auth},
-            proxy=ProxyConfig(host="203.0.113.10", port=50100) if with_proxy else None,
-        )
-        return bestbuy_api.BestBuyApiClient(profile)
+            proxy=ProxyConfig(host="203.0.113.10", port=50100)))
 
-    def test_transport_failure_retries_the_login_off_proxy_then_scrapes(self, monkeypatch):
-        client = self._client()
-        calls = []
-
-        def _fetch_once(profile, since, open_ids, terminal_ids, allow_login):
-            calls.append(allow_login)
-            if len(calls) == 1:
-                raise bestbuy_api._AuthTransportError()
-            return ["ROWS"]
-
-        monkeypatch.setattr(client, "_fetch_once", _fetch_once)
-        monkeypatch.setattr(client, "_login_without_proxy", lambda: True)
-
-        assert client.fetch_order_payloads("2026-08-01", set(), set()) == ["ROWS"]
-        # The retry must NOT try to log in again through the proxy — that is what just failed.
-        assert calls == [True, False]
-
-    def test_the_off_proxy_login_actually_strips_the_proxy(self, monkeypatch):
-        """The crux of the fix: the retry session must carry no proxy, while the profile itself (and
-        therefore every later scrape) keeps it."""
-        client = self._client()
-        seen = {}
-
-        class _FakePage:
-            def goto(self, *a, **k):
-                pass
-
-            def wait_for_timeout(self, *a, **k):
-                pass
+    def test_a_failed_sign_in_opens_exactly_one_browser(self, monkeypatch):
+        """The retry's real cost: a second full CDP session on the runs least able to afford it."""
+        opened = []
 
         class _FakeCdp:
             def __init__(self, profile):
-                seen["profile"] = profile
+                opened.append(profile)
 
             def __enter__(self):
-                return _FakePage()
+                raise ApiLoginError("logged out and login failed")
 
             def __exit__(self, *exc):
                 return False
 
         monkeypatch.setattr(bestbuy_api, "CdpBrowser", _FakeCdp)
-        monkeypatch.setattr(bestbuy_api, "_looks_logged_out", lambda page: False)  # already signed in
-
-        assert client._login_without_proxy() is True
-        assert seen["profile"].proxy is None, "the sign-in retry must bypass the broken proxy"
-        assert client.profile.proxy is not None, "the profile keeps its proxy for the scrape"
-
-    def test_a_page_shape_failure_does_not_spend_a_second_browser(self, monkeypatch):
-        # transport_failed=False -> retrying off-proxy would fail identically, so don't try.
-        client = self._client()
-        monkeypatch.setattr(
-            client, "_fetch_once",
-            lambda *a, **k: (_ for _ in ()).throw(ApiLoginError("selector changed")))
-        monkeypatch.setattr(
-            client, "_login_without_proxy",
-            lambda: pytest.fail("must not retry off-proxy for a non-transport failure"))
-
         with pytest.raises(ApiLoginError):
+            self._client().fetch_order_payloads("2026-08-01", set(), set())
+        assert len(opened) == 1, "a failed sign-in must not open a second browser to try again"
+
+    def test_the_off_proxy_plumbing_is_gone(self):
+        """Deleted, not just unused -- dead auth plumbing invites revival."""
+        assert not hasattr(bestbuy_api.BestBuyApiClient, "_login_without_proxy")
+        assert not hasattr(bestbuy_api, "_AuthTransportError")
+
+    def test_a_network_layer_failure_still_says_so(self, monkeypatch):
+        """The diagnostic value of c9e7490 is KEPT: transport_failed no longer drives a retry, but it
+        still tells whoever reads the alert which problem they have. A network-layer rejection is not
+        fixable by changing egress; a page-flow failure is a different job entirely."""
+        page = _FakeHistoryPage(html="<html>Sign in</html>", signin_selectors={"#fld-e"})
+        client = _client_with_page(page, monkeypatch)
+        monkeypatch.setattr(bestbuy_api, "_looks_logged_out", lambda p: True)
+        monkeypatch.setattr(bestbuy_api, "_deterministic_login",
+                            lambda p, a: bestbuy_api.LoginOutcome(False, transport_failed=True))
+
+        with pytest.raises(ApiLoginError, match="NETWORK layer"):
             client.fetch_order_payloads("2026-08-01", set(), set())
-
-    def test_a_failed_off_proxy_login_reports_a_login_error(self, monkeypatch):
-        # Still ApiLoginError, so scrape() alerts and skips WITHOUT running the paid agent.
-        client = self._client()
-        monkeypatch.setattr(
-            client, "_fetch_once",
-            lambda *a, **k: (_ for _ in ()).throw(bestbuy_api._AuthTransportError()))
-        monkeypatch.setattr(client, "_login_without_proxy", lambda: False)
-
-        with pytest.raises(ApiLoginError):
-            client.fetch_order_payloads("2026-08-01", set(), set())
-
-    def test_no_proxy_profile_has_nothing_to_bypass(self, monkeypatch):
-        client = self._client(with_proxy=False)
-        monkeypatch.setattr(
-            bestbuy_api, "CdpBrowser",
-            lambda profile: pytest.fail("must not open a browser when there is no proxy to bypass"))
-
-        assert client._login_without_proxy() is False

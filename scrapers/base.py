@@ -296,7 +296,22 @@ class BaseRetailerScraper(abc.ABC):
             # open their order_url and mislabel them, corrupting the ledger).
             return load_order_state(self.profile.label, since=earliest, retailer=self.retailer_name)
         except Exception:
-            log.warning("Could not load order state; treating all orders as new.", exc_info=True)
+            # load_order_state has its OWN guard for an unreadable sheet (and alerts there), so this
+            # only fires for something else entirely — a bad date window, an import failure. Alerted
+            # for the same reason: it silently drops every open-order re-check for this run, which
+            # looks identical to a healthy run in the log.
+            log.warning(
+                "%s: could not load order state; OPEN-ORDER RE-CHECKS ARE SKIPPED this run — only "
+                "brand-new orders in the date window will be fetched.",
+                self.retailer_name, exc_info=True,
+            )
+            alert(
+                f"{self.retailer_name} [{self.profile.label}]: order state unavailable — "
+                "re-checks skipped this run",
+                "The scrape could not determine which orders are still open, so it re-checked none "
+                "of them and only looked for brand-new orders. Any status or tracking-number change "
+                "on an open order was missed for this cycle. Check logs/run.log.",
+            )
             return {"delivered_ids": [], "open_orders": []}
 
     @staticmethod

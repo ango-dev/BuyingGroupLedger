@@ -6,6 +6,8 @@ enough to test everything else offline — no credentials, no network, no live s
 
 import csv
 
+import gspread
+
 import pytest
 
 from models.order import FIELDNAMES
@@ -1589,3 +1591,61 @@ class TestAppendAnchorAndGridLimits:
         sync_csv_to_sheet(path)
 
         assert sheet.added_rows > 0, "the sheet must be grown before writing past its last row"
+
+
+class TestTransientRetry:
+    """A single momentary 503 on the order-state read cost a whole cycle of re-check coverage on
+    2026-08-15, while every other sheet call in that same run succeeded seconds later."""
+
+    def test_a_transient_error_is_retried_and_succeeds(self, monkeypatch):
+        monkeypatch.setattr(ledger_sync.time, "sleep", lambda s: None)
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) < 3:
+                raise gspread.exceptions.APIError(_FakeResponse(503))
+            return "ok"
+
+        assert ledger_sync._retry_transient(flaky, what="read") == "ok"
+        assert len(calls) == 3
+
+    def test_a_deterministic_error_is_NOT_retried(self, monkeypatch):
+        """A 400 ("exceeds grid limits") fails identically twice -- retrying only delays it and hides
+        it behind a longer run."""
+        monkeypatch.setattr(ledger_sync.time, "sleep", lambda s: None)
+        calls = []
+
+        def bad_request():
+            calls.append(1)
+            raise gspread.exceptions.APIError(_FakeResponse(400))
+
+        with pytest.raises(gspread.exceptions.APIError):
+            ledger_sync._retry_transient(bad_request, what="write")
+        assert len(calls) == 1, "a 4xx must fail immediately"
+
+    def test_it_gives_up_after_the_attempt_budget(self, monkeypatch):
+        monkeypatch.setattr(ledger_sync.time, "sleep", lambda s: None)
+        calls = []
+
+        def always_503():
+            calls.append(1)
+            raise gspread.exceptions.APIError(_FakeResponse(503))
+
+        with pytest.raises(gspread.exceptions.APIError):
+            ledger_sync._retry_transient(always_503, what="read", attempts=3)
+        assert len(calls) == 3, "bounded -- a sustained outage must not stall the run forever"
+
+
+class _FakeResponse:
+    """Minimal stand-in for the requests.Response gspread wraps in an APIError."""
+
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+    def json(self):
+        return {"error": {"code": self.status_code, "message": "test", "status": "TEST"}}
+
+    @property
+    def text(self):
+        return "test"

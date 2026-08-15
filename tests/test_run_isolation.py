@@ -107,3 +107,57 @@ def profile():
     from models.profile import ProfileConfig
 
     return ProfileConfig(label="p", profile_id="pid", retailers=["bestbuy"])
+
+
+class TestSheetFailuresAreLoudNotSilent:
+    """Sheet-side failures degrade collection SILENTLY, which CLAUDE.md ranks as the worst mode:
+    "silently records nothing". Two were observed live on 2026-08-15 -- an append that dropped 4
+    scraped rows, and a transient 503 on the order-state read that skipped every re-check. Both
+    logged and carried on. Continuing the run is CORRECT; doing it quietly is not.
+    """
+
+    def test_a_failed_sheet_sync_alerts_and_says_how_many_rows_were_lost(self, monkeypatch, profile):
+        monkeypatch.setattr(main, "_classify_and_drop_personal", lambda items, label: items)
+        monkeypatch.setattr(main, "_tag_cards", lambda items, label: None)
+        monkeypatch.setattr(main, "write_csv", lambda items: __import__("pathlib").Path("x.csv"))
+        monkeypatch.setattr(main, "sync_csv_to_sheet",
+                            lambda p: (_ for _ in ()).throw(RuntimeError("APIError 400")))
+        fired = []
+        monkeypatch.setattr(main, "alert", lambda subject, body: fired.append((subject, body)))
+
+        main.run_scrape(_Scraper(profile))  # continues, does not raise
+
+        assert fired, "a sync failure must alert -- the scraped rows are gone otherwise"
+        subject, body = fired[0]
+        assert "1 row" in subject, f"the alert must say how many rows were lost: {subject!r}"
+
+    def test_an_unreadable_order_state_alerts(self, monkeypatch):
+        """The 503 case. It is not enough to log: the run then looks completely normal apart from
+        fetching fewer orders than usual."""
+        from sheets import ledger_sync
+
+        monkeypatch.setattr(ledger_sync, "_get_worksheet",
+                            lambda: (_ for _ in ()).throw(RuntimeError("503 unavailable")))
+        fired = []
+        monkeypatch.setattr(ledger_sync, "alert", lambda subject, body: fired.append(subject))
+
+        state = ledger_sync.load_order_state("profile-alpha", retailer="Amazon")
+
+        assert state["open_orders"] == [], "must still fail soft and let the run continue"
+        assert fired, "an unreadable sheet must alert"
+        assert "re-checks skipped" in fired[0].lower()
+
+    def test_the_warning_no_longer_claims_it_treats_everything_as_new(self, monkeypatch, caplog):
+        """The old wording read as conservative OVER-fetching. The real effect is the opposite: the
+        fetch set is (new-in-window + still-open re-checks), so an empty state fetches FEWER orders.
+        Live it took Amazon from "fetching 1" to "fetching 0"."""
+        from sheets import ledger_sync
+
+        monkeypatch.setattr(ledger_sync, "_get_worksheet",
+                            lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        monkeypatch.setattr(ledger_sync, "alert", lambda *a: None)
+        with caplog.at_level("WARNING"):
+            ledger_sync.load_order_state("p")
+        text = caplog.text.lower()
+        assert "treating all orders as new" not in text
+        assert "skipped" in text

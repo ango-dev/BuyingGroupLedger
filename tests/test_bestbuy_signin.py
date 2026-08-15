@@ -13,6 +13,7 @@ import logging
 
 import pytest
 
+from models.profile import RetailerAuth
 from scrapers import bestbuy_api
 
 
@@ -206,3 +207,83 @@ class TestFailedRequestReporting:
 
         # Telemetry must never be what breaks a login.
         assert bestbuy_api._watch_failed_requests(NoEvents()) == []
+
+
+class TestKeepMeSignedIn:
+    """Best Buy was logged out on ~16 consecutive scheduled runs. The accepted explanation was that
+    its sessions die in ~20-25 minutes against a 3-hourly schedule -- but the AGENT prompt has always
+    said to leave "Keep me signed in" checked, while the deterministic login that replaced it as the
+    primary path never touched the box. If it governs persistent-token vs session-cookie, the
+    deterministic path has been minting the short-lived kind on every run.
+    """
+
+    class _Box:
+        def __init__(self, present=True, checked=False):
+            self.present, self.checked, self.check_calls = present, checked, 0
+
+        def count(self):
+            return 1 if self.present else 0
+
+        def is_checked(self):
+            return self.checked
+
+        def check(self, timeout=None):
+            self.check_calls += 1
+            self.checked = True
+
+    class _Page:
+        def __init__(self, box):
+            self._box = box
+
+        def locator(self, selector):
+            page = self
+
+            class _L:
+                first = None
+
+                def __init__(self):
+                    pass
+
+                def count(self):
+                    return page._box.count()
+
+            loc = _L()
+            loc.first = page._box
+            return loc
+
+    def test_an_unticked_box_is_ticked(self):
+        box = self._Box(checked=False)
+        assert bestbuy_api._keep_signed_in(self._Page(box)) is True
+        assert box.checked and box.check_calls == 1
+
+    def test_an_already_ticked_box_is_left_alone(self):
+        """check() not click(), so a box Best Buy already defaults to checked is never toggled OFF."""
+        box = self._Box(checked=True)
+        assert bestbuy_api._keep_signed_in(self._Page(box)) is True
+        assert box.check_calls == 0 and box.checked
+
+    def test_a_missing_control_is_not_a_failure(self):
+        """Best-effort: sign-in must proceed whether or not the box exists."""
+        assert bestbuy_api._keep_signed_in(self._Page(self._Box(present=False))) is False
+
+    def test_it_runs_before_continue_is_clicked(self, monkeypatch):
+        """Ticking it AFTER submitting would be useless -- order is the whole point."""
+        order = []
+        monkeypatch.setattr(bestbuy_api, "_keep_signed_in",
+                            lambda p: order.append("keep") or True)
+        monkeypatch.setattr(bestbuy_api, "_click_continue",
+                            lambda p: order.append("continue") or False)
+        monkeypatch.setattr(bestbuy_api, "_watch_failed_requests", lambda p: [])
+        monkeypatch.setattr(bestbuy_api, "_dismiss_survey", lambda p: None)
+        monkeypatch.setattr(bestbuy_api, "_log_signin_diagnostics", lambda *a, **k: None)
+
+        class _P:
+            def wait_for_selector(self, *a, **k):
+                pass
+
+            def fill(self, *a, **k):
+                pass
+
+        auth = RetailerAuth(method="password", username="u@e.com", password="pw")
+        bestbuy_api._deterministic_login(_P(), auth)
+        assert order == ["keep", "continue"]

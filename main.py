@@ -161,8 +161,17 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
         result = sync_csv_to_sheet(csv_path)
         log.info("Synced %s into the Google Sheet ledger.", csv_path.name)
     except Exception:
-        log.exception("Sheet sync failed for %s", csv_path)
-        alert("Sheet sync failed", f"Failed to sync {csv_path} into the ledger. Check logs/run.log.")
+        # This alert has always existed, but it never said what was LOST. A sync failure discards
+        # every row that run scraped — live it silently dropped 4 Amazon Business rows
+        # twice — so the count and the retailer are the facts worth putting in front of someone.
+        log.exception("Sheet sync failed for %s (%d row(s) NOT recorded)", csv_path, len(items))
+        alert(
+            f"{label}: sheet sync FAILED — {len(items)} row(s) not recorded",
+            f"{len(items)} scraped row(s) could not be written to the ledger and are not on the "
+            f"sheet. The CSV is kept at {csv_path} if they are needed. Open orders will be "
+            "re-scraped next run; a newly-discovered order is only re-found while it stays in the "
+            "lookback window. Check logs/run.log.",
+        )
         return
 
     # Keep the ledger newest-first. Only APPENDS can put rows out of order — an update rewrites a row

@@ -59,11 +59,6 @@ class BestBuyApiError(Exception):
     should fall back to the agent."""
 
 
-class _AuthTransportError(Exception):
-    """INTERNAL: sign-in failed because the auth requests died at the network layer (the proxy), not
-    because of anything on the page. Never escapes fetch_order_payloads — it only routes the retry to
-    the off-proxy sign-in."""
-
 
 # --- pure flight parsing (unit-tested) ----------------------------------------------------------
 def _scan_string_literal(s: str, i: int) -> tuple[str, int]:
@@ -221,6 +216,48 @@ def _dismiss_survey(page) -> None:
         pass
 
 
+def _keep_signed_in(page) -> bool:
+    """Tick "Keep me signed in" before submitting, if it is present and unticked.
+
+    WHY THIS MATTERS MORE THAN IT LOOKS. Best Buy has been logged out on EVERY scheduled run for days
+    — ~16 consecutive — and the accepted explanation was that its web sessions simply die in ~20-25
+    minutes against a 3-hourly schedule. But the AGENT prompt has always said to leave this box
+    checked (`scrapers/bestbuy.py`), while the deterministic login, which replaced it as the primary
+    path, never touched it. That asymmetry is a candidate root cause rather than a certainty: if the
+    box governs whether Best Buy mints a persistent token or a session-scoped cookie, then the
+    deterministic path has been minting the short-lived kind every single run and re-signing-in
+    forever, which is exactly the observed behaviour.
+
+    Best-effort by design, like every other step in this flow: several spellings are tried, and a
+    miss changes nothing (Best Buy has historically DEFAULTED it to checked, so this is insurance
+    against a default flip as much as a fix). `check()` is used rather than `click()` so an
+    already-ticked box is never toggled OFF.
+
+    Not yet confirmed live — the next scheduled run either shows Best Buy arriving warm, or shows the
+    box was never the reason. Either outcome is worth more than the current guess.
+    """
+    for selector in (
+        "#cia-remember-me",
+        "input[name='keepMeSignedIn']",
+        "input[type=checkbox][id*='remember' i]",
+        "input[type=checkbox][name*='remember' i]",
+    ):
+        try:
+            box = page.locator(selector).first
+            if box.count() == 0:
+                continue
+            if box.is_checked():
+                log.debug("Best Buy sign-in: 'Keep me signed in' already checked (%s).", selector)
+                return True
+            box.check(timeout=4000)
+            log.info("Best Buy sign-in: ticked 'Keep me signed in' via %s.", selector)
+            return True
+        except Exception:  # noqa: BLE001 — never let an optional nicety break the sign-in
+            continue
+    log.debug("Best Buy sign-in: no 'Keep me signed in' control found; continuing.")
+    return False
+
+
 def _click_continue(page) -> bool:
     """Click Continue on the email screen, re-dismissing the survey modal before each attempt.
 
@@ -374,6 +411,7 @@ def _deterministic_login(page, auth) -> LoginOutcome:
         if page.locator(".prefilled-value, .cia-signin__username").count() == 0:
             log.warning("Best Buy sign-in page has no email field and no prefilled email.")
             return LoginOutcome(False)
+    _keep_signed_in(page)
     if not _click_continue(page):
         _log_signin_diagnostics(page, "could not click Continue on the email screen", failed_requests)
         return LoginOutcome(False, bool(_auth_critical(failed_requests)))
@@ -444,60 +482,23 @@ class BestBuyApiClient:
         """Return the ss-api payload for every order placed on/after `since_date` plus every still-open
         order, minus terminal ones. Discovery + details all happen in one logged-in CDP session.
 
-        If signing in fails because the auth requests died at the NETWORK layer, the sign-in is retried
-        once in a separate session with the profile's proxy stripped, and the scrape then runs through
-        the proxy as usual — see _login_without_proxy for why.
-        """
-        try:
-            return self._fetch_once(self.profile, since_date, open_ids, terminal_ids, allow_login=True)
-        except _AuthTransportError:
-            if not self._login_without_proxy():
-                raise ApiLoginError(
-                    "Best Buy session is logged out; sign-in failed through the proxy (auth requests "
-                    "died at the network layer) and the off-proxy retry did not succeed either."
-                ) from None
-            # The profile now holds a valid session; scrape through the proxy exactly as normal. A
-            # session obtained off-proxy works through it — Best Buy does not bind it to the login IP
-            # (proven live).
-            return self._fetch_once(self.profile, since_date, open_ids, terminal_ids, allow_login=False)
+        THERE IS NO OFF-PROXY SIGN-IN RETRY, and the reason is worth keeping. One was added on
+        2026-08-14 on the theory that the static ISP proxy was breaking the HTTP/2 auth POSTs
+        (ERR_HTTP2_PROTOCOL_ERROR on /identity/authenticate while every GET sailed through). It fired
+        for real on 2026-08-15 16:00Z and failed IDENTICALLY off-proxy — same error, same endpoint. So
+        the rejection travels with the BROWSER (TLS/HTTP2 fingerprint, or the Browser-Use cloud
+        datacenter range), not with the egress IP, and the retry bought nothing while roughly doubling
+        sign-in wall-clock on the runs that could least afford it (5m26s vs a normal ~2m50s).
 
-    def _login_without_proxy(self) -> bool:
-        """Sign in once with the profile's proxy stripped, persisting the session to the profile.
-
-        The static ISP proxy intermittently breaks HTTP/2 requests that carry a BODY, so the sign-in
-        POSTs (/identity/authenticate, /gateway/graphql) die with ERR_HTTP2_PROTOCOL_ERROR while every
-        GET — and therefore the whole scrape — sails through. Diagnosed live with an A/B on
-        the same flow minutes apart: proxy on = "Failed to fetch" and still logged out; proxy off = 200
-        and signed in. Only the sign-in bypasses the proxy, so normal traffic keeps the ISP identity.
+        That result also rules out proxy rotation as a fix, which is why it isn't attempted here.
+        `LoginOutcome.transport_failed` is kept — not to retry on, but to say plainly WHICH kind of
+        failure it was, since a network-layer rejection and a page-shape change need different people
+        to look at them.
         """
-        if not (self.profile.proxy and self.profile.proxy.host):
-            return False  # no proxy to bypass — the failure is something else
-        auth = self.profile.auth.get("bestbuy")
-        if auth is None:
-            return False
-        log.warning(
-            "Best Buy [%s]: sign-in failed through the proxy at the network layer; retrying the "
-            "sign-in OFF-PROXY (the scrape still runs through the proxy).", self.profile.label,
-        )
-        direct = self.profile.model_copy(update={"proxy": None})
-        try:
-            with CdpBrowser(direct) as page:
-                page.goto(PURCHASE_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(3000)
-                if not _looks_logged_out(page):
-                    log.info("Best Buy [%s]: session already valid off-proxy.", self.profile.label)
-                    return True
-                outcome = _deterministic_login(page, auth)
-        except Exception:  # noqa: BLE001 — the caller reports the original auth failure
-            log.warning("Best Buy [%s]: off-proxy sign-in attempt errored.", self.profile.label,
-                        exc_info=True)
-            return False
-        log.info("Best Buy [%s]: off-proxy sign-in %s.", self.profile.label,
-                 "succeeded" if outcome.ok else "did not succeed")
-        return outcome.ok
+        return self._fetch_once(self.profile, since_date, open_ids, terminal_ids)
 
     def _fetch_once(
-        self, profile, since_date: str, open_ids, terminal_ids, allow_login: bool
+        self, profile, since_date: str, open_ids, terminal_ids
     ) -> list[dict]:
         open_ids = set(open_ids or [])
         terminal_ids = set(terminal_ids or [])
@@ -513,11 +514,17 @@ class BestBuyApiClient:
                 if not outcome.ok:
                     log.warning("Best Buy [%s]: deterministic self-login did not succeed.",
                                 self.profile.label)
-                    # A network-layer auth failure is the proxy's doing and is retryable off-proxy;
-                    # anything else (page shape, bad credentials) is not, so it fails outright.
-                    if outcome.transport_failed and allow_login:
-                        raise _AuthTransportError()
+                    # Both routes end the same way — skip with an alert, never the paid agent, since
+                    # it cannot fix an auth failure either. The distinction is carried in the MESSAGE
+                    # so whoever reads the alert knows which problem they have: a network-layer
+                    # rejection is anti-bot/transport (not fixable by changing egress — proven live
+                    # 2026-08-15, see fetch_order_payloads), while anything else points at the page
+                    # flow or the credentials.
                     raise ApiLoginError(
+                        "Best Buy session is logged out and deterministic login did not succeed; the "
+                        "auth requests died at the NETWORK layer (anti-bot/transport, not the page "
+                        "flow — changing egress does not help)."
+                        if outcome.transport_failed else
                         "Best Buy session is logged out and deterministic login did not succeed."
                     )
                 log.info("Best Buy [%s]: deterministic self-login succeeded.", self.profile.label)

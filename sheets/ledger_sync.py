@@ -1,11 +1,13 @@
 import csv
 import logging
 import re
+import time
 from pathlib import Path
 
 import gspread
 from google.oauth2.service_account import Credentials
 
+from alerts.notifier import alert
 from config.settings import settings
 from config.warehouses import classify_address, is_personal
 from models.order import FIELDNAMES, TERMINAL_STATUSES, shipment_label
@@ -827,6 +829,38 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
 _STATUS_FIELD_IDX = FIELDNAMES.index("status")
 
 
+#: HTTP statuses worth trying again: Google being briefly unavailable or rate-limiting, never a 4xx
+#: telling us the request itself is wrong (a bad range or a missing sheet will fail identically twice).
+_TRANSIENT_STATUSES = (429, 500, 502, 503, 504)
+
+
+def _retry_transient(call, *, what: str, attempts: int = 3, base_delay: float = 1.0):
+    """Run `call`, retrying a TRANSIENT Google error with exponential backoff.
+
+    A single momentary 503 on the order-state read costs a whole cycle of re-check coverage — live 10:00Z it took Amazon from "fetching 1 order" to "fetching 0" — while every other sheet
+    call in that same run succeeded seconds later. So the failure was worth one more try, not a
+    skipped scrape.
+
+    Only 5xx/429 are retried. A 400 ("exceeds grid limits") or a 404 is deterministic: retrying it
+    just delays the same failure and hides it behind a longer run.
+    """
+    delay = base_delay
+    for attempt in range(1, attempts + 1):
+        try:
+            return call()
+        except Exception as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status is None:
+                status = (exc.args and isinstance(exc.args[0], dict)
+                          and exc.args[0].get("code")) or None
+            if status not in _TRANSIENT_STATUSES or attempt == attempts:
+                raise
+            log.warning("Sheets %s failed with %s (attempt %d/%d); retrying in %.1fs.",
+                        what, status, attempt, attempts, delay)
+            time.sleep(delay)
+            delay *= 2
+
+
 def _last_occupied_row(existing: list[list]) -> int:
     """The last row that really holds something — ignoring a row whose ONLY content is an unticked
     checkbox.
@@ -1066,10 +1100,31 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
     """
     empty: dict = {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
     try:
-        worksheet = _get_worksheet()
-        existing = worksheet.get_all_values()
+        worksheet = _retry_transient(_get_worksheet, what="open the ledger worksheet")
+        existing = _retry_transient(worksheet.get_all_values, what="read order state")
     except Exception:
-        log.warning("Could not read order state from sheet; treating all orders as new.", exc_info=True)
+        # NOT "treating all orders as new" — that wording reads as conservative OVER-fetching, and the
+        # real effect is the opposite. The fetch set is (new-in-window + still-open re-checks), and the
+        # still-open half comes from THIS read; with it empty, FEWER orders are fetched, not more.
+        # Live 10:00Z a transient 503 here took Amazon from its usual "fetching 1" to
+        # "discovered 10 -> fetching 0 -> built 0 rows", so a tracking-number update on the open order
+        # would have been missed for that cycle. Compare Costco in the same run, reading state fine:
+        # "0 discovered + 1 open -> 1 order(s) to fetch".
+        who = " / ".join(x for x in (profile_label, retailer) if x) or "all profiles"
+        log.warning(
+            "Could not read order state from the sheet (%s); OPEN-ORDER RE-CHECKS ARE SKIPPED this "
+            "run — only brand-new orders in the date window will be fetched.", who, exc_info=True,
+        )
+        # Alerted because this degrades collection SILENTLY. A logged-out session shouts; this used to
+        # log a warning and carry on looking like a normal run, which is the failure mode CLAUDE.md
+        # ranks worst ("silently records nothing"). The run still continues — that part is correct.
+        alert(
+            f"Ledger: order state unreadable ({who}) — re-checks skipped this run",
+            "The scrape could not read the sheet, so it did not re-check any already-recorded open "
+            "order; it only looked for brand-new orders in the lookback window. Any status or "
+            "tracking-number change on an open order was missed for this cycle and will be picked up "
+            "on the next successful run. Check logs/run.log.",
+        )
         return empty
 
     if not existing or not any(cell.strip() for cell in existing[0]):
