@@ -568,12 +568,32 @@ posts each shipped package's tracking number to the right group, and reads their
 **Insurance**, **Payout Amount** and **Payout Date** columns, which is what makes **Total Profit**
 light up (the formula stays blank until Payout Amount is filled).
 
+> ### ⚠️ You still submit BFMR order numbers by hand
+>
+> **After placing an order against a BFMR reservation, enter its order number in BFMR yourself, right
+> away.** This tool does not do it, and is not going to.
+>
+> That is not an oversight — it is what makes everything below work. BFMR keys on its own
+> `reservation → purchase → shipment` chain, and your order number is what turns a *reservation* into
+> a *purchase*. Until that happens there is nothing for a tracking number to attach to, so
+> `sync_tracking` reports the package as having no purchase rather than guessing which deal you meant.
+> A reservation also expires if its order number arrives late, and BFMR cancels a purchase whose
+> tracking misses the deadline.
+>
+> Choosing the reservation automatically would mean matching a deal against a ledger row, and getting
+> it wrong books the **wrong deal** — which cannot be undone here, because this tool never cancels
+> anything at a buying group. You already know which deal you bought at the moment you buy it; typing
+> the number then costs seconds and cannot go wrong.
+>
+> MaxOutDeals needs none of this — it keys on the tracking number alone, so posting is fully automatic.
+
 Two groups are supported today, and they work nothing alike:
 
 | | **BFMR** | **MaxOutDeals** |
 |---|---|---|
 | auth | `API-KEY` + `API-SECRET` headers | bearer token **+ an IP allowlist** |
 | keyed on | its own reservation → purchase → shipment ids | the tracking number |
+| order number | **you enter it, by hand, at order time** | not used |
 | batching | one object per ledger row | one object per package (rows summed) |
 | limits | undocumented | **10/day** payouts, **30/day** tracking |
 
