@@ -17,7 +17,7 @@ when a scraper reads page 1 of a paginated order history and misses the rest, or
 overwrites a good tracking number with a blank. Most of the work below is invariants, idempotency and
 auditing aimed squarely at that class of bug — see **[Design notes](#design-notes)**.
 
-> **Status:** running in production against real accounts. `pytest` runs 803 offline tests that need
+> **Status:** running in production against real accounts. `pytest` runs 921 offline tests that need
 > no credentials and no network.
 
 ---
@@ -34,6 +34,8 @@ The parts worth reading if you're here to look at the engineering rather than to
 | Reconcile on tracking number first | `ledger_sync.py` `sync_csv_to_sheet` | The deterministic path and the agent legitimately disagree about shipment *numbering*. Tracking number is an identity both read identically, so it beats the synthetic key. |
 | Undisclosed-split safety net | `ledger_sync.py` | A retailer API that exposes one tracking number per line and rotates it will silently lose a box. An update that changes a non-blank tracking number to a *different* one appends instead of overwriting, and alerts. |
 | Audit the live data, not just the code | `scripts/audit_sheet.py` | Tests prove the code; they can't see the sheet. 31 invariant checks, authenticated **read-only** so it cannot write even by accident. |
+| Ask storage before opening a browser | `receipts/capture.py` | Receipt capture runs every scrape, but the existence check comes first — so the common re-check run creates no cloud browser at all, and a browser is only ever paid for by a genuinely new order. |
+| Refuse to store a sign-in page | `receipts/sources.py` `looks_logged_out` | A login wall renders and uploads perfectly. Storing one would mark the order as having a receipt *forever*, because the object exists and no later run retries. |
 | Catch silent misconfiguration at boot | `scripts/preflight.py`, `docker/healthcheck.sh` | A missing dependency degrades three retailers to the paid agent without raising; a dead scheduler produces no signal at all. Both now announce themselves. |
 
 > **A note on `the design notes §N` references.** Code and test comments cite section numbers in `the design notes`, an
@@ -133,7 +135,10 @@ reason about them, then reference/audit columns you rarely scan:
 Shipment · Delivery Date · Cost Per Item · Shipping · Total Cost · Card · Cashback Rate ·
 Insurance · Payout Amount · Payout Date · Total Profit · Buying Group ·
 Order Link · Tracking Link · Delivery Address · Card Last 4 · Last Scraped At ·
-Tracking Submitted`
+Tracking Submitted · Receipt Link`
+
+**Receipt Link** points at the order's captured receipt in object storage — see "Receipt capture"
+below. It's per *order*, so every row of a multi-item order carries the same link.
 
 > **Column order is part of the wire format.** Rows are written to the sheet *positionally* from column
 > A, so `FIELDNAMES` (models/order.py) and `HEADER` (sheets/ledger_sync.py) define where every value
@@ -681,6 +686,66 @@ rows record a real `0`.
 Once you've done a dry run and a one-package live test, set `BUYING_GROUP_SYNC_ENABLED=1` to let the
 scheduled run do it too — it's off by default because it spends real money unattended.
 
+### Receipt capture (proof of purchase, in your own object storage)
+
+The ledger records *what* you bought; it doesn't prove it. That gap has a concrete cost: BFMR wants
+**proof of purchase** whenever a combined-carton tracking number has to be suffixed, and the tool's
+own alert currently tells you to go find one by hand. Worse, it's a closing window — a delivered
+order is terminal and never re-read, so once a run finishes, the chance to grab that receipt is gone.
+
+So each run renders every **newly-seen** order's receipt to PDF, uploads it to OCI Object Storage,
+and writes a link into the **Receipt Link** column.
+
+```bash
+# .env — OCI_BUCKET is the master switch; blank means the whole feature is inert
+OCI_BUCKET=ledger-receipts
+OCI_S3_ENDPOINT_URL=https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
+OCI_S3_REGION=<region>
+OCI_S3_ACCESS_KEY_ID=...      # an OCI *customer secret key*, not the API signing key
+OCI_S3_SECRET_ACCESS_KEY=...
+OCI_PAR_URL_PREFIX=https://objectstorage.<region>.oraclecloud.com/p/<secret>/n/<ns>/b/<bucket>/o
+```
+
+**One manual setup step: create a bucket-level PAR.** In the OCI console → your bucket →
+Pre-Authenticated Requests → Create, with type *Bucket*, access *Permit object reads*, prefix
+`receipts/`, and a far-future expiry. Uploads go through the **S3 Compatibility API** (plain boto3),
+but a PAR is an OCI-native concept that the S3 API cannot mint — and boto3's presigned URLs expire
+within 7 days, while a ledger row gets read months later. One console click buys a link that doesn't
+rot, and revoking it is one more.
+
+> ⚠️ **The PAR URL is a secret, and receipts are PII.** Anyone holding it can read every receipt
+> under the prefix, and a receipt carries your name, delivery address, card last 4 and order totals.
+> Keep the bucket private and the URL in `.env`.
+
+**It costs almost nothing to leave on.** Storage is asked *first*, before any browser exists: an
+order whose receipt is already stored just gets its link written from the object key. So a routine
+re-check run — the common case — opens **zero** cloud browsers. One browser is created only when at
+least one genuinely new order needs a receipt, and it covers all of them.
+
+**What each retailer gives you**, established by `scripts/receipt_probe.py` against real accounts:
+
+| Retailer | What gets stored |
+|---|---|
+| **Amazon** | Its **print invoice** page rendered to PDF — order number, date, ship-to, payment method, items, quantities, grand total |
+| **Amazon Business** | Amazon's **own invoice PDF**, downloaded rather than rendered. The print-invoice URL redirects to a real `order-document.pdf`; rendering that would capture Chrome's PDF *viewer* instead of the document |
+| **Best Buy** | The order-details page rendered in **print media** — the page ships its own `@media print` rules, so the PDF is the clean receipt, not the navigation and footer |
+| **Costco** | The order-details page. ⚠️ Needs a logged-in **browser** session, which Costco's normal path never creates — it runs on a stored GraphQL token with no browser at all. Re-run `scripts.create_profile` and sign into costco.com if captures start being skipped |
+
+**Failures are always partial, never fatal.** A missing receipt is an inconvenience the next run
+retries; a missing *order* is missed reimbursement. So one order failing doesn't stop the others, a
+capture failure can't stop the CSV write or the sheet sync, and a page that redirects to a sign-in
+wall is **refused rather than stored** — storing it would upload a perfect PDF of a login form and
+mark that order done forever, since the object would then exist and no later run would retry.
+
+Check the whole setup offline and free with `python -m scripts.preflight`, which reports a
+*partially* configured bucket as a failure — the case where capture looks switched on but silently
+stores nothing.
+
+```bash
+# Settle what a retailer's receipt page actually gives you. Uploads nothing.
+python -m scripts.receipt_probe --label profile-bravo --retailer amazon --order-id 113-...
+```
+
 ### Automatic running (every few hours — adjustable, with a floor)
 
 **Linux (cron):**
@@ -807,6 +872,11 @@ Linux host has its own runbook: **[DEPLOY.md](DEPLOY.md)**.
 
 **Next up**
 
+- **Backfill receipts for rows already on the sheet.** Capture only fires for orders a run actually
+  scrapes, and terminal orders are never re-read — so historical rows keep a blank Receipt Link
+  until a one-off script walks the sheet and captures them. Most of the machinery already exists
+  (`receipts.capture.attach_receipts` takes any list of rows); what's missing is reading the sheet
+  and writing the column back.
 - **Event-driven re-checks from retailer emails.** Ingest Amazon / Best Buy shipped + delivered +
   order-update emails (Gmail API or IMAP) to trigger a targeted re-check of just that order, instead of
   or alongside the multi-hour poll. Faster status, fewer wasted runs.
@@ -819,6 +889,12 @@ Everything below works end to end against real accounts. What's listed is the *s
 transition* that hasn't happened to occur yet during a run — these ride real orders, so they close on
 their own schedule rather than being work items.
 
+- **Receipt capture end to end.** All four retailers' receipt *pages* are live-verified (see the
+  table above), and the storage layer is fully offline-tested — but no receipt has been uploaded to
+  a real bucket yet, because that needs OCI credentials. What rides the first configured run: the
+  upload itself, the PAR link opening from the sheet, and the re-run proving zero browsers are
+  opened. Costco additionally needs its profile signed into costco.com **in a browser** — its data
+  path uses a stored token and never opens one, so nothing keeps that session warm.
 - **Amazon / Amazon Business split lifecycle** — a single-shipment order splitting at ship time, with
   shipment `1` updating in place while `2`/`3` append, and the order staying open until every shipment
   delivers. Validated on Costco and Best Buy; both Amazons share the code path but haven't yet had an
@@ -886,6 +962,10 @@ buying_groups/bfmr.py   BFMR: reserve/purchase/shipment chain, insurance filing
 buying_groups/maxoutdeals.py  MaxOutDeals: batched tracking push + CSV receipts parse
 buying_groups/registry.py     Buying Group column -> provider (handles MOD/MaxOutDeals aliasing)
 scripts/bg_probe.py     read-only recon against both buying-group APIs (writes nothing)
+receipts/sources.py     per-retailer receipt URL + object key + logged-out/PDF detection (pure)
+receipts/store.py       OCI Object Storage over the S3 compat API (boto3, lazily imported)
+receipts/capture.py     render/download each new order's receipt and link it from its rows
+scripts/receipt_probe.py  dev recon: what a retailer's receipt page renders to (uploads nothing)
 tests/                  offline pytest suite (no credentials/network needed)
 run.sh / run.ps1        scheduler entry points
 scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)

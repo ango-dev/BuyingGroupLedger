@@ -51,6 +51,7 @@ HEADER = [
     "Card Last 4",
     "Last Scraped At",
     "Tracking Submitted",  # a checkbox; ticked by sync_tracking.py when a group accepts the number
+    "Receipt Link",  # the order's captured receipt in object storage (receipts/capture.py)
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is

@@ -19,10 +19,14 @@ class CdpBrowser:
         with CdpBrowser(profile) as page:
             page.goto(url)
             ...
+
+    `block_resources=False` keeps images/media/fonts — only receipt capture wants that (see
+    __enter__), and it costs real proxy bandwidth, so it is opt-in.
     """
 
-    def __init__(self, profile: ProfileConfig):
+    def __init__(self, profile: ProfileConfig, block_resources: bool = True):
         self.profile = profile
+        self.block_resources = block_resources
         self._client: BrowserUseV2 | None = None
         self._pw = None
         self._browser = None
@@ -64,16 +68,23 @@ class CdpBrowser:
 
             # Block heavy resources we never read — cuts proxy bandwidth (billed per GB) and speeds
             # loads. Our reads use text selectors on the DOM, which resolve without images/media/fonts.
-            try:
-                ctx.route(
-                    "**/*",
-                    lambda route: route.abort()
-                    if route.request.resource_type in ("image", "media", "font")
-                    else route.continue_(),
-                )
-            except Exception:
-                log.warning("Could not install resource-blocking route; continuing without it.",
-                            exc_info=True)
+            #
+            # RECEIPT CAPTURE IS THE ONE EXCEPTION (block_resources=False). It renders the page to a
+            # PDF meant to be looked at and attached to a buying-group support ticket, and a receipt
+            # stripped of its logos and webfonts is a poor document. That render is bounded — it only
+            # ever runs for an order with no stored receipt yet — so the extra bandwidth is paid once
+            # per order rather than on every re-check.
+            if self.block_resources:
+                try:
+                    ctx.route(
+                        "**/*",
+                        lambda route: route.abort()
+                        if route.request.resource_type in ("image", "media", "font")
+                        else route.continue_(),
+                    )
+                except Exception:
+                    log.warning("Could not install resource-blocking route; continuing without it.",
+                                exc_info=True)
 
             self.page = ctx.pages[0] if ctx.pages else ctx.new_page()
             return self.page

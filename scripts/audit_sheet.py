@@ -888,7 +888,7 @@ def check_column_shape(sheet: Sheet, opts: Options) -> Result:
     """
     fails, warns = [], []
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-        for name in ("Order Link", "Tracking Link"):
+        for name in ("Order Link", "Tracking Link", "Receipt Link"):
             value = str(sheet.cell(sheet.grids.formatted, row_number, name)).strip()
             if value and not value.startswith(("http://", "https://")):
                 fails.append(f"row {row_number}, {name}: {value!r} is not a URL")

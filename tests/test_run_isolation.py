@@ -58,6 +58,51 @@ class TestRunScrapeContainsPostScrapeFailures:
         main.run_scrape(_Scraper(profile))  # must return, not raise
 
 
+class TestReceiptCaptureCannotCostARow:
+    """Receipt capture is additive; the ledger row is not.
+
+    A missing receipt is an inconvenience — the next run retries it. A missing ORDER is missed
+    reimbursement money. So `_capture_receipts` sits between tagging and write_csv and must swallow
+    everything: a storage outage, an expired browser session or a changed page cannot be allowed to
+    skip the CSV write and the sheet sync three lines later.
+    """
+
+    def test_a_capture_failure_still_writes_and_syncs_the_rows(self, monkeypatch, profile):
+        monkeypatch.setattr(main, "_classify_and_drop_personal", lambda items, label: items)
+        monkeypatch.setattr(main, "_tag_cards", lambda items, label: None)
+        written, synced = [], []
+        monkeypatch.setattr(main, "write_csv",
+                            lambda items: written.append(items) or __import__("pathlib").Path("x.csv"))
+        monkeypatch.setattr(main, "sync_csv_to_sheet", lambda p: synced.append(p) or {"appended": 0})
+        monkeypatch.setattr("receipts.capture.attach_receipts",
+                            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("bucket down")))
+        fired = []
+        monkeypatch.setattr(main, "alert", lambda subject, body: fired.append(subject))
+
+        main.run_scrape(_Scraper(profile))
+
+        assert written, "the rows must still be written when only the receipt failed"
+        assert synced, "the rows must still reach the sheet when only the receipt failed"
+        assert any("receipt" in s.lower() for s in fired), "the failure must still be reported"
+
+    def test_capture_runs_before_the_csv_is_written(self, monkeypatch, profile):
+        """The link has to land in the SAME sync as its rows, or the row is written blank and only
+        picks the link up on a later re-check — which never comes for a terminal order."""
+        order = []
+        monkeypatch.setattr(main, "_classify_and_drop_personal", lambda items, label: items)
+        monkeypatch.setattr(main, "_tag_cards", lambda items, label: None)
+        monkeypatch.setattr("receipts.capture.attach_receipts",
+                            lambda *a, **kw: order.append("capture"))
+        monkeypatch.setattr(main, "write_csv",
+                            lambda items: order.append("csv") or __import__("pathlib").Path("x.csv"))
+        monkeypatch.setattr(main, "sync_csv_to_sheet", lambda p: {"appended": 0})
+        monkeypatch.setattr(main, "alert", lambda *a: None)
+
+        main.run_scrape(_Scraper(profile))
+
+        assert order == ["capture", "csv"]
+
+
 class TestTheLoopIsolatesEachRetailer:
     def test_one_retailer_failing_still_runs_the_others_and_the_sync(self, monkeypatch, profile):
         ran, synced = [], []

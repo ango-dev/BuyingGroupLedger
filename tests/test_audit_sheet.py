@@ -148,6 +148,10 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
         "Card Last 4": Cell("0315"),
         "Last Scraped At": Cell("2026-08-12T06:00:00Z"),
         "Tracking Submitted": Cell(True),
+        "Receipt Link": Cell(
+            "https://objectstorage.us-ashburn-1.oraclecloud.com/p/tok/n/ns/b/bkt/o/"
+            f"receipts/bestbuy/2026-08/BBY01-{row_number:09d}.pdf"
+        ),
     }
     for name, value in overrides.items():
         base[name] = value if isinstance(value, Cell) else Cell(value)

@@ -25,14 +25,17 @@ class FakePage:
 
 
 class FakeContext:
-    pages = [FakePage()]
+    def __init__(self):
+        self.pages = [FakePage()]
+        self.routes = []
 
     def route(self, pattern, handler):
-        pass
+        self.routes.append((pattern, handler))
 
 
 class FakeBrowser:
-    contexts = [FakeContext()]
+    def __init__(self):
+        self.contexts = [FakeContext()]
 
     def close(self):
         pass
@@ -184,3 +187,48 @@ class TestConnectFailureDoesNotLeakAPaidBrowser:
         with pytest.raises(RuntimeError, match="cdp refused"):
             with cdp.CdpBrowser(_profile()):
                 pass
+
+
+class TestResourceBlocking:
+    """Images/media/fonts are aborted to cut billed proxy bandwidth, because every normal read here
+    resolves text selectors on the DOM and never looks at a picture.
+
+    Receipt capture is the deliberate exception: it renders a page to a PDF meant to be LOOKED at
+    and attached to a buying-group support ticket, and a receipt stripped of its logos and webfonts
+    is a poor document. That render is bounded to orders with no stored receipt yet, so the extra
+    bandwidth is paid once per order rather than on every re-check.
+    """
+
+    @staticmethod
+    def _open(monkeypatch, **kwargs):
+        browser = FakeBrowser()
+
+        class FakeClient:
+            _http = FakeHttp()
+
+            def close(self):
+                pass
+
+        class Pw:
+            class chromium:
+                @staticmethod
+                def connect_over_cdp(url):
+                    return browser
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr(cdp, "BrowserUseV2", lambda: FakeClient())
+        monkeypatch.setattr(cdp, "sync_playwright",
+                            lambda: type("F", (), {"start": staticmethod(Pw)})())
+        with cdp.CdpBrowser(_profile(), **kwargs):
+            pass
+        return browser.contexts[0]
+
+    def test_blocking_is_on_by_default(self, monkeypatch):
+        assert self._open(monkeypatch).routes, "every existing caller must keep saving bandwidth"
+
+    def test_capture_can_turn_it_off(self, monkeypatch):
+        ctx = self._open(monkeypatch, block_resources=False)
+
+        assert ctx.routes == [], "a receipt render needs its images, logos and webfonts"

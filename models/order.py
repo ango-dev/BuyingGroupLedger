@@ -134,6 +134,14 @@ FIELDNAMES = [
     # unticked box next to a shipped package is the thing worth noticing. It is a display of state,
     # not a source of truth. Blank on every scraper path, so _merge_row preserves it.
     "tracking_submitted",
+    # A link to this ORDER's captured receipt in object storage (receipts/). One document per order,
+    # so every row of a multi-item / multi-shipment order carries the same link — the receipt covers
+    # the whole order, and duplicating the link is what makes it reachable from whichever row you
+    # happen to be looking at.
+    #
+    # Filled by receipts.capture.attach_receipts during the scrape and blank when receipt capture is
+    # unconfigured, so _merge_row's blank-never-overwrites rule keeps a link already on the sheet.
+    "receipt_url",
 ]
 
 
@@ -172,6 +180,9 @@ class OrderItem(BaseModel):
     # number. Typed as a string, not a bool, precisely so the scrapers' blank survives _merge_row —
     # a default of False would tick nothing but would overwrite a real True on every re-scrape.
     tracking_submitted: str = ""
+    # Set by receipts.capture.attach_receipts after the rows are built (it needs the order id and
+    # date this carries), so every scraper emits it blank and _merge_row preserves an existing link.
+    receipt_url: str = ""
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
                      "cashback_rate", "insurance", "payout_amount", "total_profit", mode="before")

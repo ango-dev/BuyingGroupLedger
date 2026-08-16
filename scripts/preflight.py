@@ -226,6 +226,57 @@ def check_money_switches() -> list[Result]:
     return out
 
 
+def check_receipt_capture() -> list[Result]:
+    """Receipt capture is optional, so the failure worth catching is a PARTIAL config.
+
+    Fully unconfigured is fine and reported as such — orders record with a blank Receipt Link. But a
+    bucket set without a PAR prefix (or without boto3 installed) is the silent case: capture looks
+    switched on, and either every run pays to render receipts it cannot link, or the whole feature
+    no-ops while the operator believes it is working.
+
+    Config-presence only — no bucket call, no network. Preflight runs on every container start and
+    has to stay offline and free.
+    """
+    try:
+        from config.settings import settings
+        from receipts.store import is_configured, missing_settings
+    except Exception as exc:  # noqa: BLE001 — a broken settings import is already reported elsewhere
+        return [Result(WARN, "receipt capture", f"could not be checked ({exc}).")]
+
+    if not settings.receipt_capture_enabled:
+        return [Result(WARN, "receipt capture",
+                       "DISABLED (RECEIPT_CAPTURE_ENABLED) — no order receipts are stored.")]
+
+    missing = missing_settings()
+    if len(missing) == len(["OCI_BUCKET", "OCI_S3_ENDPOINT_URL", "OCI_S3_ACCESS_KEY_ID",
+                            "OCI_S3_SECRET_ACCESS_KEY", "OCI_PAR_URL_PREFIX"]):
+        return [Result(WARN, "receipt capture",
+                       "not configured — orders record normally with a blank Receipt Link. Set the "
+                       "OCI_* values in .env to store proof of purchase for each order.")]
+    if missing:
+        return [Result(
+            FAIL, "receipt capture",
+            f"PARTIALLY configured — {', '.join(missing)} unset. Capture stays off, so every order "
+            f"records with a blank Receipt Link while the config reads as if it were on.",
+        )]
+
+    out = [Result(OK, "receipt capture", f"bucket {settings.oci_bucket!r} via the S3 compat endpoint")]
+    try:
+        importlib.import_module("boto3")
+    except Exception as exc:  # noqa: BLE001
+        out.append(Result(
+            FAIL, "import boto3",
+            f"{type(exc).__name__}: {exc} — receipt capture is configured but nothing can be "
+            f"uploaded (`pip install -r requirements.txt`). Orders still record.",
+        ))
+    else:
+        out.append(Result(OK, "import boto3", "receipt uploads"))
+    if not is_configured():  # belt and braces: the settings agree, so this should be unreachable
+        out.append(Result(WARN, "receipt capture", "settings look complete but the store reports "
+                                                   "itself unconfigured; check for stray whitespace."))
+    return out
+
+
 def runs_per_day(hours: int) -> int:
     """How many times `0 */H * * *` actually fires in a day.
 
@@ -299,6 +350,7 @@ def run_checks() -> list[Result]:
     results += check_env()
     results += check_costco_tokens()
     results += check_money_switches()
+    results += check_receipt_capture()
     results += check_run_interval()
     return results
 

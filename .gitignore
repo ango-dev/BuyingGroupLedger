@@ -8,6 +8,7 @@ cards.json
 .amazon_capture/
 .amazon_business_capture/
 .bg_capture/
+.receipt_capture/
 data/
 logs/
 __pycache__/

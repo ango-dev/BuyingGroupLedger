@@ -17,3 +17,7 @@ beautifulsoup4>=4.12.0
 # it, `_scrape_via_api` raises ImportError, the scrapers' catch-all degrades to the Browser-Use agent,
 # and Amazon / Amazon Business / Best Buy silently run on the PAID path forever.
 playwright>=1.40.0
+# Receipt capture uploads to OCI Object Storage through its S3 COMPATIBILITY API, which boto3 speaks
+# unchanged against a custom endpoint_url. Imported LAZILY in receipts/store.py, like curl_cffi and
+# PyJWT, so `import main` and the whole test suite stay free of it.
+boto3>=1.34.0

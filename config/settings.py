@@ -105,5 +105,31 @@ class Settings:
     maxoutdeals_user_id: str = os.getenv("MAXOUTDEALS_USER_ID", "")
     maxoutdeals_email: str = os.getenv("MAXOUTDEALS_EMAIL", "")
 
+    # --- Receipt capture -> OCI Object Storage (see receipts/) ----------------------------------
+    # Uploads go through OCI's S3 COMPATIBILITY API, so the credentials are an OCI "customer secret
+    # key" (an access-key/secret pair minted under your user), NOT the API signing key.
+    #
+    # OCI_BUCKET IS THE MASTER SWITCH. Blank = receipt capture is completely inert: no browser is
+    # opened, no object is written, the Receipt Link column stays blank, and nothing raises. That is
+    # deliberately the default, so a host that has not been given a bucket degrades to "no receipts"
+    # rather than failing runs. RECEIPT_CAPTURE_ENABLED is the separate off switch, for turning the
+    # feature off WITHOUT deleting working credentials.
+    receipt_capture_enabled: bool = _get_bool("RECEIPT_CAPTURE_ENABLED", True)
+    oci_bucket: str = os.getenv("OCI_BUCKET", "")
+    oci_s3_endpoint_url: str = os.getenv("OCI_S3_ENDPOINT_URL", "")
+    oci_s3_region: str = os.getenv("OCI_S3_REGION", "")
+    oci_s3_access_key_id: str = os.getenv("OCI_S3_ACCESS_KEY_ID", "")
+    oci_s3_secret_access_key: str = os.getenv("OCI_S3_SECRET_ACCESS_KEY", "")
+    # A bucket-level Pre-Authenticated Request URL, created ONCE by hand in the OCI console
+    # (Access Type: object read; Target: bucket with the `receipts/` prefix). PARs are NOT part of
+    # the S3 compatibility API — minting one needs OCI's native API and a different credential set
+    # entirely — and boto3's generate_presigned_url caps at 7 days, which is not long-lived. One
+    # manual PAR sidesteps both: every object's link is this prefix + the object key, and revoking
+    # it is one click.
+    #
+    # TREAT IT AS A SECRET. Anyone holding this URL can read every receipt under the prefix, and a
+    # receipt carries your name, delivery address, card last 4 and order totals.
+    oci_par_url_prefix: str = os.getenv("OCI_PAR_URL_PREFIX", "")
+
 
 settings = Settings()

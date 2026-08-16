@@ -112,6 +112,29 @@ def _classify_and_drop_personal(items: list, label: str) -> list:
     return kept
 
 
+def _capture_receipts(items: list, scraper: BaseRetailerScraper, label: str) -> None:
+    """Store each new order's receipt and link it from its rows. NEVER raises.
+
+    Swallowing everything is the whole contract. This step is additive — a receipt is proof of
+    purchase you'll want when a buying group asks for one — but a missing receipt costs an
+    inconvenience while a missing ORDER costs reimbursement money. So a storage outage, an expired
+    browser session or a changed page must not stop write_csv and sync_csv_to_sheet from running
+    three lines later, which is exactly what would happen if this propagated into run_scrape's
+    post-scrape guard.
+
+    Inert (and silent after one log line) when no bucket is configured.
+    """
+    try:
+        from receipts.capture import attach_receipts  # local: keeps `import main` free of boto3
+
+        attach_receipts(items, scraper.profile, scraper.retailer_key)
+    except Exception:
+        log.exception("Receipt capture failed for %s", label)
+        alert(f"{label}: receipt capture failed",
+              "The orders themselves were still recorded and synced; only their Receipt Link is "
+              "missing, and the next run retries. Check logs/run.log.")
+
+
 def run_scrape(scraper: BaseRetailerScraper) -> None:
     label = f"{scraper.retailer_name} [{scraper.profile.label}]"
     log.info("Scraping %s...", label)
@@ -148,6 +171,10 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
 
         # After the personal-address drop, so no work is spent resolving cards for rows we discard.
         _tag_cards(items, label)
+
+        # Before write_csv, so the Receipt Link lands in the SAME sheet sync as the rows it belongs
+        # to. _capture_receipts never raises — see its docstring.
+        _capture_receipts(items, scraper, label)
 
         csv_path = write_csv(items)
     except Exception:
