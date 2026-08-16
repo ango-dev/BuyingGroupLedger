@@ -120,9 +120,9 @@ class Settings:
     oci_s3_region: str = os.getenv("OCI_S3_REGION", "")
     oci_s3_access_key_id: str = os.getenv("OCI_S3_ACCESS_KEY_ID", "")
     oci_s3_secret_access_key: str = os.getenv("OCI_S3_SECRET_ACCESS_KEY", "")
-    # A bucket-level Pre-Authenticated Request URL, created ONCE by hand in the OCI console
-    # (Access Type: object read; Target: bucket with the `receipts/` prefix). PARs are NOT part of
-    # the S3 compatibility API — minting one needs OCI's native API and a different credential set
+    # A Pre-Authenticated Request URL, created ONCE by hand in the OCI console — Target: Bucket,
+    # Access type: Permit object reads, object listing left OFF. PARs are NOT part of the S3
+    # compatibility API — minting one needs OCI's native API and a different credential set
     # entirely — and boto3's generate_presigned_url caps at 7 days, which is not long-lived. One
     # manual PAR sidesteps both: every object's link is this prefix + the object key, and revoking
     # it is one click.

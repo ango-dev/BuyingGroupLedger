@@ -13,9 +13,13 @@ WHY THE LINK IS BUILT BY STRING CONCATENATION AND NOT SIGNED. A Pre-Authenticate
 NATIVE concept — it cannot be created through the S3 API, which is why there is no `create_par()`
 here. `generate_presigned_url` does work against the compat endpoint, but SigV4 presigned URLs
 expire after at most 7 days, and a ledger row is read months later. So the deployment creates ONE
-bucket-level read PAR by hand in the console and puts its URL in OCI_PAR_URL_PREFIX; every object's
-link is that prefix plus the object key. One manual step buys a link that does not rot, and revoking
-it is one click.
+read PAR by hand in the console (Target: Bucket; Access type: Permit object reads; object listing
+left OFF, since receipts are PII and listing would let the URL's holder enumerate every order) and
+puts its URL in OCI_PAR_URL_PREFIX; every object's link is that prefix plus the object key. One
+manual step buys a link that does not rot, and revoking it is one click.
+
+("Objects with prefix" is a separate PAR target type and also works, but its URL already ends in the
+prefix while link_for appends the full key — so that value must be trimmed back to the `/o` part.)
 
 INERT WHEN UNCONFIGURED. A blank OCI_BUCKET makes every method a no-op that raises nothing, so a
 host without a bucket records orders exactly as before with a blank Receipt Link — receipts are

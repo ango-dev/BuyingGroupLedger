@@ -707,8 +707,19 @@ OCI_PAR_URL_PREFIX=https://objectstorage.<region>.oraclecloud.com/p/<secret>/n/<
 ```
 
 **One manual setup step: create a bucket-level PAR.** In the OCI console → your bucket →
-Pre-Authenticated Requests → Create, with type *Bucket*, access *Permit object reads*, prefix
-`receipts/`, and a far-future expiry. Uploads go through the **S3 Compatibility API** (plain boto3),
+Pre-Authenticated Requests → Create:
+
+- **Target: Bucket** (not *Objects with prefix* — that's a separate target type, and its URL already
+  ends in the prefix, which would double up against the key this code appends. If you do use it, set
+  `OCI_PAR_URL_PREFIX` to the part ending at `/o`.)
+- **Access type: Permit object reads**
+- **Leave "Enable Object Listing" unchecked.** Receipts are PII; listing would let anyone holding
+  the URL enumerate every order you've placed, rather than only fetch a receipt they already have a
+  link to.
+- Expiry: far future
+
+The URL it gives you ends in `/o` — that's `OCI_PAR_URL_PREFIX`, and each object's link is that plus
+the object key. Uploads go through the **S3 Compatibility API** (plain boto3),
 but a PAR is an OCI-native concept that the S3 API cannot mint — and boto3's presigned URLs expire
 within 7 days, while a ledger row gets read months later. One console click buys a link that doesn't
 rot, and revoking it is one more.
