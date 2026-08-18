@@ -270,7 +270,15 @@ class OrderItem(BaseModel):
         Computed here rather than trusted from the agent, which used to report the ORDER grand total
         on every row (so the column couldn't be summed). Left untouched when either factor is absent
         — e.g. a tracking-only re-check sends both blank, and _merge_row then preserves whatever was
-        already recorded. Shipping is a separate column and is not folded in.
+        already recorded.
+
+        SHIPPING IS A SEPARATE COLUMN AND IS NOT FOLDED IN — settled 2026-08-13, and not a free
+        change if you're tempted. This number is a money-path input, not just a
+        display value: it gates and values real BFMR insurance filings (buying_groups/bfmr.py), is
+        the `amount` declared to MOD (unrevisable once sent), weights how sync_tracking splits a
+        payout across an order's rows, AND is the weight ledger_sync._reprorate_shipping divides the
+        order's shipping total by — so folding that shipping share back in here is circular. The two
+        are combined only inside the Total Profit formula, which subtracts Shipping on its own.
         """
         if self.quantity is not None and self.cost_per_item is not None:
             self.total_cost = round(self.quantity * self.cost_per_item, 2)
