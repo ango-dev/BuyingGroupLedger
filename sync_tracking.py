@@ -115,7 +115,8 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
           "skipped_no_tracking": int,
           "skipped_unroutable":  {buying_group_as_written: count},
           "skipped_cancelled":   int,
-          "cancelled_by_group":  {group_key: [(row_number, order_id), ...]},
+          "cancelled_by_group":  {group_key: [(row_number, order_id), ...]},   # retailer said no
+          "awaiting_by_group":   {group_key: [(row_number, order_id), ...]},   # ordered, no tracking yet
         }
     """
     idx = {name: header.index(name) for name in (
@@ -133,6 +134,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     unresolved_split: list[tuple] = []
     unroutable_tracked: list[tuple] = []
     cancelled_by_group: dict[str, list[tuple]] = {}
+    awaiting_by_group: dict[str, list[tuple]] = {}
     skipped_unroutable: dict[str, int] = {}
     skipped_no_tracking = 0
     skipped_cancelled = 0
@@ -161,6 +163,14 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         tracking = cell("Tracking Number")
         if not tracking:
             skipped_no_tracking += 1
+            # Kept, not just counted. An order still AWAITING SHIPMENT is the only state BFMR can
+            # cancel a purchase from — their deadline is for submitting tracking, so once a number is
+            # attached there is nothing left to cancel over. That makes this the one population worth
+            # cross-checking against their cancellations, and until now it never reached a BFMR call
+            # at all. See _alert_on_cancelled_purchases.
+            group_key = resolve_group(cell("Buying Group"))
+            if group_key:
+                awaiting_by_group.setdefault(group_key, []).append((row_number, order_id))
             continue
 
         group_written = cell("Buying Group")
@@ -232,6 +242,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "skipped_unroutable": skipped_unroutable,
         "skipped_cancelled": skipped_cancelled,
         "cancelled_by_group": cancelled_by_group,
+        "awaiting_by_group": awaiting_by_group,
         "settled_keys": settled_keys,
     }
 
@@ -415,6 +426,48 @@ def _alert_on_cancelled_orders(group_key, client, plan, apply) -> None:
     )
 
 
+def _alert_on_cancelled_purchases(group_key, client, plan, apply) -> None:
+    """BFMR cancelled the purchase, but the retailer order is alive and still coming.
+
+    The mirror of `_alert_on_cancelled_orders`, and the more likely direction. BFMR cancels a
+    purchase whose tracking number missed their deadline — which by definition happens while the
+    order is still AWAITING SHIPMENT, the one state that never reached a BFMR call before this.
+    Once a package ships and its number is attached there is nothing left for them to cancel over,
+   so `submit_tracking`'s own cancelled-purchase check was guarding a state this
+    can barely occur in.
+
+    Silence here is expensive and completely invisible: the deal is gone, so the package arrives, the
+    warehouse receives it, and nothing is ever paid for it. Worse, it is only actionable in the gap
+    between the cancellation and delivery — long enough to raise a support ticket and ask for
+    reinstatement, or to decide not to keep the goods. By the time the row ships and the existing
+    check finally notices, that window has closed.
+    """
+    awaiting = plan.get("awaiting_by_group", {}).get(group_key) or []
+    if not awaiting or not hasattr(client, "cancelled_purchases_for"):
+        return
+
+    dead = client.cancelled_purchases_for(order_id for _row, order_id in awaiting)
+    affected = [(row, order_id) for row, order_id in awaiting if order_id in dead]
+    if not affected:
+        return
+
+    detail = "\n".join(f"  row {row}: order {order_id}" for row, order_id in affected)
+    log.warning("%s: %d awaiting order(s) have a CANCELLED purchase", group_key, len(affected))
+    _alert(
+        apply,
+        f"ACTION NEEDED — {group_key}: {len(affected)} incoming order(s) have a CANCELLED purchase",
+        f"{group_key} has CANCELLED the purchase for these orders, but the retailer has NOT "
+        f"cancelled them — they are still on their way:\n{detail}\n\n"
+        f"The usual cause is the tracking number missing {group_key}'s deadline. The deal is gone, so "
+        f"as things stand the package will arrive at the warehouse and NOTHING WILL BE PAID for it.\n\n"
+        f"This is only fixable NOW, before it lands: raise a support ticket with proof of purchase "
+        f"and ask them to reinstate the purchase, or decide not to keep the goods and cancel at the "
+        f"retailer while you still can. Once it ships and the tracking is submitted there is nothing "
+        f"for the number to attach to.\n\n"
+        f"This tool never cancels anything at a buying group, so nothing has been changed for you.",
+    )
+
+
 def _alert(apply: bool, subject: str, message: str) -> None:
     """Alert only on a real run.
 
@@ -500,6 +553,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
     log.info("%s: %d payout record(s) read back", group_key, len(payouts))
 
     _alert_on_cancelled_orders(group_key, client, plan, apply)
+    _alert_on_cancelled_purchases(group_key, client, plan, apply)
 
     pushed = set(push.submitted)
     ticked = {

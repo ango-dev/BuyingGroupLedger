@@ -1216,8 +1216,72 @@ class TestNothingEverCancels:
         ]
         assert offenders == [], f"{endpoint} must never be called: {offenders}"
 
+    #: Read-only accessors that merely REPORT on cancellations. `cancelled_purchases_for` reads
+    #: BFMR's cancelled purchases so `_alert_on_cancelled_purchases` can warn about them; it sends
+    #: nothing. Allowlisted by name rather than loosening the check, so a genuinely new
+    #: cancel-shaped method still has to be argued for here.
+    READ_ONLY_CANCEL_ACCESSORS = {"cancelled_purchases_for"}
+
     def test_the_client_exposes_no_cancel_method(self, bfmr):
-        assert not [name for name in dir(bfmr) if "cancel" in name.lower()]
+        suspicious = [
+            name for name in dir(bfmr)
+            if "cancel" in name.lower() and name not in self.READ_ONLY_CANCEL_ACCESSORS
+        ]
+        assert not suspicious
+
+    def test_the_allowlisted_accessor_really_is_read_only(self, bfmr, transport):
+        """The allowlist above is only safe if the thing it exempts cannot mutate. Pin that."""
+        transport.responses = [tracker(
+            {"purchase_id": "P1", "order_id": "DEAD", "status": "cancelled", "deal_title": "PS5"},
+        )]
+        assert bfmr.cancelled_purchases_for(["DEAD"]) == {"DEAD"}
+        assert [c["method"] for c in transport.calls] == ["GET"]
+
+
+class TestCancelledPurchaseDetection:
+    """The mirror direction: BFMR cancelled the purchase while the retailer order is still coming.
+
+    This is the more LIKELY direction, and until 2026-08-15 it was silent. BFMR cancels a purchase
+    whose tracking missed their deadline, which can only happen while the order is still awaiting
+    shipment — and awaiting-shipment rows never reached a BFMR call at all, because the planner drops
+    anything without a tracking number. The existing check in `submit_tracking` only sees rows that
+    HAVE one, i.e. a state BFMR can no longer cancel from.
+    """
+
+    def test_a_cancelled_purchase_for_a_live_order_is_reported(self, bfmr, transport):
+        transport.responses = [tracker(
+            {"purchase_id": "P1", "order_id": "COMING", "status": "cancelled", "deal_title": "PS5"},
+            {"purchase_id": "P2", "order_id": "FINE", "status": "shipped", "deal_title": "PS5"},
+        )]
+        assert bfmr.cancelled_purchases_for(["COMING", "FINE"]) == {"COMING"}
+
+    def test_an_order_with_a_live_purchase_alongside_a_dead_one_is_NOT_reported(
+        self, bfmr, transport
+    ):
+        """An order can carry a cancelled first attempt plus a live re-book. Reporting that as
+        cancelled would send someone to support about a deal they still hold — the same precedence
+        `_index_purchases_by_order` applies."""
+        transport.responses = [tracker(
+            {"purchase_id": "P1", "order_id": "REBOOKED", "status": "cancelled", "deal_title": "PS5"},
+            {"purchase_id": "P2", "order_id": "REBOOKED", "status": "shipped", "deal_title": "PS5"},
+        )]
+        assert bfmr.cancelled_purchases_for(["REBOOKED"]) == set()
+
+    def test_an_insurance_fee_row_cannot_invent_a_cancellation(self, bfmr, transport):
+        """A real fee row carries NO order_id (that is part of how `_is_insurance_fee_row` knows it
+        is one), so it is dropped by the order lookup before the fee check even matters. Asserted
+        with a genuine fee row rather than a contrived one with an order_id — that combination
+        cannot occur, and a test for it would prove nothing."""
+        transport.responses = [tracker(
+            {"total_payout": "-7.40", "status": "cancelled"},                       # the fee row
+            {"purchase_id": "P1", "order_id": "COMING", "status": "shipped", "deal_title": "PS5"},
+        )]
+        assert bfmr.cancelled_purchases_for(["COMING"]) == set()
+
+    def test_an_order_bfmr_has_no_purchase_for_is_not_reported_as_cancelled(self, bfmr, transport):
+        """"No purchase yet" is the normal state right after ordering, not a cancellation."""
+        transport.responses = [tracker({"reserve_id": "R1", "order_id": "COMING"})]
+        assert bfmr.cancelled_purchases_for(["COMING"]) == set()
 
 
 class TestCancelledOrderDetection:

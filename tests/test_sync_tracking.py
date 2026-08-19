@@ -440,6 +440,88 @@ class TestUnsubmittableAlertsImmediately:
         assert sent == []
 
 
+class TestCancelledPurchaseAlert:
+    """BFMR cancelled the purchase while the retailer order is still coming — alert, never act.
+
+    Only reachable because the planner now KEEPS awaiting-shipment rows instead of merely counting
+    them. That population is the whole point: BFMR's deadline is for submitting tracking, so a
+    cancellation can only happen before a number exists, and rows without one used to reach no BFMR
+    call at all.
+    """
+
+    class FakeClient:
+        group_key = "BFMR"
+
+        def __init__(self, dead=()):
+            self.dead = set(dead)
+            self.asked = None
+
+        def cancelled_purchases_for(self, order_ids):
+            self.asked = list(order_ids)
+            return {o for o in self.asked if o in self.dead}
+
+    @staticmethod
+    def _plan(awaiting):
+        return {"awaiting_by_group": {"BFMR": awaiting}}
+
+    def test_a_cancelled_purchase_on_an_incoming_order_alerts(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
+
+        sync_tracking._alert_on_cancelled_purchases(
+            "BFMR", self.FakeClient(dead={"COMING"}),
+            self._plan([(4, "COMING"), (5, "FINE")]), apply=True)
+
+        subject, body = sent[0]
+        assert subject.startswith("ACTION NEEDED")
+        assert "CANCELLED purchase" in subject
+        assert "row 4" in body and "COMING" in body
+        assert "FINE" not in body, "only the affected order"
+        # The two things that make it actionable rather than merely alarming.
+        assert "NOTHING WILL BE PAID" in body
+        assert "only fixable NOW" in body
+
+    def test_it_says_plainly_that_nothing_was_changed(self, monkeypatch):
+        """This tool never cancels anything at a buying group. The alert has to say so, or a reader
+        could reasonably assume it tidied up on their behalf."""
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append(body))
+        sync_tracking._alert_on_cancelled_purchases(
+            "BFMR", self.FakeClient(dead={"COMING"}), self._plan([(4, "COMING")]), apply=True)
+        assert "never cancels" in sent[0]
+
+    def test_a_healthy_incoming_order_is_silent(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append(subject))
+        sync_tracking._alert_on_cancelled_purchases(
+            "BFMR", self.FakeClient(), self._plan([(4, "FINE")]), apply=True)
+        assert sent == []
+
+    def test_a_provider_without_the_read_is_skipped_not_crashed(self, monkeypatch):
+        """MOD has no purchase concept at all, so the capability is probed rather than assumed."""
+        class ModLike:
+            group_key = "MOD"
+        sync_tracking._alert_on_cancelled_purchases(
+            "MOD", ModLike(), {"awaiting_by_group": {"MOD": [(4, "X")]}}, apply=True)
+
+    def test_a_dry_run_sends_nothing(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append(subject))
+        sync_tracking._alert_on_cancelled_purchases(
+            "BFMR", self.FakeClient(dead={"COMING"}), self._plan([(4, "COMING")]), apply=False)
+        assert sent == []
+
+    def test_the_planner_keeps_awaiting_rows_per_group(self):
+        rows = [
+            shipped("AWAITING", "", group="BFMR", **{"Status": "ordered"}),
+            shipped("SHIPPED", "T1", group="BFMR"),
+            shipped("NOGROUP", "", group="Unclassified", **{"Status": "ordered"}),
+        ]
+        plan = plan_tracking_submissions(list(HEADER), rows)
+        assert plan["awaiting_by_group"] == {"BFMR": [(2, "AWAITING")]}
+        assert plan["skipped_no_tracking"] == 2, "still counted, as before"
+
+
 class TestColumnsExist:
     def test_the_columns_this_module_writes_are_real_schema_columns(self):
         """These are looked up by name against HEADER at write time; a rename would otherwise fail

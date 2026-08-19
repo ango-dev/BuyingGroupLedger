@@ -230,6 +230,36 @@ class BFMRClient(HttpClient):
             and not _is_insurance_fee_row(entry)
         }
 
+    def cancelled_purchases_for(self, order_ids) -> set[str]:
+        """Which of these orders BFMR has CANCELLED the purchase for, with none still active.
+
+        The mirror of `active_purchases_for`, and it catches the divergence that costs the payout:
+        BFMR cancelled the purchase — almost always because the tracking number missed their
+        deadline — while the retailer order is alive and on its way.
+
+        **THAT CAN ONLY HAPPEN WHILE THE ORDER IS STILL `ordered`**: the deadline
+        is for submitting tracking, so once a package ships and its number is attached there is
+        nothing left for BFMR to cancel over. Which means `submit_tracking`'s own cancelled-purchase
+        check — reached only by rows that HAVE a tracking number — is guarding a state this can
+        barely occur in, while the state it does occur in never reached a BFMR call at all.
+
+        AN ACTIVE PURCHASE ANYWHERE WINS. An order can carry more than one purchase row (a cancelled
+        first attempt plus a live re-book), and reporting that as cancelled would send someone to
+        support about a deal they still hold — the same precedence `_index_purchases_by_order`
+        applies, for the same reason.
+        """
+        wanted = {str(o).strip() for o in order_ids if str(o).strip()}
+        cancelled: set[str] = set()
+        active: set[str] = set()
+        for entry in self.fetch_tracker():
+            order_id = _order_id_of(entry)
+            if order_id not in wanted or not entry.get("purchase_id"):
+                continue
+            if _is_insurance_fee_row(entry):
+                continue
+            (cancelled if _is_cancelled_purchase(entry) else active).add(order_id)
+        return cancelled - active
+
     def active_reservations(self) -> list[dict]:
         """Reservations not yet turned into purchases.
 
