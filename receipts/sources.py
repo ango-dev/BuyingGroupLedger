@@ -85,6 +85,11 @@ READY_SELECTORS = {
 # noise to the document.
 EXPAND_SELECTORS = {
     "costco": ('[automation-id="HideorExpandOrderSummary"]',),
+    # Best Buy hides the payment method behind a "Payment Details" disclosure. NOTE the toggle is
+    # itself marked `hidden-print`, so Best Buy may deliberately keep payment off a printed receipt
+    # — clicking it costs nothing either way, and the shipping address and totals are already in the
+    # render. Whether the revealed panel survives print media is recorded in the design notes.
+    "bestbuy": ('[data-test="order-details-summary__toggle"]',),
 }
 
 # Only ever clicks a section that is genuinely CLOSED. The toggle is a toggle: firing it blindly on
@@ -191,6 +196,39 @@ def object_key(retailer_key: str, order_id: str, order_date: str, ext: str) -> s
     # create a nested prefix, so it is neutralized rather than trusted.
     safe_id = order_id.strip().replace("/", "_")
     return f"receipts/{retailer_key}/{month}/{safe_id}.{ext.lstrip('.')}"
+
+
+# WHEN an order is worth capturing. A receipt is captured ONCE and never refreshed, so the question
+# is not "how often" (storage is checked before any browser opens, so a re-check run captures
+# nothing) but "at what moment is the document final".
+#
+# Capturing an order still `ordered` or `shipped` freezes a receipt that predates its own final
+# totals, tracking numbers and delivery date — and nothing will ever go back and improve it. So a
+# capture waits until the order is FINISHED.
+#
+# `cancelled` is deliberately excluded: the order never completed, so its receipt proves nothing and
+# there is no reimbursement to claim against it. `paid` and `return` are included because they are
+# real outcomes of a real purchase — the buying group's own statuses — and a paid order is exactly
+# the one you may later have to prove.
+CAPTURE_STATUSES = ("delivered", "paid", "return")
+
+# Statuses that mean the order is still in flight, so its receipt is not final yet.
+_OPEN_STATUSES = ("ordered", "shipped")
+
+
+def is_capturable(statuses) -> bool:
+    """Is this order finished, and worth a receipt?
+
+    Takes EVERY row's status, because one order can be several shipments: a 3-box order with two
+    boxes delivered and one still moving is not finished, and capturing it would store a receipt
+    that is out of date the moment the last box lands.
+    """
+    seen = [(s or "").strip().lower() for s in statuses if (s or "").strip()]
+    if not seen:
+        return False
+    if any(s in _OPEN_STATUSES or s not in CAPTURE_STATUSES + ("cancelled",) for s in seen):
+        return False
+    return any(s in CAPTURE_STATUSES for s in seen)
 
 
 # Extensions a stored receipt can carry, newest-preferred first: PDF is what we try to render, PNG is

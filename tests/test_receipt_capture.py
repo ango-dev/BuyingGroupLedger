@@ -18,11 +18,16 @@ def _configured(monkeypatch):
     monkeypatch.setattr(store, "link_for", lambda key: f"https://par/{key}")
 
 
-def _items(*specs):
-    """specs: (order_id, order_date, item_name)."""
+def _items(*specs, status="delivered"):
+    """specs: (order_id, order_date, item_name).
+
+    Defaults to `delivered` because a receipt is only taken once an order is FINISHED — capturing an
+    open order would freeze a document that predates its own final totals (see is_capturable). Pass
+    status= to exercise the gate itself.
+    """
     return [
         OrderItem(retailer="Amazon", profile_label="p", order_id=oid, order_date=date,
-                  item_name=name, quantity=1, cost_per_item=10.0)
+                  item_name=name, quantity=1, cost_per_item=10.0, status=status)
         for oid, date, name in specs
     ]
 
@@ -467,3 +472,86 @@ class TestExpandingCollapsedSections:
         """The same Costco page carries ~29 other aria-expanded="false" nodes — footer accordions,
         nav dropdowns, tooltips — and opening those would only pad the document with chrome."""
         assert sources.expand_selectors("costco") == ('[automation-id="HideorExpandOrderSummary"]',)
+
+
+class TestOnlyFinishedOrdersAreCaptured:
+    """A receipt is taken ONCE and never refreshed, so the moment it is taken decides what it says.
+
+    User decision 2026-08-21. Capturing an order that is still `ordered` or `shipped` permanently
+    stores a document predating its own final totals, tracking numbers and delivery date — and
+    nothing will ever go back and improve it, because a terminal order is never re-read.
+
+    Note this is NOT about how OFTEN capture runs: storage is checked before any browser opens, so a
+    re-check run of an already-captured order costs nothing either way.
+    """
+
+    @pytest.mark.parametrize("status", ["ordered", "shipped"])
+    def test_an_unfinished_order_is_not_captured(self, wired, status):
+        recorder = wired(Recorder())
+        factory = BrowserFactory()
+        items = _items(("A1", "2026-08-21", "Thing"), status=status)
+
+        capture.attach_receipts(items, _profile(), "amazon", browser_factory=factory)
+
+        assert recorder.puts == []
+        assert factory.calls == 0, "and it must not even open a browser to find that out"
+        assert items[0].receipt_url == ""
+
+    @pytest.mark.parametrize("status", ["delivered", "paid", "return"])
+    def test_a_finished_order_is_captured(self, wired, status):
+        """`paid` and `return` count: both are real outcomes of a real purchase, and a paid order is
+        exactly the one you may later have to prove."""
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status=status), _profile(),
+                                "amazon", browser_factory=BrowserFactory())
+
+        assert len(recorder.puts) == 1
+
+    def test_a_cancelled_order_is_never_captured(self, wired):
+        """It never completed, so the receipt proves nothing and there is nothing to claim."""
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status="cancelled"), _profile(),
+                                "amazon", browser_factory=BrowserFactory())
+
+        assert recorder.puts == []
+
+    def test_a_part_delivered_split_order_waits_for_its_last_box(self, wired):
+        """The receipt covers the WHOLE order, so one delivered box is not enough — capturing then
+        would store a document that is out of date the moment the last box lands."""
+        recorder = wired(Recorder())
+        items = _items(("A1", "2026-08-21", "Box one"))          # delivered
+        items += _items(("A1", "2026-08-21", "Box two"), status="shipped")
+
+        capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
+
+        assert recorder.puts == [], "one shipment still moving means the order is not finished"
+
+    def test_a_fully_delivered_split_order_is_captured_once(self, wired):
+        recorder = wired(Recorder())
+        items = _items(("A1", "2026-08-21", "Box one"), ("A1", "2026-08-21", "Box two"))
+
+        capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
+
+        assert len(recorder.puts) == 1, "one order is still one document"
+        assert items[0].receipt_url == items[1].receipt_url != ""
+
+    def test_a_delivered_order_with_one_cancelled_line_still_captures(self, wired):
+        """A partial cancellation is a completed purchase for whatever actually shipped."""
+        recorder = wired(Recorder())
+        items = _items(("A1", "2026-08-21", "Kept"))
+        items += _items(("A1", "2026-08-21", "Dropped"), status="cancelled")
+
+        capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
+
+        assert len(recorder.puts) == 1
+
+    def test_finished_and_unfinished_orders_in_one_batch_are_separated(self, wired):
+        recorder = wired(Recorder())
+        items = _items(("DONE", "2026-08-21", "T1"))
+        items += _items(("OPEN", "2026-08-21", "T2"), status="shipped")
+
+        capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
+
+        assert [k for k, _, _ in recorder.puts] == ["receipts/amazon/2026-08/DONE.pdf"]

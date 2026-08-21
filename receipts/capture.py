@@ -32,6 +32,7 @@ from receipts.sources import (
     EXTENSIONS,
     UnknownRetailerError,
     expand_selectors,
+    is_capturable,
     looks_like_pdf,
     looks_logged_out,
     object_key,
@@ -178,11 +179,28 @@ def _orders_from(items) -> dict[str, str]:
     shipments it becomes. Rows with a blank order id are skipped — `ledger_sync` already refuses to
     write them, so there is nothing to link a receipt to.
     """
-    orders: dict[str, str] = {}
+    by_order: dict[str, dict] = {}
     for item in items:
         order_id = (getattr(item, "order_id", "") or "").strip()
-        if order_id and order_id not in orders:
-            orders[order_id] = getattr(item, "order_date", "") or ""
+        if not order_id:
+            continue
+        entry = by_order.setdefault(order_id, {"date": getattr(item, "order_date", "") or "",
+                                               "statuses": []})
+        entry["statuses"].append(getattr(item, "status", "") or "")
+
+    # Only FINISHED orders. A receipt is captured once and never refreshed, so capturing one that is
+    # still `ordered` or `shipped` would permanently store a document predating its own final totals,
+    # tracking and delivery date. Judged across EVERY row, so a part-delivered split order waits for
+    # its last box. See receipts.sources.is_capturable.
+    orders: dict[str, str] = {}
+    waiting = 0
+    for order_id, entry in by_order.items():
+        if is_capturable(entry["statuses"]):
+            orders[order_id] = entry["date"]
+        else:
+            waiting += 1
+    if waiting:
+        log.info("Receipts: %d order(s) not finished yet (or cancelled); no receipt taken.", waiting)
     return orders
 
 
