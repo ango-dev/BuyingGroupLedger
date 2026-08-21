@@ -274,6 +274,22 @@ def check_receipt_capture() -> list[Result]:
     if not is_configured():  # belt and braces: the settings agree, so this should be unreachable
         out.append(Result(WARN, "receipt capture", "settings look complete but the store reports "
                                                    "itself unconfigured; check for stray whitespace."))
+
+    # pypdf is OPTIONAL at runtime and the finality guard fails open without it, which is precisely
+    # the shape preflight exists for: receipts keep being captured and stored, so nothing looks
+    # wrong, but a pre-shipment invoice ("Not Yet Shipped") is no longer rejected -- and these are
+    # the documents that substantiate COGS at tax time.
+    try:
+        importlib.import_module("pypdf")
+    except Exception:  # noqa: BLE001
+        out.append(Result(
+            WARN, "import pypdf",
+            "missing, so a captured receipt's TEXT cannot be read: pre-shipment invoices are no "
+            "longer refused, and `python -m scripts.receipt_verify` cannot audit what is stored. "
+            "Receipts are still captured. Fix with `pip install -r requirements.txt`.",
+        ))
+    else:
+        out.append(Result(OK, "import pypdf", "receipt finality guard active"))
     return out
 
 
