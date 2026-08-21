@@ -656,3 +656,57 @@ class TestCapturedExactlyOnce:
 
         assert len(store_.puts) == 1
         assert fresh[0].receipt_url == "https://par/receipts/amazon/2026-08/A1.pdf"
+
+
+class TestTheLedgerKnowsMoreThanTheFreshRead:
+    """The scraper's fresh status can be BEHIND what the sheet already recorded.
+
+    Found live on Amazon Business order 111-9990021-9990021. Its order page still reads
+    "Not Yet Shipped", so every run rebuilds it as `ordered` with blank tracking — while the ledger
+    correctly holds `shipped` with a real tracking number from an earlier read, because status only
+    moves forward and a blank never overwrites.
+
+    Gated on the fresh status alone, that order is skipped on EVERY run and never gets a receipt.
+    Not an error, not a warning — just a permanently missing document. main._capture_receipts passes
+    the order state the scraper already loaded, which costs no extra sheet read.
+    """
+
+    def test_the_recorded_status_can_trigger_a_capture_the_fresh_one_would_miss(self, wired):
+        recorder = wired(Recorder())
+        items = _items(("A1", "2026-08-21", "iPad"), status="ordered")   # page says not yet shipped
+
+        capture.attach_receipts(items, _profile(), "amazon-business",
+                                browser_factory=BrowserFactory(),
+                                known_statuses={"A1": "shipped"})        # but the ledger knows
+
+        assert len(recorder.puts) == 1
+        assert items[0].receipt_url != ""
+
+    def test_it_cannot_resurrect_an_order_that_never_shipped(self, wired):
+        """The ledger agreeing it is only `ordered` must still mean no capture."""
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status="ordered"), _profile(),
+                                "amazon", browser_factory=BrowserFactory(),
+                                known_statuses={"A1": "ordered"})
+
+        assert recorder.puts == []
+
+    def test_a_known_status_for_an_order_not_in_this_batch_is_ignored(self, wired):
+        """The state covers every open order; only the ones actually scraped this run are candidates."""
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status="ordered"), _profile(),
+                                "amazon", browser_factory=BrowserFactory(),
+                                known_statuses={"SOMETHING-ELSE": "shipped"})
+
+        assert recorder.puts == []
+
+    def test_no_known_statuses_at_all_still_works(self, wired):
+        """An unreadable sheet leaves the state empty; capture must fall back to the fresh read."""
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(), "amazon",
+                                browser_factory=BrowserFactory(), known_statuses=None)
+
+        assert len(recorder.puts) == 1

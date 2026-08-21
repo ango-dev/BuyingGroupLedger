@@ -172,7 +172,7 @@ def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
         return page.screenshot(full_page=True), "png"
 
 
-def _orders_from(items, include_settled: bool = False) -> dict[str, str]:
+def _orders_from(items, include_settled: bool = False, known_statuses=None) -> dict[str, str]:
     """{order_id: order_date} for the rows in this batch.
 
     Keyed on the ORDER, not the ledger row key: one order is one receipt however many line items and
@@ -187,6 +187,15 @@ def _orders_from(items, include_settled: bool = False) -> dict[str, str]:
         entry = by_order.setdefault(order_id, {"date": getattr(item, "order_date", "") or "",
                                                "statuses": []})
         entry["statuses"].append(getattr(item, "status", "") or "")
+
+    # What the LEDGER already knows, folded in alongside this run's fresh read. The two can
+    # legitimately disagree: a retailer page that still says "Not Yet Shipped" rebuilds as `ordered`
+    # with blank tracking every run, while the sheet holds `shipped` from an earlier read (status
+    # only moves forward, and blanks never overwrite). Judging on the fresh status alone means such
+    # an order is never captured on any run — a permanent, silent gap. See main._capture_receipts.
+    for order_id, status in (known_statuses or {}).items():
+        if order_id in by_order and status:
+            by_order[order_id]["statuses"].append(status)
 
     # Only FINISHED orders. A receipt is captured once and never refreshed, so capturing one that is
     # still `ordered` or `shipped` would permanently store a document predating its own final totals,
@@ -218,7 +227,7 @@ def _find_existing(retailer_key: str, order_id: str, order_date: str) -> str | N
 
 
 def attach_receipts(items, profile, retailer_key: str, browser_factory=None,
-                    include_settled: bool = False) -> None:
+                    include_settled: bool = False, known_statuses=None) -> None:
     """Set `receipt_url` on every row whose order has (or can be given) a stored receipt.
 
     Mutates `items` in place. `browser_factory` exists so tests can assert the far more important
@@ -230,7 +239,8 @@ def attach_receipts(items, profile, retailer_key: str, browser_factory=None,
         store._warn_once()
         return
 
-    orders = _orders_from(items, include_settled=include_settled)
+    orders = _orders_from(items, include_settled=include_settled,
+                          known_statuses=known_statuses)
     if not orders:
         return
 
