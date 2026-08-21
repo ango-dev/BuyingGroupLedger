@@ -18,16 +18,22 @@ def _configured(monkeypatch):
     monkeypatch.setattr(store, "link_for", lambda key: f"https://par/{key}")
 
 
-def _items(*specs, status="delivered"):
+def _items(*specs, status="shipped"):
     """specs: (order_id, order_date, item_name).
 
-    Defaults to `delivered` because a receipt is only taken once an order is FINISHED — capturing an
-    open order would freeze a document that predates its own final totals (see is_capturable). Pass
-    status= to exercise the gate itself.
+    Defaults to `shipped`, which is the trigger: a receipt is taken once the goods are actually
+    moving, because that is when a buying group asks for proof (see is_capturable). Pass status= to
+    exercise the gate itself.
     """
+    # A `shipped` row MUST carry a tracking number or OrderItem._shipped_requires_tracking quietly
+    # downgrades it to `ordered` — which is the invariant working correctly, and worth knowing:
+    # capture-on-shipped therefore fires exactly when a tracking number exists, i.e. exactly when
+    # the buying group has something to ask proof of purchase about.
+    tracking = "1Z999" if status == "shipped" else ""
     return [
         OrderItem(retailer="Amazon", profile_label="p", order_id=oid, order_date=date,
-                  item_name=name, quantity=1, cost_per_item=10.0, status=status)
+                  item_name=name, quantity=1, cost_per_item=10.0, status=status,
+                  tracking_number=tracking)
         for oid, date, name in specs
     ]
 
@@ -474,71 +480,44 @@ class TestExpandingCollapsedSections:
         assert sources.expand_selectors("costco") == ('[automation-id="HideorExpandOrderSummary"]',)
 
 
-class TestOnlyFinishedOrdersAreCaptured:
-    """A receipt is taken ONCE and never refreshed, so the moment it is taken decides what it says.
+class TestOnlyShippedOrdersAreCaptured:
+    """A receipt is taken ONCE and never refreshed, so the moment it is taken is the whole design.
 
-    User decision 2026-08-21. Capturing an order that is still `ordered` or `shipped` permanently
-    stores a document predating its own final totals, tracking numbers and delivery date — and
-    nothing will ever go back and improve it, because a terminal order is never re-read.
-
-    Note this is NOT about how OFTEN capture runs: storage is checked before any browser opens, so a
-    re-check run of an already-captured order costs nothing either way.
+    THE RULE IS `shipped` OR BEYOND. Proof of purchase is wanted at ship time —
+    when tracking goes to the buying group, and when BFMR asks for proof behind a suffixed tracking
+    number. And a LOST package never delivers, so a delivered-only rule would never capture the one
+    order where proof matters most: the insurance claim.
     """
 
-    @pytest.mark.parametrize("status", ["ordered", "shipped"])
-    def test_an_unfinished_order_is_not_captured(self, wired, status):
+    def test_a_shipped_order_is_captured(self, wired):
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(), "amazon",
+                                browser_factory=BrowserFactory())
+
+        assert len(recorder.puts) == 1
+
+    def test_an_order_first_seen_already_delivered_is_still_captured(self, wired):
+        """NOT redundant with the above. An order can be first seen delivered — fast shipping, or
+        discovered outside the lookback window — and a shipped-ONLY rule would never capture it."""
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status="delivered"), _profile(),
+                                "amazon", browser_factory=BrowserFactory())
+
+        assert len(recorder.puts) == 1
+
+    def test_an_ordered_but_unshipped_order_is_not_captured(self, wired):
+        """Nothing has moved yet, and the order can still be cancelled outright."""
         recorder = wired(Recorder())
         factory = BrowserFactory()
-        items = _items(("A1", "2026-08-21", "Thing"), status=status)
+        items = _items(("A1", "2026-08-21", "T"), status="ordered")
 
         capture.attach_receipts(items, _profile(), "amazon", browser_factory=factory)
 
         assert recorder.puts == []
-        assert factory.calls == 0, "and it must not even open a browser to find that out"
+        assert factory.calls == 0, "and it must not open a browser to find that out"
         assert items[0].receipt_url == ""
-
-    def test_a_delivered_order_is_captured(self, wired):
-        recorder = wired(Recorder())
-
-        capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(),
-                                "amazon", browser_factory=BrowserFactory())
-
-        assert len(recorder.puts) == 1
-
-    @pytest.mark.parametrize("status", ["paid", "return"])
-    def test_the_buying_groups_own_statuses_are_NOT_a_live_capture_trigger(self, wired, status):
-        """DELIVERED is the whole live rule.
-
-        `paid` and `return` are the buying group's outcomes, and no scraper can emit them —
-        sync_tracking writes them to the SHEET after a scrape — so they can never reach a live
-        capture anyway. Excluding them here is what makes the rule say exactly what it means.
-        """
-        recorder = wired(Recorder())
-
-        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status=status), _profile(),
-                                "amazon", browser_factory=BrowserFactory())
-
-        assert recorder.puts == []
-
-    @pytest.mark.parametrize("status", ["paid", "return"])
-    def test_the_backfill_may_opt_into_them(self, wired, status):
-        """scripts/backfill_receipts.py reads statuses off the sheet, where a settled order genuinely
-        IS finished — and is exactly the one you may later have to prove. 16 of the first 40 rows
-        were `paid`, and without this they could never get a receipt from anything."""
-        recorder = wired(Recorder())
-
-        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status=status), _profile(),
-                                "amazon", browser_factory=BrowserFactory(), include_settled=True)
-
-        assert len(recorder.puts) == 1
-
-    def test_the_backfill_opt_in_still_refuses_an_unfinished_order(self, wired):
-        recorder = wired(Recorder())
-
-        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status="shipped"), _profile(),
-                                "amazon", browser_factory=BrowserFactory(), include_settled=True)
-
-        assert recorder.puts == []
 
     def test_a_cancelled_order_is_never_captured(self, wired):
         """It never completed, so the receipt proves nothing and there is nothing to claim."""
@@ -549,41 +528,131 @@ class TestOnlyFinishedOrdersAreCaptured:
 
         assert recorder.puts == []
 
-    def test_a_part_delivered_split_order_waits_for_its_last_box(self, wired):
-        """The receipt covers the WHOLE order, so one delivered box is not enough — capturing then
-        would store a document that is out of date the moment the last box lands."""
+    def test_a_part_shipped_order_is_captured_without_waiting(self, wired):
+        """The invoice covers the WHOLE order, so there is nothing to wait for — and waiting only
+        widens the window where the receipt is missing when someone asks for it."""
         recorder = wired(Recorder())
-        items = _items(("A1", "2026-08-21", "Box one"))          # delivered
-        items += _items(("A1", "2026-08-21", "Box two"), status="shipped")
-
-        capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
-
-        assert recorder.puts == [], "one shipment still moving means the order is not finished"
-
-    def test_a_fully_delivered_split_order_is_captured_once(self, wired):
-        recorder = wired(Recorder())
-        items = _items(("A1", "2026-08-21", "Box one"), ("A1", "2026-08-21", "Box two"))
-
-        capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
-
-        assert len(recorder.puts) == 1, "one order is still one document"
-        assert items[0].receipt_url == items[1].receipt_url != ""
-
-    def test_a_delivered_order_with_one_cancelled_line_still_captures(self, wired):
-        """A partial cancellation is a completed purchase for whatever actually shipped."""
-        recorder = wired(Recorder())
-        items = _items(("A1", "2026-08-21", "Kept"))
-        items += _items(("A1", "2026-08-21", "Dropped"), status="cancelled")
+        items = _items(("A1", "2026-08-21", "Box one"))                       # shipped
+        items += _items(("A1", "2026-08-21", "Box two"), status="ordered")    # not yet
 
         capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
 
         assert len(recorder.puts) == 1
 
-    def test_finished_and_unfinished_orders_in_one_batch_are_separated(self, wired):
+    def test_a_multi_row_order_is_still_one_document(self, wired):
         recorder = wired(Recorder())
-        items = _items(("DONE", "2026-08-21", "T1"))
-        items += _items(("OPEN", "2026-08-21", "T2"), status="shipped")
+        items = _items(("A1", "2026-08-21", "One"), ("A1", "2026-08-21", "Two"))
 
         capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
 
-        assert [k for k, _, _ in recorder.puts] == ["receipts/amazon/2026-08/DONE.pdf"]
+        assert len(recorder.puts) == 1
+        assert items[0].receipt_url == items[1].receipt_url != ""
+
+    @pytest.mark.parametrize("status", ["paid", "return"])
+    def test_the_buying_groups_own_statuses_are_NOT_a_live_trigger(self, wired, status):
+        """No scraper can emit them — sync_tracking writes them to the SHEET after a scrape — so
+        they can never reach a live capture. Excluding them makes the rule say what it means."""
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status=status), _profile(),
+                                "amazon", browser_factory=BrowserFactory())
+
+        assert recorder.puts == []
+
+    @pytest.mark.parametrize("status", ["paid", "return"])
+    def test_the_backfill_may_opt_into_them(self, wired, status):
+        """The backfill reads statuses off the sheet, where a settled order genuinely IS finished.
+        16 of the first 40 rows were `paid`; without this they could never get a receipt at all."""
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status=status), _profile(),
+                                "amazon", browser_factory=BrowserFactory(), include_settled=True)
+
+        assert len(recorder.puts) == 1
+
+    def test_the_backfill_opt_in_still_refuses_an_unshipped_order(self, wired):
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status="ordered"), _profile(),
+                                "amazon", browser_factory=BrowserFactory(), include_settled=True)
+
+        assert recorder.puts == []
+
+    def test_shipped_and_unshipped_orders_in_one_batch_are_separated(self, wired):
+        recorder = wired(Recorder())
+        items = _items(("MOVED", "2026-08-21", "T1"))
+        items += _items(("STILL", "2026-08-21", "T2"), status="ordered")
+
+        capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
+
+        assert [k for k, _, _ in recorder.puts] == ["receipts/amazon/2026-08/MOVED.pdf"]
+
+
+
+class TestCapturedExactlyOnce:
+    """Across repeated runs, an order is captured ONCE — verified by running it twice.
+
+    The existing tests check a single run against a pre-seeded store. This drives the real sequence
+    a scheduled deployment produces: run 1 captures, run 2..N find it already there. The bucket is
+    the source of truth (not the sheet, and not any local state), so this holds even if a sheet
+    write failed in between — which is the case that would otherwise re-capture forever.
+    """
+
+    class StatefulStore(Recorder):
+        """A store that actually remembers what was uploaded, so a second run sees run 1's object."""
+
+        def put(self, key, body, ext):
+            link = super().put(key, body, ext)
+            self.present.add(key)
+            return link
+
+    def test_a_second_run_captures_nothing_and_opens_no_browser(self, wired):
+        store_ = wired(self.StatefulStore())
+        first, second = BrowserFactory(), BrowserFactory()
+
+        run1 = _items(("A1", "2026-08-21", "Thing"))
+        capture.attach_receipts(run1, _profile(), "amazon", browser_factory=first)
+        run2 = _items(("A1", "2026-08-21", "Thing"))
+        capture.attach_receipts(run2, _profile(), "amazon", browser_factory=second)
+
+        assert len(store_.puts) == 1, "the receipt must be uploaded exactly once"
+        assert first.calls == 1
+        assert second.calls == 0, "the second run must not create a paid cloud browser"
+        assert run2[0].receipt_url == run1[0].receipt_url, "and must still link the existing object"
+
+    def test_ten_runs_still_upload_once(self, wired):
+        store_ = wired(self.StatefulStore())
+        factories = [BrowserFactory() for _ in range(10)]
+        for f in factories:
+            capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(), "amazon",
+                                    browser_factory=f)
+
+        assert len(store_.puts) == 1
+        assert [f.calls for f in factories] == [1] + [0] * 9
+
+    def test_an_order_that_ships_then_delivers_is_not_captured_twice(self, wired):
+        """The status advancing must not re-trigger it: shipped captures, delivered finds it there."""
+        store_ = wired(self.StatefulStore())
+        a, b = BrowserFactory(), BrowserFactory()
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(), "amazon",
+                                browser_factory=a)
+        later = _items(("A1", "2026-08-21", "T"), status="delivered")
+        capture.attach_receipts(later, _profile(), "amazon", browser_factory=b)
+
+        assert len(store_.puts) == 1
+        assert b.calls == 0
+        assert later[0].receipt_url != ""
+
+    def test_the_link_is_rebuilt_from_the_key_even_if_the_sheet_write_failed(self, wired):
+        """The bucket is the source of truth. A row whose Receipt Link never made it to the sheet
+        still gets the link re-derived next run, WITHOUT re-uploading."""
+        store_ = wired(self.StatefulStore())
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(), "amazon",
+                                browser_factory=BrowserFactory())
+
+        fresh = _items(("A1", "2026-08-21", "T"))   # sheet lost the link; scraper emits blank
+        capture.attach_receipts(fresh, _profile(), "amazon", browser_factory=BrowserFactory())
+
+        assert len(store_.puts) == 1
+        assert fresh[0].receipt_url == "https://par/receipts/amazon/2026-08/A1.pdf"

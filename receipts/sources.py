@@ -200,42 +200,48 @@ def object_key(retailer_key: str, order_id: str, order_date: str, ext: str) -> s
 
 # WHEN an order is worth capturing. A receipt is captured ONCE and never refreshed, so the question
 # is not "how often" (storage is checked before any browser opens, so a re-check run captures
-# nothing) but "at what moment is the document final".
+# nothing) but "at what moment is the document worth taking".
 #
-# THE RULE: capture on DELIVERED. Capturing an order still `ordered` or `shipped`
-# freezes a receipt that predates its own final totals, tracking numbers and delivery date — and
-# nothing will ever go back and improve it. `cancelled` is never captured: the order did not
-# complete, so its receipt proves nothing and there is nothing to claim against it.
-CAPTURE_STATUSES = ("delivered",)
+# THE RULE: once the order has SHIPPED.
+#
+# Waiting for delivery was wrong for the job this serves. A receipt is proof of purchase for a
+# buying group, and that is needed AT SHIP TIME — when tracking is submitted, and when BFMR asks for
+# proof to support a suffixed tracking number. Worse, **a lost package never delivers**, so the one
+# order where proof matters most — an insurance claim — is exactly the one a delivered-only rule
+# would never capture.
+#
+# Waiting also bought less than it looked like it did: the receipt is an ORDER-level invoice (items,
+# quantities, prices, totals, payment method, ship-to), all of which exists the moment it ships. A
+# shipment split does not change it, because it was never a per-shipment document.
+#
+# `delivered` is included, and that is not redundant: an order can be FIRST SEEN already delivered
+# (fast shipping, or discovered outside the lookback window), and on a shipped-only rule it would
+# never be captured at all.
+#
+# `ordered` is excluded — nothing has moved yet and the order can still be cancelled outright.
+# `cancelled` is excluded — the order never completed, so its receipt proves nothing.
+CAPTURE_STATUSES = ("shipped", "delivered")
 
 # `paid` and `return` are the BUYING GROUP's outcomes, and no scraper can ever emit them —
 # sync_tracking writes them to the sheet AFTER a scrape, so they can never appear in the rows a live
 # capture sees. They exist here only for scripts/backfill_receipts.py, which reads statuses off the
-# SHEET, where a settled order genuinely is finished and genuinely may need proving later. Keeping
-# them out of the live rule is what makes that rule say exactly what it means.
+# SHEET, where a settled order genuinely is finished and genuinely may need proving later.
 SETTLED_STATUSES = ("paid", "return")
-
-# Statuses that mean the order is still in flight, so its receipt is not final yet.
-_OPEN_STATUSES = ("ordered", "shipped")
 
 
 def is_capturable(statuses, include_settled: bool = False) -> bool:
-    """Is this order finished, and worth a receipt?
+    """Has this order shipped (or better), and is it worth a receipt?
 
-    Takes EVERY row's status, because one order can be several shipments: a 3-box order with two
-    boxes delivered and one still moving is not finished, and capturing it would store a receipt
-    that is out of date the moment the last box lands.
+    Takes EVERY row's status because one order can be several shipments, and asks whether ANY of
+    them has moved. A part-shipped order IS worth capturing: the invoice covers the whole order, so
+    there is nothing to wait for, and waiting only widens the window in which the receipt is not
+    there when someone asks for it.
 
     `include_settled` widens the rule to the buying group's own terminal outcomes. Only the backfill
     passes it — see SETTLED_STATUSES.
     """
     good = CAPTURE_STATUSES + (SETTLED_STATUSES if include_settled else ())
-    seen = [(s or "").strip().lower() for s in statuses if (s or "").strip()]
-    if not seen:
-        return False
-    if any(s not in good + ("cancelled",) for s in seen):
-        return False  # still in flight (or an unknown status — do not guess)
-    return any(s in good for s in seen)
+    return any((s or "").strip().lower() in good for s in statuses)
 
 
 # Extensions a stored receipt can carry, newest-preferred first: PDF is what we try to render, PNG is
