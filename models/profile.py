@@ -8,7 +8,10 @@ class ProxyConfig(BaseModel):
     host: str
     port: int
     username: str = ""
-    password: str = ""
+    # repr=False so a proxy password cannot ride out in a traceback, a log line or an alert email.
+    # A ProfileConfig is handed to almost everything here, so its repr surfaces in a lot of places —
+    # and an alert leaves the host entirely. The value is still read normally by as_url().
+    password: str = Field(default="", repr=False)
 
     def as_url(self, scheme: str = "http") -> str:
         """`http://user:pass@host:port` — the form direct HTTP clients want.
@@ -56,7 +59,10 @@ class RetailerAuth(BaseModel):
 
     method: Literal["password"] = "password"
     username: str = ""
-    password: str = ""
+    # repr=False: this is the retailer account password. It is already exposed to the agent
+    # fallback by necessity (v4 has no secret channel), so it must not ALSO leak everywhere a
+    # profile happens to be printed.
+    password: str = Field(default="", repr=False)
 
 
 class ProfileConfig(BaseModel):

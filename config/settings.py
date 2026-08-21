@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
@@ -44,6 +44,15 @@ def _get_rate(name: str, default: float) -> float:
 
 @dataclass(frozen=True)
 class Settings:
+    """Every credential the run needs.
+
+    SECRETS ARE `repr=False`. This object is reachable from almost every module, so any unhandled
+    exception that carries it into `logs/run.log` — or into an alert email, which is worse, since
+    that leaves the host — would otherwise print every API key, the Best Buy password and the PAR
+    URL in full. Found 2026-08-21 when a test traceback printed the PAR secret verbatim.
+    A masked repr costs nothing; the values are still read normally as attributes.
+    """
+
     # Browser-Use Cloud v4 (browser_use_sdk.v4.BrowserUse reads BROWSER_USE_API_KEY itself).
     # v4 is BYOK-only. The SDK's RunModel enum is stale/incomplete — it doesn't list
     # "gpt-5.6-luna", but the server accepts it and it's the cheapest confirmed-working
@@ -66,15 +75,27 @@ class Settings:
     # cards.json (see config/cards.py). 0 = assume no cashback unless a card says otherwise.
     default_cashback_rate: float = _get_rate("DEFAULT_CASHBACK_RATE", 0.0)
 
+    # Amazon prints the paying card's earn line under the payment method, e.g. "Earn 5% back (cap
+    # applies) plus an extra 1% back on select items". ON = that EXTRA percentage is added to the
+    # card's cards.json rate for that order (Amazon consumer only). Turn it OFF to fall back to the
+    # cards.json rate alone — the escape hatch if that text turns out to be card-level marketing
+    # rather than a per-order promo, since it would then inflate every order on that card.
+    amazon_promo_cashback_enabled: bool = _get_bool("AMAZON_PROMO_CASHBACK_ENABLED", True)
+    # A gift card earns NO cashback, so when one pays part of an Amazon order the recorded cost is
+    # scaled down to what the card actually paid — which makes both Total Cost and the cashback it
+    # drives reflect card spend only. Applies to Amazon AND Amazon Business. OFF = record the full
+    # sticker cost (and thus cashback on money the card never spent).
+    amazon_gift_card_netting_enabled: bool = _get_bool("AMAZON_GIFT_CARD_NETTING_ENABLED", True)
+
     google_service_account_file: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
     google_sheet_id: str = os.getenv("GOOGLE_SHEET_ID", "")
     google_sheet_worksheet_name: str = os.getenv("GOOGLE_SHEET_WORKSHEET_NAME", "Orders")
 
     gmail_address: str = os.getenv("GMAIL_ADDRESS", "")
-    gmail_app_password: str = os.getenv("GMAIL_APP_PASSWORD", "")
+    gmail_app_password: str = field(default=os.getenv("GMAIL_APP_PASSWORD", ""), repr=False)
     alert_email_to: str = os.getenv("ALERT_EMAIL_TO", "") or os.getenv("GMAIL_ADDRESS", "")
 
-    discord_webhook_url: str = os.getenv("DISCORD_WEBHOOK_URL", "")
+    discord_webhook_url: str = field(default=os.getenv("DISCORD_WEBHOOK_URL", ""), repr=False)
 
     # --- Buying groups (see buying_groups/) -----------------------------------------------------
     # Master switch for the scheduled buying-group sync in main.run_buying_group_sync. OFF by
@@ -91,8 +112,8 @@ class Settings:
     # BFMR authenticates with TWO headers, API-KEY and API-SECRET — not a bearer token. Spec:
     # https://api.bfmr.com/storage/api-docs.json (the page at https://api.bfmr.com/ just renders it).
     bfmr_api_base_url: str = os.getenv("BFMR_API_BASE_URL", "https://api.bfmr.com")
-    bfmr_api_key: str = os.getenv("BFMR_API_KEY", "")
-    bfmr_api_secret: str = os.getenv("BFMR_API_SECRET", "")
+    bfmr_api_key: str = field(default=os.getenv("BFMR_API_KEY", ""), repr=False)
+    bfmr_api_secret: str = field(default=os.getenv("BFMR_API_SECRET", ""), repr=False)
     # Only insure shipments worth at least this much. 0 (the default) insures every shipment, which
     # is the intended behaviour — the knob exists so cheap boxes can be excluded later without a
     # code change, since filing costs a real premium on every unattended run.
@@ -101,7 +122,7 @@ class Settings:
     # MaxOutDeals authenticates with a bearer token AND an IP allowlist (its profile has a firewall
     # tab). `user` and `email` are required in the BODY of every request, not just the headers.
     maxoutdeals_api_base_url: str = os.getenv("MAXOUTDEALS_API_BASE_URL", "https://www.maxoutdeals.com")
-    maxoutdeals_api_key: str = os.getenv("MAXOUTDEALS_API_KEY", "")
+    maxoutdeals_api_key: str = field(default=os.getenv("MAXOUTDEALS_API_KEY", ""), repr=False)
     maxoutdeals_user_id: str = os.getenv("MAXOUTDEALS_USER_ID", "")
     maxoutdeals_email: str = os.getenv("MAXOUTDEALS_EMAIL", "")
 
@@ -118,8 +139,8 @@ class Settings:
     oci_bucket: str = os.getenv("OCI_BUCKET", "")
     oci_s3_endpoint_url: str = os.getenv("OCI_S3_ENDPOINT_URL", "")
     oci_s3_region: str = os.getenv("OCI_S3_REGION", "")
-    oci_s3_access_key_id: str = os.getenv("OCI_S3_ACCESS_KEY_ID", "")
-    oci_s3_secret_access_key: str = os.getenv("OCI_S3_SECRET_ACCESS_KEY", "")
+    oci_s3_access_key_id: str = field(default=os.getenv("OCI_S3_ACCESS_KEY_ID", ""), repr=False)
+    oci_s3_secret_access_key: str = field(default=os.getenv("OCI_S3_SECRET_ACCESS_KEY", ""), repr=False)
     # A Pre-Authenticated Request URL, created ONCE by hand in the OCI console — Target: Bucket,
     # Access type: Permit object reads, object listing left OFF. PARs are NOT part of the S3
     # compatibility API — minting one needs OCI's native API and a different credential set
@@ -129,7 +150,7 @@ class Settings:
     #
     # TREAT IT AS A SECRET. Anyone holding this URL can read every receipt under the prefix, and a
     # receipt carries your name, delivery address, card last 4 and order totals.
-    oci_par_url_prefix: str = os.getenv("OCI_PAR_URL_PREFIX", "")
+    oci_par_url_prefix: str = field(default=os.getenv("OCI_PAR_URL_PREFIX", ""), repr=False)
 
 
 settings = Settings()
