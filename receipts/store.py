@@ -110,8 +110,7 @@ def _s3():
                 "requirements.txt`). Orders are still recorded; only the Receipt Link is lost."
             ) from exc
 
-        _client = boto3.client(
-            "s3",
+        kwargs = dict(
             endpoint_url=settings.oci_s3_endpoint_url,
             aws_access_key_id=settings.oci_s3_access_key_id,
             aws_secret_access_key=settings.oci_s3_secret_access_key,
@@ -119,12 +118,26 @@ def _s3():
             # subdomains, so path-style addressing is required rather than merely safer. SigV4 is
             # what it authenticates with.
             region_name=settings.oci_s3_region or "us-ashburn-1",
-            config=Config(
-                signature_version="s3v4",
-                s3={"addressing_style": "path"},
-                retries={"max_attempts": 3, "mode": "standard"},
-            ),
         )
+        base = {
+            "signature_version": "s3v4",
+            "s3": {"addressing_style": "path"},
+            "retries": {"max_attempts": 3, "mode": "standard"},
+        }
+        # OCI REJECTS AWS CHUNKED ENCODING. Since botocore 1.36 the default is `when_supported`, which wraps every
+        # put_object body in aws-chunked framing with a trailing CRC32 — AWS-only, and OCI's compat
+        # endpoint refuses it, so EVERY upload fails while credentials and permissions are perfect.
+        # `when_required` sends a plain body. Applies to any S3-compatible provider, not just OCI.
+        try:
+            _client = boto3.client("s3", config=Config(
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
+                **base,
+            ), **kwargs)
+        except TypeError:
+            # botocore < 1.36 has neither option — and needs neither, since it never sent
+            # aws-chunked in the first place.
+            _client = boto3.client("s3", config=Config(**base), **kwargs)
         return _client
 
 

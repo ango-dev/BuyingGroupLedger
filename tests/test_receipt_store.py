@@ -203,3 +203,62 @@ class TestLazyImport:
         names |= {(n.module or "").split(".")[0] for n in top_level if isinstance(n, ast.ImportFrom)}
 
         assert "boto3" not in names and "botocore" not in names
+
+
+class TestClientCompatibilityWithNonAwsS3:
+    """OCI is S3-COMPATIBLE, not S3, and two boto3 defaults are wrong against it.
+
+    Both were found live on 2026-08-15 and both fail in the silent direction — credentials and
+    permissions perfectly fine, every upload rejected.
+    """
+
+    def test_chunked_encoding_is_disabled(self, monkeypatch):
+        """botocore >= 1.36 defaults request_checksum_calculation to "when_supported", which frames
+        every put_object body as aws-chunked with a trailing CRC32. OCI answers `NotImplemented:
+        AWS chunked encoding not supported` — so EVERY receipt upload fails."""
+        _configure(monkeypatch)
+        captured = {}
+
+        def fake_client(service, config=None, **kw):
+            captured["config"] = config
+            return FakeS3()
+
+        import boto3
+        monkeypatch.setattr(boto3, "client", fake_client)
+        store._s3()
+
+        assert captured["config"].request_checksum_calculation == "when_required"
+
+    def test_path_style_addressing_is_used(self, monkeypatch):
+        """OCI's compat endpoint is namespace-scoped and does not serve virtual-host-style bucket
+        subdomains, so the default would address a hostname that does not resolve."""
+        _configure(monkeypatch)
+        captured = {}
+
+        def fake_client(service, config=None, **kw):
+            captured["config"] = config
+            return FakeS3()
+
+        import boto3
+        monkeypatch.setattr(boto3, "client", fake_client)
+        store._s3()
+
+        assert captured["config"].s3["addressing_style"] == "path"
+        assert captured["config"].signature_version == "s3v4"
+
+    def test_an_older_botocore_without_the_checksum_options_still_builds_a_client(self, monkeypatch):
+        """Those Config kwargs do not exist before botocore 1.36. Raising there would take receipt
+        capture down on an older host that never needed the fix in the first place."""
+        _configure(monkeypatch)
+        import boto3
+        from botocore.config import Config
+
+        def old_config(**kw):
+            if "request_checksum_calculation" in kw:
+                raise TypeError("unexpected keyword argument")
+            return Config(**kw)
+
+        monkeypatch.setattr("botocore.config.Config", old_config)
+        monkeypatch.setattr(boto3, "client", lambda service, config=None, **kw: FakeS3())
+
+        assert store._s3() is not None
