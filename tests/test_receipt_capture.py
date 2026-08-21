@@ -656,3 +656,107 @@ class TestCapturedExactlyOnce:
 
         assert len(store_.puts) == 1
         assert fresh[0].receipt_url == "https://par/receipts/amazon/2026-08/A1.pdf"
+
+
+class TestANonFinalDocumentIsNeverStored:
+    """The guard that does not trust status: it reads the DOCUMENT.
+
+    Live the two disagreed. The ledger said `shipped` because a tracking number existed —
+    Amazon Logistics assigns `TBA…` at LABEL CREATION, not dispatch — while Amazon's own invoice for
+    that order said `Not Yet Shipped`. The invoice was right, and it is the invoice that gets kept
+    forever and shown to a tax auditor, so the invoice is what gets checked.
+    """
+
+    FINAL = b"%PDF-1.4 Final Details for Order #A1 ... Shipped on August 20, 2026"
+    INTERIM = b"%PDF-1.4 Details for Order #A1 ... Not Yet Shipped"
+
+    @staticmethod
+    def _page_returning(body):
+        """A page whose printToPDF yields `body`."""
+        return FakePage(pdf=body)
+
+    def test_a_pre_shipment_invoice_is_refused(self, wired, monkeypatch):
+        recorder = wired(Recorder())
+        monkeypatch.setattr(capture, "pdf_text", lambda b: b.decode("latin-1"))
+        items = _items(("A1", "2026-08-21", "iPad"))
+
+        capture.attach_receipts(items, _profile(), "amazon-business",
+                                browser_factory=BrowserFactory(self._page_returning(self.INTERIM)))
+
+        assert recorder.puts == [], "a 'Not Yet Shipped' invoice must not become the permanent record"
+        assert items[0].receipt_url == "", "and the row stays blank so a later run retries it"
+
+    def test_the_final_invoice_is_stored(self, wired, monkeypatch):
+        recorder = wired(Recorder())
+        monkeypatch.setattr(capture, "pdf_text", lambda b: b.decode("latin-1"))
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "iPad")), _profile(), "amazon-business",
+                                browser_factory=BrowserFactory(self._page_returning(self.FINAL)))
+
+        assert len(recorder.puts) == 1
+
+    def test_a_retailer_with_no_markers_is_untouched(self, wired, monkeypatch):
+        """Consumer Amazon's rendered invoice carries no finality wording in EITHER direction, so
+        inventing a marker for it would only produce false rejections."""
+        recorder = wired(Recorder())
+        monkeypatch.setattr(capture, "pdf_text", lambda b: b.decode("latin-1"))
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(), "amazon",
+                                browser_factory=BrowserFactory(self._page_returning(self.INTERIM)))
+
+        assert len(recorder.puts) == 1
+
+    def test_one_refused_order_does_not_stop_the_others(self, wired, monkeypatch):
+        recorder = wired(Recorder())
+        monkeypatch.setattr(capture, "pdf_text", lambda b: b.decode("latin-1"))
+
+        class Mixed(FakePage):
+            def new_cdp_session(self, page):
+                body = (TestANonFinalDocumentIsNeverStored.INTERIM
+                        if "BAD" in (self.visited[-1] if self.visited else "")
+                        else TestANonFinalDocumentIsNeverStored.FINAL)
+                import base64
+                return type("S", (), {
+                    "send": lambda _s, m, p=None: {"data": base64.b64encode(body).decode()},
+                    "detach": lambda _s: None,
+                })()
+
+        items = _items(("BAD", "2026-08-21", "T1"), ("GOOD", "2026-08-21", "T2"))
+        capture.attach_receipts(items, _profile(), "amazon-business",
+                                browser_factory=BrowserFactory(Mixed()))
+
+        assert [k for k, _, _ in recorder.puts] == ["receipts/amazon-business/2026-08/GOOD.pdf"]
+
+
+class TestTheGuardFailsOpen:
+    """An unverified receipt is the status quo and still beats no receipt.
+
+    Only a document that POSITIVELY identifies itself as pre-shipment is refused. Anything that
+    merely cannot be checked — a PNG, a missing pypdf, an unreadable PDF — stores as before.
+    """
+
+    def test_a_png_fallback_skips_the_check(self, wired):
+        recorder = wired(Recorder())
+        page = FakePage(pdf_error=RuntimeError("PrintToPDF is not implemented"))
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(), "amazon-business",
+                                browser_factory=BrowserFactory(page))
+
+        assert len(recorder.puts) == 1
+        assert recorder.puts[0][2] == "png"
+
+    def test_unextractable_text_still_stores(self, wired, monkeypatch):
+        """pypdf missing, or a PDF it cannot parse: pdf_text returns "" and nothing is rejected."""
+        recorder = wired(Recorder())
+        monkeypatch.setattr(capture, "pdf_text", lambda b: "")
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(), "amazon-business",
+                                browser_factory=BrowserFactory())
+
+        assert len(recorder.puts) == 1
+
+    def test_pdf_text_never_raises(self):
+        """Every caller depends on this: it returns "" rather than propagating anything."""
+        assert capture.pdf_text(b"") == ""
+        assert capture.pdf_text(b"\x89PNG not a pdf at all") == ""
+        assert capture.pdf_text(b"%PDF-1.4 truncated garbage") == ""

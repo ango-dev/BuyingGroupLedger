@@ -114,6 +114,42 @@ def expand_selectors(retailer_key: str) -> tuple:
     return EXPAND_SELECTORS.get(retailer_key, ())
 
 
+# Text that means the DOCUMENT ITSELF says the order has not shipped yet, so it is not the final
+# invoice and must not be stored.
+#
+# WHY CHECK THE DOCUMENT AND NOT THE STATUS. A receipt is stored once and never refreshed, and these
+# receipts substantiate COGS at tax time — a pre-shipment invoice can diverge from what was actually
+# paid (partial shipment, price adjustment, outright cancellation), and Amazon generally charges AT
+# shipment, so an unshipped order may not be a booked expense at all. Status is a claim ABOUT the
+# document; this is the document. Live the two disagreed: the ledger said `shipped` (it
+# had a tracking number — Amazon Logistics assigns `TBA…` at LABEL CREATION, not dispatch) while
+# Amazon's own invoice said `Not Yet Shipped`. The invoice was right.
+#
+# Only Amazon Business has a marker, and deliberately so: its receipt is Amazon's OWN generated PDF,
+# which is explicitly titled `Final Details for Order #…` once shipped and `Details for Order #…`
+# before. Consumer Amazon's rendered print.html carries NO finality wording in either direction
+# (verified: `Order Summary` / `Grand Total` / `Payment`, never `Final Details` or `Not Yet
+# Shipped`), so inventing a marker for it would only produce false rejections. Best Buy and Costco
+# likewise. This table is the extension point if that ever changes.
+NOT_FINAL_MARKERS = {
+    "amazon-business": ("Not Yet Shipped",),
+}
+
+
+def not_final_reason(retailer_key: str, text: str) -> str | None:
+    """The marker proving this document is pre-shipment, or None if it looks final.
+
+    Positive-match only: a retailer with no markers, or text we could not extract, returns None and
+    the receipt is stored. See _reject_if_not_final in receipts/capture.py for why this fails open.
+    """
+    if not text:
+        return None
+    for marker in NOT_FINAL_MARKERS.get(retailer_key, ()):
+        if marker.lower() in text.lower():
+            return marker
+    return None
+
+
 # Substrings that mean the page we landed on is a sign-in wall or a bot check rather than a receipt.
 # WITHOUT this the capture succeeds, uploads a perfectly rendered PDF of a login form, and marks the
 # order done forever — the exact silent failure this project keeps engineering against. Matched

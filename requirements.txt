@@ -21,3 +21,8 @@ playwright>=1.40.0
 # unchanged against a custom endpoint_url. Imported LAZILY in receipts/store.py, like curl_cffi and
 # PyJWT, so `import main` and the whole test suite stay free of it.
 boto3>=1.34.0
+# Reads a captured receipt's TEXT so the document itself can be checked before it is stored — a
+# pre-shipment invoice ("Not Yet Shipped") must never be kept as the permanent record, since these
+# substantiate COGS at tax time. Pure Python, no native build. Imported LAZILY in receipts/capture.py
+# (pdf_text), so a host without it degrades to storing unverified receipts rather than failing.
+pypdf>=4.0.0

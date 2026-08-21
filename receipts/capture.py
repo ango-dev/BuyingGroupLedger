@@ -30,11 +30,13 @@ from receipts import store
 from receipts.sources import (
     EXPAND_JS,
     EXTENSIONS,
+    NOT_FINAL_MARKERS,
     UnknownRetailerError,
     expand_selectors,
     is_capturable,
     looks_like_pdf,
     looks_logged_out,
+    not_final_reason,
     object_key,
     ready_selector,
     receipt_url,
@@ -111,6 +113,50 @@ def _expand_sections(page, retailer_key: str) -> None:
                     retailer_key, exc_info=True)
 
 
+def pdf_text(body: bytes) -> str:
+    """Extract a PDF's text, or "" if it cannot be read.
+
+    pypdf is imported HERE, not at module scope, for the same reason boto3/curl_cffi/PyJWT are:
+    `import main` and the whole offline suite must not require it. Returns "" rather than raising on
+    ANY failure, which is what makes every caller fail open.
+    """
+    if not body or not body.startswith(b"%PDF"):
+        return ""
+    try:
+        import io
+
+        from pypdf import PdfReader
+
+        return "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(body)).pages)
+    except Exception:  # noqa: BLE001 — an unreadable PDF must never cost a receipt
+        log.debug("Could not extract text from a captured PDF.", exc_info=True)
+        return ""
+
+
+def _reject_if_not_final(body: bytes, ext: str, retailer_key: str, order_id: str) -> None:
+    """Refuse to store a document that says, in its own words, that the order has not shipped.
+
+    THE POINT IS THAT THIS DOES NOT TRUST STATUS. A receipt is stored once and never refreshed, and
+    these documents substantiate COGS at tax time, so a pre-shipment invoice is the wrong artefact
+    to keep forever. Live the ledger said `shipped` (Amazon Logistics assigns `TBA…`
+    tracking at LABEL CREATION) while Amazon's own invoice said `Not Yet Shipped`. The invoice won.
+
+    FAILS OPEN, deliberately. A PNG, a missing pypdf, an unreadable PDF or a retailer with no marker
+    all store as before — an unverified receipt is the status quo and still beats no receipt. Only a
+    document that POSITIVELY identifies itself as pre-shipment is refused. Raising here lands in
+    attach_receipts' per-order handler: this order is skipped and left un-captured (so a later run
+    retries it once it really ships) while every other order in the batch still uploads.
+    """
+    if ext != "pdf" or not NOT_FINAL_MARKERS.get(retailer_key):
+        return
+    reason = not_final_reason(retailer_key, pdf_text(body))
+    if reason:
+        raise RuntimeError(
+            f"the receipt for {order_id} says {reason!r} — it is the pre-shipment invoice, not the "
+            f"final one, so it is not being stored. It will be captured once the order ships."
+        )
+
+
 def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
     """Navigate to one order's receipt page and render it. Returns (body, extension).
 
@@ -141,7 +187,9 @@ def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
     if looks_like_pdf(landed):
         log.info("Receipt for %s is Amazon's own PDF document; downloading rather than rendering.",
                  order_id)
-        return _download(page, landed), "pdf"
+        body = _download(page, landed)
+        _reject_if_not_final(body, "pdf", retailer_key, order_id)
+        return body, "pdf"
 
     selector = ready_selector(retailer_key)
     try:
@@ -165,11 +213,13 @@ def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
         )
 
     try:
-        return _render_pdf(page), "pdf"
+        body, ext = _render_pdf(page), "pdf"
     except Exception as exc:  # noqa: BLE001 — any refusal means fall back, not fail
         log.warning("Page.printToPDF unavailable for %s (%s: %s); falling back to a full-page "
                     "screenshot.", order_id, type(exc).__name__, exc)
-        return page.screenshot(full_page=True), "png"
+        body, ext = page.screenshot(full_page=True), "png"
+    _reject_if_not_final(body, ext, retailer_key, order_id)
+    return body, ext
 
 
 def _orders_from(items, include_settled: bool = False) -> dict[str, str]:

@@ -17,7 +17,7 @@ when a scraper reads page 1 of a paginated order history and misses the rest, or
 overwrites a good tracking number with a blank. Most of the work below is invariants, idempotency and
 auditing aimed squarely at that class of bug — see **[Design notes](#design-notes)**.
 
-> **Status:** running in production against real accounts. `pytest` runs 986 offline tests that need
+> **Status:** running in production against real accounts. `pytest` runs 1007 offline tests that need
 > no credentials and no network.
 
 ---
@@ -771,6 +771,20 @@ capture failure can't stop the CSV write or the sheet sync, and a page that redi
 wall is **refused rather than stored** — storing it would upload a perfect PDF of a login form and
 mark that order done forever, since the object would then exist and no later run would retry.
 
+**The document is checked, not just the status.** Amazon labels its Business invoice `Final Details
+for Order #…` once shipped and `Details for Order #…` + `Not Yet Shipped` before — and the two can
+disagree with your ledger, because Amazon Logistics assigns a `TBA…` tracking number at *label
+creation*, not dispatch. So a receipt whose own text says it hasn't shipped is **refused rather than
+stored**; the order simply gets captured on a later run. That matters because these receipts
+substantiate COGS at tax time and each is written once and never refreshed.
+
+To audit what's already stored — it fetches each object and reads it, no browser:
+
+```bash
+python -m scripts.receipt_verify            # every receipt: right order id, final, has a total + payment
+python -m scripts.receipt_verify --purge    # delete the failures so capture replaces them
+```
+
 Check the whole setup offline and free with `python -m scripts.preflight`, which reports a
 *partially* configured bucket as a failure — the case where capture looks switched on but silently
 stores nothing.
@@ -1000,6 +1014,8 @@ receipts/sources.py     per-retailer receipt URL + object key + logged-out/PDF d
 receipts/store.py       OCI Object Storage over the S3 compat API (boto3, lazily imported)
 receipts/capture.py     render/download each new order's receipt and link it from its rows
 scripts/receipt_probe.py  dev recon: what a retailer's receipt page renders to (uploads nothing)
+scripts/receipt_verify.py audits stored receipts (final? right order? has a total?)
+scripts/backfill_receipts.py  one-off: capture receipts for rows already on the sheet
 tests/                  offline pytest suite (no credentials/network needed)
 run.sh / run.ps1        scheduler entry points
 scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
