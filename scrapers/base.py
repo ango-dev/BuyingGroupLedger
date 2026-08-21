@@ -66,9 +66,6 @@ class BaseRetailerScraper(abc.ABC):
     retailer_name: str
     order_history_url: str
     retailer_key: str  # matches an entry in a profile's "retailers" list in profiles.json
-
-    # Set by _load_order_state; read by main._capture_receipts. {} until a state read happens.
-    last_order_state: dict = {}
     # Cheap CDP+selector re-check path. A retailer opts in by overriding read_tracking_page AND
     # leaving this True. Retailers whose orders can change shape after they already look shipped —
     # e.g. Amazon splits an order into multiple shipments (each with its own delivery date) at ship
@@ -297,14 +294,7 @@ class BaseRetailerScraper(abc.ABC):
             # = Best Buy + Costco + Amazon Business), and without this a re-check would pull in another
             # retailer's open orders and re-read them under the wrong retailer (the agent fallback would
             # open their order_url and mislabel them, corrupting the ledger).
-            state = load_order_state(self.profile.label, since=earliest, retailer=self.retailer_name)
-            # Cached so receipt capture can see what the LEDGER already knows, not only what this
-            # run's fresh read produced. an Amazon Business order whose page still
-            # says "Not Yet Shipped" rebuilds as `ordered` with blank tracking on EVERY run, while
-            # the sheet correctly holds `shipped` with a tracking number from an earlier read. Judged
-            # on the fresh status alone that order could never be captured, on any run, forever.
-            self.last_order_state = state
-            return state
+            return load_order_state(self.profile.label, since=earliest, retailer=self.retailer_name)
         except Exception:
             # load_order_state has its OWN guard for an unreadable sheet (and alerts there), so this
             # only fires for something else entirely — a bad date window, an import failure. Alerted
@@ -322,8 +312,7 @@ class BaseRetailerScraper(abc.ABC):
                 "of them and only looked for brand-new orders. Any status or tracking-number change "
                 "on an open order was missed for this cycle. Check logs/run.log.",
             )
-            self.last_order_state = {"delivered_ids": [], "open_orders": []}
-            return self.last_order_state
+            return {"delivered_ids": [], "open_orders": []}
 
     @staticmethod
     def _stop_underlying_browser(agent_session_id: UUID) -> None:

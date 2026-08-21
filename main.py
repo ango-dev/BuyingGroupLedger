@@ -127,20 +127,7 @@ def _capture_receipts(items: list, scraper: BaseRetailerScraper, label: str) -> 
     try:
         from receipts.capture import attach_receipts  # local: keeps `import main` free of boto3
 
-        # What the LEDGER already knows about each open order, from the state the scraper loaded at
-        # the start of this run — free, no extra sheet read.
-        #
-        # WHY IT IS NEEDED. The scraper's fresh read can be BEHIND the ledger. an
-        # Amazon Business order whose page still reads "Not Yet Shipped" rebuilds as `ordered` with
-        # blank tracking on every run, while the sheet correctly holds `shipped` with a tracking
-        # number captured earlier (status only moves forward; blanks never overwrite). Gated on the
-        # fresh status alone, that order is skipped on EVERY run and silently never gets a receipt.
-        known = {
-            o["order_id"]: o.get("status", "")
-            for o in (getattr(scraper, "last_order_state", None) or {}).get("open_orders", [])
-            if o.get("order_id")
-        }
-        attach_receipts(items, scraper.profile, scraper.retailer_key, known_statuses=known)
+        attach_receipts(items, scraper.profile, scraper.retailer_key)
     except Exception:
         log.exception("Receipt capture failed for %s", label)
         alert(f"{label}: receipt capture failed",
