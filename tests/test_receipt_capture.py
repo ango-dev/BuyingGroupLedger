@@ -497,16 +497,48 @@ class TestOnlyFinishedOrdersAreCaptured:
         assert factory.calls == 0, "and it must not even open a browser to find that out"
         assert items[0].receipt_url == ""
 
-    @pytest.mark.parametrize("status", ["delivered", "paid", "return"])
-    def test_a_finished_order_is_captured(self, wired, status):
-        """`paid` and `return` count: both are real outcomes of a real purchase, and a paid order is
-        exactly the one you may later have to prove."""
+    def test_a_delivered_order_is_captured(self, wired):
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(),
+                                "amazon", browser_factory=BrowserFactory())
+
+        assert len(recorder.puts) == 1
+
+    @pytest.mark.parametrize("status", ["paid", "return"])
+    def test_the_buying_groups_own_statuses_are_NOT_a_live_capture_trigger(self, wired, status):
+        """DELIVERED is the whole live rule.
+
+        `paid` and `return` are the buying group's outcomes, and no scraper can emit them —
+        sync_tracking writes them to the SHEET after a scrape — so they can never reach a live
+        capture anyway. Excluding them here is what makes the rule say exactly what it means.
+        """
         recorder = wired(Recorder())
 
         capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status=status), _profile(),
                                 "amazon", browser_factory=BrowserFactory())
 
+        assert recorder.puts == []
+
+    @pytest.mark.parametrize("status", ["paid", "return"])
+    def test_the_backfill_may_opt_into_them(self, wired, status):
+        """scripts/backfill_receipts.py reads statuses off the sheet, where a settled order genuinely
+        IS finished — and is exactly the one you may later have to prove. 16 of the first 40 rows
+        were `paid`, and without this they could never get a receipt from anything."""
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status=status), _profile(),
+                                "amazon", browser_factory=BrowserFactory(), include_settled=True)
+
         assert len(recorder.puts) == 1
+
+    def test_the_backfill_opt_in_still_refuses_an_unfinished_order(self, wired):
+        recorder = wired(Recorder())
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "T"), status="shipped"), _profile(),
+                                "amazon", browser_factory=BrowserFactory(), include_settled=True)
+
+        assert recorder.puts == []
 
     def test_a_cancelled_order_is_never_captured(self, wired):
         """It never completed, so the receipt proves nothing and there is nothing to claim."""

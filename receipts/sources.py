@@ -202,33 +202,40 @@ def object_key(retailer_key: str, order_id: str, order_date: str, ext: str) -> s
 # is not "how often" (storage is checked before any browser opens, so a re-check run captures
 # nothing) but "at what moment is the document final".
 #
-# Capturing an order still `ordered` or `shipped` freezes a receipt that predates its own final
-# totals, tracking numbers and delivery date — and nothing will ever go back and improve it. So a
-# capture waits until the order is FINISHED.
-#
-# `cancelled` is deliberately excluded: the order never completed, so its receipt proves nothing and
-# there is no reimbursement to claim against it. `paid` and `return` are included because they are
-# real outcomes of a real purchase — the buying group's own statuses — and a paid order is exactly
-# the one you may later have to prove.
-CAPTURE_STATUSES = ("delivered", "paid", "return")
+# THE RULE: capture on DELIVERED. Capturing an order still `ordered` or `shipped`
+# freezes a receipt that predates its own final totals, tracking numbers and delivery date — and
+# nothing will ever go back and improve it. `cancelled` is never captured: the order did not
+# complete, so its receipt proves nothing and there is nothing to claim against it.
+CAPTURE_STATUSES = ("delivered",)
+
+# `paid` and `return` are the BUYING GROUP's outcomes, and no scraper can ever emit them —
+# sync_tracking writes them to the sheet AFTER a scrape, so they can never appear in the rows a live
+# capture sees. They exist here only for scripts/backfill_receipts.py, which reads statuses off the
+# SHEET, where a settled order genuinely is finished and genuinely may need proving later. Keeping
+# them out of the live rule is what makes that rule say exactly what it means.
+SETTLED_STATUSES = ("paid", "return")
 
 # Statuses that mean the order is still in flight, so its receipt is not final yet.
 _OPEN_STATUSES = ("ordered", "shipped")
 
 
-def is_capturable(statuses) -> bool:
+def is_capturable(statuses, include_settled: bool = False) -> bool:
     """Is this order finished, and worth a receipt?
 
     Takes EVERY row's status, because one order can be several shipments: a 3-box order with two
     boxes delivered and one still moving is not finished, and capturing it would store a receipt
     that is out of date the moment the last box lands.
+
+    `include_settled` widens the rule to the buying group's own terminal outcomes. Only the backfill
+    passes it — see SETTLED_STATUSES.
     """
+    good = CAPTURE_STATUSES + (SETTLED_STATUSES if include_settled else ())
     seen = [(s or "").strip().lower() for s in statuses if (s or "").strip()]
     if not seen:
         return False
-    if any(s in _OPEN_STATUSES or s not in CAPTURE_STATUSES + ("cancelled",) for s in seen):
-        return False
-    return any(s in CAPTURE_STATUSES for s in seen)
+    if any(s not in good + ("cancelled",) for s in seen):
+        return False  # still in flight (or an unknown status — do not guess)
+    return any(s in good for s in seen)
 
 
 # Extensions a stored receipt can carry, newest-preferred first: PDF is what we try to render, PNG is

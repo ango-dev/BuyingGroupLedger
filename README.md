@@ -17,7 +17,7 @@ when a scraper reads page 1 of a paginated order history and misses the rest, or
 overwrites a good tracking number with a blank. Most of the work below is invariants, idempotency and
 auditing aimed squarely at that class of bug — see **[Design notes](#design-notes)**.
 
-> **Status:** running in production against real accounts. `pytest` runs 980 offline tests that need
+> **Status:** running in production against real accounts. `pytest` runs 983 offline tests that need
 > no credentials and no network.
 
 ---
@@ -736,8 +736,8 @@ rot, and revoking it is one more.
 > under the prefix, and a receipt carries your name, delivery address, card last 4 and order totals.
 > Keep the bucket private and the URL in `.env`.
 
-**A receipt is captured once the order is FINISHED** (delivered, paid or returned) — never while
-it's still `ordered` or `shipped`. It's taken once and never refreshed, so capturing early would
+**A receipt is captured once the order is `delivered`** — never while it's still `ordered` or
+`shipped`. It's taken once and never refreshed, so capturing early would
 permanently store a document predating its own final totals, tracking and delivery date. A split
 order waits for its last box, and a cancelled order is never captured at all.
 

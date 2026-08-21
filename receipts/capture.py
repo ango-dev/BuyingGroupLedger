@@ -172,7 +172,7 @@ def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
         return page.screenshot(full_page=True), "png"
 
 
-def _orders_from(items) -> dict[str, str]:
+def _orders_from(items, include_settled: bool = False) -> dict[str, str]:
     """{order_id: order_date} for the rows in this batch.
 
     Keyed on the ORDER, not the ledger row key: one order is one receipt however many line items and
@@ -195,7 +195,7 @@ def _orders_from(items) -> dict[str, str]:
     orders: dict[str, str] = {}
     waiting = 0
     for order_id, entry in by_order.items():
-        if is_capturable(entry["statuses"]):
+        if is_capturable(entry["statuses"], include_settled=include_settled):
             orders[order_id] = entry["date"]
         else:
             waiting += 1
@@ -217,7 +217,8 @@ def _find_existing(retailer_key: str, order_id: str, order_date: str) -> str | N
     return None
 
 
-def attach_receipts(items, profile, retailer_key: str, browser_factory=None) -> None:
+def attach_receipts(items, profile, retailer_key: str, browser_factory=None,
+                    include_settled: bool = False) -> None:
     """Set `receipt_url` on every row whose order has (or can be given) a stored receipt.
 
     Mutates `items` in place. `browser_factory` exists so tests can assert the far more important
@@ -229,7 +230,7 @@ def attach_receipts(items, profile, retailer_key: str, browser_factory=None) -> 
         store._warn_once()
         return
 
-    orders = _orders_from(items)
+    orders = _orders_from(items, include_settled=include_settled)
     if not orders:
         return
 

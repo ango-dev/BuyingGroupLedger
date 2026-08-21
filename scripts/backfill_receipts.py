@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from config.profiles import load_profiles_for_retailer
 from receipts import store
 from receipts.capture import attach_receipts
+from receipts.sources import is_capturable
 from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -110,6 +111,20 @@ def collect(grid):
         order.rows.append(row_number)
         # attach_receipts gates on status per ROW, so carry every row's status through.
         order.statuses.append(cell("Status"))
+
+    # Drop orders attach_receipts would refuse anyway — a cancelled order (never captured, by
+    # design) or one still in flight. Done HERE so the dry run reports what would ACTUALLY be
+    # captured; listing an order it would then silently skip makes the preview a lie.
+    unfinished = 0
+    for key, bucket in list(groups.items()):
+        for order_id, order in list(bucket.items()):
+            if not is_capturable(order.statuses, include_settled=True):
+                del bucket[order_id]
+                unfinished += 1
+        if not bucket:
+            del groups[key]
+    if unfinished:
+        log.info("Skipped %d order(s): cancelled, or not finished yet.", unfinished)
 
     for reason, n in sorted(skipped.items()):
         log.info("Skipped %d row(s): %s", n, reason)
@@ -192,7 +207,10 @@ def run(apply=False, only_retailer=None, limit=None):
         # attach_receipts does the rest: it skips anything already in the bucket WITHOUT opening a
         # browser, opens ONE browser for the remainder, and never raises for a single bad order.
         try:
-            attach_receipts(selected, profile, retailer_key)
+            # include_settled: the sheet's `paid`/`return` rows are genuinely finished
+            # purchases that a live scrape can never see (no scraper emits those), and
+            # they are exactly the ones you may later have to prove.
+            attach_receipts(selected, profile, retailer_key, include_settled=True)
         except Exception:  # noqa: BLE001 — one retailer must not end the backfill
             log.exception("Backfill failed for %s [%s]; continuing.", retailer_key, profile_label)
             continue
