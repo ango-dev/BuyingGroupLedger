@@ -141,12 +141,27 @@ def main() -> int:
               f"       Uploads work but every Receipt Link would 404.")
         return 1
 
-    # --- 4. Leave the bucket as we found it.
+    # --- 4. Leave the bucket as we found it — REALLY, not just apparently.
+    #
+    # On a VERSIONED bucket a plain delete_object is not a delete: it writes a delete marker and
+    # keeps the object as a non-current version. head_object then 404s, so the probe looks gone
+    # while two billable artefacts stay behind — every single run. So purge by VersionId.
     try:
-        store._s3().delete_object(Bucket=bucket, Key=PROBE_KEY)
-        print("[ OK ] cleanup  probe object removed")
+        s3 = store._s3()
+        listing = s3.list_object_versions(Bucket=bucket, Prefix=PROBE_KEY)
+        # Prefix is a PREFIX, so match the key exactly rather than trusting the filter.
+        versions = [v for v in listing.get("Versions", []) if v["Key"] == PROBE_KEY]
+        markers = [d for d in listing.get("DeleteMarkers", []) if d["Key"] == PROBE_KEY]
+        if versions or markers:
+            for entry in versions + markers:
+                s3.delete_object(Bucket=bucket, Key=PROBE_KEY, VersionId=entry["VersionId"])
+            print(f"[ OK ] cleanup  probe object purged ({len(versions) + len(markers)} version(s))")
+        else:
+            # An unversioned bucket has nothing to enumerate; one plain delete is a real delete.
+            s3.delete_object(Bucket=bucket, Key=PROBE_KEY)
+            print("[ OK ] cleanup  probe object removed")
     except Exception as exc:  # noqa: BLE001
-        print(f"[WARN] cleanup  could not delete {PROBE_KEY}: {exc}")
+        print(f"[WARN] cleanup  could not fully remove {PROBE_KEY}: {exc}")
 
     print("\nReceipt storage is working end to end — uploads AND the sheet-facing links.")
     return 0
