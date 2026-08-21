@@ -6,6 +6,14 @@ profiles.json
 warehouses.json
 cards.json
 .costco/
+# Recon/capture output — REAL PII (names, addresses, card last 4, order totals, whole receipts).
+# These are gitignored, but .gitignore does not apply to `COPY . .`, so they must be named here too
+# or they get baked into the image and travel wherever it is pushed.
+.amazon_capture/
+.amazon_business_capture/
+.bestbuy_capture/
+.bg_capture/
+.receipt_capture/
 .venv/
 __pycache__/
 *.pyc
