@@ -180,3 +180,23 @@ class TestReadySelectors:
 
     def test_an_unlisted_retailer_falls_back_to_body(self):
         assert sources.ready_selector("walmart") == "body"
+
+
+class TestCostcoSelectorIsAnAttributeNotAnId:
+    """Costco's order page is a hash-route SPA, so the ready selector is what stops us capturing an
+    empty shell — and it is easy to get subtly wrong.
+
+    The page renders `<div automation-id="orderNumber">`, an ATTRIBUTE, not `id="orderNumber"`. A
+    naive `#orderNumber` matches nothing, waits out the full timeout on every single capture, and
+    then renders whatever happened to be on screen. Costco's real classes are hashed MUI names
+    (`css-1pzz4na`), so class-substring matching is no good either.
+    """
+
+    def test_it_targets_the_automation_id_attribute(self):
+        selector = sources.ready_selector("costco")
+
+        assert '[automation-id="orderNumber"]' in selector
+        assert "#orderNumber" not in selector, "that is an attribute, not an id — it would match nothing"
+
+    def test_it_does_not_rely_on_hashed_mui_class_names(self):
+        assert "class*=" not in sources.ready_selector("costco")

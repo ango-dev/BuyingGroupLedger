@@ -62,12 +62,16 @@ READY_SELECTORS = {
     # renders in PRINT media, so the stored PDF is the clean receipt — 3 pages of Best Buy's own
     # HumanBBYDigital font — not the navigation-and-footer page a screenshot would catch.
     "bestbuy": "main, [class*='order-details']",
-    # UNVERIFIED. The 2026-08-15 probe never got to test it: costco.com redirected straight to
-    # signin.costco.com, because the profile's BROWSER session had lapsed independently of the
-    # GraphQL refresh token that Costco's data path runs on (that path opens no browser at all, so
-    # nothing keeps this session warm). looks_logged_out caught it and production skips the capture.
-    # Re-run scripts/receipt_probe.py once the profile is logged back into costco.com in a browser.
-    "costco": "[class*='order-details'], [class*='orderDetails'], table",
+    # LIVE-VERIFIED 2026-08-21 against the rendered SPA. Costco's order page is a hash-route SPA, so
+    # `domcontentloaded` fires while the document is still an empty shell — this is the one retailer
+    # where waiting on the right node genuinely matters.
+    #
+    # NOTE these are `automation-id` ATTRIBUTES, not ids: the page renders
+    # `<div automation-id="orderNumber">Order Number 1399000015</div>`, so `#orderNumber` matches
+    # nothing. (The earlier guess of `[class*='order-details']` matched nothing either — Costco's
+    # classes are hashed MUI names like `css-1pzz4na` — and cost a 30s timeout on every capture.)
+    # `#detail-costcoOrder` is a genuine id and is kept as a second chance.
+    "costco": '[automation-id="orderNumber"], #detail-costcoOrder',
 }
 
 # Substrings that mean the page we landed on is a sign-in wall or a bot check rather than a receipt.
