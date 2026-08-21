@@ -17,7 +17,7 @@ when a scraper reads page 1 of a paginated order history and misses the rest, or
 overwrites a good tracking number with a blank. Most of the work below is invariants, idempotency and
 auditing aimed squarely at that class of bug — see **[Design notes](#design-notes)**.
 
-> **Status:** running in production against real accounts. `pytest` runs 921 offline tests that need
+> **Status:** running in production against real accounts. `pytest` runs 980 offline tests that need
 > no credentials and no network.
 
 ---
@@ -257,6 +257,14 @@ etc.) — they're never resold, so they never hit the ledger.
   Amazon reports the right rate on each row. A card that isn't configured keeps a blank name — so the
   gap stays visible — but still gets your `DEFAULT_CASHBACK_RATE` so profit stays computable. The rate
   is the only cashback column; the dollar amount isn't stored, it's folded into Total Profit.
+  On **Amazon**, if the order page advertises a bonus under the payment method ("Earn 5% back … plus an
+  extra 1% back"), that extra is **added** to the card's configured rate for that order, so the single
+  Cashback Rate cell carries the true total (`AMAZON_PROMO_CASHBACK_ENABLED=0` turns it off).
+- **Gift cards earn no cashback**, so when one pays part of an Amazon or Amazon Business order the
+  recorded cost is scaled down to what the *card* actually paid — Total Cost, Shipping and the cashback
+  they drive all reflect card spend only, which raises reported profit by the gift-card amount. The
+  reduction is capped at the pre-tax basis (Amazon applies gift cards to tax too, which this ledger
+  doesn't track). `AMAZON_GIFT_CARD_NETTING_ENABLED=0` records the full sticker cost instead.
 - **Insurance**, **Payout Date** and **Payout Amount** are filled by the buying-group sync (see
   "Buying groups" below) — or by hand until you enable it. The scrapers always write them blank, and
   the upsert's blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.
@@ -728,6 +736,16 @@ rot, and revoking it is one more.
 > under the prefix, and a receipt carries your name, delivery address, card last 4 and order totals.
 > Keep the bucket private and the URL in `.env`.
 
+**A receipt is captured once the order is FINISHED** (delivered, paid or returned) — never while
+it's still `ordered` or `shipped`. It's taken once and never refreshed, so capturing early would
+permanently store a document predating its own final totals, tracking and delivery date. A split
+order waits for its last box, and a cancelled order is never captured at all.
+
+That means orders finished *before* you configured this are unreachable by any normal run, since a
+terminal order is never re-read. `python -m scripts.backfill_receipts` (dry run by default,
+`--apply` to write, `--retailer` and `--limit` to bound it) walks the sheet and fills them in. It's
+safe to re-run: it only fills blank cells and skips anything already stored.
+
 **It costs almost nothing to leave on.** Storage is asked *first*, before any browser exists: an
 order whose receipt is already stored just gets its link written from the object key. So a routine
 re-check run — the common case — opens **zero** cloud browsers. One browser is created only when at
@@ -739,8 +757,8 @@ least one genuinely new order needs a receipt, and it covers all of them.
 |---|---|
 | **Amazon** | Its **print invoice** page rendered to PDF — order number, date, ship-to, payment method, items, quantities, grand total |
 | **Amazon Business** | Amazon's **own invoice PDF**, downloaded rather than rendered. The print-invoice URL redirects to a real `order-document.pdf`; rendering that would capture Chrome's PDF *viewer* instead of the document |
-| **Best Buy** | The order-details page rendered in **print media** — the page ships its own `@media print` rules, so the PDF is the clean receipt, not the navigation and footer |
-| **Costco** | The order-details page. ⚠️ Needs a logged-in **browser** session, which Costco's normal path never creates — it runs on a stored GraphQL token with no browser at all. Re-run `scripts.create_profile` and sign into costco.com if captures start being skipped |
+| **Best Buy** | The order-details page with its **Payment Details** disclosure expanded, rendered in **print media** — the page ships its own `@media print` rules, so the PDF is the clean receipt, not the navigation and footer |
+| **Costco** | The order-details page, with its collapsed **Order Summary** expanded first — otherwise the receipt shows the item and none of the money. ⚠️ Needs a logged-in **browser** session, which Costco's normal path never creates — it runs on a stored GraphQL token with no browser at all. Re-run `scripts.create_profile` and sign into costco.com if captures start being skipped |
 
 **Failures are always partial, never fatal.** A missing receipt is an inconvenience the next run
 retries; a missing *order* is missed reimbursement. So one order failing doesn't stop the others, a
