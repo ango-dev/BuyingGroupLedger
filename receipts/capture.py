@@ -28,8 +28,10 @@ import logging
 
 from receipts import store
 from receipts.sources import (
+    EXPAND_JS,
     EXTENSIONS,
     UnknownRetailerError,
+    expand_selectors,
     looks_like_pdf,
     looks_logged_out,
     object_key,
@@ -83,6 +85,31 @@ def _download(page, url: str) -> bytes:
     return response.body()
 
 
+def _expand_sections(page, retailer_key: str) -> None:
+    """Open the collapsed sections a receipt would be incomplete without.
+
+    Costco hides its entire Order Summary — payment method, subtotal, shipping, tax, grand total —
+    behind a "Show Details" toggle, so without this the stored PDF shows WHAT was bought and none of
+    what it cost. That is the half a buying group actually wants.
+
+    Best-effort by design: a selector matching nothing is normal (most retailers hide nothing) and
+    must never cost the capture. The JS only clicks sections that are genuinely closed, because the
+    control is a toggle — firing it on an already-open accordion would collapse the thing we came
+    to reveal.
+    """
+    selectors = expand_selectors(retailer_key)
+    if not selectors:
+        return
+    try:
+        clicked = page.evaluate(EXPAND_JS, list(selectors))
+        if clicked:
+            log.info("Receipts: expanded %d collapsed section(s) before rendering.", clicked)
+            page.wait_for_timeout(1500)  # let the accordion finish animating open
+    except Exception:  # noqa: BLE001 — a receipt missing one section beats no receipt at all
+        log.warning("Receipts: could not expand collapsed sections for %s; capturing as-is.",
+                    retailer_key, exc_info=True)
+
+
 def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
     """Navigate to one order's receipt page and render it. Returns (body, extension).
 
@@ -124,6 +151,7 @@ def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
         # logged-out check below still has to pass before anything is stored.
         log.warning("Receipt page for %s did not match its ready selector %r; capturing anyway.",
                     order_id, selector)
+    _expand_sections(page, retailer_key)
     page.wait_for_timeout(_SETTLE_MS)
 
     # Re-checked after settling: a session can lapse into a sign-in redirect that only lands once

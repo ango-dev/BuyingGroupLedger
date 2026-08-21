@@ -9,7 +9,7 @@ import pytest
 
 from models.order import OrderItem
 from models.profile import ProfileConfig
-from receipts import capture, store
+from receipts import capture, sources, store
 
 
 @pytest.fixture(autouse=True)
@@ -398,3 +398,72 @@ class TestFailureIsAlwaysPartial:
         capture.attach_receipts([], _profile(), "amazon", browser_factory=factory)
 
         assert factory.calls == 0
+
+
+class TestExpandingCollapsedSections:
+    """Costco hides its whole Order Summary — payment method, subtotal, shipping, tax, grand total —
+    behind a "Show Details" toggle.
+
+    Found 2026-08-21 by extracting the text of the PDFs already in the bucket, not by looking at the
+    page: the receipts showed WHAT was bought and none of what it COST, and nothing about the run
+    looked wrong.
+    """
+
+    @staticmethod
+    def _page(retailer="costco"):
+        class ExpandPage(FakePage):
+            def __init__(self):
+                super().__init__()
+                self.evaluated = []
+
+            def evaluate(self, js, arg=None):
+                self.evaluated.append((js, arg))
+                return 1  # one section clicked
+
+        return ExpandPage()
+
+    def test_costco_expands_the_order_summary_before_rendering(self, wired):
+        wired(Recorder())
+        page = self._page()
+
+        capture.attach_receipts(_items(("1399000015", "2026-08-21", "iPad")), _profile(), "costco",
+                                browser_factory=BrowserFactory(page))
+
+        assert page.evaluated, "the Order Summary must be opened or the receipt has no money on it"
+        _js, selectors = page.evaluated[0]
+        assert selectors == ['[automation-id="HideorExpandOrderSummary"]']
+
+    def test_retailers_with_nothing_collapsed_do_not_evaluate_anything(self, wired):
+        wired(Recorder())
+        page = self._page()
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "Thing")), _profile(), "amazon",
+                                browser_factory=BrowserFactory(page))
+
+        assert page.evaluated == []
+
+    def test_a_failure_to_expand_still_stores_the_receipt(self, wired):
+        """A receipt missing one section beats no receipt at all."""
+        recorder = wired(Recorder())
+
+        class Broken(FakePage):
+            def evaluate(self, js, arg=None):
+                raise RuntimeError("evaluate blocked by CSP")
+
+        capture.attach_receipts(_items(("1399000015", "2026-08-21", "iPad")), _profile(), "costco",
+                                browser_factory=BrowserFactory(Broken()))
+
+        assert len(recorder.puts) == 1
+
+    def test_the_js_only_clicks_sections_that_are_actually_closed(self):
+        """The control is a TOGGLE. Firing it on an already-open accordion would collapse the very
+        thing we came to reveal, so a day when Costco ships it open by default must not silently
+        start producing worse receipts."""
+        js = sources.EXPAND_JS
+
+        assert "aria-expanded" in js and "'false'" in js
+
+    def test_the_expanders_are_surgical_not_every_collapsed_node(self):
+        """The same Costco page carries ~29 other aria-expanded="false" nodes — footer accordions,
+        nav dropdowns, tooltips — and opening those would only pad the document with chrome."""
+        assert sources.expand_selectors("costco") == ('[automation-id="HideorExpandOrderSummary"]',)

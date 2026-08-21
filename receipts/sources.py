@@ -74,6 +74,41 @@ READY_SELECTORS = {
     "costco": '[automation-id="orderNumber"], #detail-costcoOrder',
 }
 
+# Sections a retailer COLLAPSES by default and that a receipt is incomplete without. Clicked before
+# rendering, best-effort — a selector that matches nothing is not an error.
+#
+# Costco hides the whole Order Summary (payment method, subtotal, shipping, tax, grand total) behind
+# a "Show Details" toggle, so a straight render produces a receipt with the ITEM but none of the
+# MONEY — found 2026-08-21 by reading the captured PDFs' text rather than trusting that the page
+# looked complete. Keep these SURGICAL: the same page has ~29 other `aria-expanded="false"` nodes,
+# every one of them site chrome (footer accordions, nav dropdowns, tooltips) that would only add
+# noise to the document.
+EXPAND_SELECTORS = {
+    "costco": ('[automation-id="HideorExpandOrderSummary"]',),
+}
+
+# Only ever clicks a section that is genuinely CLOSED. The toggle is a toggle: firing it blindly on
+# an already-open accordion would COLLAPSE the very thing we came to reveal, so a run where Costco
+# ships it open by default would silently start producing worse receipts than one where it doesn't.
+EXPAND_JS = """
+(selectors) => {
+  let clicked = 0;
+  for (const sel of selectors) {
+    for (const el of document.querySelectorAll(sel)) {
+      const header = el.closest('[aria-expanded]');
+      if (!header || header.getAttribute('aria-expanded') === 'false') { el.click(); clicked++; }
+    }
+  }
+  return clicked;
+}
+"""
+
+
+def expand_selectors(retailer_key: str) -> tuple:
+    """Collapsed sections to open before rendering. Empty for retailers that hide nothing."""
+    return EXPAND_SELECTORS.get(retailer_key, ())
+
+
 # Substrings that mean the page we landed on is a sign-in wall or a bot check rather than a receipt.
 # WITHOUT this the capture succeeds, uploads a perfectly rendered PDF of a login form, and marks the
 # order done forever — the exact silent failure this project keeps engineering against. Matched
