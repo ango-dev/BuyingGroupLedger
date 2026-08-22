@@ -48,7 +48,7 @@ def _shipment(order_id: str, index: int, status_text: str, items: list[str],
 
 def _details(order_id: str, order_date: str, shipments: list[str], card: str = "1234",
              shipping: str = "$0.00", address: str = "Test Buyer\n123 Main St\nSampletown, CA 90000",
-             earn: str = "", gift_card: str = "") -> str:
+             earn: str = "", gift_card: str = "", subtotal: str = "") -> str:
     # Amazon prints the paying card's earn line under the payment method, in its own pmts-* <li>.
     earn_html = (
         '<ul class="pmts-payments-instrument-list">'
@@ -57,13 +57,16 @@ def _details(order_id: str, order_date: str, shipments: list[str], card: str = "
     ) if earn else ""
     # The "Gift Card Amount" line only renders when a gift card actually paid part of the order.
     gift_html = f"Gift Card Amount: -{gift_card}\n" if gift_card else ""
+    # Real pages always carry a subtotal; tests that don't care omit it so the reconciliation guard
+    # (which only fires when the cards are worth MORE than the order) stays out of the way.
+    subtotal_line = f"Item(s) Subtotal: {subtotal}\n" if subtotal else ""
     return (
         '<html><body><div id="orderDetails">'
         f'<div data-component="orderDate">{order_date}</div>'
         f'<div data-component="orderId">Order # {order_id}</div>'
         f'<div data-component="shippingAddress">{address}</div>'
         f'<div>Payment method Visa ending in {card}{earn_html}</div>'
-        f'<div data-component="orderSummary">Item(s) Subtotal: $10.00\nShipping &amp; Handling: {shipping}\n'
+        f'<div data-component="orderSummary">{subtotal_line}Shipping &amp; Handling: {shipping}\n'
         f"{gift_html}Grand Total: $10.00</div>"
         f'<div data-component="shipments">{"".join(shipments)}</div>'
         "</div>"
@@ -407,3 +410,64 @@ def test_summary_lines_are_read_when_label_and_amount_are_separate_elements():
 
     assert _gift_card_amount(region.select_one("[data-component='orderSummary']")) == 14.04
     assert _promo_cashback_rate(region) == 0.01
+
+
+# --- re-tracked shipment / subtotal reconciliation ------------------------------------------------
+# Amazon re-issues a new tracking number for the same package when it is delayed, and can render the
+# package TWICE while that is in flight. Shipments are numbered by DOM position, so the second card
+# lands as a brand-new row carrying the full cost again. The guard: an order's cards may not be worth
+# more than the order's own subtotal.
+RID = "111-9990021-9990021"
+
+
+def _two_cards(subtotal: str, price: str = "$949.00", qty: int = 3, cards: int = 2, **kw) -> str:
+    ships = [
+        _shipment(RID, i, "Arriving Monday", [_item("iPad Pro", price, qty=qty)], shipment_id="S%d" % i)
+        for i in range(cards)
+    ]
+    return _details(RID, "August 12, 2026", ships, subtotal=subtotal, **kw)
+
+
+def test_a_repeated_shipment_card_is_collapsed_to_one_row():
+    """The live case: two cards of 3 iPads against a $2,847 order would book $5,694."""
+    html = _two_cards("$2,847.00")
+    rows = build_order_items(html, tracking_by_shipment={"1": "TBA-DEAD", "2": "TBA-LIVE"})
+
+    assert len(rows) == 1, "one physical shipment must produce one row"
+    assert rows[0].total_cost == 2847.0
+    assert rows[0].shipment == "1", "the survivor is renumbered so future scrapes match it"
+    assert rows[0].tracking_number == "TBA-LIVE", "the re-issued label wins, not the dead one"
+
+
+def test_a_genuine_split_is_left_alone():
+    """The critical no-false-positive case: real boxes still sum to the subtotal."""
+    html = _two_cards("$200.00", price="$100.00", qty=1)
+    rows = build_order_items(html, tracking_by_shipment={"1": "T1", "2": "T2"})
+
+    assert [r.shipment for r in rows] == ["1", "2"]
+    assert sum(r.total_cost for r in rows) == 200.0
+
+
+def test_no_subtotal_on_the_page_leaves_rows_untouched():
+    html = _two_cards("")  # subtotal omitted -> nothing to reconcile against
+    assert len(build_order_items(html)) == 2
+
+
+def test_an_unresolvable_duplicate_is_marked_rather_than_guessed():
+    """A qty-6 order split 3+3 where one box was re-tracked renders 3/3/3. Collapsing gets to 3, which
+    still isn't 6 — so the quantity is left explicitly unresolved instead of booking a wrong number."""
+    html = _two_cards("$5,694.00", cards=3)
+    rows = build_order_items(html, tracking_by_shipment={"1": "A", "2": "B", "3": "C"})
+
+    assert len(rows) == 1
+    assert rows[0].quantity == "*", "'*' is the existing convention audit_sheet.unresolved_split_quantity reads"
+    assert rows[0].total_cost is None, "no cost is better than a wrong cost"
+
+
+def test_gift_card_netting_sees_the_corrected_basis():
+    """Netting divides by the cost basis, so a duplicated card would make the reduction too gentle."""
+    html = _two_cards("$100.00", price="$100.00", qty=1, gift_card="$40.00")
+    rows = build_order_items(html, tracking_by_shipment={"1": "T1", "2": "T2"})
+
+    assert len(rows) == 1
+    assert rows[0].total_cost == 60.0, "100 - 40, not the 80 an inflated 200 basis would give"

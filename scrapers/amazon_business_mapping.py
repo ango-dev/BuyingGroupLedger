@@ -35,11 +35,14 @@ Row model (keyed on Order ID + Order Date + Item Name + Shipment, like every ret
 preserved; digital items skipped; cost_per_item = the unit price charged (total_cost is computed).
 """
 
+import logging
 import re
 
 from bs4 import BeautifulSoup
 
 from models.order import OrderItem, shipment_label
+
+log = logging.getLogger(__name__)
 
 RETAILER = "Amazon Business"
 _BASE = "https://www.amazon.com"
@@ -55,6 +58,8 @@ _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
 # standalone copy of the Amazon trio. NOTE: the consumer path also reads a promo cashback rate off the
 # payment block; that is intentionally NOT ported here (Amazon consumer only, by decision).
 _GIFT_CARD_RE = re.compile(r"Gift Card Amount:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
+# What the order is actually worth — the ceiling its shipment cards may not exceed.
+_SUBTOTAL_RE = re.compile(r"Item\(s\) Subtotal:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7,
@@ -304,6 +309,92 @@ def _gift_card_amount(summary_el) -> float | None:
     return abs(amount) if amount is not None else None
 
 
+def _order_subtotal(summary_el) -> float | None:
+    """The order summary's "Item(s) Subtotal" — what the order is actually worth."""
+    if summary_el is None:
+        return None
+    m = _SUBTOTAL_RE.search(summary_el.get_text("\n", strip=True))
+    return _num(m.group(1)) if m else None
+
+
+def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
+                                order_id: str) -> list[OrderItem]:
+    """Twin of scrapers/amazon_mapping._reconcile_against_subtotal — keep the two in step.
+
+    Drop shipment cards that would make an order cost MORE than the order is worth.
+
+    Amazon re-issues a NEW TRACKING NUMBER FOR THE SAME PHYSICAL SHIPMENT when one is delayed, and
+    while that is in flight the order-details page can render the package TWICE — the superseded card
+    and its replacement. Each card carries the whole line, and shipments are numbered by DOM position,
+    so the second card lands as a brand-new "Shipment 2" row holding the full quantity and cost again.
+    Seen live on a 3-iPad order: two cards against a $2,847 order booked $5,694, which halves the
+    reported profit and doubles the cashback basis.
+
+    The invariant that separates that from a GENUINE split: a real split's boxes still sum to the order
+    subtotal (three boxes of a qty-3 line are one unit each), while a duplicated card pushes the sum
+    ABOVE it. So this can only fire when the page claims more value than the order contains — a
+    legitimate multi-box order never trips it.
+
+    Nothing is corrected silently (CLAUDE.md: a cheap path must not guess): the collapse is logged and
+    alerted. And if the survivors STILL do not reconcile — e.g. a qty-6 order split 3+3 where one box
+    was re-tracked, giving 3/3/3 — quantities are left UNRESOLVED ("*" with a blank cost) rather than
+    guessed, the same convention ledger_sync's undisclosed-split net uses and which
+    audit_sheet.unresolved_split_quantity exists to surface.
+    """
+    if subtotal is None or not rows:
+        return rows
+    before = round(sum(r.total_cost or 0.0 for r in rows), 2)
+    if before <= subtotal + 0.01:
+        return rows  # the normal path, including every genuine split
+
+    # Keep ONE row per identical (item, quantity, unit price) card. Prefer a card carrying a tracking
+    # number, then the LAST such card: Amazon appends the re-issued package, and on the observed order
+    # the live number was on the second card while the first held a dead label.
+    keep: dict[tuple, OrderItem] = {}
+    for row in rows:
+        sig = (row.item_name, row.quantity, row.cost_per_item)
+        current = keep.get(sig)
+        if current is None or bool(row.tracking_number) >= bool(current.tracking_number):
+            keep[sig] = row
+    survivor_ids = {id(r) for r in keep.values()}
+    survivors = [r for r in rows if id(r) in survivor_ids]
+    for index, row in enumerate(survivors):
+        row.shipment = shipment_label(index + 1)
+
+    after = round(sum(r.total_cost or 0.0 for r in survivors), 2)
+    resolved = abs(after - subtotal) <= 0.01
+    if not resolved:
+        # Can't tell which box holds what. Record it as explicitly unresolved rather than book a number
+        # that is wrong: "*" is deliberately not blank, because _merge_row preserves a blank and would
+        # quietly keep the inflated figure already on the sheet.
+        for row in survivors:
+            row.quantity = "*"
+            row.total_cost = None
+
+    log.warning(
+        "%s: order-details showed %d shipment card(s) worth $%.2f against a $%.2f subtotal — a "
+        "re-tracked package rendered twice. Kept %d card(s) worth $%.2f.%s",
+        order_id, len(rows), before, subtotal, len(survivors), after,
+        "" if resolved else " Still short of the subtotal, so quantities are left unresolved ('*').",
+    )
+    from alerts.notifier import alert  # local: keeps this module importable without the alert stack
+
+    tail = "" if resolved else (
+        "\n\nThe surviving cards still do not match the subtotal, so their quantities are recorded "
+        "as '*' and need setting by hand."
+    )
+    alert(
+        f"Amazon Business {order_id}: a shipment was recorded twice",
+        f"The order-details page rendered {len(rows)} shipment card(s) totalling ${before:.2f} for an "
+        f"order whose subtotal is ${subtotal:.2f} — the hallmark of a delayed package that was "
+        f"re-issued a new tracking number while the old card was still on the page.\n\n"
+        f"{len(survivors)} card(s) worth ${after:.2f} were kept.{tail}\n\n"
+        f"If a row for the superseded tracking number is already on the sheet, clear it with:\n"
+        f"  python -m scripts.fix_superseded_shipments --order {order_id}",
+    )
+    return survivors
+
+
 def _net_gift_card(rows: list[OrderItem], gift_card: float | None) -> None:
     """Scale an order's cost basis down to what the CARD actually paid. Mutates rows in place.
 
@@ -439,6 +530,9 @@ def build_order_items(
     if rows and all(r.status == "cancelled" for r in rows) and order_id not in (known_open_ids or set()):
         return []
 
+    # Before netting: the gift-card reduction divides by this same basis, so it must
+    # not see a basis inflated by a duplicated shipment card.
+    rows = _reconcile_against_subtotal(rows, _order_subtotal(summary_el), order_id)
     if net_gift_cards:
         _net_gift_card(rows, _gift_card_amount(summary_el))
     return rows

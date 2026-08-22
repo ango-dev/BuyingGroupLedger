@@ -54,9 +54,12 @@ def _shipment(order_id: str, index: int, status_text: str, items: list[str],
 
 def _details(order_id: str, order_date: str, shipments: list[str], card: str = "1234",
              shipping: str = "$0.00", address: str = "Test Buyer\n123 Main St\nSampletown, CA 90000",
-             extra_chrome: str = "", gift_card: str = "") -> str:
+             extra_chrome: str = "", gift_card: str = "", subtotal: str = "") -> str:
     # The "Gift Card Amount" line only renders when a gift card actually paid part of the order.
     gift_html = f"Gift Card Amount: -{gift_card}\n" if gift_card else ""
+    # Real pages always carry a subtotal; tests that don't care omit it so the reconciliation guard
+    # (which only fires when the cards are worth MORE than the order) stays out of the way.
+    subtotal_line = f"Item(s) Subtotal: {subtotal}\n" if subtotal else ""
     return (
         '<html><body><div id="orderDetails">'
         f'<div data-component="orderDate">{order_date}</div>'
@@ -64,7 +67,7 @@ def _details(order_id: str, order_date: str, shipments: list[str], card: str = "
         f'<div data-component="shippingAddress">{address}</div>'
         f"{extra_chrome}"
         f'<div>Payment method Prime Business Card ending in {card} 5% back</div>'
-        f'<div data-component="orderSummary">Item(s) Subtotal: $10.00\nShipping &amp; Handling: {shipping}\n'
+        f'<div data-component="orderSummary">{subtotal_line}Shipping &amp; Handling: {shipping}\n'
         f"Total before tax: $10.00\nEstimated tax to be collected: $0.87\n{gift_html}Grand Total: $10.87</div>"
         f'<div data-component="shipments">{"".join(shipments)}</div>'
         "</div>"
@@ -355,3 +358,34 @@ def test_business_never_reads_a_promo_rate():
                      "<span>Earn 5% back plus an extra 1% back on select items</span></li>",
     )
     assert build_order_items(html)[0]._promo_cashback_rate is None
+
+
+# --- re-tracked shipment / subtotal reconciliation (twin of the consumer guard) --------------------
+RID = "111-9990021-9990021"
+
+
+def _biz_two_cards(subtotal: str, price: str = "$949.00", qty: int = 3, cards: int = 2) -> str:
+    ships = [
+        _shipment(RID, i, "Arriving Monday", [_item("iPad Pro", price, qty=qty)], shipment_id="S%d" % i)
+        for i in range(cards)
+    ]
+    return _details(RID, "August 12, 2026", ships, subtotal=subtotal)
+
+
+def test_a_repeated_shipment_card_is_collapsed_to_one_row():
+    """The real case this came from: order 111-9990021-9990021 booked $5,694 for a $2,847 order."""
+    rows = build_order_items(_biz_two_cards("$2,847.00"),
+                             tracking_by_shipment={"1": "TBA-DEAD", "2": "TBA-LIVE"})
+
+    assert len(rows) == 1
+    assert rows[0].total_cost == 2847.0
+    assert rows[0].shipment == "1"
+    assert rows[0].tracking_number == "TBA-LIVE"
+
+
+def test_a_genuine_split_is_left_alone():
+    rows = build_order_items(_biz_two_cards("$200.00", price="$100.00", qty=1),
+                             tracking_by_shipment={"1": "T1", "2": "T2"})
+
+    assert [r.shipment for r in rows] == ["1", "2"]
+    assert sum(r.total_cost for r in rows) == 200.0
