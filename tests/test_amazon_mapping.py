@@ -6,6 +6,8 @@ real order-details `data-component` tree captured live (scripts/amazon_capture.p
 (PII) is committed. The live browser mechanics are proven by a real run instead.
 """
 
+import pytest
+
 from scrapers.amazon_mapping import (
     build_order_items,
     discover_orders,
@@ -294,10 +296,16 @@ def test_promo_amazon_day_wording_is_parsed():
     assert build_order_items(html)[0]._promo_cashback_rate == 0.01
 
 
-def test_earn_line_without_an_extra_is_not_a_promo():
-    # The base rate is cards.json's job — "Earn 5% back" alone must not become a bonus.
-    html = _one_item_order(earn="Earn 5% back at Amazon.com")
-    assert build_order_items(html)[0]._promo_cashback_rate is None
+@pytest.mark.parametrize("earn", [
+    # The bare wording REAL non-promo orders carry (seen on four captured 0315 orders) — the case
+    # that matters most, since it is what distinguishes "no bonus this order" from a bonus.
+    "5% back",
+    "Earn 5% back at Amazon.com",
+    "Earn 5% back (cap applies)",
+])
+def test_earn_line_without_an_extra_is_not_a_promo(earn):
+    # The base rate is cards.json's job — an earn line with no "extra N%" must not become a bonus.
+    assert build_order_items(_one_item_order(earn=earn))[0]._promo_cashback_rate is None
 
 
 def test_no_earn_line_means_no_promo():
