@@ -85,7 +85,7 @@ def _tag_cards(items: list, label: str) -> None:
     and agent fallback alike, funnels through run_scrape. Unlike the warehouse classifier this never
     drops a row — an unrecognized card is only a missing profit input, not a reason to lose an order.
     """
-    unknown = tag_cards(items, _cards())
+    unknown = tag_cards(items, _cards(), apply_promo=settings.amazon_promo_cashback_enabled)
     if unknown:
         log.info(
             "%s: %d row(s) have a card ending in digits not listed in cards.json (default "

@@ -54,7 +54,9 @@ def _shipment(order_id: str, index: int, status_text: str, items: list[str],
 
 def _details(order_id: str, order_date: str, shipments: list[str], card: str = "1234",
              shipping: str = "$0.00", address: str = "Test Buyer\n123 Main St\nSampletown, CA 90000",
-             extra_chrome: str = "") -> str:
+             extra_chrome: str = "", gift_card: str = "") -> str:
+    # The "Gift Card Amount" line only renders when a gift card actually paid part of the order.
+    gift_html = f"Gift Card Amount: -{gift_card}\n" if gift_card else ""
     return (
         '<html><body><div id="orderDetails">'
         f'<div data-component="orderDate">{order_date}</div>'
@@ -63,7 +65,7 @@ def _details(order_id: str, order_date: str, shipments: list[str], card: str = "
         f"{extra_chrome}"
         f'<div>Payment method Prime Business Card ending in {card} 5% back</div>'
         f'<div data-component="orderSummary">Item(s) Subtotal: $10.00\nShipping &amp; Handling: {shipping}\n'
-        "Total before tax: $10.00\nEstimated tax to be collected: $0.87\nGrand Total: $10.87</div>"
+        f"Total before tax: $10.00\nEstimated tax to be collected: $0.87\n{gift_html}Grand Total: $10.87</div>"
         f'<div data-component="shipments">{"".join(shipments)}</div>'
         "</div>"
         # A recommendations carousel OUTSIDE #orderDetails must be ignored.
@@ -295,3 +297,61 @@ def test_no_date_in_status_leaves_delivery_date_blank():
     html = _details(oid, "August 11, 2026",
                     [_shipment(oid, 0, "Preparing for shipment", [_item("Thing", "$5.00")])])
     assert build_order_items(html, today="2026-08-11")[0].delivery_date == ""
+
+
+# --- gift-card netting ---------------------------------------------------------------------------
+# Business shares the consumer rule: a gift card earns 0% cashback, so cost is scaled down to what the
+# CARD actually paid. (The consumer path ALSO reads a promo cashback rate; Business deliberately does
+# not — test_business_never_reads_a_promo_rate pins that.)
+BIZ_OID = "111-2223334-5556667"
+
+
+def _one_item_order(**kwargs) -> str:
+    return _details(BIZ_OID, "August 12, 2026",
+                    [_shipment(BIZ_OID, 0, "Delivered August 13",
+                               [_item("Thing", "$100.00", qty=1)])],
+                    **kwargs)
+
+
+def test_gift_card_reduces_cost_to_what_the_card_paid():
+    rows = build_order_items(_one_item_order(gift_card="$40.00"))
+    assert rows[0].cost_per_item == 60.00
+    assert rows[0].total_cost == 60.00
+
+
+def test_gift_card_larger_than_the_basis_floors_cost_at_zero():
+    html = _details(BIZ_OID, "August 11, 2026",
+                    [_shipment(BIZ_OID, 0, "Delivered August 12", [_item("Gummies", "$12.85", qty=1)])],
+                    gift_card="$14.04")
+    rows = build_order_items(html)
+    assert rows[0].cost_per_item == 0.00
+    assert rows[0].total_cost == 0.00
+
+
+def test_gift_card_prorates_across_shipments_by_cost():
+    html = _details(BIZ_OID, "August 12, 2026", [
+        _shipment(BIZ_OID, 0, "Delivered August 13", [_item("Big", "$60.00", qty=1)], shipment_id="S1"),
+        _shipment(BIZ_OID, 1, "Delivered August 14", [_item("Small", "$40.00", qty=1)], shipment_id="S2"),
+    ], gift_card="$50.00")
+    rows = build_order_items(html)
+    assert [r.total_cost for r in rows] == [30.00, 20.00]
+
+
+def test_no_gift_card_line_leaves_cost_untouched():
+    rows = build_order_items(_one_item_order())
+    assert rows[0].cost_per_item == 100.00
+
+
+def test_netting_can_be_switched_off():
+    rows = build_order_items(_one_item_order(gift_card="$40.00"), net_gift_cards=False)
+    assert rows[0].cost_per_item == 100.00
+
+
+def test_business_never_reads_a_promo_rate():
+    """Promo cashback is Amazon-consumer only by decision; Business must leave it unset even when an
+    earn line with an 'extra N%' is on the page, so tag_cards has nothing to add."""
+    html = _one_item_order(
+        extra_chrome='<li class="pmts-payments-instrument-supplemental-box-paystationpaymentmethod">'
+                     "<span>Earn 5% back plus an extra 1% back on select items</span></li>",
+    )
+    assert build_order_items(html)[0]._promo_cashback_rate is None

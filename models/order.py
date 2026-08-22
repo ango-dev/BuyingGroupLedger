@@ -1,7 +1,7 @@
 import logging
 import re
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 log = logging.getLogger(__name__)
 
@@ -183,6 +183,14 @@ class OrderItem(BaseModel):
     # Set by receipts.capture.attach_receipts after the rows are built (it needs the order id and
     # date this carries), so every scraper emits it blank and _merge_row preserves an existing link.
     receipt_url: str = ""
+
+    # TRANSIENT, Amazon only: a per-order promo the order page advertises under the payment method
+    # ("... plus an extra 1% back ..."), which config.cards.tag_cards ADDS to the card's own rate when
+    # filling cashback_rate. Deliberately a PrivateAttr rather than a field: every OrderItem field must
+    # appear in FIELDNAMES (tests/test_schema.py enforces it both ways), and this is summed into the
+    # existing Cashback Rate column instead of claiming a column of its own. It only has to survive
+    # from the mapping to tag_cards inside one run — nothing rebuilds an OrderItem in between.
+    _promo_cashback_rate: float | None = PrivateAttr(default=None)
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
                      "cashback_rate", "insurance", "payout_amount", "total_profit", mode="before")

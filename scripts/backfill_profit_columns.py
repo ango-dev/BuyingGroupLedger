@@ -41,13 +41,25 @@ CARD_COL = "Card"
 RATE_COL = "Cashback Rate"
 
 
+# How far ABOVE the cards.json rate a cell may sit and still count as correct. A row's rate can
+# legitimately exceed it: Amazon's order page advertises a per-order promo ("... plus an extra 1% back
+# ...") that config.cards.tag_cards folds into this same cell, because cashback is deliberately one
+# summed rate rather than two columns. Without this tolerance `--refresh` would quietly revert every
+# promo row to the base rate and check_card_and_rate_coverage would flag them forever.
+MAX_PROMO_RATE = 0.10
+
+
 def _same_rate(sheet_value, resolved) -> bool:
-    """Is the sheet's Cashback Rate cell already the resolved rate?
+    """Is the sheet's Cashback Rate cell consistent with the resolved rate?
 
     Compared through parse_rate so a cell that reads back as "4%" counts as equal to 0.04. That
     happens for real: the column is usually percent-FORMATTED, and a formatted read returns the
     DISPLAY text. Without this, every already-correct row would be reported as disagreeing with
     cards.json — and --refresh would rewrite 0.04 on top of 0.04, pure churn.
+
+    A cell ABOVE the resolved rate by up to MAX_PROMO_RATE is also treated as consistent (a folded-in
+    Amazon promo). A cell BELOW it, or above it by more than that, is still a real disagreement —
+    those are the cases that mean a stale or mis-typed rate.
     """
     if resolved is None:
         return not str(sheet_value).strip()
@@ -55,7 +67,10 @@ def _same_rate(sheet_value, resolved) -> bool:
         parsed = parse_rate(sheet_value if isinstance(sheet_value, str) else str(sheet_value))
     except ValueError:
         return False
-    return parsed is not None and abs(parsed - float(resolved)) < 1e-9
+    if parsed is None:
+        return False
+    delta = parsed - float(resolved)
+    return -1e-9 <= delta <= MAX_PROMO_RATE + 1e-9
 
 
 def plan_profit_backfill(header: list[str], data_rows: list[list[str]], cards,

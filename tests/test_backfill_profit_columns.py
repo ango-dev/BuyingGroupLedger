@@ -108,6 +108,28 @@ class TestDoesNotClobber:
         assert p["changes"] == []
         assert all(f[1] != "Cashback Rate" for f in p["fills"])
 
+    def test_a_folded_in_amazon_promo_is_not_reverted(self):
+        # An Amazon row's rate can legitimately EXCEED cards.json: the order page's "extra 1% back" is
+        # summed into the same cell. Without the tolerance, --refresh would quietly undo every promo
+        # and check_card_and_rate_coverage would flag them forever.
+        p = plan(sheet_row(**{"Order ID": "A1", "Card Last 4": "4335", "Retailer": "Amazon",
+                              "Cashback Rate": "0.04"}))  # 0.03 card + 0.01 promo
+
+        assert p["changes"] == []
+        assert all(c[1] != "Cashback Rate" for c in p["will_write"])
+
+    def test_a_rate_below_the_configured_one_is_still_a_disagreement(self):
+        # The tolerance is one-directional — a stale/too-low rate is still real drift to report.
+        p = plan(sheet_row(**{"Order ID": "A1", "Card Last 4": "4335", "Cashback Rate": "0.01"}))
+
+        assert (2, "Cashback Rate", "0.01", 0.03) in p["changes"]
+
+    def test_an_implausibly_large_excess_is_still_a_disagreement(self):
+        # Well beyond any real promo — that's a mis-typed rate, not a bonus.
+        p = plan(sheet_row(**{"Order ID": "A1", "Card Last 4": "4335", "Cashback Rate": "0.50"}))
+
+        assert (2, "Cashback Rate", "0.50", 0.03) in p["changes"]
+
 
 class TestFormulaRows:
     def test_every_real_row_gets_a_formula_even_with_no_payout(self):

@@ -27,6 +27,7 @@ scrapers/amazon_business.py falls back to the Browser-Use agent — never an aut
 
 import logging
 
+from config.settings import settings
 from scrapers.amazon_business_mapping import build_order_items, discover_orders, parse_shipment_targets
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
@@ -108,6 +109,7 @@ class AmazonBusinessApiClient:
             rows.extend(build_order_items(
                 html, self.profile.label, known_open_ids=frozenset(open_ids),
                 tracking_by_shipment=tracking_by_order.get(oid), today=today,
+                net_gift_cards=settings.amazon_gift_card_netting_enabled,
             ))
 
         # Final keep filter using the authoritative per-order date already parsed into the rows.

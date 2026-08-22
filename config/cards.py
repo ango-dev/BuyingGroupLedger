@@ -113,18 +113,33 @@ def resolve_card(
     return best.name, rate if rate is not None else default_rate
 
 
-def tag_cards(items, cards: list[Card], default_rate: float | None = None) -> int:
+def tag_cards(items, cards: list[Card], default_rate: float | None = None,
+              apply_promo: bool = True) -> int:
     """Fill each item's `card_name` / `cashback_rate` from its `card_last4`, in place.
 
     Returns the number of rows whose card digits were present but matched no configured card — the
     caller logs it, mirroring how the Unclassified warehouse count surfaces a config gap instead of
     letting it pass unnoticed.
+
+    `apply_promo` (AMAZON_PROMO_CASHBACK_ENABLED) ADDS any per-order promo the scraper parsed off the
+    order page — Amazon advertises "... plus an extra 1% back ..." under the payment method — on top of
+    the card's configured rate, so the sheet's single Cashback Rate column carries the true total. Only
+    the Amazon mapping sets it, so every other retailer is unaffected. A row with no resolvable rate
+    (blank card_last4 -> None) is left alone: writing a promo-only rate there would defeat the blank
+    that lets ledger_sync._merge_row preserve what an earlier full extraction recorded.
     """
     unknown = 0
     for item in items:
         name, rate = resolve_card(
             item.card_last4, cards, item.profile_label, item.retailer, default_rate
         )
+        promo = getattr(item, "_promo_cashback_rate", None)
+        if apply_promo and promo and rate is not None:
+            rate = round(rate + promo, 4)
+            log.info(
+                "%s order %s: +%.2f%% promo cashback from the order page (rate now %.2f%%).",
+                item.retailer, item.order_id, promo * 100, rate * 100,
+            )
         item.card_name = name
         item.cashback_rate = rate
         if normalize_last4(item.card_last4) and not name:

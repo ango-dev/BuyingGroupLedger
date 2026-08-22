@@ -45,15 +45,24 @@ def _shipment(order_id: str, index: int, status_text: str, items: list[str],
 
 
 def _details(order_id: str, order_date: str, shipments: list[str], card: str = "1234",
-             shipping: str = "$0.00", address: str = "Test Buyer\n123 Main St\nSampletown, CA 90000") -> str:
+             shipping: str = "$0.00", address: str = "Test Buyer\n123 Main St\nSampletown, CA 90000",
+             earn: str = "", gift_card: str = "") -> str:
+    # Amazon prints the paying card's earn line under the payment method, in its own pmts-* <li>.
+    earn_html = (
+        '<ul class="pmts-payments-instrument-list">'
+        '<li class="pmts-payments-instrument-supplemental-box-paystationpaymentmethod">'
+        f'<span class="a-list-item">{earn}</span></li></ul>'
+    ) if earn else ""
+    # The "Gift Card Amount" line only renders when a gift card actually paid part of the order.
+    gift_html = f"Gift Card Amount: -{gift_card}\n" if gift_card else ""
     return (
         '<html><body><div id="orderDetails">'
         f'<div data-component="orderDate">{order_date}</div>'
         f'<div data-component="orderId">Order # {order_id}</div>'
         f'<div data-component="shippingAddress">{address}</div>'
-        f'<div>Payment method Visa ending in {card}</div>'
+        f'<div>Payment method Visa ending in {card}{earn_html}</div>'
         f'<div data-component="orderSummary">Item(s) Subtotal: $10.00\nShipping &amp; Handling: {shipping}\n'
-        "Grand Total: $10.00</div>"
+        f"{gift_html}Grand Total: $10.00</div>"
         f'<div data-component="shipments">{"".join(shipments)}</div>'
         "</div>"
         # A recommendations carousel OUTSIDE #orderDetails must be ignored.
@@ -260,3 +269,133 @@ def test_year_rollover_when_delivered_month_before_order_month():
                     [_shipment(oid, 0, "Delivered January 2", [_item("Thing", "$5.00")])])
     rows = build_order_items(html, today="2026-01-05")
     assert rows[0].delivery_date == "2026-01-02"
+
+
+# --- promo cashback ------------------------------------------------------------------------------
+# The order page advertises the paying card's earn line; only the "extra N%" half is read, and
+# config.cards.tag_cards adds it to the card's own cards.json rate. Wordings below are the real ones
+# captured live from two different cards.
+OID = "111-2223334-5556667"
+
+
+def _one_item_order(**kwargs) -> str:
+    return _details(OID, "August 12, 2026",
+                    [_shipment(OID, 0, "Delivered August 13", [_item("Thing", "$100.00", qty=1)])],
+                    **kwargs)
+
+
+def test_promo_extra_percent_is_parsed():
+    html = _one_item_order(earn="Earn 5% back (cap applies) plus an extra 1% back on select items")
+    assert build_order_items(html)[0]._promo_cashback_rate == 0.01
+
+
+def test_promo_amazon_day_wording_is_parsed():
+    html = _one_item_order(earn="Earns 5% back and extra 1% on items using Amazon Day delivery.")
+    assert build_order_items(html)[0]._promo_cashback_rate == 0.01
+
+
+def test_earn_line_without_an_extra_is_not_a_promo():
+    # The base rate is cards.json's job — "Earn 5% back" alone must not become a bonus.
+    html = _one_item_order(earn="Earn 5% back at Amazon.com")
+    assert build_order_items(html)[0]._promo_cashback_rate is None
+
+
+def test_no_earn_line_means_no_promo():
+    assert build_order_items(_one_item_order())[0]._promo_cashback_rate is None
+
+
+def test_promo_outside_order_details_is_ignored():
+    """A promo-shaped line in the recommendations rail must never be read as this order's promo."""
+    html = _one_item_order().replace(
+        '<div id="rhf">',
+        '<div id="rhf"><li class="pmts-payments-instrument-supplemental-box-paystationpaymentmethod">'
+        "<span>Get an extra 9% back today</span></li>",
+    )
+    assert build_order_items(html)[0]._promo_cashback_rate is None
+
+
+# --- gift-card netting ---------------------------------------------------------------------------
+# A gift card earns 0% cashback, so the recorded cost is scaled down to what the CARD actually paid;
+# the sheet's Cashback = (Total Cost + Shipping) * rate then charges the promo to card spend only.
+def test_gift_card_reduces_cost_to_what_the_card_paid():
+    rows = build_order_items(_one_item_order(gift_card="$40.00"))
+    assert rows[0].cost_per_item == 60.00
+    assert rows[0].total_cost == 60.00
+
+
+def test_gift_card_larger_than_the_basis_floors_cost_at_zero():
+    """The real …2175042-8952239 case: a $14.04 gift card against a $12.85 order (the rest covered
+    $1.19 of tax, which this ledger does not record). Cost must floor at 0, never go negative."""
+    html = _details(OID, "August 11, 2026",
+                    [_shipment(OID, 0, "Delivered August 12", [_item("Gummies", "$12.85", qty=1)])],
+                    gift_card="$14.04")
+    rows = build_order_items(html)
+    assert rows[0].cost_per_item == 0.00
+    assert rows[0].total_cost == 0.00
+
+
+def test_gift_card_scales_shipping_too():
+    html = _details(OID, "August 12, 2026",
+                    [_shipment(OID, 0, "Delivered August 13", [_item("Thing", "$100.00", qty=1)])],
+                    shipping="$10.00", gift_card="$55.00")
+    rows = build_order_items(html)
+    # basis 110 - 55 = 55 left, so everything halves and the row still sums to card spend.
+    assert rows[0].cost_per_item == 50.00
+    assert rows[0].shipping == 5.00
+    assert rows[0].total_cost + rows[0].shipping == 55.00
+
+
+def test_gift_card_prorates_across_shipments_by_cost():
+    html = _details(OID, "August 12, 2026", [
+        _shipment(OID, 0, "Delivered August 13", [_item("Big", "$60.00", qty=1)], shipment_id="S1"),
+        _shipment(OID, 1, "Delivered August 14", [_item("Small", "$40.00", qty=1)], shipment_id="S2"),
+    ], gift_card="$50.00")
+    rows = build_order_items(html)
+    assert [r.total_cost for r in rows] == [30.00, 20.00]
+    assert sum(r.total_cost for r in rows) == 50.00  # == basis 100 - gift card 50
+
+
+def test_gift_card_respects_quantity():
+    html = _details(OID, "August 12, 2026",
+                    [_shipment(OID, 0, "Delivered August 13", [_item("Thing", "$50.00", qty=2)])],
+                    gift_card="$25.00")
+    rows = build_order_items(html)
+    assert rows[0].cost_per_item == 37.50  # 100 basis, 75 left, halved per unit -> 37.50
+    assert rows[0].total_cost == 75.00
+
+
+def test_no_gift_card_line_leaves_cost_untouched():
+    rows = build_order_items(_one_item_order())
+    assert rows[0].cost_per_item == 100.00
+    assert rows[0].total_cost == 100.00
+
+
+def test_netting_can_be_switched_off():
+    rows = build_order_items(_one_item_order(gift_card="$40.00"), net_gift_cards=False)
+    assert rows[0].cost_per_item == 100.00
+    assert rows[0].total_cost == 100.00
+
+
+def test_summary_lines_are_read_when_label_and_amount_are_separate_elements():
+    """The live page puts each summary label and its amount in their own span, so the text comes back
+    as 'Gift Card Amount:\\n-$14.04' — the builder above happens to emit them on one line, and both
+    shapes must parse. Same for the earn line's real pmts-* markup."""
+    from bs4 import BeautifulSoup
+
+    from scrapers.amazon_mapping import _gift_card_amount, _order_region, _promo_cashback_rate
+
+    html = (
+        '<div id="orderDetails"><div data-component="orderSummary">'
+        "<span>Item(s) Subtotal:</span><span>$12.85</span>"
+        "<span>Shipping &amp; Handling:</span><span>$0.00</span>"
+        "<span>Estimated tax to be collected:</span><span>$1.19</span>"
+        "<span>Gift Card Amount:</span><span>-$14.04</span>"
+        "<span>Grand Total:</span><span>$0.00</span></div>"
+        '<ul><li class="pmts-payments-instrument-supplemental-box-paystationpaymentmethod">'
+        '<span class="a-list-item">Earns 5% back and extra 1% on items using Amazon Day delivery.'
+        "</span></li></ul></div>"
+    )
+    region = _order_region(BeautifulSoup(html, "html.parser"))
+
+    assert _gift_card_amount(region.select_one("[data-component='orderSummary']")) == 14.04
+    assert _promo_cashback_rate(region) == 0.01

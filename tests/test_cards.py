@@ -229,6 +229,56 @@ class TestTagCards:
         assert (rows[0].card_name, rows[0].cashback_rate) == ("BB Card", 0.03)
 
 
+class TestPromoCashback:
+    """An Amazon order page can advertise a per-order bonus ("... plus an extra 1% back ..."), which
+    the mapping hangs on the row and tag_cards ADDS to the card's own rate — cashback is deliberately
+    one summed rate on the sheet, not two columns."""
+
+    CARDS = [Card(last4="4321", name="Prime", cashback_rate=0.05)]
+
+    def _row(self, promo, **kwargs):
+        kwargs.setdefault("card_last4", "4321")
+        kwargs.setdefault("retailer", "Amazon")
+        row = item(**kwargs)
+        row._promo_cashback_rate = promo
+        return row
+
+    def test_promo_is_added_to_the_cards_own_rate(self):
+        rows = [self._row(0.01)]
+        tag_cards(rows, self.CARDS, default_rate=0.0)
+        assert rows[0].cashback_rate == 0.06
+
+    def test_no_promo_leaves_the_rate_alone(self):
+        rows = [self._row(None)]
+        tag_cards(rows, self.CARDS, default_rate=0.0)
+        assert rows[0].cashback_rate == 0.05
+
+    def test_apply_promo_false_ignores_it(self):
+        # AMAZON_PROMO_CASHBACK_ENABLED=0 — the escape hatch if the earn line proves to be card-level
+        # marketing rather than a real per-order promo.
+        rows = [self._row(0.01)]
+        tag_cards(rows, self.CARDS, default_rate=0.0, apply_promo=False)
+        assert rows[0].cashback_rate == 0.05
+
+    def test_promo_rides_the_default_rate_for_an_unconfigured_card(self):
+        rows = [self._row(0.01, card_last4="9999")]
+        tag_cards(rows, self.CARDS, default_rate=0.02)
+        assert rows[0].cashback_rate == 0.03
+
+    def test_a_blank_card_stays_blank_even_with_a_promo(self):
+        # A partial re-check carries no card; writing a promo-only rate here would defeat the blank
+        # that lets ledger_sync._merge_row keep what the first full extraction recorded.
+        rows = [self._row(0.01, card_last4="")]
+        tag_cards(rows, self.CARDS, default_rate=0.02)
+        assert rows[0].cashback_rate is None
+
+    def test_other_retailers_are_unaffected(self):
+        # Only the Amazon mapping sets the attribute, so a Best Buy row never has one.
+        rows = [item(card_last4="4321", retailer="Best Buy")]
+        tag_cards(rows, self.CARDS, default_rate=0.0)
+        assert rows[0].cashback_rate == 0.05
+
+
 class TestLoadCards:
     def test_missing_file_is_not_an_error(self, tmp_path, monkeypatch):
         # Same posture as warehouses.json: no config means no card names, never a crashed run.

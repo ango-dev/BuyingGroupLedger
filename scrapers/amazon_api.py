@@ -24,6 +24,7 @@ back to the Browser-Use agent (which detects logged-out, alerts, and skips) — 
 import logging
 from datetime import date
 
+from config.settings import settings
 from scrapers.amazon_mapping import build_order_items, discover_orders, parse_shipment_targets
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
@@ -124,6 +125,7 @@ class AmazonApiClient:
             rows.extend(build_order_items(
                 html, self.profile.label, known_open_ids=frozenset(open_ids),
                 tracking_by_shipment=tracking_by_order.get(oid), today=today,
+                net_gift_cards=settings.amazon_gift_card_netting_enabled,
             ))
 
         # Final keep filter using the authoritative per-order date already parsed into the rows.

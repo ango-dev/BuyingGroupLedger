@@ -41,6 +41,13 @@ _ENDING_IN_RE = re.compile(r"ending in\s+(\d{4})", re.IGNORECASE)
 _SHIPMENT_ID_RE = re.compile(r"shipmentId=([A-Za-z0-9]+)")
 _ASIN_RE = re.compile(r"asin=([A-Z0-9]{10})|/dp/([A-Z0-9]{10})")
 _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
+# The bonus half of the card's earn line, e.g. "Earn 5% back (cap applies) plus an extra 1% back on
+# select items" / "Earns 5% back and extra 1% on items using Amazon Day delivery." Only the EXTRA is
+# read — the base rate is cards.json's job.
+_EXTRA_PCT_RE = re.compile(r"extra\s+(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
+_EARN_LINE_SELECTOR = ".pmts-payments-instrument-supplemental-box-paystationpaymentmethod"
+# Order-summary line that only renders when a gift card actually paid part of the order.
+_GIFT_CARD_RE = re.compile(r"Gift Card Amount:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7,
@@ -271,12 +278,84 @@ def _is_digital_shipment(status_text: str) -> bool:
     return any(marker in low for marker in _DIGITAL_MARKERS)
 
 
+def _promo_cashback_rate(region) -> float | None:
+    """The BONUS rate Amazon advertises under the payment method, as a decimal fraction.
+
+    Amazon prints the paying card's earn line there ("Earn 5% back (cap applies) plus an extra 1% back
+    on select items"). Only the "extra N%" is taken; the card's base rate stays in cards.json, and
+    config.cards.tag_cards adds the two together. Returns None when there is no such line (most cards).
+
+    Scoped to the payment element rather than the page text so unrelated marketing ("extra 5% off!")
+    in a recommendations rail can never be mistaken for this order's promo.
+
+    Caveat worth knowing: two orders on the same card have been seen carrying byte-identical text, so
+    this may be card-level marketing rather than proof the delay promo was taken. That is why
+    AMAZON_PROMO_CASHBACK_ENABLED exists.
+    """
+    for el in region.select(_EARN_LINE_SELECTOR):
+        m = _EXTRA_PCT_RE.search(el.get_text(" ", strip=True))
+        if not m:
+            continue
+        try:
+            rate = float(m.group(1)) / 100
+        except ValueError:
+            continue
+        if 0 < rate <= 1:
+            return rate
+    return None
+
+
+def _gift_card_amount(summary_el) -> float | None:
+    """"Gift Card Amount: -$14.04" from the order summary, as a POSITIVE number; None when absent."""
+    if summary_el is None:
+        return None
+    m = _GIFT_CARD_RE.search(summary_el.get_text("\n", strip=True))
+    amount = _num(m.group(1)) if m else None
+    return abs(amount) if amount is not None else None
+
+
+def _net_gift_card(rows: list[OrderItem], gift_card: float | None) -> None:
+    """Scale an order's cost basis down to what the CARD actually paid. Mutates rows in place.
+
+    A gift card earns 0% cashback, so the recorded cost — and the cashback it drives — must come from
+    the card-paid portion only. The sheet computes cashback as (Total Cost + Shipping) * rate, so
+    shrinking the basis is all it takes: no second rate, no extra column, no formula change.
+
+    The reduction is CAPPED at the pre-tax item+shipping basis. Amazon applies a gift card to the tax
+    too (a real case: a $14.04 gift card against a $12.85 order carrying $1.19 tax), and this ledger
+    records no tax anywhere, so the excess is dropped rather than pushing cost negative. That keeps the
+    pre-tax convention every other row already follows — a $100 order with $8 tax records $100 even
+    though the card was charged $108.
+
+    Scaling by cost IS cost-weighted proration, the same rule ledger_sync._reprorate_shipping uses to
+    spread an order-level amount across rows. total_cost is recomputed by hand because the model's
+    _compute_total_cost validator only runs at construction, not on assignment.
+    """
+    if not gift_card or gift_card <= 0 or not rows:
+        return
+    items_total = sum(r.total_cost or 0.0 for r in rows)
+    # shipping is the ORDER-level total repeated on every row, so any row carries it.
+    ship = rows[0].shipping or 0.0
+    basis = items_total + ship
+    if basis <= 0:
+        return
+    factor = max(0.0, basis - gift_card) / basis
+    for r in rows:
+        if r.cost_per_item is not None:
+            r.cost_per_item = round(r.cost_per_item * factor, 2)
+            if r.quantity is not None:
+                r.total_cost = round(r.quantity * r.cost_per_item, 2)
+        if r.shipping is not None:
+            r.shipping = round(r.shipping * factor, 2)
+
+
 def build_order_items(
     order_details_html: str,
     profile_label: str = "",
     known_open_ids: frozenset[str] | set[str] = frozenset(),
     tracking_by_shipment: dict[str, str] | None = None,
     today: str | None = None,
+    net_gift_cards: bool = True,
 ) -> list[OrderItem]:
     """Ledger rows for ONE order-details page. `tracking_by_shipment` maps a shipment's number
     ('Shipment 1') OR its Amazon shipmentId to a tracking number read from the pt page; absent leaves
@@ -372,4 +451,11 @@ def build_order_items(
     # cancelled flows through so its rows go terminal). Same rule as Best Buy / Costco.
     if rows and all(r.status == "cancelled" for r in rows) and order_id not in (known_open_ids or set()):
         return []
+
+    if net_gift_cards:
+        _net_gift_card(rows, _gift_card_amount(summary_el))
+    # Rides to config.cards.tag_cards, which folds it into cashback_rate (see OrderItem).
+    promo = _promo_cashback_rate(region)
+    for row in rows:
+        row._promo_cashback_rate = promo
     return rows
