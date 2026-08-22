@@ -17,7 +17,7 @@ when a scraper reads page 1 of a paginated order history and misses the rest, or
 overwrites a good tracking number with a blank. Most of the work below is invariants, idempotency and
 auditing aimed squarely at that class of bug — see **[Design notes](#design-notes)**.
 
-> **Status:** running in production against real accounts. `pytest` runs 1022 offline tests that need
+> **Status:** running in production against real accounts. `pytest` runs 1056 offline tests that need
 > no credentials and no network.
 
 ---
@@ -744,13 +744,24 @@ rot, and revoking it is one more.
 > under the prefix, and a receipt carries your name, delivery address, card last 4 and order totals.
 > Keep the bucket private and the URL in `.env`.
 
+**One receipt per ORDER, not per shipment.** The object key is `receipts/<retailer>/<YYYY-MM>/<order-id>.pdf`
+— no shipment component — so a five-shipment order stores one invoice and all five rows carry the
+same Receipt Link. A shipment that appears on a later run finds the object already stored, opens no
+browser, and inherits the link.
+
 **A receipt is captured once the order has `shipped`** — never while it's still `ordered`, and
 never for a `cancelled` one. Ship time is when proof of purchase is actually wanted (submitting
 tracking; BFMR asking for proof behind a suffixed tracking number), and a **lost package never
 delivers** — so waiting for delivery would miss the very order an insurance claim depends on. The
 receipt is an order-level invoice, so nothing is gained by waiting: the items, prices, totals,
 payment method and ship-to all exist the moment it ships. An order first *seen* already delivered is
-captured too. It's taken once and never refreshed, so capturing early would
+captured too.
+
+For a **split** order the capture waits until *every* shipment has moved. A receipt is stored once
+and never refreshed, so capturing early would permanently keep a partial invoice — printed
+`Not Yet Shipped` against the shipments still pending — and these documents substantiate COGS at tax
+time. The cost of that: an order with one indefinitely-backordered line never becomes capturable on
+a live run, and needs `scripts/backfill_receipts.py`. It's taken once and never refreshed, so capturing early would
 permanently store a document predating its own final totals, tracking and delivery date. A split
 order waits for its last box, and a cancelled order is never captured at all.
 

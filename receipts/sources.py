@@ -135,17 +135,35 @@ NOT_FINAL_MARKERS = {
     "amazon-business": ("Not Yet Shipped",),
 }
 
+# Text that means the document declares ITSELF final, which OVERRIDES any not-final marker.
+#
+# Amazon's invoice has one section per shipment, so a legitimately-final invoice can still contain
+# `Not Yet Shipped` for a line that was cancelled or is straggling. Matching that phrase anywhere
+# would then refuse a receipt for goods that genuinely shipped — and, because capture retries, refuse
+# it again on every subsequent run. The TITLE is the real discriminator: verified across all 10
+# stored Amazon Business invoices, a shipped order reads `Final Details for Order #…` while the one
+# pre-shipment invoice read `Details for Order #…` with no "Final".
+FINAL_MARKERS = {
+    "amazon-business": ("Final Details",),
+}
+
 
 def not_final_reason(retailer_key: str, text: str) -> str | None:
     """The marker proving this document is pre-shipment, or None if it looks final.
 
-    Positive-match only: a retailer with no markers, or text we could not extract, returns None and
-    the receipt is stored. See _reject_if_not_final in receipts/capture.py for why this fails open.
+    Positive-match only, and FAILS OPEN: a retailer with no markers, or text we could not extract,
+    returns None and the receipt is stored. See _reject_if_not_final in receipts/capture.py.
+
+    A FINAL_MARKERS hit wins outright — a document that calls itself final is final, whatever else
+    it happens to mention further down.
     """
     if not text:
         return None
+    lowered = text.lower()
+    if any(m.lower() in lowered for m in FINAL_MARKERS.get(retailer_key, ())):
+        return None
     for marker in NOT_FINAL_MARKERS.get(retailer_key, ()):
-        if marker.lower() in text.lower():
+        if marker.lower() in lowered:
             return marker
     return None
 
@@ -266,18 +284,34 @@ SETTLED_STATUSES = ("paid", "return")
 
 
 def is_capturable(statuses, include_settled: bool = False) -> bool:
-    """Has this order shipped (or better), and is it worth a receipt?
+    """Has the WHOLE order shipped, so its invoice is final and worth a receipt?
 
-    Takes EVERY row's status because one order can be several shipments, and asks whether ANY of
-    them has moved. A part-shipped order IS worth capturing: the invoice covers the whole order, so
-    there is nothing to wait for, and waiting only widens the window in which the receipt is not
-    there when someone asks for it.
+    Takes EVERY row's status, because one order can be several shipments and the receipt covers all
+    of them. The rule is "no row is still in flight, and at least one really shipped".
+
+    WHY NOT "ANY ROW SHIPPED" — this was that, briefly, on 2026-08-21, to make a receipt available
+    sooner. It was wrong for one reason: a receipt is captured ONCE and never refreshed, so an early
+    snapshot of a split order is what gets stored PERMANENTLY, with `Not Yet Shipped` printed against
+    the shipments that had not moved yet. These documents substantiate COGS at tax time, so a
+    permanently-partial invoice is a bad trade for a few days' earlier availability.
+
+    `cancelled` is tolerated ALONGSIDE shipped rows — a partial cancellation is still a completed
+    purchase for whatever did ship — but an all-cancelled order returns False, as does an order with
+    a status nobody recognizes (never guess that an unknown state means "finished").
+
+    THE ACCEPTED COST: an order with one indefinitely-backordered line never becomes capturable on a
+    live run, so its receipt only ever arrives via scripts/backfill_receipts.py.
 
     `include_settled` widens the rule to the buying group's own terminal outcomes. Only the backfill
     passes it — see SETTLED_STATUSES.
     """
     good = CAPTURE_STATUSES + (SETTLED_STATUSES if include_settled else ())
-    return any((s or "").strip().lower() in good for s in statuses)
+    seen = [(s or "").strip().lower() for s in statuses if (s or "").strip()]
+    if not seen:
+        return False
+    if any(s not in good + ("cancelled",) for s in seen):
+        return False
+    return any(s in good for s in seen)
 
 
 # Extensions a stored receipt can carry, newest-preferred first: PDF is what we try to render, PNG is

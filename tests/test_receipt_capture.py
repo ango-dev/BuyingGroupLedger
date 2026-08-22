@@ -528,16 +528,48 @@ class TestOnlyShippedOrdersAreCaptured:
 
         assert recorder.puts == []
 
-    def test_a_part_shipped_order_is_captured_without_waiting(self, wired):
-        """The invoice covers the WHOLE order, so there is nothing to wait for — and waiting only
-        widens the window where the receipt is missing when someone asks for it."""
+    def test_a_part_shipped_order_waits_for_its_last_shipment(self, wired):
+        """A receipt is captured ONCE and never refreshed, so capturing a split order early stores a
+        partial invoice PERMANENTLY — printed `Not Yet Shipped` against the shipments that had not
+        moved. These documents substantiate COGS, so the whole order has to be out the door first."""
         recorder = wired(Recorder())
+        factory = BrowserFactory()
         items = _items(("A1", "2026-08-21", "Box one"))                       # shipped
         items += _items(("A1", "2026-08-21", "Box two"), status="ordered")    # not yet
+
+        capture.attach_receipts(items, _profile(), "amazon", browser_factory=factory)
+
+        assert recorder.puts == []
+        assert factory.calls == 0, "and it must not open a browser to discover that"
+        assert all(i.receipt_url == "" for i in items)
+
+    def test_a_fully_shipped_split_order_captures_exactly_one_document(self, wired):
+        recorder = wired(Recorder())
+        items = _items(("A1", "2026-08-21", "Box one"), ("A1", "2026-08-21", "Box two"),
+                       ("A1", "2026-08-21", "Box three"))
+
+        capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
+
+        assert len(recorder.puts) == 1, "one order is one document, however many shipments"
+        assert len({i.receipt_url for i in items}) == 1
+
+    def test_a_shipped_line_beside_a_cancelled_one_still_captures(self, wired):
+        """A partial cancellation is still a completed purchase for whatever actually shipped."""
+        recorder = wired(Recorder())
+        items = _items(("A1", "2026-08-21", "Kept"))
+        items += _items(("A1", "2026-08-21", "Dropped"), status="cancelled")
 
         capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
 
         assert len(recorder.puts) == 1
+
+    def test_an_entirely_cancelled_order_is_still_never_captured(self, wired):
+        recorder = wired(Recorder())
+        items = _items(("A1", "2026-08-21", "One"), ("A1", "2026-08-21", "Two"), status="cancelled")
+
+        capture.attach_receipts(items, _profile(), "amazon", browser_factory=BrowserFactory())
+
+        assert recorder.puts == []
 
     def test_a_multi_row_order_is_still_one_document(self, wired):
         recorder = wired(Recorder())

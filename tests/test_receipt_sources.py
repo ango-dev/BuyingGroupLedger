@@ -200,3 +200,76 @@ class TestCostcoSelectorIsAnAttributeNotAnId:
 
     def test_it_does_not_rely_on_hashed_mui_class_names(self):
         assert "class*=" not in sources.ready_selector("costco")
+
+
+class TestSplitOrdersWaitForEveryShipment:
+    """A receipt is captured ONCE and never refreshed, so the moment it is taken is permanent.
+
+    Briefly on 2026-08-21 the rule was "ANY row shipped", to make receipts available sooner. That
+    stored a partial invoice for a split order — `Not Yet Shipped` printed against the shipments that
+    had not moved — and nothing would ever go back and improve it. These documents substantiate COGS,
+    so the whole order ships first.
+    """
+
+    @pytest.mark.parametrize("statuses, capturable", [
+        (["shipped"], True),
+        (["delivered"], True),
+        (["shipped", "shipped"], True),
+        (["shipped", "delivered"], True),
+        (["shipped", "ordered"], False),      # one box still in flight
+        (["delivered", "ordered"], False),
+        (["ordered"], False),
+        (["cancelled"], False),
+        (["cancelled", "cancelled"], False),
+        (["shipped", "cancelled"], True),     # partial cancellation, rest shipped
+        ([], False),
+    ])
+    def test_the_truth_table(self, statuses, capturable):
+        assert sources.is_capturable(statuses) is capturable
+
+    def test_an_unknown_status_blocks_rather_than_guesses(self):
+        """Never assume an unrecognized state means finished — that is how a partial invoice gets
+        stored permanently."""
+        assert sources.is_capturable(["shipped", "some-new-status"]) is False
+
+    def test_the_buying_groups_statuses_need_the_backfill_opt_in(self):
+        assert sources.is_capturable(["paid"]) is False
+        assert sources.is_capturable(["paid"], include_settled=True) is True
+
+    def test_the_opt_in_does_not_relax_the_whole_order_rule(self):
+        assert sources.is_capturable(["paid", "ordered"], include_settled=True) is False
+
+
+class TestAFinalDocumentOverridesAStrayMarker:
+    """Amazon's invoice has a section per shipment, so a genuinely-final one can still contain
+    `Not Yet Shipped` for a cancelled or straggling line.
+
+    Matching that phrase anywhere would refuse a receipt for goods that shipped — and refuse it again
+    every run, since capture retries. The TITLE is the real discriminator: all 10 stored Amazon
+    Business invoices read `Final Details for Order #…`, while the one pre-shipment invoice read
+    `Details for Order #…` with no "Final".
+    """
+
+    def test_a_final_invoice_is_accepted(self):
+        text = "Final Details for Order #114-9990030-9990030 ... Shipped on August 20, 2026"
+
+        assert sources.not_final_reason("amazon-business", text) is None
+
+    def test_final_wins_over_a_not_yet_shipped_section(self):
+        text = "Final Details for Order #1 ... Shipped on Aug 20 ... Not Yet Shipped ... Item B"
+
+        assert sources.not_final_reason("amazon-business", text) is None
+
+    def test_a_pre_shipment_invoice_is_still_refused(self):
+        text = "Details for Order #111-9990021-9990021 ... Not Yet Shipped"
+
+        assert sources.not_final_reason("amazon-business", text) == "Not Yet Shipped"
+
+    def test_retailers_without_markers_are_unaffected(self):
+        """Consumer Amazon, Best Buy and Costco renders carry no finality wording either way, so
+        inventing one would only produce false rejections."""
+        for key in ("amazon", "bestbuy", "costco"):
+            assert sources.not_final_reason(key, "Not Yet Shipped") is None
+
+    def test_unextractable_text_fails_open(self):
+        assert sources.not_final_reason("amazon-business", "") is None
