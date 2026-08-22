@@ -265,6 +265,14 @@ etc.) — they're never resold, so they never hit the ledger.
   they drive all reflect card spend only, which raises reported profit by the gift-card amount. The
   reduction is capped at the pre-tax basis (Amazon applies gift cards to tax too, which this ledger
   doesn't track). `AMAZON_GIFT_CARD_NETTING_ENABLED=0` records the full sticker cost instead.
+
+  **The accounting rule this implies:** a cost is recorded ONCE, where the money actually left your
+  pocket. So if you *bought* the gift card, add its purchase as its own row and the two reconcile —
+  a $40 card bought at face value and spent on a $100 order totals the same profit as simply paying
+  $100 on the card, and a card bought at a discount shows the spread as real profit. If the gift card
+  was *given* to you, there is no purchase row and its value is pure profit, which is correct.
+  Note you must add that row BY HAND: every scraper skips gift-card purchases as digital items
+  (there is no package to track), so one will never appear on its own.
 - **Insurance**, **Payout Date** and **Payout Amount** are filled by the buying-group sync (see
   "Buying groups" below) — or by hand until you enable it. The scrapers always write them blank, and
   the upsert's blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.
