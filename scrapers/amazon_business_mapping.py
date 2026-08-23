@@ -29,6 +29,10 @@ TWO business-only differences the capture surfaced (everything else is identical
 The "Track package" link on business order-details is still the consumer `/gp/your-account/ship-track…`
 (`a[href*='ship-track']`); a separate `/your-orders/pop` "View your item" link exists but the ship-track
 selector already ignores it, so the pt-page tracking-number hop (reusing the pt selectors) carries over.
+CAVEAT: that link EXPIRES and is removed from the page once an order is old enough,
+leaving only the pop link. Orders inside a normal lookback window always have it, so this only shows up
+when an OLD order is re-read (a backfill, or a wide LOOKBACK_DAYS) — and a blank tracking_url can never
+erase a number already recorded, because `ledger_sync._merge_row` never lets a blank overwrite.
 
 Row model (keyed on Order ID + Order Date + Item Name + Shipment, like every retailer): one row per
 (physical shipment x distinct item); shipments numbered 1..N top-to-bottom (single included); qty
@@ -53,11 +57,11 @@ _ENDING_IN_RE = re.compile(r"ending in\s+(\d{4})", re.IGNORECASE)
 _SHIPMENT_ID_RE = re.compile(r"shipmentId=([A-Za-z0-9]+)")
 _ASIN_RE = re.compile(r"asin=([A-Z0-9]{10})|/dp/([A-Z0-9]{10})")
 _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
-# Amazon Business FREIGHT/PALLET orders have no carrier delivery event: the BUYER clicks "Mark as
-# received" and the status card reads "All items received <date>" + "N/M items marked as received.
-# Updated by: <name>" (live capture 2026-08-23, order 111-9990019). There is also NO "Track package"
-# link on such an order — only a "/your-orders/pop" ("View your item") link — so no tracking number
-# can ever be read for it.
+# Amazon Business RECEIVING CONFIRMATION: the buyer clicks "Mark as received" and the status card
+# then reads "All items received <date>" + "N/M items marked as received. Updated by: <name>" instead
+# of the usual "Delivered <date>" (live capture 2026-08-23, order 111-9990019, a pallet). It is the
+# completion signal for orders Amazon never gets a carrier delivery scan for, so nothing else marks
+# them done.
 _RECEIVED_COUNT_RE = re.compile(r"(\d+)\s*/\s*(\d+)\s+items?\s+marked as received", re.IGNORECASE)
 # Order-summary line that only renders when a gift card actually paid part of the order. Twin of the
 # consumer rule in scrapers/amazon_mapping.py — kept duplicated because this module is deliberately a
@@ -124,8 +128,8 @@ def _parse_status_date(status_text: str, order_date: str, today: str) -> str:
     from datetime import date, timedelta
 
     low = status_text.lower()
-    # A freight "…items marked as received" card is a PAST event just like "Delivered", so a bare
-    # weekday on it must resolve backwards, not to the next occurrence.
+    # A self-receipt "…items marked as received" card is a PAST event just like "Delivered", so a
+    # bare weekday on it must resolve backwards, not to the next occurrence.
     is_delivered = low.lstrip().startswith(("delivered", "all items received")) or "marked as received" in low
 
     def _infer_year(month: int):
@@ -181,12 +185,12 @@ def _status_from_text(status_text: str) -> str:
     present (Amazon shows an 'Arriving …' estimate before a package actually ships)."""
     low = status_text.strip().lower()
 
-    # FREIGHT/PALLET self-receipt, checked FIRST because none of the keyword rules below match its
-    # wording. "5/5 items marked as received" is terminal; a PARTIAL receipt ("3/5") is not — the
-    # rest of the pallet is still outstanding, so the order stays open and keeps being tracked.
-    # Without this the card fell through to `ordered`, which was doubly bad: a pallet received months
-    # ago looked permanently open, AND — having no tracking page to read — it was `needs_agent`, so
-    # the PAID agent re-read it on every scheduled run forever.
+    # Self-receipt ("Mark as received"), checked FIRST because none of the keyword rules below match
+    # its wording. "5/5 items marked as received" is terminal; a PARTIAL receipt ("3/5") is not — the
+    # rest of the order is still outstanding, so it stays open and keeps being tracked. Without this
+    # the card fell through to `ordered`, leaving a long-since-received order permanently open: it
+    # never rolls up, and while open with no tracking number it is `needs_agent`, so the PAID agent
+    # re-reads it on every scheduled run.
     received = _RECEIVED_COUNT_RE.search(status_text)
     if received:
         return "delivered" if int(received.group(1)) == int(received.group(2)) else "ordered"
