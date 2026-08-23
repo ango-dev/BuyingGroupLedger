@@ -31,9 +31,18 @@ def _item(title: str, price: str, qty: int | None = None, asin: str = "B00000000
 
 
 def _shipment(order_id: str, index: int, status_text: str, items: list[str],
-              shipment_id: str = "SHIP", track: bool = True) -> str:
+              shipment_id: str = "SHIP", track: bool = True, pop_only: bool = False) -> str:
     track_html = ""
-    if track:
+    if pop_only:
+        # A FREIGHT/PALLET shipment: Amazon renders the "View your item" pop link but NO "Track
+        # package" ship-track link, so there is no tracking page and no number to read.
+        track_html = (
+            '<div data-component="shipmentConnections">'
+            f'<a href="/your-orders/pop?orderId={order_id}&shipmentId={shipment_id}'
+            f'&packageId=1&ref_=ppx_hzod_itemconns_dt_b_pop_{index}_0&noPopRedirect=1">View your item</a>'
+            "</div>"
+        )
+    elif track:
         # Business "Track package" is still a consumer /gp/your-account/ship-track link (a separate
         # /your-orders/pop "View your item" link may sit alongside it, which the ship-track selector
         # correctly ignores).
@@ -269,6 +278,75 @@ def test_business_chrome_is_ignored():
     assert r.card_last4 == "0315"
     assert r.status == "shipped"  # tracking number present
     assert "PO-2026-4471" not in (r.item_name or "")
+
+
+# --- freight / pallet self-receipt ----------------------------------------------------------------
+# Amazon Business pallet orders have no carrier delivery event: the buyer clicks "Mark as received"
+# and the card reads "All items received <date>" + "N/M items marked as received. Updated by: <name>",
+# with a "View your item" pop link but NO "Track package". Modelled on the real captured order
+# 111-9990019 (Apple Watch x5 to a BFMR warehouse). Before this was handled the card fell through to
+# `ordered`, leaving a long-since-received pallet permanently open AND — having no tracking page —
+# re-read by the PAID agent on every scheduled run.
+def test_pallet_fully_received_is_delivered_with_no_tracking_link():
+    oid = "111-9990019-9990019"
+    html = _details(
+        oid, "April 25, 2026",
+        [_shipment(oid, 0,
+                   "All items received April 28 5/5 items marked as received. Updated by: Test Buyer",
+                   [_item("Apple Watch Series 11", "$329.99", qty=5)],
+                   shipment_id="Pk91KJl0p", pop_only=True)],
+        card="4345",
+    )
+    rows = build_order_items(html, "profile-alpha", today="2026-08-23")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r.status == "delivered", "a fully-received pallet is terminal, not still 'ordered'"
+    assert r.delivery_date == "2026-04-28"
+    assert r.quantity == 5
+    assert r.total_cost == 1649.95
+    assert r.card_last4 == "4345"
+    # No ship-track link exists on a pallet, so nothing can drive the pt tracking-number hop.
+    assert r.tracking_url == ""
+    assert r.tracking_number == ""
+
+
+def test_pallet_partially_received_stays_open():
+    """3 of 5 received means the rest of the pallet is still outstanding — keep tracking it."""
+    oid = "111-9990019-9990019"
+    html = _details(
+        oid, "April 25, 2026",
+        [_shipment(oid, 0, "3/5 items marked as received. Updated by: Test Buyer",
+                   [_item("Apple Watch Series 11", "$329.99", qty=5)], pop_only=True)],
+    )
+    rows = build_order_items(html, "profile-alpha", today="2026-08-23")
+    assert rows[0].status == "ordered", "a partial receipt must not close the order"
+
+
+def test_pallet_receipt_target_is_not_a_tracking_hop_candidate():
+    """parse_shipment_targets drives the pt hop; a delivered pallet with no track link offers it
+    nothing, so the client skips it instead of opening a browser for a number that cannot exist."""
+    oid = "111-9990019-9990019"
+    html = _details(
+        oid, "April 25, 2026",
+        [_shipment(oid, 0, "All items received April 28 5/5 items marked as received",
+                   [_item("Apple Watch Series 11", "$329.99", qty=5)], pop_only=True)],
+    )
+    targets = parse_shipment_targets(html)
+    assert len(targets) == 1
+    assert targets[0]["status"] == "delivered"
+    assert targets[0]["tracking_url"] == ""
+
+
+def test_received_bare_weekday_resolves_backwards_not_forwards():
+    """A receipt is a PAST event, so a bare weekday must resolve to the most recent occurrence."""
+    oid = "111-9990019-9990019"
+    html = _details(
+        oid, "August 17, 2026",
+        [_shipment(oid, 0, "All items received Monday 2/2 items marked as received",
+                   [_item("Thing", "$5.00", qty=2)], pop_only=True)],
+    )
+    # From Sunday 2026-08-23 the most recent Monday is 2026-08-17.
+    assert build_order_items(html, today="2026-08-23")[0].delivery_date == "2026-08-17"
 
 
 # --- delivery-date parsing ----------------------------------------------------------------------

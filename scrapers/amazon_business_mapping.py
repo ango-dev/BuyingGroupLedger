@@ -53,6 +53,12 @@ _ENDING_IN_RE = re.compile(r"ending in\s+(\d{4})", re.IGNORECASE)
 _SHIPMENT_ID_RE = re.compile(r"shipmentId=([A-Za-z0-9]+)")
 _ASIN_RE = re.compile(r"asin=([A-Z0-9]{10})|/dp/([A-Z0-9]{10})")
 _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
+# Amazon Business FREIGHT/PALLET orders have no carrier delivery event: the BUYER clicks "Mark as
+# received" and the status card reads "All items received <date>" + "N/M items marked as received.
+# Updated by: <name>" (live capture 2026-08-23, order 111-9990019). There is also NO "Track package"
+# link on such an order — only a "/your-orders/pop" ("View your item") link — so no tracking number
+# can ever be read for it.
+_RECEIVED_COUNT_RE = re.compile(r"(\d+)\s*/\s*(\d+)\s+items?\s+marked as received", re.IGNORECASE)
 # Order-summary line that only renders when a gift card actually paid part of the order. Twin of the
 # consumer rule in scrapers/amazon_mapping.py — kept duplicated because this module is deliberately a
 # standalone copy of the Amazon trio. NOTE: the consumer path also reads a promo cashback rate off the
@@ -118,7 +124,9 @@ def _parse_status_date(status_text: str, order_date: str, today: str) -> str:
     from datetime import date, timedelta
 
     low = status_text.lower()
-    is_delivered = low.lstrip().startswith("delivered")
+    # A freight "…items marked as received" card is a PAST event just like "Delivered", so a bare
+    # weekday on it must resolve backwards, not to the next occurrence.
+    is_delivered = low.lstrip().startswith(("delivered", "all items received")) or "marked as received" in low
 
     def _infer_year(month: int):
         if order_date and len(order_date) >= 7 and order_date[:4].isdigit():
@@ -172,6 +180,19 @@ def _status_from_text(status_text: str) -> str:
     `_shipped_requires_tracking` invariant downgrades it to 'ordered' when no tracking number is
     present (Amazon shows an 'Arriving …' estimate before a package actually ships)."""
     low = status_text.strip().lower()
+
+    # FREIGHT/PALLET self-receipt, checked FIRST because none of the keyword rules below match its
+    # wording. "5/5 items marked as received" is terminal; a PARTIAL receipt ("3/5") is not — the
+    # rest of the pallet is still outstanding, so the order stays open and keeps being tracked.
+    # Without this the card fell through to `ordered`, which was doubly bad: a pallet received months
+    # ago looked permanently open, AND — having no tracking page to read — it was `needs_agent`, so
+    # the PAID agent re-read it on every scheduled run forever.
+    received = _RECEIVED_COUNT_RE.search(status_text)
+    if received:
+        return "delivered" if int(received.group(1)) == int(received.group(2)) else "ordered"
+    if low.startswith("all items received"):
+        return "delivered"
+
     if low.startswith("delivered") or low.startswith("return") or "refund" in low:
         # A returned/refunded item was delivered first; keep it terminal so it stops re-checking.
         return "delivered"
