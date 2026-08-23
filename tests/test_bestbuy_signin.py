@@ -287,3 +287,69 @@ class TestKeepMeSignedIn:
         auth = RetailerAuth(method="password", username="u@e.com", password="pw")
         bestbuy_api._deterministic_login(_P(), auth)
         assert order == ["keep", "continue"]
+
+
+class TestSigninFailureVerdict:
+    """Every sign-in failure ends as the same "submitted the password but stayed logged out" line, yet
+    the fixes are opposite: a stale password is a config edit, an identity challenge needs a human, and
+    an anti-bot rejection needs backing OFF (retrying deepens it). On 2026-08-23 a simply-wrong password
+    was misread as the anti-bot transport failure for days, so the verdict is now derived from Best
+    Buy's own on-page copy.
+    """
+
+    @staticmethod
+    def _verdict(info, critical=()):
+        return bestbuy_api._classify_signin_failure(info, list(critical))[0]
+
+    def test_the_page_saying_the_password_is_wrong_names_a_bad_credential(self):
+        info = {"errors": ["The password you've entered is incorrect."],
+                "url": "https://www.bestbuy.com/identity/signin/options"}
+        assert "BAD CREDENTIAL" in self._verdict(info)
+
+    def test_bad_credential_wins_over_incidental_network_noise(self):
+        """The banner is direct evidence; a failed request is circumstantial. Getting this backwards is
+        exactly the misdiagnosis that cost days — tmx/analytics failures are near-permanent."""
+        info = {"errors": ["The password you've entered is incorrect."], "url": "…/signin/options"}
+        critical = [{"url": "https://tmx.bestbuy.com/x.js", "error": "net::ERR_TUNNEL_CONNECTION_FAILED"}]
+        assert "BAD CREDENTIAL" in self._verdict(info, critical)
+
+    def test_verify_ownership_is_named_but_NOT_treated_as_proof_the_password_is_good(self):
+        """This screen has two causes with opposite fixes: genuine 2FA, OR Best Buy
+        escalating after too many failed password attempts. So the verdict must name the challenge
+        without certifying the credential, and must point at BOTH causes."""
+        info = {"errors": [], "title": "Sign In - Verify Your Identity - Best Buy",
+                "url": "https://www.bestbuy.com/identity/signin/verifyOwnership?token=tid%3Aabc"}
+        verdict, action = bestbuy_api._classify_signin_failure(info, [])
+        assert "IDENTITY VERIFICATION" in verdict
+        assert "ACCEPTED" not in verdict, "must not claim the password was accepted"
+        assert "2FA" in action, "the legitimate-2FA cause must be offered"
+        assert "BAD CREDENTIAL" in action, "the failed-password escalation must be offered too"
+
+    def test_a_one_time_code_prompt_is_not_confused_with_a_bad_password(self):
+        info = {"errors": [], "url": "…/signin", "text": "We sent a code to your phone ending in 1234"}
+        assert "ONE-TIME CODE" in self._verdict(info)
+
+    def test_a_locked_account_is_called_out_so_retrying_stops(self):
+        info = {"errors": ["Your account has been locked due to too many failed attempts."],
+                "url": "…/signin"}
+        assert "ACCOUNT LOCKED" in self._verdict(info)
+
+    def test_auth_critical_failures_with_no_page_copy_read_as_anti_bot(self):
+        info = {"errors": [], "url": "…/signin/options", "text": ""}
+        critical = [{"url": "https://www.bestbuy.com/identity/authenticate",
+                     "error": "net::ERR_HTTP2_PROTOCOL_ERROR"}]
+        assert "ANTI-BOT" in self._verdict(info, critical)
+
+    def test_no_evidence_at_all_admits_it_is_unknown(self):
+        # Better an honest UNKNOWN pointing at the DOM than a confident wrong verdict.
+        assert "UNKNOWN" in self._verdict({"errors": [], "url": "…/signin", "text": ""})
+
+    def test_every_verdict_comes_with_an_action(self):
+        for info, crit in (
+            ({"errors": ["The password you've entered is incorrect."], "url": "u"}, []),
+            ({"errors": [], "url": "…/verifyOwnership"}, []),
+            ({"errors": [], "url": "u", "text": ""}, [{"url": "identity/authenticate", "error": "x"}]),
+            ({"errors": [], "url": "u", "text": ""}, []),
+        ):
+            _, action = bestbuy_api._classify_signin_failure(info, crit)
+            assert action and len(action) > 20, "a verdict without a next step is not actionable"

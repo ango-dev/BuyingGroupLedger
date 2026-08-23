@@ -343,6 +343,56 @@ class LoginOutcome(NamedTuple):
     transport_failed: bool = False
 
 
+def _classify_signin_failure(info: dict, critical: list) -> tuple[str, str]:
+    """(verdict, what to do about it) for a stalled sign-in.
+
+    These failures look IDENTICAL from the outside — every one of them ends as "submitted the password
+    but stayed logged out" — yet they have opposite fixes: a stale password is a one-line config edit,
+    an identity challenge needs a human, and an anti-bot rejection needs backing off (retrying makes it
+    worse). Learned 2026-08-23, when a simply-wrong password was misread for days as the anti-bot
+    transport failure that produces the same line. Best Buy states the reason on the page; read it.
+    """
+    errors = " ".join(str(e) for e in (info.get("errors") or []))
+    haystack = f"{errors} {info.get('title') or ''} {info.get('text') or ''}"
+    url = str(info.get("url") or "").lower()
+
+    if re.search(r"password.{0,25}incorrect|incorrect.{0,25}password|couldn'?t find an account", haystack, re.I):
+        return ("BAD CREDENTIAL — Best Buy says the password is wrong",
+                "Usually the stored password IS stale -> update auth.bestbuy.password in profiles.json. "
+                "But do not trust this banner blindly: observed that the SAME unchanged "
+                "password reached the identity-verification screen 25 minutes earlier and was then "
+                "reported 'incorrect', i.e. Best Buy also says this while an account is flagged and "
+                "pending a forced reset. So if that credential recently got FURTHER than this screen, "
+                "treat the account as flagged and clear it by hand rather than editing the password. "
+                "Either way stop retrying — repeated attempts risk a lockout.")
+    if re.search(r"account.{0,30}(locked|disabled)|too many (failed )?attempts", haystack, re.I):
+        return ("ACCOUNT LOCKED — too many attempts",
+                "Stop all automated sign-ins and unlock the account with Best Buy before retrying.")
+    if "verifyownership" in url or re.search(r"verify your identity|last four digits", haystack, re.I):
+        return ("IDENTITY VERIFICATION — Best Buy is asking for a one-time code (SMS/email)",
+                "Automation cannot clear this: confirmed that the screen offers only "
+                "'Text message'/'Email address' -> Send code, with NO known-value field to fill. It has "
+                "TWO causes and they need opposite responses, so check the preceding runs before acting: "
+                "(a) legitimate 2FA on the account -> sign in manually once via scripts/create_profile; "
+                "(b) an ESCALATION Best Buy imposes after too many failed password attempts (it then "
+                "pushes a reset) -> if recent runs logged BAD CREDENTIAL, fix the stored password FIRST "
+                "and stop retrying. Reaching this screen is NOT by itself proof the stored password is "
+                "correct.")
+    if re.search(r"we sent a code|enter the (6|six)[- ]digit|verification code", haystack, re.I):
+        return ("ONE-TIME CODE REQUIRED (SMS/email)",
+                "The automation cannot receive the code. Sign in manually, or switch auth.bestbuy to a "
+                "method that needs no code.")
+    if re.search(r"captcha|unusual activity|are you a human", haystack, re.I):
+        return ("CAPTCHA / BOT CHALLENGE",
+                "Back off; do not retry in a loop. The agent fallback cannot solve it either.")
+    if critical:
+        return ("ANTI-BOT / TRANSPORT — auth requests died at the network layer",
+                "Not a page-shape problem, so the agent cannot fix it. Back off and retry later; see "
+                "reference-isp-proxy-breaks-post.")
+    return ("UNKNOWN — no error text on the page and no auth-critical request failures",
+            "Inspect the saved page state below; the sign-in DOM may have changed.")
+
+
 def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None = None) -> None:
     """Say WHY sign-in stalled, since the caller can only return False.
 
@@ -350,15 +400,24 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
     tell a survey overlay from a disabled button from a CAPTCHA interstitial from a changed DOM, and
     those have completely different fixes. Best Buy sessions die in ~20 minutes, so this path runs on
     most scheduled runs and a silent failure is one you'd be guessing at for days.
+
+    The single most useful thing here is Best Buy's OWN error copy (`errors`), which names the cause
+    outright — without it a wrong password is indistinguishable from an anti-bot rejection.
     """
+    info: dict = {}
     try:
         info = page.evaluate(
-            """() => {
+            r"""() => {
                 const b = document.querySelector('button.cia-form__controls__submit');
                 const text = (document.body && document.body.innerText) || '';
                 return {
                     url: location.href,
                     title: document.title,
+                    // Best Buy's own banner ("The password you've entered is incorrect.") — the one
+                    // field that actually names the failure.
+                    errors: Array.from(document.querySelectorAll(
+                            '[role=alert], .c-alert, [class*="error"], [class*="Error"]'))
+                        .map(e => (e.innerText || '').trim()).filter(Boolean).slice(0, 4),
                     button: b ? {
                         text: (b.innerText || '').trim().slice(0, 40),
                         disabled: !!b.disabled,
@@ -368,17 +427,27 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
                     password_radio: !!document.getElementById('password-radio'),
                     looks_like_challenge:
                         /captcha|unusual activity|verify it'?s you|are you a human/i.test(text),
+                    text: text.replace(/\s+/g, ' ').slice(0, 400),
                 };
             }"""
         )
-        log.warning("Best Buy sign-in: %s. Page state: %s", what_failed, info)
     except Exception:  # noqa: BLE001 — diagnostics must never mask the original failure
         log.warning("Best Buy sign-in: %s (page state unreadable).", what_failed, exc_info=True)
 
+    critical = [f for f in (failed_requests or [])
+                if any(h in f.get("url", "") for h in _AUTH_CRITICAL_HOSTS)]
+
+    if info:
+        verdict, action = _classify_signin_failure(info, critical)
+        # Lead with the verdict: this is the line a human reads first in a wall of scheduled-run logs.
+        log.warning("Best Buy sign-in FAILED — %s. WHAT TO DO: %s", verdict, action)
+        if info.get("errors"):
+            log.warning("Best Buy sign-in: the page says: %s", info["errors"])
+        log.warning("Best Buy sign-in: %s. Page state: %s", what_failed,
+                    {k: v for k, v in info.items() if k != "text"})
+
     if not failed_requests:
         return
-    critical = [f for f in failed_requests
-                if any(h in f.get("url", "") for h in _AUTH_CRITICAL_HOSTS)]
     if critical:
         log.warning(
             "Best Buy sign-in: %d auth-critical request(s) FAILED at the network layer — this is a "
