@@ -67,6 +67,24 @@ MAX_TRACKER_OBJECTS = 500
 #: few requests rather than a march through the alphabet.
 MAX_SUFFIX_ATTEMPTS = 5
 
+#: The suffix retry is for BEST BUY ONLY. The duplicate-tracking problem is Best
+#: Buy reusing ONE tracking number across the orders it packs into a carton; Amazon and Costco do not
+#: do that, so a number THEY refuse means something else entirely and appending a letter would paper
+#: over it — inventing a spelling no carrier ever issued and hiding the real reason behind a package
+#: that now looks submitted. Those keep their previous handling: rejected -> failed, vanished ->
+#: needs_manual.
+#:
+#: Matched on the ORDER-ID SHAPE rather than a retailer field, which keeps the guard inside this
+#: module instead of threading a new column through TrackingSubmission and every caller. Best Buy
+#: order numbers are `BBY01-<digits>` (the same shape scrapers/bestbuy_api.py keys on). If that ever
+#: changes the retry simply stops firing and the package goes to needs_manual WITH an alert — it
+#: degrades to the old manual chore rather than being lost.
+BESTBUY_ORDER_PREFIX = "BBY01-"
+
+
+def _is_bestbuy_order(order_id) -> bool:
+    return str(order_id or "").upper().startswith(BESTBUY_ORDER_PREFIX)
+
 #: BFMR's own `status` -> the ledger's Status vocabulary. Observed live: cancelled, paid, processed,
 #: returned, shipped.
 #:
@@ -390,16 +408,21 @@ class BFMRClient(HttpClient):
                 # you CAN insure. The ledger's own spelling is what gets recorded as submitted, since
                 # that is the key the checkbox and every later join use.
                 result.submitted.append(number)
-            else:
-                # Refused outright (invalid_items) or accepted-then-silently-dropped. Both are the
-                # Best Buy duplicate-carton case, and since 2026-08-23 BFMR no longer resolves it, so
-                # we append the letter ourselves rather than handing the user a manual chore.
+            elif _is_bestbuy_order(obj.get("order_no")):
+                # Refused outright (invalid_items) or accepted-then-silently-dropped. For a Best Buy
+                # order both are the duplicate-carton case, and since 2026-08-23 BFMR no longer
+                # resolves it, so we append the letter ourselves rather than handing over a chore.
                 #
                 # `invalid` is passed through only so an exhausted retry can quote BFMR's own words
                 # instead of guessing at why the number was refused.
                 self._resubmit_with_suffix(
                     obj, result, taken, rejected=number in invalid_numbers, invalid=invalid,
                 )
+            elif number in invalid_numbers:
+                # Not a Best Buy carton, so a letter cannot fix it — report it as it always was.
+                result.failed.append((number, f"BFMR rejected it: {invalid}"))
+            else:
+                result.needs_manual.append((number, _duplicate_tracking_hint(number)))
 
     def _resubmit_with_suffix(self, obj: dict, result: SubmissionResult, taken: set[str],
                               *, rejected: bool = False, invalid=None) -> None:
