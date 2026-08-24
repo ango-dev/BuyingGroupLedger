@@ -573,3 +573,63 @@ def test_without_a_boosted_set_every_gift_card_is_skipped():
     html = _gift_card_order("Applied Gift Card balance is added to your account.",
                             "Amazon Gift Card Balance Reload")
     assert build_order_items(html) == []
+
+
+# --- the "Track package" link has TWO shapes -------------------------------------------------------
+# Amazon moved from /gp/your-account/ship-track to /progress-tracker/package. Matching only the old one silently produced NO tracking url -> no pt-page
+# visit -> no tracking number -> _shipped_requires_tracking downgraded a shipped package to 'ordered'.
+TRK = "112-9990026-9990026"
+
+
+def _shipment_with_links(status_text, item_html, links: str) -> str:
+    return (
+        '<div class="shipment-block">'
+        f'<div class="a-row"><div data-component="shipmentStatus">{status_text}</div></div>'
+        f'<div data-component="purchasedItems">{item_html}</div>'
+        f'<div data-component="shipmentConnections">{links}</div>'
+        "</div>"
+    )
+
+
+def _details_with(links: str) -> str:
+    return _details(TRK, "August 18, 2026",
+                    [_shipment_with_links("Arriving today", _item("iPad Air", "$559.00", qty=1), links)])
+
+
+def test_a_progress_tracker_link_is_captured():
+    html = _details_with(
+        f'<a href="/progress-tracker/package?orderId={TRK}&_encoding=UTF8&shipmentId=NWf4QBM12'
+        '&packageIndex=0">Track package</a>'
+    )
+    targets = parse_shipment_targets(html)
+
+    assert "progress-tracker/package" in targets[0]["tracking_url"]
+    assert targets[0]["shipmentId"] == "NWf4QBM12"
+
+
+def test_the_old_ship_track_link_still_works():
+    html = _details_with(
+        f'<a href="/gp/your-account/ship-track?orderId={TRK}&shipmentId=OLD123">Track package</a>'
+    )
+    assert "ship-track" in parse_shipment_targets(html)[0]["tracking_url"]
+
+
+def test_the_cancel_items_sibling_is_not_mistaken_for_a_tracking_link():
+    """"Cancel items" lives in the SAME shipmentConnections block and is also under
+    /progress-tracker/package/ — matching it would send the tracking read to a cancellation page."""
+    html = _details_with(
+        f'<a href="/progress-tracker/package/preship/cancel-items?orderID={TRK}">Cancel items</a>'
+    )
+    assert parse_shipment_targets(html)[0]["tracking_url"] == ""
+
+
+def test_the_real_block_picks_the_track_link_over_its_siblings():
+    """The live block carries Track package, Cancel items and a product-review link together."""
+    html = _details_with(
+        f'<a href="/progress-tracker/package?itemId=abc&orderId={TRK}">Track package</a>'
+        f'<a href="/progress-tracker/package/preship/cancel-items?orderID={TRK}">Cancel items</a>'
+        '<a href="/review/review-your-purchases?asins=B0GQVPX1PJ">Write a product review</a>'
+    )
+    url = parse_shipment_targets(html)[0]["tracking_url"]
+
+    assert "progress-tracker/package?" in url and "cancel" not in url

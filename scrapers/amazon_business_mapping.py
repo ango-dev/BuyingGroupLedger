@@ -290,6 +290,26 @@ def _order_id(region, html: str) -> str:
     return m.group(0) if m else ""
 
 
+# The "Track package" link. Amazon serves TWO shapes and BOTH must be accepted:
+#   /gp/your-account/ship-track?...   the long-standing one
+#   /progress-tracker/package?...     seen live on an order arriving that day
+# The page they land on is the same pt page either way, so read_tracking_page needs no change — a
+# progress-tracker link was live-verified to yield TBA999000000008 through the existing selectors.
+# The trailing "?" on the progress-tracker form is LOAD-BEARING: it keeps the sibling
+# /progress-tracker/package/preship/cancel-items link — a "Cancel items" button sitting in the very
+# same shipmentConnections block — from being mistaken for a tracking link.
+_TRACK_HREF_RE = re.compile(r"ship-track|progress-tracker/package\?", re.IGNORECASE)
+
+
+def _track_href(node) -> str:
+    """The first real tracking link inside `node`, or "". See _TRACK_HREF_RE for the two shapes."""
+    for anchor in node.select("a[href]"):
+        href = anchor.get("href") or ""
+        if "cancel" in href.lower():
+            continue
+        if _TRACK_HREF_RE.search(href):
+            return href
+    return ""
 def _shipment_wrapper(status_el):
     """The block that holds one shipment: the nearest ancestor of a `shipmentStatus` that also contains
     its `purchasedItems` and its connections (the 'Track package' link / shipmentConnections)."""
@@ -301,7 +321,7 @@ def _shipment_wrapper(status_el):
             break
         if node.select_one("[data-component='purchasedItems']"):
             fallback = fallback or node
-            if node.select_one("a[href*='ship-track'], [data-component='shipmentConnections']"):
+            if _track_href(node) or node.select_one("[data-component='shipmentConnections']"):
                 return node
     return fallback
 
@@ -319,13 +339,13 @@ def _shipment_targets(region) -> list[dict]:
         wrapper = _shipment_wrapper(status_el)
         if wrapper is None:
             continue
-        track = wrapper.select_one("a[href*='ship-track']")
+        track_href = _track_href(wrapper)
         hrefs = " ".join(a.get("href", "") for a in wrapper.select("a[href]"))
         m = _SHIPMENT_ID_RE.search(hrefs)
         targets.append({
             "shipment": shipment_label(i + 1),
             "shipmentId": m.group(1) if m else "",
-            "tracking_url": _abs_url(track.get("href")) if track else "",
+            "tracking_url": _abs_url(track_href) if track_href else "",
             "status": _status_from_text(status_el.get_text(" ", strip=True)),
         })
     return targets
@@ -548,8 +568,8 @@ def build_order_items(
         status = _status_from_text(status_text)
         cancelled = status == "cancelled"
 
-        track = wrapper.select_one("a[href*='ship-track']")
-        tracking_url = _abs_url(track.get("href")) if track else ""
+        track_href = _track_href(wrapper)
+        tracking_url = _abs_url(track_href) if track_href else ""
         hrefs = " ".join(a.get("href", "") for a in wrapper.select("a[href]"))
         sid_m = _SHIPMENT_ID_RE.search(hrefs)
         shipment_id = sid_m.group(1) if sid_m else ""
