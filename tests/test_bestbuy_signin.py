@@ -353,3 +353,77 @@ class TestSigninFailureVerdict:
         ):
             _, action = bestbuy_api._classify_signin_failure(info, crit)
             assert action and len(action) > 20, "a verdict without a next step is not actionable"
+
+
+class TestEmailIsEnteredAutomatically:
+    """Best Buy alternates between a "remembered user" page (email shown as static text, just click
+    Continue) and a fresh one with an EMPTY editable #fld-e — it reverted to the fresh variant after a
+    password reset on 2026-08-23. Clicking Continue without typing there just yields "Please enter a
+    valid email address", so the field must be filled whenever it exists.
+    """
+
+    def test_the_email_is_typed_when_the_field_is_editable(self, monkeypatch):
+        monkeypatch.setattr(bestbuy_api, "_watch_failed_requests", lambda p: [])
+        monkeypatch.setattr(bestbuy_api, "_dismiss_survey", lambda p: None)
+        monkeypatch.setattr(bestbuy_api, "_keep_signed_in", lambda p: True)
+        monkeypatch.setattr(bestbuy_api, "_click_continue", lambda p: False)  # stop after screen 1
+        monkeypatch.setattr(bestbuy_api, "_log_signin_diagnostics", lambda *a, **k: ("", ""))
+        filled = []
+
+        class _P:
+            def wait_for_selector(self, selector, **k):
+                if selector != "#fld-e":
+                    raise RuntimeError("not present")
+
+            def fill(self, selector, value):
+                filled.append((selector, value))
+
+        bestbuy_api._deterministic_login(_P(), RetailerAuth(
+            method="password", username="u@e.com", password="pw"))
+        assert filled == [("#fld-e", "u@e.com")], "the email must be entered automatically"
+
+
+class TestFailureReasonReachesTheAlert:
+    """The verdict used to live only in logs/run.log. The ALERT is what actually reaches a human, so
+    the reason rides out on LoginOutcome and into ApiLoginError — otherwise an identity challenge and a
+    rejected password both arrive as "login failed, check the logs"."""
+
+    def test_the_verdict_is_carried_out_on_the_outcome(self, monkeypatch):
+        monkeypatch.setattr(bestbuy_api, "_watch_failed_requests", lambda p: [])
+        monkeypatch.setattr(bestbuy_api, "_dismiss_survey", lambda p: None)
+        monkeypatch.setattr(bestbuy_api, "_keep_signed_in", lambda p: True)
+        monkeypatch.setattr(bestbuy_api, "_click_continue", lambda p: False)
+        monkeypatch.setattr(
+            bestbuy_api, "_log_signin_diagnostics",
+            lambda *a, **k: ("IDENTITY VERIFICATION — Best Buy is asking for a one-time code",
+                             "sign in manually via scripts/create_profile"))
+
+        class _P:
+            def wait_for_selector(self, *a, **k): raise RuntimeError("no field")
+            def locator(self, *a, **k):
+                class _L:
+                    def count(self): return 1      # prefilled variant
+                return _L()
+
+        outcome = bestbuy_api._deterministic_login(_P(), RetailerAuth(
+            method="password", username="u@e.com", password="pw"))
+        assert outcome.ok is False
+        assert "IDENTITY VERIFICATION" in outcome.reason
+        assert "create_profile" in outcome.reason, "the action must travel with the verdict"
+
+    def test_diagnostics_returning_nothing_never_breaks_the_login_path(self, monkeypatch):
+        """Diagnostics are best-effort; a None return must not turn a clean 'login failed' into a
+        TypeError that escapes as a page-shape error and spends the agent."""
+        monkeypatch.setattr(bestbuy_api, "_watch_failed_requests", lambda p: [])
+        monkeypatch.setattr(bestbuy_api, "_dismiss_survey", lambda p: None)
+        monkeypatch.setattr(bestbuy_api, "_keep_signed_in", lambda p: True)
+        monkeypatch.setattr(bestbuy_api, "_click_continue", lambda p: False)
+        monkeypatch.setattr(bestbuy_api, "_log_signin_diagnostics", lambda *a, **k: None)
+
+        class _P:
+            def wait_for_selector(self, *a, **k): pass
+            def fill(self, *a, **k): pass
+
+        outcome = bestbuy_api._deterministic_login(_P(), RetailerAuth(
+            method="password", username="u@e.com", password="pw"))
+        assert outcome.ok is False and outcome.reason == ""

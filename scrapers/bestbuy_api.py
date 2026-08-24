@@ -341,6 +341,10 @@ class LoginOutcome(NamedTuple):
 
     ok: bool
     transport_failed: bool = False
+    # Verdict + action from _classify_signin_failure, propagated into ApiLoginError so the emailed
+    # alert names the actual problem ("sign in manually to clear a verification code") instead of a
+    # generic "login failed - check the logs".
+    reason: str = ""
 
 
 def _classify_signin_failure(info: dict, critical: list) -> tuple[str, str]:
@@ -437,6 +441,7 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
     critical = [f for f in (failed_requests or [])
                 if any(h in f.get("url", "") for h in _AUTH_CRITICAL_HOSTS)]
 
+    verdict = action = ""
     if info:
         verdict, action = _classify_signin_failure(info, critical)
         # Lead with the verdict: this is the line a human reads first in a wall of scheduled-run logs.
@@ -447,7 +452,7 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
                     {k: v for k, v in info.items() if k != "text"})
 
     if not failed_requests:
-        return
+        return verdict, action
     if critical:
         log.warning(
             "Best Buy sign-in: %d auth-critical request(s) FAILED at the network layer — this is a "
@@ -457,6 +462,11 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
     else:
         log.warning("Best Buy sign-in: %d request(s) failed (none auth-critical): %s",
                     len(failed_requests), failed_requests[:6])
+    return verdict, action
+
+
+def _signin_reason(verdict: str, action: str) -> str:
+    return f"{verdict}. WHAT TO DO: {action}" if verdict else ""
 
 
 def _deterministic_login(page, auth) -> LoginOutcome:
@@ -482,8 +492,9 @@ def _deterministic_login(page, auth) -> LoginOutcome:
             return LoginOutcome(False)
     _keep_signed_in(page)
     if not _click_continue(page):
-        _log_signin_diagnostics(page, "could not click Continue on the email screen", failed_requests)
-        return LoginOutcome(False, bool(_auth_critical(failed_requests)))
+        v, a = _log_signin_diagnostics(page, "could not click Continue on the email screen",
+                                       failed_requests) or ("", "")
+        return LoginOutcome(False, bool(_auth_critical(failed_requests)), _signin_reason(v, a))
 
     # Screen 2: method chooser -> "Use password".
     try:
@@ -509,8 +520,9 @@ def _deterministic_login(page, auth) -> LoginOutcome:
             except Exception:
                 continue
     except Exception:
-        _log_signin_diagnostics(page, "password field never appeared", failed_requests)
-        return LoginOutcome(False, bool(_auth_critical(failed_requests)))
+        v, a = _log_signin_diagnostics(page, "password field never appeared",
+                                       failed_requests) or ("", "")
+        return LoginOutcome(False, bool(_auth_critical(failed_requests)), _signin_reason(v, a))
 
     try:
         page.wait_for_url(lambda u: "bestbuy.com" in u and not any(m in u for m in _SIGNIN_MARKERS),
@@ -520,8 +532,9 @@ def _deterministic_login(page, auth) -> LoginOutcome:
     if _looks_logged_out(page):
         # Everything clicked and filled, yet we are still on a sign-in URL. Live this was
         # the auth POST being rejected at the network layer, which no selector work can fix.
-        _log_signin_diagnostics(page, "submitted the password but stayed logged out", failed_requests)
-        return LoginOutcome(False, bool(_auth_critical(failed_requests)))
+        v, a = _log_signin_diagnostics(page, "submitted the password but stayed logged out",
+                                       failed_requests) or ("", "")
+        return LoginOutcome(False, bool(_auth_critical(failed_requests)), _signin_reason(v, a))
     return LoginOutcome(True)
 
 
@@ -589,12 +602,16 @@ class BestBuyApiClient:
                     # rejection is anti-bot/transport (not fixable by changing egress — proven live
                     # 2026-08-15, see fetch_order_payloads), while anything else points at the page
                     # flow or the credentials.
+                    # Lead with the classified reason when the page told us one — an identity
+                    # challenge, a rejected password and an anti-bot reset all end here, and the
+                    # alert is useless unless it says WHICH.
                     raise ApiLoginError(
-                        "Best Buy session is logged out and deterministic login did not succeed; the "
-                        "auth requests died at the NETWORK layer (anti-bot/transport, not the page "
-                        "flow — changing egress does not help)."
-                        if outcome.transport_failed else
-                        "Best Buy session is logged out and deterministic login did not succeed."
+                        outcome.reason
+                        or ("Best Buy session is logged out and deterministic login did not succeed; "
+                            "the auth requests died at the NETWORK layer (anti-bot/transport, not the "
+                            "page flow — changing egress does not help)."
+                            if outcome.transport_failed else
+                            "Best Buy session is logged out and deterministic login did not succeed.")
                     )
                 log.info("Best Buy [%s]: deterministic self-login succeeded.", self.profile.label)
                 page.goto(PURCHASE_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
