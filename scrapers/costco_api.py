@@ -27,6 +27,7 @@ from pathlib import Path
 import jwt
 from curl_cffi import requests as curl_requests
 
+from config.loader import load_state, save_state
 from scrapers.base import ApiLoginError
 
 log = logging.getLogger(__name__)
@@ -53,7 +54,28 @@ GRAPHQL_ENDPOINT = "https://ecom-api.costco.com/ebusiness/order/v1/orders/graphq
 
 # Per-profile token cache lives here (gitignored). One file per profile label so several Costco
 # memberships can run side by side.
-TOKEN_DIR = Path(".costco")
+#: Costco's tokens live in `.state.json` under `costco.<profile label>`, NOT in the config file.
+#:
+#: THEY ROTATE. Costco issues a NEW refresh token on every refresh and invalidates the old one, so
+#: this is written several times a day — which is exactly why it is state rather than configuration,
+#: and why its file is the one thing mounted writable in docker-compose.yml while config.json stays
+#: read-only. Losing it costs nothing permanent: re-run `scripts.costco_token`.
+
+
+def load_costco_auth(profile_label: str) -> dict:
+    """This profile's stored Costco tokens, or {} if it has never authenticated."""
+    return (load_state().get("costco") or {}).get(profile_label) or {}
+
+
+def save_costco_auth(profile_label: str, auth: dict) -> None:
+    """Persist this profile's tokens, leaving every other profile's entry untouched.
+
+    Read-modify-write rather than a whole-file rewrite: several profiles share `.state.json`, and a
+    blind overwrite during a multi-profile run would drop the tokens of whichever profile wrote first.
+    """
+    state = load_state()
+    state.setdefault("costco", {})[profile_label] = auth
+    save_state(state)
 DEFAULT_WAREHOUSES = ["847"]
 
 _USER_AGENT = (
@@ -157,14 +179,13 @@ def _is_token_expired(id_token: str, buffer_seconds: int = 120) -> bool:
 
 
 class CostcoApiClient:
-    def __init__(self, profile_label: str, token_dir: Path | str = TOKEN_DIR, proxy=None):
-        """`proxy` is the profile's `ProxyConfig` (profiles.json). Passing it routes BOTH the token
+    def __init__(self, profile_label: str, proxy=None):
+        """`proxy` is the profile's `ProxyConfig` (config.json). Passing it routes BOTH the token
         exchange and the GraphQL calls through that static ISP proxy, so Costco sees this account from
         the same IP as the browser paths (agent fallback / CDP), instead of the host's own IP. Optional
         so a proxy-less profile still works; None = direct, the pre-2026-08-13 behavior."""
         self.profile_label = profile_label
-        self.token_path = Path(token_dir) / f"{profile_label}.json"
-        self._auth = self._load_auth()
+        self._auth = load_costco_auth(profile_label)
         self.warehouse_numbers = [
             str(w) for w in (self._auth.get("warehouse_numbers") or DEFAULT_WAREHOUSES)
         ]
@@ -178,17 +199,8 @@ class CostcoApiClient:
                      profile_label, proxy.host, proxy.port)
 
     # --- token cache -----------------------------------------------------------------------------
-    def _load_auth(self) -> dict:
-        if self.token_path.exists():
-            try:
-                return json.loads(self.token_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                log.warning("Costco token file %s is unreadable; treating as unauthenticated.", self.token_path)
-        return {}
-
     def _save_auth(self) -> None:
-        self.token_path.parent.mkdir(parents=True, exist_ok=True)
-        self.token_path.write_text(json.dumps(self._auth, indent=2), encoding="utf-8")
+        save_costco_auth(self.profile_label, self._auth)
 
     def _refresh(self, refresh_token: str) -> dict:
         resp = curl_requests.post(

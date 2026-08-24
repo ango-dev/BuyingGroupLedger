@@ -1,0 +1,134 @@
+{
+  "//": "Copy to config.json and fill in. ENVIRONMENT VARIABLES OVERRIDE EVERY VALUE HERE — the name in each `// <KEY>` note below is the variable that wins over it, from .env or the shell. That is what makes a one-off possible without editing this file: BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking",
+  "//2": "Two env vars have no home here on purpose. BROWSER_USE_API_KEY does (browser_use.api_key) — but RUN_INTERVAL_HOURS is read by docker-compose.yml itself, not by Python, so it can only come from the environment. The *_FORCE_AGENT switches are deliberate one-off ops hooks: COSTCO_FORCE_AGENT=1 python main.py costco",
+
+  "browser_use": {
+    "// api_key": "BROWSER_USE_API_KEY — required. The cloud browser every scraper runs in.",
+    "api_key": "",
+    "// llm": "BROWSER_USE_LLM — the agent-fallback model. v4 is BYOK-only and its model list is stale, so verify a new name with a cheap run before trusting it.",
+    "llm": "gpt-5.6-luna",
+    "// max_cost_usd": "BROWSER_USE_MAX_COST_USD — per-run circuit breaker; stops a run spiralling on retries.",
+    "max_cost_usd": 0.5
+  },
+
+  "google": {
+    "// sheet_id": "GOOGLE_SHEET_ID — required. The id from the sheet's URL.",
+    "sheet_id": "",
+    "// worksheet_name": "GOOGLE_SHEET_WORKSHEET_NAME — the tab. Created if absent.",
+    "worksheet_name": "Orders",
+    "// service_account": "Paste the WHOLE JSON object Google gave you here, then share the sheet with its client_email. GOOGLE_SERVICE_ACCOUNT_FILE still points at a standalone file instead, and wins when set.",
+    "service_account": {}
+  },
+
+  "alerts": {
+    "// ": "Configure at least one channel. With neither, an unattended host reports a logged-out session or a failed run to nobody. Test with `python -m alerts.notifier`.",
+    "// gmail_app_password": "GMAIL_APP_PASSWORD — a Google APP PASSWORD, not your account password.",
+    "gmail_address": "",
+    "gmail_app_password": "",
+    "// email_to": "ALERT_EMAIL_TO — defaults to gmail_address.",
+    "email_to": "",
+    "discord_webhook_url": ""
+  },
+
+  "scraping": {
+    "// lookback_days": "LOOKBACK_DAYS — CALENDAR days back, counting today as 0. 1 = today and yesterday.",
+    "lookback_days": 1,
+    "// default_cashback_rate": "DEFAULT_CASHBACK_RATE — for a card not listed in `cards`. Write 2% as 0.02 or \"2%\", never 2.",
+    "default_cashback_rate": 0,
+    "// amazon_promo_cashback_enabled": "AMAZON_PROMO_CASHBACK_ENABLED — add Amazon's per-order 'Earn N% back' promo on top of the card's rate.",
+    "amazon_promo_cashback_enabled": true,
+    "// amazon_gift_card_netting_enabled": "AMAZON_GIFT_CARD_NETTING_ENABLED — scale cost down to what the CARD paid when a gift card covers part of an order, so cashback isn't earned on money the card never spent.",
+    "amazon_gift_card_netting_enabled": true
+  },
+
+  "buying_groups": {
+    "// sync_enabled": "BUYING_GROUP_SYNC_ENABLED — SPENDS REAL MONEY. On, every scheduled run submits tracking numbers and files BFMR insurance unattended. Leave off until a dry run and a one-package live test have both been done. `python -m sync_tracking` ignores this.",
+    "sync_enabled": false,
+    "bfmr": {
+      "// ": "BFMR authenticates with TWO HEADERS (API-KEY / API-SECRET), not a bearer token. Both from Developer Tools in your BFMR account settings.",
+      "api_base_url": "https://api.bfmr.com",
+      "api_key": "",
+      "api_secret": "",
+      "// min_insurance_value": "BFMR_MIN_INSURANCE_VALUE — only insure shipments worth at least this. BFMR charges ~0.45% with a $2.00 MINIMUM, so below roughly $450 the floor dominates and the effective rate passes 1%. 0 insures everything.",
+      "min_insurance_value": 0
+    },
+    "mod": {
+      "// ": "MaxOutDeals needs a bearer token AND an IP allowlist — add this machine under the firewall tab in your MOD profile, or every call is rejected however valid the token. user_id and email are required in the BODY of every request.",
+      "api_base_url": "https://www.maxoutdeals.com",
+      "api_key": "",
+      "user_id": "",
+      "email": ""
+    }
+  },
+
+  "receipts": {
+    "// capture_enabled": "RECEIPT_CAPTURE_ENABLED — the off switch that keeps working credentials in place. `oci.bucket` is the real master switch: blank means capture is completely inert.",
+    "capture_enabled": true,
+    "oci": {
+      "// ": "Uploads go through OCI's S3 COMPATIBILITY API, so these are an OCI 'customer secret key' (access-key/secret pair), NOT the API signing key.",
+      "bucket": "",
+      "s3_endpoint_url": "",
+      "s3_region": "",
+      "s3_access_key_id": "",
+      "s3_secret_access_key": "",
+      "// par_url_prefix": "A Pre-Authenticated Request URL made ONCE by hand in the OCI console (Target: Bucket, Permit object reads, listing OFF). TREAT AS A SECRET — anyone holding it can read every receipt, and a receipt carries your name, address, card last 4 and totals.",
+      "par_url_prefix": ""
+    }
+  },
+
+  "// profiles": "One Browser-Use browser identity per entry, each behind its own proxy. `amazon` and `amazon-business` are separate accounts and MUST NOT share a profile — one identity for both is exactly the linking risk the separate profile exists to avoid. `profile_id` is filled in for you by `python -m scripts.create_profile`.",
+  "profiles": [
+    {
+      "label": "profile-1",
+      "profile_id": "REPLACE_WITH_BROWSER_USE_PROFILE_ID",
+      "proxy": {
+        "host": "proxy.example.com",
+        "port": 10000,
+        "username": "REPLACE_WITH_PROXY_USERNAME",
+        "password": "REPLACE_WITH_PROXY_PASSWORD"
+      },
+      "retailers": ["amazon", "bestbuy"],
+      "// auth": "Username + password is the only supported method. TURN 2-STEP VERIFICATION OFF on the Best Buy account — nothing here can answer a challenge.",
+      "auth": {
+        "bestbuy": { "method": "password", "username": "you@example.com", "password": "" }
+      }
+    },
+    {
+      "label": "profile-2",
+      "profile_id": "REPLACE_WITH_BROWSER_USE_PROFILE_ID",
+      "retailers": ["amazon-business", "costco"]
+    }
+  ],
+
+  "// warehouses": "Which buying group an order belongs to, matched on its DELIVERY ADDRESS. A jig is a deliberately misspelled variant the group hands out ('THIRTEEN SAMMPLE DR1VE') so each order routes distinctly — so it is a routing token, never a postal address. `insure_as` points at the real warehouse to file insurance against; filing the jig would put a fictional street on the policy. Name a group literally `Personal` to have those rows dropped before the sheet is written.",
+  "warehouses": [
+    {
+      "buying_group": "BFMR",
+      "insurance_addresses": {
+        "// ": "state is the ISO 3166-2 code WITHOUT the country prefix (NH, not US-NH); country is ISO 3166-1 alpha-3 (USA, not US). Both are validated when this file loads, because both mistakes look right and only fail when a premium is being paid.",
+        "sample": { "address_1": "13 Sample Drive", "city": "Testville", "state": "NH", "country": "USA", "zip": "03050-0000" },
+        "executive": { "address_1": "5 Sample Park Drive", "address_2": "Suite 6", "city": "Testville", "state": "NH", "country": "USA", "zip": "03050-0000" },
+        "broadway": { "address_1": "51 Sample Blvd", "address_2": "Unit 0002", "city": "Sampleton", "state": "NH", "country": "USA", "zip": "03040-0002" },
+        "spring": { "address_1": "38 Sample Street", "address_2": "Unit 0000", "city": "Sampleton", "state": "NH", "country": "USA", "zip": "03040-0000" }
+      },
+      "jigs": [
+        { "label": "BFMR-A", "street": "THIRTEEN SAMMPLE DR1VE", "zip": "03050", "insure_as": "sample" }
+      ]
+    },
+    {
+      "buying_group": "MaxOutDeals",
+      "jigs": [{ "label": "MOD-1", "street": "9 Oak Ave", "zip": "30303" }]
+    },
+    {
+      "buying_group": "Personal",
+      "jigs": [{ "label": "home", "zip": "94103", "name_contains": "Your Name" }]
+    }
+  ],
+
+  "// cards": "Cashback per card, matched on the last 4 digits the scraper reads. `retailer_rates` overrides the card's overall rate at one retailer. Rates accept 0.02 or \"2%\" — never a bare 2.",
+  "cards": [
+    { "last4": "4321", "name": "Chase Freedom Unlimited", "cashback_rate": 0.015, "retailer_rates": { "Amazon": "5%", "Best Buy": "3%" } },
+    { "last4": "8765", "name": "Citi Double Cash", "cashback_rate": "2%" },
+    { "// profile": "Scopes a card to one profile, when two accounts each have a card ending in the same 4 digits.", "last4": "2222", "name": "Personal Amex Gold", "cashback_rate": "4%", "profile": "profile-1" }
+  ]
+}

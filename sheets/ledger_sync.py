@@ -185,7 +185,7 @@ def _collapse_records(records: list[dict]) -> list[dict]:
 
 
 def _get_worksheet() -> gspread.Worksheet:
-    creds = Credentials.from_service_account_file(settings.google_service_account_file, scopes=SCOPES)
+    creds = settings.google_credentials(SCOPES)
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(settings.google_sheet_id)
     try:

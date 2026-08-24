@@ -103,21 +103,92 @@ def _check_path(path: Path, *, required: bool, what: str, parses_json: bool = Fa
     return Result(OK, name, "present")
 
 
-def check_config_files(root: Path = ROOT) -> list[Result]:
-    out = [
-        _check_path(root / "profiles.json", required=True, parses_json=True,
-                    what="no profile can be loaded, so NOTHING is scraped."),
-        _check_path(root / "warehouses.json", required=False, parses_json=True,
-                    what="every address tags Unclassified, so no order routes to a buying group."),
-        _check_path(root / "cards.json", required=False, parses_json=True,
-                    what="every row falls back to DEFAULT_CASHBACK_RATE, misstating profit."),
-    ]
+#: The files config.json replaced. Their presence is how an un-migrated host is recognised.
+LEGACY_CONFIG_FILES = ("profiles.json", "warehouses.json", "cards.json", "service_account.json")
 
-    # The service-account key is env-configurable, so resolve it the way settings.py does.
-    sa = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
-    sa_path = Path(sa) if Path(sa).is_absolute() else root / sa
-    out.append(_check_path(sa_path, required=True, parses_json=True,
-                           what="the Sheet cannot be read or written, so every run fails at sync."))
+
+def check_config_files(root: Path = ROOT) -> list[Result]:
+    """One config file now, and a loud failure for a host that still has the old six.
+
+    A silent fallback would be worse than a hard stop here. Without config.json the loaders return
+    empty sections, so an un-migrated host does not crash — it scrapes NOTHING (no profiles), tags
+    every address Unclassified and posts to no buying group, all while exiting 0. That is precisely
+    the silent misconfiguration this whole script exists to catch, and it gates the container
+    (docker/entrypoint.sh), so the run stops instead.
+    """
+    config = root / "config.json"
+    legacy = [name for name in LEGACY_CONFIG_FILES if (root / name).is_file()]
+
+    if config.is_dir():
+        # Docker creates an empty DIRECTORY when a bind-mounted host file is missing. Reporting it
+        # as "missing" sends someone hunting for the wrong problem.
+        return [_check_path(config, required=True, parses_json=True,
+                            what="nothing can be loaded: no profiles, no sheet, no credentials.")]
+
+    if not config.is_file():
+        if legacy:
+            return [Result(
+                FAIL, "config.json",
+                f"is missing, but the old config is still here ({', '.join(legacy)}). This host has "
+                f"not been migrated, and nothing reads those files any more — it would scrape "
+                f"nothing and exit 0. Fix with `python -m scripts.migrate_config` (dry run), then "
+                f"`--apply`. The old files are left in place.",
+            )]
+        return [Result(
+            FAIL, "config.json",
+            "is missing — there is no configuration at all, so no profile, sheet or credential is "
+            "available. Copy config.example.json to config.json and fill it in.",
+        )]
+
+    out = [_check_path(config, required=True, parses_json=True,
+                       what="nothing can be loaded: no profiles, no sheet, no credentials.")]
+    if legacy:
+        out.append(Result(
+            WARN, "legacy config",
+            f"{', '.join(legacy)} still present but NO LONGER READ — config.json wins. Delete them "
+            f"once you are satisfied, so nobody edits a file that has no effect.",
+        ))
+
+    # Each section is optional in a different way, and each failure is quiet, so name the cost.
+    try:
+        from config.loader import config_section
+        for name, cost in (
+            ("profiles", "no profile can be loaded, so NOTHING is scraped."),
+            ("warehouses", "every address tags Unclassified, so no order routes to a buying group."),
+            ("cards", "every row falls back to DEFAULT_CASHBACK_RATE, misstating profit."),
+        ):
+            entries = config_section(name)
+            level = (FAIL if name == "profiles" else WARN) if not entries else OK
+            out.append(Result(
+                level, f"config.json `{name}`",
+                f"{len(entries)} entr(y/ies)" if entries else f"is empty — {cost}",
+            ))
+    except Exception as exc:  # noqa: BLE001 — a malformed section is already a FAIL above
+        out.append(Result(FAIL, "config.json sections", f"could not be read ({exc})."))
+
+    # Google credentials: inlined in config.json, unless a standalone file is pointed at.
+    sa = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "")
+    if sa:
+        sa_path = Path(sa) if Path(sa).is_absolute() else root / sa
+        out.append(_check_path(sa_path, required=True, parses_json=True,
+                               what="the Sheet cannot be read or written; every run fails at sync."))
+        from config.loader import config_value
+        if isinstance(config_value("google.service_account"), dict):
+            out.append(Result(
+                WARN, "google credentials",
+                f"GOOGLE_SERVICE_ACCOUNT_FILE is set, so {sa_path.name} OVERRIDES the credential "
+                f"inlined in config.json — which is then dead weight, and deleting that file would "
+                f"break the run even though config.json looks complete. Unset the variable to use "
+                f"the inlined one.",
+            ))
+    else:
+        from config.loader import config_value
+        info = config_value("google.service_account")
+        out.append(Result(OK, "google credentials", "inlined in config.json")
+                   if isinstance(info, dict) and info.get("private_key")
+                   else Result(FAIL, "google credentials",
+                               "config.json has no `google.service_account` block and "
+                               "GOOGLE_SERVICE_ACCOUNT_FILE is unset — every run fails at sync."))
     return out
 
 
@@ -134,8 +205,11 @@ def check_costco_tokens(root: Path = ROOT) -> list[Result]:
 
     out = []
     for profile in profiles:
-        token = root / ".costco" / f"{profile.label}.json"
-        if token.is_file():
+        from config.loader import STATE_FILE
+        from scrapers.costco_api import load_costco_auth
+
+        token = STATE_FILE
+        if load_costco_auth(profile.label):
             # Present is not enough: Costco ROTATES the refresh token on every refresh and
             # _save_auth persists the new one. A read-only mount (the natural-looking `:ro` for a
             # file full of secrets) turns that write into an OSError, so Costco degrades to the
@@ -152,16 +226,16 @@ def check_costco_tokens(root: Path = ROOT) -> list[Result]:
                     f"present but its directory is NOT WRITABLE ({exc.strerror}). Costco rotates "
                     f"its refresh token and must save the new one, so this degrades Costco to the "
                     f"PAID agent every run and discards the rotation. In Docker, drop the `:ro` "
-                    f"from the ./.costco volume in docker-compose.yml.",
+                    f"from the ./.state.json volume in docker-compose.yml.",
                 ))
             else:
                 out.append(Result(OK, f"costco token [{profile.label}]", "present and writable"))
         else:
             out.append(Result(
                 FAIL, f"costco token [{profile.label}]",
-                f"{token} is missing — Costco falls back to the PAID agent every run. Fix with "
-                f"`python -m scripts.costco_token --label {profile.label} --token '<REFRESH_TOKEN>'`, "
-                f"and check the ./.costco volume is mounted if this is a container.",
+                f"no token stored in {token} — Costco falls back to the PAID agent every run. Fix "
+                f"with `python -m scripts.costco_token --label {profile.label} --token "
+                f"'<REFRESH_TOKEN>'`, and check the ./.state.json volume is mounted in a container.",
             ))
     return out
 
@@ -174,16 +248,35 @@ REQUIRED_ENV = {
 
 
 def check_env() -> list[Result]:
+    """Resolved through `settings`, NOT os.getenv.
+
+    These values may come from config.json or from the environment, and reading the environment
+    directly would report a perfectly configured host as broken — the exact false alarm that makes
+    people stop trusting preflight. `settings` is the one place that knows the resolution order.
+    """
+    # Resolved through settings.py's own helpers, NOT the `settings` singleton and not os.getenv.
+    #
+    # Not the singleton because a dataclass evaluates its field defaults ONCE, when the class is
+    # defined — so `Settings()` re-reads nothing and would report whatever was true at import. Not
+    # os.getenv because a value may legitimately live only in config.json, and reading the
+    # environment alone would call a correctly configured host broken. The helpers are the only
+    # thing that applies the real order: environment, then config file, then default.
+    from config.settings import _get_str
+
+    resolved = {
+        "BROWSER_USE_API_KEY": os.getenv("BROWSER_USE_API_KEY", ""),
+        "GOOGLE_SHEET_ID": _get_str("GOOGLE_SHEET_ID"),
+    }
     out = [
-        Result(FAIL, name, f"is unset — {why}") if not (os.getenv(name) or "").strip()
+        Result(FAIL, name, f"is unset — {why}") if not str(resolved.get(name, "")).strip()
         else Result(OK, name, "set")
         for name, why in REQUIRED_ENV.items()
     ]
 
     # Alerts are how an unattended host tells you anything at all. Neither channel configured means
     # a silent failure stays silent until you happen to look at the sheet.
-    email = (os.getenv("GMAIL_ADDRESS") or "").strip() and (os.getenv("GMAIL_APP_PASSWORD") or "").strip()
-    discord = (os.getenv("DISCORD_WEBHOOK_URL") or "").strip()
+    email = _get_str("GMAIL_ADDRESS").strip() and _get_str("GMAIL_APP_PASSWORD").strip()
+    discord = _get_str("DISCORD_WEBHOOK_URL").strip()
     if email or discord:
         channels = ", ".join(c for c, on in (("email", email), ("Discord", discord)) if on)
         out.append(Result(OK, "alerts", f"configured ({channels})"))

@@ -9,8 +9,10 @@ services:
     image: buying-group-ledger
     container_name: buying-group-ledger
     restart: unless-stopped
-    # .env is read from the host and injected as environment variables (settings.py reads them
-    # via os.getenv; no .env file is copied into the image).
+    # OPTIONAL. Everything lives in config.json now; .env is only the OVERRIDE layer, for values you
+    # want to differ on this host without editing the config it shares. Delete these two lines if you
+    # have no overrides — but note RUN_INTERVAL_HOURS below is read by compose itself, not by Python,
+    # so that one can only come from the environment.
     env_file:
       - .env
     environment:
@@ -24,21 +26,19 @@ services:
                                   # alerting and running degraded (see docker/entrypoint.sh)
       TZ: "America/New_York"      # the cron schedule follows this; UTC if unset
     volumes:
-      - ./profiles.json:/app/profiles.json:ro
-      - ./service_account.json:/app/service_account.json:ro
-      # Costco refresh tokens (.costco/<label>.json); omit this line if not using Costco.
+      # THE config file: profiles, warehouses, cards, credentials and the inlined Google service
+      # account. Read-only, because nothing in a scheduled run has any business rewriting what you
+      # authored. A bind mount whose host file is missing makes Docker create an empty DIRECTORY
+      # here, which preflight reports as "config.json is missing" on start rather than letting the
+      # run scrape nothing and exit 0.
+      - ./config.json:/app/config.json:ro
+      # The app's own state — currently just Costco's refresh tokens.
       # MUST be writable — NOT :ro. Costco ROTATES the refresh token on every refresh and
       # CostcoApiClient._save_auth persists the new one alongside the cached id_token. Mounted
       # read-only, the write raises OSError, Costco falls back to the PAID agent every run, and the
-      # rotated token is lost — which can strand the stored one and force a manual re-grab.
-      - ./.costco:/app/.costco
-      # Buying-group warehouses and credit-card cashback rates. Both are OPTIONAL — but a bind mount
-      # whose host file is missing makes Docker create an empty DIRECTORY there, so either create the
-      # file on the host (even as `[]`) or delete the line. Without them the run still works: every
-      # address tags Unclassified and every card falls back to DEFAULT_CASHBACK_RATE. Preflight
-      # reports this on every container start rather than letting it pass as "not configured".
-      - ./warehouses.json:/app/warehouses.json:ro
-      - ./cards.json:/app/cards.json:ro
+      # rotated token is lost — which can strand the stored one and force a manual re-grab. Keeping
+      # it a SEPARATE file from config.json is what lets that stay read-only.
+      - ./.state.json:/app/.state.json
       - ./data:/app/data          # generated CSVs (optional; Sheet is source of truth)
       - ./logs:/app/logs          # run.log, the overlap lock, and the .last_run heartbeat
     # Docker's default json-file driver grows without bound. On a Pi that means an SD card filling

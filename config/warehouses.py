@@ -1,6 +1,4 @@
-import json
-from pathlib import Path
-
+from config.loader import config_section
 from models.warehouse import InsuranceAddress, Warehouse, normalize_address
 
 __all__ = [
@@ -13,8 +11,6 @@ __all__ = [
     "normalize_address",
     "tag_and_filter_personal",
 ]
-
-WAREHOUSES_FILE = Path(__file__).resolve().parent.parent / "warehouses.json"
 
 # Tag for an address that matched no configured jig. Deliberately NOT "Personal": a real warehouse the
 # user simply hasn't configured yet would then look like a personal order and be skipped by the future
@@ -33,18 +29,12 @@ def is_personal(buying_group: str) -> bool:
 
 
 def load_warehouses() -> list[Warehouse]:
-    """Load the buying-group warehouse/jig config (see warehouses.example.json).
+    """Load the buying-group warehouse/jig config from config.json's `warehouses` section.
 
-    Returns [] when warehouses.json is absent — then every non-blank address classifies as Unclassified,
+    Returns [] when the section is absent — then every non-blank address classifies as Unclassified,
     which is the safe default (nothing is silently called personal).
-
-    is_file(), not exists(): Docker creates an empty DIRECTORY at a bind-mount path whose host file is
-    missing, and reading that would raise and take the whole run down over an optional config file.
     """
-    if not WAREHOUSES_FILE.is_file():
-        return []
-    data = json.loads(WAREHOUSES_FILE.read_text(encoding="utf-8"))
-    return [Warehouse.model_validate(entry) for entry in data]
+    return [Warehouse.model_validate(entry) for entry in config_section("warehouses")]
 
 
 def classify_address(delivery_address: str, warehouses: list[Warehouse]) -> str:

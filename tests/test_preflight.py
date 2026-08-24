@@ -56,44 +56,94 @@ class TestDeterministicImports:
 
 
 class TestConfigFiles:
+    """One config file now, and preflight is what stops an un-migrated host running silently.
+
+    The failure mode it guards is specifically QUIET: without config.json the loaders return empty
+    sections rather than raising, so such a host scrapes nothing, routes nothing to a buying group,
+    and exits 0. Preflight gates the container (docker/entrypoint.sh), so it must FAIL rather than
+    let that pass.
+    """
+
+    @staticmethod
+    def _write(root, **sections):
+        (root / "config.json").write_text(json.dumps(sections), encoding="utf-8")
+
+    def test_an_unmigrated_host_fails_and_names_the_migration(self, tmp_path):
+        """The old files still present with no config.json is the recognisable shape of a host that
+        was updated but never migrated. Saying so beats "config.json is missing", which reads like a
+        fresh install and invites someone to hand-write one beside a perfectly good old config."""
+        for name in ("profiles.json", "cards.json"):
+            (tmp_path / name).write_text("[]", encoding="utf-8")
+
+        result = _by_name(preflight.check_config_files(root=tmp_path), "config.json")
+
+        assert result.level == FAIL
+        assert "not been migrated" in result.detail
+        assert "scripts.migrate_config" in result.detail
+
     def test_a_directory_is_diagnosed_as_the_docker_bind_mount_trap(self, tmp_path):
         """Docker creates an empty DIRECTORY when a bind-mounted host file is missing.
 
         Reporting this as merely 'missing' would send you looking for the wrong problem — the file
         exists on the host or it doesn't, and the fix is a compose edit either way.
         """
-        (tmp_path / "profiles.json").write_text("[]", encoding="utf-8")
-        (tmp_path / "service_account.json").write_text("{}", encoding="utf-8")
-        (tmp_path / "cards.json").mkdir()
+        (tmp_path / "config.json").mkdir()
 
-        result = _by_name(preflight.check_config_files(root=tmp_path), "cards.json")
+        result = _by_name(preflight.check_config_files(root=tmp_path), "config.json")
 
         assert result.level == FAIL
         assert "DIRECTORY" in result.detail
         assert "docker-compose" in result.detail
 
-    def test_missing_required_config_fails_but_missing_optional_only_warns(self, tmp_path):
-        (tmp_path / "service_account.json").write_text("{}", encoding="utf-8")
+    def test_an_empty_profiles_section_fails_but_an_empty_cards_section_only_warns(
+        self, tmp_path, config_file
+    ):
+        """Same severity split as before, on sections rather than files: no profiles means nothing
+        is scraped at all, while no cards only misstates profit."""
+        self._write(tmp_path, google={"service_account": {"private_key": "x"}})
+        config_file(google={"service_account": {"private_key": "x"}})
 
         results = preflight.check_config_files(root=tmp_path)
 
-        # No profiles.json = nothing is scraped at all.
-        assert _by_name(results, "profiles.json").level == FAIL
-        # No cards.json = profit is misstated, but orders are still captured.
-        assert _by_name(results, "cards.json").level == WARN
-        assert "DEFAULT_CASHBACK_RATE" in _by_name(results, "cards.json").detail
+        assert _by_name(results, "config.json `profiles`").level == FAIL
+        assert _by_name(results, "config.json `cards`").level == WARN
+        assert "DEFAULT_CASHBACK_RATE" in _by_name(results, "config.json `cards`").detail
 
     def test_malformed_json_fails_rather_than_reading_as_absent(self, tmp_path):
-        (tmp_path / "profiles.json").write_text("{not json", encoding="utf-8")
-        (tmp_path / "service_account.json").write_text("{}", encoding="utf-8")
+        """A typo in the ONE file holding every credential must not degrade to "no config"."""
+        (tmp_path / "config.json").write_text("{not json", encoding="utf-8")
 
-        result = _by_name(preflight.check_config_files(root=tmp_path), "profiles.json")
+        result = _by_name(preflight.check_config_files(root=tmp_path), "config.json")
 
         assert result.level == FAIL
         assert "not valid JSON" in result.detail
 
-    def test_service_account_path_follows_the_env_var(self, tmp_path, monkeypatch):
+    def test_legacy_files_alongside_a_config_only_warn(self, tmp_path, config_file):
+        """Migration deliberately leaves the originals, so their presence is normal — but they are
+        no longer read, and someone editing one would see no effect."""
+        self._write(tmp_path, profiles=[{"label": "p", "retailers": ["amazon"]}])
+        config_file(profiles=[{"label": "p", "retailers": ["amazon"]}])
         (tmp_path / "profiles.json").write_text("[]", encoding="utf-8")
+
+        result = _by_name(preflight.check_config_files(root=tmp_path), "legacy config")
+
+        assert result.level == WARN
+        assert "NO LONGER READ" in result.detail
+
+    def test_the_inlined_google_credential_satisfies_the_check(
+        self, tmp_path, monkeypatch, config_file
+    ):
+        monkeypatch.delenv("GOOGLE_SERVICE_ACCOUNT_FILE", raising=False)
+        self._write(tmp_path, google={"service_account": {"private_key": "x"}})
+        config_file(google={"service_account": {"private_key": "x"}})
+
+        assert _by_name(preflight.check_config_files(root=tmp_path),
+                        "google credentials").level == OK
+
+    def test_service_account_path_still_follows_the_env_var(self, tmp_path, monkeypatch, config_file):
+        """The standalone file remains supported and still overrides the inlined block."""
+        self._write(tmp_path, profiles=[{"label": "p", "retailers": ["amazon"]}])
+        config_file(profiles=[{"label": "p", "retailers": ["amazon"]}])
         key = tmp_path / "nested" / "key.json"
         key.parent.mkdir()
         key.write_text(json.dumps({"type": "service_account"}), encoding="utf-8")
@@ -112,7 +162,10 @@ class TestEnv:
         assert _by_name(results, "BROWSER_USE_API_KEY").level == FAIL
         assert _by_name(results, "GOOGLE_SHEET_ID").level == OK
 
-    def test_no_alert_channel_warns_because_nothing_could_report_a_failure(self, monkeypatch):
+    def test_no_alert_channel_warns_because_nothing_could_report_a_failure(
+        self, monkeypatch, config_file
+    ):
+        config_file()  # empty config: the channels can only come from the environment
         for name in ("GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "DISCORD_WEBHOOK_URL"):
             monkeypatch.setenv(name, "")
 
@@ -127,6 +180,20 @@ class TestEnv:
         monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/webhook")
 
         assert _by_name(preflight.check_env(), "alerts").level == OK
+
+
+def _store_token(tmp_path, monkeypatch):
+    """Put a Costco token in `.state.json` — where they live now, because they ROTATE."""
+    import json as _json
+
+    from config import loader
+
+    state = tmp_path / ".state.json"
+    monkeypatch.setattr(loader, "STATE_FILE", state)
+    state.write_text(_json.dumps({"costco": {"profile-alpha": {"refresh_token": "rt"}}}),
+                     encoding="utf-8")
+    loader.reload_config()
+    return state
 
 
 class TestCostcoTokens:
@@ -154,8 +221,7 @@ class TestCostcoTokens:
             label = "profile-alpha"
 
         monkeypatch.setattr("config.profiles.load_profiles_for_retailer", lambda key: [_Profile()])
-        (tmp_path / ".costco").mkdir()
-        (tmp_path / ".costco" / "profile-alpha.json").write_text("{}", encoding="utf-8")
+        _store_token(tmp_path, monkeypatch)
 
         # Simulate the read-only mount: the probe write is what fails, not the read.
         real_touch = preflight.Path.touch
@@ -179,8 +245,7 @@ class TestCostcoTokens:
             label = "profile-alpha"
 
         monkeypatch.setattr("config.profiles.load_profiles_for_retailer", lambda key: [_Profile()])
-        (tmp_path / ".costco").mkdir()
-        (tmp_path / ".costco" / "profile-alpha.json").write_text("{}", encoding="utf-8")
+        _store_token(tmp_path, monkeypatch)
 
         result = _by_name(preflight.check_costco_tokens(root=tmp_path),
                           "costco token [profile-alpha]")

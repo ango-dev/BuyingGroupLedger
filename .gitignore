@@ -1,3 +1,8 @@
+# The one config file you author, and the one the app writes for itself.
+config.json
+.state.json
+# Superseded by config.json (scripts/migrate_config.py folds them in). Kept ignored so an
+# un-migrated checkout still can't leak credentials.
 .env
 service_account.json
 profiles.json

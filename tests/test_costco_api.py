@@ -53,12 +53,21 @@ def _token(exp_offset=3600):
 
 
 @pytest.fixture
-def token_dir(tmp_path):
-    """A token store holding a still-valid id_token, so calls don't trigger a refresh."""
-    (tmp_path / "p1.json").write_text(
-        json.dumps({"refresh_token": "rt", "id_token": _token()}), encoding="utf-8"
+def stored_token(tmp_path, monkeypatch):
+    """A stored token with a still-valid id_token, so calls don't trigger a refresh.
+
+    Writes `.state.json` — where the tokens live now — rather than a config file: they ROTATE on
+    every refresh, which is exactly why they are state and not configuration.
+    """
+    from config import loader
+
+    state = tmp_path / ".state.json"
+    monkeypatch.setattr(loader, "STATE_FILE", state)
+    state.write_text(
+        json.dumps({"costco": {"p1": {"refresh_token": "rt", "id_token": _token()}}}),
+        encoding="utf-8",
     )
-    return tmp_path
+    return state
 
 
 @pytest.fixture
@@ -68,8 +77,8 @@ def http(monkeypatch):
     return recorder
 
 
-def test_graphql_call_goes_through_the_proxy(token_dir, http):
-    client = CostcoApiClient("p1", token_dir=token_dir, proxy=PROXY)
+def test_graphql_call_goes_through_the_proxy(stored_token, http):
+    client = CostcoApiClient("p1", proxy=PROXY)
 
     client.list_order_numbers("2026-08-01", "2026-08-13")
 
@@ -80,11 +89,15 @@ def test_graphql_call_goes_through_the_proxy(token_dir, http):
 def test_token_exchange_goes_through_the_proxy(tmp_path, monkeypatch):
     # No cached id_token -> the client must refresh, and that call must be proxied too (it's the
     # identity-minting request, so it especially must not leak the host IP).
-    (tmp_path / "p1.json").write_text(json.dumps({"refresh_token": "rt"}), encoding="utf-8")
+    from config import loader
+
+    state = tmp_path / ".state.json"
+    monkeypatch.setattr(loader, "STATE_FILE", state)
+    state.write_text(json.dumps({"costco": {"p1": {"refresh_token": "rt"}}}), encoding="utf-8")
     recorder = RecordingHttp({"id_token": _token(), "refresh_token": "rt2"})
     monkeypatch.setattr(costco_api, "curl_requests", recorder)
 
-    client = CostcoApiClient("p1", token_dir=tmp_path, proxy=PROXY)
+    client = CostcoApiClient("p1", proxy=PROXY)
     client._bearer_token()
 
     assert len(recorder.calls) == 1
@@ -92,18 +105,18 @@ def test_token_exchange_goes_through_the_proxy(tmp_path, monkeypatch):
     assert recorder.calls[0]["proxies"] == EXPECTED
 
 
-def test_no_proxy_configured_sends_none(token_dir, http):
-    client = CostcoApiClient("p1", token_dir=token_dir, proxy=None)
+def test_no_proxy_configured_sends_none(stored_token, http):
+    client = CostcoApiClient("p1", proxy=None)
 
     client.list_order_numbers("2026-08-01", "2026-08-13")
 
     assert all(c["proxies"] is None for c in http.calls)
 
 
-def test_blank_host_counts_as_no_proxy(token_dir, http):
+def test_blank_host_counts_as_no_proxy(stored_token, http):
     # Matches the browser paths' `if proxy and proxy.host` guard — a blank host must not become
     # a bogus "http://:0" URL that would break every request.
-    client = CostcoApiClient("p1", token_dir=token_dir, proxy=ProxyConfig(host="", port=0))
+    client = CostcoApiClient("p1", proxy=ProxyConfig(host="", port=0))
 
     client.list_order_numbers("2026-08-01", "2026-08-13")
 

@@ -179,14 +179,12 @@ class TestRetailerRates:
     def test_percent_and_decimal_forms_both_work_in_the_map(self):
         assert self.card.retailer_rates == {"amazon": 0.05, "bestbuy": 0.03}
 
-    def test_a_typoed_retailer_key_warns_at_load(self, tmp_path, monkeypatch, caplog):
+    def test_a_typoed_retailer_key_warns_at_load(self, config_file, caplog):
         # A typo'd override never applies, and nothing else would ever say so — the row would just
         # quietly earn the card's overall rate and understate profit.
-        path = tmp_path / "cards.json"
-        path.write_text(json.dumps([
+        config_file(cards=[
             {"last4": "4321", "name": "Freedom", "retailer_rates": {"Amazonn": "5%"}},
-        ]), encoding="utf-8")
-        monkeypatch.setattr(cards_module, "CARDS_FILE", path)
+        ])
 
         with caplog.at_level("WARNING"):
             load_cards()
@@ -280,18 +278,16 @@ class TestPromoCashback:
 
 
 class TestLoadCards:
-    def test_missing_file_is_not_an_error(self, tmp_path, monkeypatch):
-        # Same posture as warehouses.json: no config means no card names, never a crashed run.
-        monkeypatch.setattr(cards_module, "CARDS_FILE", tmp_path / "nope.json")
+    def test_a_missing_section_is_not_an_error(self, config_file):
+        # Same posture as `warehouses`: no config means no card names, never a crashed run.
+        config_file()
         assert load_cards() == []
 
-    def test_reads_the_example_shape(self, tmp_path, monkeypatch):
-        path = tmp_path / "cards.json"
-        path.write_text(json.dumps([
+    def test_reads_the_example_shape(self, config_file):
+        config_file(cards=[
             {"last4": "4321", "name": "Freedom", "cashback_rate": "1.5%"},
             {"last4": "8765", "name": "Flat"},
-        ]), encoding="utf-8")
-        monkeypatch.setattr(cards_module, "CARDS_FILE", path)
+        ])
 
         loaded = load_cards()
 
@@ -300,6 +296,11 @@ class TestLoadCards:
         assert loaded[1].cashback_rate is None
 
     def test_committed_example_file_actually_parses(self):
-        # cards.example.json is what a user copies; a typo in it would break their first run.
-        data = json.loads((cards_module.CARDS_FILE.parent / "cards.example.json").read_text("utf-8"))
+        """config.example.json is what a user copies; a typo in it would break their first run."""
+        from pathlib import Path
+
+        from config.loader import strip_comments
+
+        example = Path(__file__).resolve().parent.parent / "config.example.json"
+        data = strip_comments(json.loads(example.read_text("utf-8")))["cards"]
         assert [Card.model_validate(entry).name for entry in data]

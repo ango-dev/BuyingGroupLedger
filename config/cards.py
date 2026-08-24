@@ -1,12 +1,10 @@
-import json
 import logging
-from pathlib import Path
 
+from config.loader import config_section
 from config.settings import settings
 from models.card import Card, normalize_last4, normalize_retailer
 
 __all__ = [
-    "CARDS_FILE",
     "KNOWN_RETAILERS",
     "boosted_last4s",
     "load_cards",
@@ -17,8 +15,6 @@ __all__ = [
 
 log = logging.getLogger(__name__)
 
-CARDS_FILE = Path(__file__).resolve().parent.parent / "cards.json"
-
 # Retailer names a `retailer_rates` key may refer to, in both the display and CLI spellings. A key
 # that matches none of these is a TYPO, and a typo'd override would silently never apply — the row
 # would quietly fall back to the card's overall rate and understate profit with no error anywhere.
@@ -28,18 +24,12 @@ KNOWN_RETAILERS = ("Amazon", "Amazon Business", "Best Buy", "Costco", "amazon-bu
 
 
 def load_cards() -> list[Card]:
-    """Load the credit-card config (see cards.example.json).
+    """Load the credit-card config from config.json's `cards` section.
 
-    Returns [] when cards.json is absent — every row then gets a blank Card name and the default
+    Returns [] when the section is absent — every row then gets a blank Card name and the default
     cashback rate, which is the safe default (nothing is misattributed to the wrong card).
-
-    is_file(), not exists(): Docker creates an empty DIRECTORY at a bind-mount path whose host file is
-    missing, and reading that would raise and take the whole run down over an optional config file.
     """
-    if not CARDS_FILE.is_file():
-        return []
-    data = json.loads(CARDS_FILE.read_text(encoding="utf-8"))
-    cards = [Card.model_validate(entry) for entry in data]
+    cards = [Card.model_validate(entry) for entry in config_section("cards")]
     _warn_about_unknown_retailer_rates(cards)
     return cards
 

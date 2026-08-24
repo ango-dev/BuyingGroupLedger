@@ -71,8 +71,7 @@ def test_the_totp_field_is_gone():
     assert "totp_secret" not in RetailerAuth.model_fields
 
 
-def test_auth_round_trips_through_save_and_load(tmp_path, monkeypatch):
-    monkeypatch.setattr(profiles_mod, "PROFILES_FILE", tmp_path / "profiles.json")
+def test_auth_round_trips_through_save_and_load(config_file):
     original = [
         ProfileConfig(
             label="profile-alpha",
@@ -92,22 +91,20 @@ def test_auth_round_trips_through_save_and_load(tmp_path, monkeypatch):
 
 
 # --- amazon vs amazon-business mutual exclusion --------------------------------------------------
-def _write_profiles(tmp_path, monkeypatch, entries):
-    path = tmp_path / "profiles.json"
-    path.write_text(json.dumps(entries), encoding="utf-8")
-    monkeypatch.setattr(profiles_mod, "PROFILES_FILE", path)
+def _write_profiles(config_file, entries):
+    config_file(profiles=entries)
 
 
-def test_profile_with_both_amazon_keys_is_rejected(tmp_path, monkeypatch):
-    _write_profiles(tmp_path, monkeypatch, [
+def test_profile_with_both_amazon_keys_is_rejected(config_file):
+    _write_profiles(config_file, [
         {"label": "profile-oops", "retailers": ["amazon", "amazon-business"]},
     ])
     with pytest.raises(ValueError, match="profile-oops"):
         profiles_mod.load_profiles()
 
 
-def test_separate_amazon_and_business_profiles_load_fine(tmp_path, monkeypatch):
-    _write_profiles(tmp_path, monkeypatch, [
+def test_separate_amazon_and_business_profiles_load_fine(config_file):
+    _write_profiles(config_file, [
         {"label": "profile-bravo", "retailers": ["amazon"]},
         {"label": "profile-biz", "retailers": ["amazon-business"]},
     ])
@@ -115,9 +112,9 @@ def test_separate_amazon_and_business_profiles_load_fine(tmp_path, monkeypatch):
     assert [p.label for p in loaded] == ["profile-bravo", "profile-biz"]
 
 
-def test_amazon_alongside_other_retailers_is_fine(tmp_path, monkeypatch):
+def test_amazon_alongside_other_retailers_is_fine(config_file):
     # amazon + bestbuy on one profile is legitimate (different sites, different accounts allowed).
-    _write_profiles(tmp_path, monkeypatch, [
+    _write_profiles(config_file, [
         {"label": "profile-multi", "retailers": ["amazon", "bestbuy", "costco"]},
     ])
     loaded = profiles_mod.load_profiles()

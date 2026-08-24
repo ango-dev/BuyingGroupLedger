@@ -67,3 +67,51 @@ def _receipts_inert_by_default(monkeypatch):
     from receipts import store
 
     monkeypatch.setattr(store, "settings", dataclasses.replace(store.settings, oci_bucket=""))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config(tmp_path_factory, monkeypatch):
+    """Safety net: no test may read the developer's REAL config.json or .state.json.
+
+    Same class of bug as the two above, and the same shape of fix. config.json now holds every
+    credential and every profile, so a test calling load_profiles() or load_cards() without a fixture
+    would silently read the real one — passing on a configured machine, failing on CI, and shaping
+    assertions around whatever happens to be in the author's own setup. Worse, `save_profiles` WRITES
+    that file, so a test exercising create_profile could rewrite it.
+
+    Points both files at a per-session temp directory that does not exist, so an un-fixtured test
+    sees an empty config rather than a real one. Tests that need content use the `config_file`
+    fixture below, which writes into a per-test path.
+    """
+    from config import loader
+
+    empty = tmp_path_factory.mktemp("no-config")
+    monkeypatch.setattr(loader, "CONFIG_FILE", empty / "config.json")
+    monkeypatch.setattr(loader, "STATE_FILE", empty / ".state.json")
+    loader.reload_config()
+    yield
+    loader.reload_config()
+
+
+@pytest.fixture
+def config_file(tmp_path, monkeypatch):
+    """Write a config.json for this test and point the loader at it.
+
+    Returns a callable: `config_file(cards=[...], profiles=[...])`. Call it more than once to
+    rewrite, which is what a save/load round-trip test needs.
+    """
+    import json
+
+    from config import loader
+
+    path = tmp_path / "config.json"
+    monkeypatch.setattr(loader, "CONFIG_FILE", path)
+    monkeypatch.setattr(loader, "STATE_FILE", tmp_path / ".state.json")
+
+    def write(**sections):
+        path.write_text(json.dumps(sections, indent=2), encoding="utf-8")
+        loader.reload_config()
+        return path
+
+    write()
+    return write

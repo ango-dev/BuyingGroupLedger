@@ -125,9 +125,7 @@ def open_worksheet_readonly():
 
     from config.settings import settings
 
-    creds = Credentials.from_service_account_file(
-        settings.google_service_account_file, scopes=READONLY_SCOPES
-    )
+    creds = settings.google_credentials(READONLY_SCOPES)
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(settings.google_sheet_id)
     name = settings.google_sheet_worksheet_name

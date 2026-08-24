@@ -69,34 +69,32 @@ git clone http://<gitea-host>:3000/pi/BuyingGroupLedger.git ~/BuyingGroupLedger
 cd ~/BuyingGroupLedger
 ```
 
-From the machine that currently runs it, copy these six paths across. They hold live credentials —
+From the machine that currently runs it, copy these two files across. They hold live credentials —
 use `scp`/`rsync` over SSH, not email or a cloud drive:
 
 | Path | Contains | Required? |
 |---|---|---|
-| `.env` | every API key and password | **yes** |
-| `service_account.json` | Google service-account key | **yes** |
-| `profiles.json` | Browser-Use profile ids, proxy creds, Best Buy password | **yes** |
-| `.costco/` | Costco refresh token per profile | if you use Costco |
-| `warehouses.json` | buying-group warehouse addresses | strongly recommended |
-| `cards.json` | card names + cashback rates | strongly recommended |
+| `config.json` | everything: API keys, passwords, profiles, warehouse jigs, cards, and the inlined Google service-account key | **yes** |
+| `.state.json` | Costco's rotating refresh token | if you use Costco |
 
 ```powershell
 # from the project dir on Windows
-scp .env service_account.json profiles.json warehouses.json cards.json you@ledger-vm:~/BuyingGroupLedger/
-scp -r .costco you@ledger-vm:~/BuyingGroupLedger/
+scp config.json .state.json you@ledger-vm:~/BuyingGroupLedger/
 ```
 
-Then lock them down — `.env` and `profiles.json` contain passwords in plaintext:
+`.env` is OPTIONAL — it is only the override layer now. Copy it only if this host needs a value to
+differ from the shared config, and note `RUN_INTERVAL_HOURS` can ONLY live there: docker-compose
+reads it itself, not through Python.
+
+Then lock them down — `config.json` holds every password in plaintext:
 
 ```bash
-chmod 600 .env profiles.json service_account.json
-chmod 700 .costco && chmod 600 .costco/*.json
+chmod 600 config.json .state.json
 ```
 
-> **`warehouses.json` and `cards.json` are optional but are NOT no-ops if you skip them.** Without
-> `warehouses.json` every order tags `Unclassified`, which means **nothing is ever submitted to a
-> buying group** — the sync skips unclassified rows rather than guessing. Without `cards.json` every
+> **`config.json`'s `warehouses` and `config.json`'s `cards` are optional but are NOT no-ops if you skip them.** Without
+> `config.json`'s `warehouses` every order tags `Unclassified`, which means **nothing is ever submitted to a
+> buying group** — the sync skips unclassified rows rather than guessing. Without `config.json`'s `cards` every
 > row falls back to `DEFAULT_CASHBACK_RATE` and your profit column is wrong but plausible-looking.
 > Preflight (step 3) reports both.
 
@@ -390,7 +388,7 @@ gap is where surprises live:
 
 - **It does contain** filesystem and process blast radius. A bad command wrecks a VM you can rebuild,
   not your daily driver, and rolling back is a snapshot restore.
-- **It does not contain the credentials.** This VM holds `.env`, `profiles.json` and
+- **It does not contain the credentials.** This VM holds `.env`, `config.json`'s `profiles` and
   `service_account.json` — live keys to your Google Sheet, both buying-group accounts, and Browser-Use.
   Anything running here can spend money and write to the ledger regardless of the VM boundary.
 - **It does not contain the network.** By default the VM reaches your LAN (including the Gitea host)
@@ -445,7 +443,7 @@ things are the MOD IP allowlist (step 2) and the scheduler itself.
 | `exec format error` on start | Wrong-architecture image. Rebuild on the host — don't copy an image built on a different architecture. |
 | `exec /usr/local/bin/entrypoint.sh: no such file` | CRLF line endings. `.gitattributes` forces LF on `*.sh`, `Dockerfile` and YAML; clone rather than copying files over from Windows by hand. |
 | Every retailer runs the agent; costs jump | A deterministic-path import is broken. Run preflight — this is exactly what it's for. |
-| Buying Group column is all `Unclassified` | `warehouses.json` missing, or Docker made it an empty directory. Preflight distinguishes these. |
+| Buying Group column is all `Unclassified` | `config.json`'s `warehouses` missing, or Docker made it an empty directory. Preflight distinguishes these. |
 | MOD calls rejected with a valid token | This host's IP isn't allowlisted (step 2), or your ISP rotated it. |
 | Container `(unhealthy)` but logs look fine | No run has completed within two intervals. Check the run lock: `cat logs/.run.lock` — it self-expires after 3h. |
 | Runs skipped with "another run appears to be in progress" | A stale lock from a killed run. It clears itself after 3h, or `rm logs/.run.lock`. |

@@ -252,7 +252,7 @@ etc.) — they're never resold, so they never hit the ledger.
 **Profit accounting** (Card through Total Profit) turns the ledger into a P&L rather than just a tracker:
 
 - **Card** and **Cashback Rate** are derived automatically from `Card Last 4`, which the scrapers
-  already capture, via a `cards.json` config (see "Card / cashback config" below). Each card has an
+  already capture, via a `config.json`'s `cards` config (see "Card / cashback config" below). Each card has an
   overall rate plus optional **per-retailer overrides**, so a card earning 1.5% generally and 5% at
   Amazon reports the right rate on each row. A card that isn't configured keeps a blank name — so the
   gap stays visible — but still gets your `DEFAULT_CASHBACK_RATE` so profit stays computable. The rate
@@ -272,7 +272,7 @@ etc.) — they're never resold, so they never hit the ledger.
   $100 on the card, and a card bought at a discount shows the spread as real profit. If the gift card
   was *given* to you, there is no purchase row and its value is pure profit, which is correct.
   On **Amazon**, that purchase row is now created FOR you when the gift card was bought on a card that
-  carries an explicit Amazon rate in `cards.json` — such a card is a reselling card, so the gift card is
+  carries an explicit Amazon rate in `config.json`'s `cards` — such a card is a reselling card, so the gift card is
   funding inventory. It lands as a `delivered` row with cost and cashback and no tracking. A gift card
   bought on any other card is treated as personal and skipped, as are all other digital items; if you
   need one of those on the ledger, add it by hand.
@@ -298,7 +298,7 @@ etc.) — they're never resold, so they never hit the ledger.
 
 **Buying Group** classifies each row's `Delivery Address`: which buying group's warehouse the order
 shipped to, or `Unclassified` when the address matches no configured warehouse. It's derived at run time
-from a `warehouses.json` config (see "Warehouse / jig config" below), so it also sets up the later
+from a `config.json`'s `warehouses` config (see "Warehouse / jig config" below), so it also sets up the later
 buying-group tracking-post step. **Personal orders are dropped entirely** — an address matched to a group
 named `Personal` (your own reship/consumer addresses) never reaches the sheet. `Unclassified` is
 deliberately *not* treated as personal: a real warehouse you simply haven't configured yet is kept and
@@ -309,7 +309,7 @@ the tag untouched.
 
 ## Concepts
 
-- **Profile** = a Browser-Use cloud browser identity (`profiles.json`) with its own **static ISP
+- **Profile** = a Browser-Use cloud browser identity (`config.json`'s `profiles`) with its own **static ISP
   proxy** and the set of **retailers** it's logged into. One profile can cover several retailers.
 - **Sheet** = the source of truth. Each run reads it to decide what's new vs. what needs a re-check,
   and writes results back.
@@ -328,25 +328,36 @@ python -m venv .venv
 # Windows:  .venv\Scripts\pip install -r requirements.txt
 # Linux:    .venv/bin/pip install -r requirements.txt
 
-# 2. config
-cp .env.example .env          # then fill it in (see below)
-cp profiles.example.json profiles.json
-cp warehouses.example.json warehouses.json   # optional: buying-group address classification
-cp cards.example.json cards.json             # optional: card names + per-card cashback rates
+# 2. config — ONE file
+cp config.example.json config.json     # then fill it in (every key is commented in place)
 ```
 
-**`.env`** — fill in:
-- `BROWSER_USE_API_KEY` (cloud.browser-use.com), `BROWSER_USE_LLM` (default `gpt-5.6-luna`)
-- `GOOGLE_SERVICE_ACCOUNT_FILE` (path to the JSON key), `GOOGLE_SHEET_ID`, `GOOGLE_SHEET_WORKSHEET_NAME`
-- `GMAIL_ADDRESS` + `GMAIL_APP_PASSWORD`, `ALERT_EMAIL_TO`, `DISCORD_WEBHOOK_URL`
-- `LOOKBACK_DAYS` (default 1 = today + yesterday), `BROWSER_USE_MAX_COST_USD` (per-run cost cap)
-- `DEFAULT_CASHBACK_RATE` — the cashback rate of last resort, applied when a row's card isn't in
-  `cards.json` at all. A decimal fraction (`0.02` = 2%); `"2%"` also works. A bare `2` is rejected
-  rather than guessed at.
+**`config.json` is the whole setup**: credentials, profiles, warehouse jigs and card cashback rates,
+plus the Google service-account key inlined. It is gitignored. The example file documents every key
+next to it, so this is the only thing to read.
 
-**Google Sheet** — create a Google Cloud service account, download its JSON key to
-`service_account.json`, and **share the sheet** with the service account's `…@…iam.gserviceaccount.com`
-email as Editor. Put the sheet ID (from its URL) in `GOOGLE_SHEET_ID`.
+> **Environment variables override every value in it**, from `.env` or the shell — the name is in
+> each key's `// note`. That is the escape hatch for a one-off or a host-specific difference:
+> ```bash
+> BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking     # just this run
+> ```
+> `.env` is entirely optional now. Two variables have no config home: `RUN_INTERVAL_HOURS` (read by
+> `docker-compose.yml` itself, not by Python) and the `*_FORCE_AGENT` test hooks.
+
+**Already have the old six files?** `python -m scripts.migrate_config` (dry run, secrets masked),
+then `--apply`. It folds `.env`, `config.json`'s `profiles`, `config.json`'s `warehouses`, `config.json`'s `cards`,
+`service_account.json` and `.costco/*.json` into `config.json` + `.state.json`, and never deletes the
+originals — so it is reversible by deleting `config.json`. Delete them yourself once a run has proven
+the new file works; preflight warns while they linger, because nothing reads them any more.
+
+**Google Sheet** — create a Google Cloud service account, paste its whole JSON key into
+`google.service_account`, and **share the sheet** with that key's `…@…iam.gserviceaccount.com` email
+as Editor. Put the sheet ID (from its URL) in `google.sheet_id`. (`GOOGLE_SERVICE_ACCOUNT_FILE` still
+points at a standalone file instead, and wins when set.)
+
+**`.state.json`** is the app's own file — currently just Costco's rotating refresh token. You never
+edit it, and deleting it only costs a re-run of `scripts.costco_token`. It is separate from
+`config.json` precisely so the config you author can stay read-only in Docker.
 
 **Test alerts** before relying on them:
 ```bash
@@ -355,7 +366,7 @@ email as Editor. Put the sheet ID (from its URL) in `GOOGLE_SHEET_ID`.
 
 ### Set up a profile (log in through its proxy)
 
-Fill a profile's `proxy` in `profiles.json` (leave `profile_id` blank), then:
+Fill a profile's `proxy` in `config.json`'s `profiles` list (leave `profile_id` blank), then:
 
 ```bash
 .venv/bin/python -m scripts.create_profile --label profile-1
@@ -364,7 +375,7 @@ Fill a profile's `proxy` in `profiles.json` (leave `profile_id` blank), then:
 ```
 
 It opens a live browser URL — log into the retailer(s) there, press Enter, and it saves the
-`profile_id` back into `profiles.json`. Re-run it any time to log back in if a session expires.
+`profile_id` back into `config.json`. Re-run it any time to log back in if a session expires.
 
 **Auto-auth for Best Buy (username + password).** Best Buy web sessions die in ~20–25 min, which
 would break hands-off scheduling, so give the profile an `auth` block and both Best Buy paths log
@@ -500,7 +511,7 @@ token** grabbed once from a logged-in browser session (it's long-lived; redo onl
    (There's also a best-effort `--grab` that reads the token from a logged-in profile over CDP, but
    Costco encrypts its stored token, so the manual `--token` copy above is the reliable path.)
 
-The token is written to `.costco/<label>.json` (gitignored — treat it like a password). This path
+The token is written to `.state.json` (gitignored — treat it like a password). This path
 also needs the extra deps in `requirements.txt` (`curl_cffi`, `PyJWT`); re-run the pip install if you
 set the project up before Costco was added. If the token is missing/expired or the API changes shape,
 Costco alerts and falls back to the Browser-Use agent for that run.
@@ -510,7 +521,7 @@ logs to `logs/run.log`. A lock (`logs/.run.lock`, auto-expires after 3h) prevent
 
 ### Warehouse / jig config (the "Buying Group" column)
 
-To classify each order by which buying group's warehouse it shipped to, create a **`warehouses.json`**
+To classify each order by which buying group's warehouse it shipped to, fill the **`warehouses`** section of `config.json`
 at the repo root (gitignored — it holds real addresses). Copy `warehouses.example.json` and edit it:
 
 ```json
@@ -537,14 +548,14 @@ file order) wins and its `buying_group` is written to the row.
 - An address matching **no** jig is tagged **`Unclassified`** (kept, not dropped), and the run logs how
   many — a real warehouse you forgot to add stands out instead of silently vanishing. A jig with no match
   fields is rejected (it would match everything).
-- No `warehouses.json` at all = every non-blank address is `Unclassified` (nothing is guessed).
+- No `warehouses` section at all = every non-blank address is `Unclassified` (nothing is guessed).
 - Editing the file re-tags **open** orders on the next run (they get re-read); already-delivered rows
   keep their tag. Classification is offline and free — no live run is needed to change it.
 
 ### Card / cashback config (the "Card" and "Cashback Rate" columns)
 
 Every scraper already captures the last 4 digits of the card an order was charged to. Create a
-**`cards.json`** at the repo root (gitignored — it names your cards) to turn those digits into a card
+**`config.json`'s `cards`** at the repo root (gitignored — it names your cards) to turn those digits into a card
 name and a cashback rate. Copy `cards.example.json`:
 
 ```json
@@ -576,11 +587,11 @@ Details:
 - `last4` is matched **normalized**, so it doesn't matter that Amazon says "ending in 4321", Best Buy
   sends `************4321`, and Costco sends `xxxx4321`.
 - Two *different* cards can genuinely share a last 4 across accounts. Add an optional **`profile`** (a
-  `profiles.json` label) to scope an entry; the scoped entry wins over the catch-all, and genuinely
+  `config.json`'s `profiles` label) to scope an entry; the scoped entry wins over the catch-all, and genuinely
   ambiguous duplicates log a warning rather than one being silently picked. (There's no `retailer`
   scope — one physical card is used at many retailers, and what varies per retailer is the *rate*.)
 - A card that's charged but **not configured** gets a blank Card name (so the gap is visible, and a
-  name you type by hand survives) and the default rate. No `cards.json` at all = every row gets the
+  name you type by hand survives) and the default rate. No `config.json`'s `cards` at all = every row gets the
   default rate and no name.
 - Like the warehouse config, this is offline and free — editing it re-derives the columns for **open**
   orders on the next run. Delivered rows are terminal and keep what they were tagged with.
@@ -615,7 +626,7 @@ light up (the formula stays blank until Payout Amount is filled).
 deliberately misspelled address variants — `THIRTEEN SAMMPLE DR1VE` — so each order routes
 distinctly, and that is what the retailer prints and the ledger records. Filing it would put a
 fictional street on the policy, which is the kind of detail a claim is refused over. So each jig in
-`warehouses.json` points at the real address it delivers to:
+each jig in `config.json` points at the real address it delivers to:
 
 ```json
 {
@@ -882,20 +893,19 @@ Playwright is only a CDP *client*). The container **self-schedules** via supercr
 is needed. Best for Linux servers, cloud, or running several isolated instances; for a single desktop
 the venv + Task Scheduler path is simpler.
 
-Prereqs on the host: `.env`, `service_account.json`, and `profiles.json` present in the project dir
-(they're mounted/injected at runtime and are excluded from the image via `.dockerignore` — secrets are
-never baked in). If you use Costco, also have `.costco/<label>.json` present, so the container can use
+Prereqs on the host: `config.json` present in the project dir (mounted at runtime and excluded
+from the image via `.dockerignore` — secrets are never baked in). If you use Costco, also have `.state.json` present, so the container can use
 the GraphQL API path; without it, Costco falls back to the agent every run. (Not using Costco? Drop the
-`./.costco` volume line from `docker-compose.yml`.)
+`./.state.json` volume line from `docker-compose.yml`.)
 
-> ⚠️ **The `.costco` mount must stay writable — do not add `:ro` to it.** It looks like it should be
+> ⚠️ **The `.state.json` mount must stay writable — do not add `:ro` to it.** It looks like it should be
 > read-only, since it holds nothing but secrets, but Costco **rotates its refresh token** on every
 > refresh and the client saves the new one back. Mounted read-only that write raises
 > `OSError: Read-only file system`, Costco silently falls back to the paid agent on every run, and the
 > rotated token is discarded — which can strand the stored one and force a manual re-grab. Preflight
 > now probes the directory for writability rather than only checking the file exists.
 
-`warehouses.json` and `cards.json` are mounted the same way. Both are optional, **but a bind mount
+`config.json`'s `warehouses` and `config.json`'s `cards` are mounted the same way. Both are optional, **but a bind mount
 whose host file is missing makes Docker create an empty directory in its place** — so either create the
 file (even as `[]`) or delete that volume line. Without them the run still works: every address tags
 `Unclassified` and every card falls back to `DEFAULT_CASHBACK_RATE`.
@@ -912,7 +922,7 @@ silently keep the previous schedule. **3h is the practical floor**: every run sp
 MaxOutDeals' 10 daily received-items calls, so running more often makes payout write-back start
 failing (see "Choosing an interval" in [DEPLOY.md](DEPLOY.md)). Set
 `RUN_ON_START: "true"` to also run once at container start, and `TZ` to align the schedule to local
-time. To run **multiple instances**, copy the compose service with a different `profiles.json`/`.env`
+time. To run **multiple instances**, copy the compose service with a different `config.json`'s `profiles`/`.env`
 mounted per instance (e.g. one per proxy pool).
 
 The image builds for the host's own architecture (amd64 and arm64 both work — see
@@ -944,8 +954,8 @@ fills a small disk months later.
 
 Everything except the local environment is cloud-side (profiles, sheet, proxies), so migration is just:
 copy the project **except** `.venv/`, `__pycache__/`, `data/`, `logs/`; be sure to bring the gitignored
-`.env`, `service_account.json`, `profiles.json`, `.costco/` (if you use Costco), and (if you use them)
-`warehouses.json` / `cards.json` — all of those except the last two hold live credentials, so move them
+`config.json` and `.state.json` (if you use Costco)
+`config.json`'s `warehouses` / `config.json`'s `cards` — all of those except the last two hold live credentials, so move them
 securely; then recreate the venv (`python -m venv .venv && …/pip install -r requirements.txt`) and
 re-install the scheduler on the new host. No re-login or re-sharing needed.
 
@@ -1038,9 +1048,10 @@ trimmed JOB 2 example so re-checks don't re-fill identity fields.
 ```
 main.py                 orchestration + run lock
 config/settings.py      .env-backed settings
-config/profiles.py      profiles.json loader + Sheet order-state reader
-config/warehouses.py    warehouses.json loader + address -> buying-group classifier
-config/cards.py         cards.json loader + card last-4 -> card name/cashback-rate resolver
+config/loader.py        config.json + .state.json access (one file each way)
+config/profiles.py      profiles section loader + Sheet order-state reader
+config/warehouses.py    warehouses section + address -> buying-group/jig classifier
+config/cards.py         cards section + card last-4 -> card name/cashback-rate resolver
 models/                 OrderItem + ProfileConfig + Warehouse/Jig + Card schemas
 scrapers/base.py        scrape(): CDP re-check + agent scan + merge/cleanup
 scrapers/amazon.py      Amazon prompt + tracking-page selectors/reader

@@ -43,7 +43,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from scrapers.costco_api import DEFAULT_WAREHOUSES, TOKEN_DIR
+from config.loader import STATE_FILE
+from scrapers.costco_api import DEFAULT_WAREHOUSES, load_costco_auth, save_costco_auth
 
 # The CDP grab talks to Browser-Use, which reads BROWSER_USE_API_KEY from the environment; this
 # script doesn't import config.settings, so load .env ourselves.
@@ -263,25 +264,14 @@ def _grab_refresh_token(label: str) -> str | None:
     return None
 
 
-def _token_path(label: str) -> Path:
-    return Path(TOKEN_DIR) / f"{label}.json"
-
-
 def _load(label: str) -> dict:
-    path = _token_path(label)
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    return load_costco_auth(label)
 
 
 def _save(label: str, data: dict) -> Path:
-    path = _token_path(label)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    return path
+    """Persist this profile's tokens into `.state.json` and return the file, for the printed hint."""
+    save_costco_auth(label, data)
+    return STATE_FILE
 
 
 def _mask(token: str) -> str:
@@ -309,7 +299,7 @@ def main() -> None:
     data = _load(args.label)
 
     if args.show:
-        print(f"Costco token store for '{args.label}': {_token_path(args.label)}")
+        print(f"Costco token store for '{args.label}': {STATE_FILE}")
         print(f"  refresh_token: {_mask(data.get('refresh_token', ''))}")
         print(f"  id_token cached: {'yes' if data.get('id_token') else 'no'}")
         print(f"  warehouse_numbers: {data.get('warehouse_numbers') or DEFAULT_WAREHOUSES}")
