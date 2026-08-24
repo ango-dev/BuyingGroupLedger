@@ -20,6 +20,7 @@ from buying_groups.base import (
     TrackingSubmission,
     normalize_group,
 )
+from buying_groups import bfmr as bfmr_mod
 from buying_groups.bfmr import BFMRClient, _reductions_first, _tracker_object
 from buying_groups.maxoutdeals import (
     MaxOutDealsClient,
@@ -245,7 +246,7 @@ class TestBfmrSubmission:
         bfmr.submit_tracking([submission(order_id="O1")])
         assert transport.bodies()[-1]["tracker_data"][0]["purchase_id"] == "LIVE"
 
-    def test_a_rejected_object_is_attributed_to_its_own_row(self, bfmr, transport):
+    def test_a_rejected_object_is_attributed_to_its_own_row(self, bfmr, transport, monkeypatch):
         transport.responses = [
             FakeResponse(payload={"my_tracker": [
                 {"reserve_id": "R1", "purchase_id": "P1", "order_no": "O1", "qty": 5},
@@ -254,13 +255,18 @@ class TestBfmrSubmission:
                 "invalid_items": [{"tracking_number": "BAD", "error": "nope"}]
             }}),
             tracker({"tracking_number": "GOOD", "shipment_id": "S9"}),
+            FakeResponse(payload={"reservations_response": {}}),          # retry as BADB
+            tracker({"tracking_number": "GOOD", "shipment_id": "S9"}),    # still no BADB
         ]
+        # One suffix attempt, so the retry's POST + confirm are the two responses appended above.
+        monkeypatch.setattr(bfmr_mod, "MAX_SUFFIX_ATTEMPTS", 1)
         result = bfmr.submit_tracking([
             submission(order_id="O1", tracking_number="GOOD"),
             submission(order_id="O1", tracking_number="BAD"),
         ])
-        assert result.submitted == ["GOOD"]
-        assert result.failed[0][0] == "BAD"
+        assert result.submitted == ["GOOD"], "the good row is unaffected by its neighbour"
+        # BAD is refused, retried as BADB, and still absent -> a human, attributed to its own row.
+        assert [n for n, _ in result.needs_manual] == ["BAD"]
 
 
 class TestBfmrSplitOrdering:
@@ -290,16 +296,24 @@ class TestBfmrSplitOrdering:
 
     def test_batches_respect_the_documented_500_object_ceiling(self, bfmr, transport):
         rows = [submission(tracking_number=f"T{i}", row_number=i + 2) for i in range(501)]
-        landed = tracker(*[{"tracking_number": f"T{i}", "shipment_id": f"S{i}"} for i in range(501)])
+        # A SEPARATE response per confirm read: each is consumed once, so sharing one object left the
+        # second batch's re-read empty and the last number looked silently dropped.
+        def landed():
+            return tracker(*[{"tracking_number": f"T{i}", "shipment_id": f"S{i}",
+                              "order_no": "111-2222222-3333333"} for i in range(501)])
+        # 501 rows is MORE than one page, so each confirm read costs two responses: the full page and
+        # the empty one that ends the walk. Without the terminator the paginator swallows the next
+        # queued response and every later step reads the wrong one.
         transport.responses = [FakeResponse(payload={"my_tracker": [
             {"reserve_id": "R1", "purchase_id": "P1",
              "order_no": "111-2222222-3333333", "qty": 9}
-        ]})] + [FakeResponse(payload={"reservations_response": {}}), landed,
-                FakeResponse(payload={"reservations_response": {}}), landed]
+        ]})] + [FakeResponse(payload={"reservations_response": {}}), landed(), tracker(),
+                FakeResponse(payload={"reservations_response": {}}), landed(), tracker()]
 
         bfmr.submit_tracking(rows)
         posted = transport.bodies()
-        assert [len(b["tracker_data"]) for b in posted] == [500, 1]
+        assert [len(b["tracker_data"]) for b in posted] == [500, 1], (
+            "two batches and NO suffix retries — every number confirmed as landed")
 
 
 def tracker(*rows):
@@ -912,28 +926,29 @@ class TestSilentlyDroppedSubmission:
         assert result.failed == [], "not a transient failure — no retry of ours can clear it"
         assert "NO spelling" in result.needs_manual[0][1]
 
-    def test_the_alert_leads_with_the_check_that_costs_nothing(self, bfmr, transport):
-        """Since BFMR automated the suffixing (2026-08-13), landing under no spelling at all is
-        AMBIGUOUS: either their Best Buy check is still running, or the submission was dropped. Those
-        want opposite responses, so the message must put the free check first and only then describe
-        the manual repair — the old text prescribed three steps BFMR now performs itself."""
+    def test_the_alert_only_asks_for_a_human_once_our_own_retries_are_spent(self, bfmr, transport,
+                                                                            monkeypatch):
+        """BFMR appended the duplicate letter itself between 2026-08-13 and 2026-08-23; it no longer
+        does, so the old message — "look in My Tracker, this RESOLVES ITSELF" — would now be advice to
+        wait for something that is never coming. Reaching a human means our suffixed sends were spent
+        too, so the message says what we tried and hands over the repair."""
+        monkeypatch.setattr(bfmr_mod, "MAX_SUFFIX_ATTEMPTS", 1)
         transport.responses = [
             tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
             FakeResponse(payload={"reservations_response": {}}),
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
+            FakeResponse(payload={"reservations_response": {}}),   # retry as ...B
             tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
         ]
         result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
         message = result.needs_manual[0][1]
 
-        assert "LOOK IN MY TRACKER FIRST" in message
-        assert "RESOLVES ITSELF" in message
-        assert "IF IT IS STILL ABSENT ON THE NEXT RUN" in message
+        assert "1 suffixed spelling(s)" in message, "say what we already tried, so it isn't repeated"
+        assert "NEITHER SUBMITTED NOR INSURED" in message, "state the exposure plainly"
         assert "support.bfmr.com/hc/en-us/articles/50968170907547" in message
         assert "NOTHING TO EDIT ON THE SHEET" in message
-        # The instructions BFMR took over. Telling someone to do these by hand is now busy-work that
-        # also contradicts what their dashboard is already doing.
-        assert "FILE THE INSURANCE BY HAND" not in message
-        assert "ADD THE TRACKING BY HAND to the purchase" not in message
+        # The promise that BFMR finishes the job is exactly what stopped being true.
+        assert "RESOLVES ITSELF" not in message
 
     def test_a_manual_fix_is_picked_up_on_the_next_run(self, bfmr, transport):
         """THE ROUND TRIP. Once the package exists in My Tracker under any letter, the next run must
@@ -958,18 +973,47 @@ class TestSilentlyDroppedSubmission:
         assert payout.tracking_number == "529900000009", "reported under the LEDGER's spelling"
         assert payout.payout_amount == 1584.0 and payout.status == "paid"
 
-    def test_the_hint_does_not_auto_append_letters(self, bfmr, transport):
-        """The suffix is BFMR's to assign, not ours to guess. Since 2026-08-13 they append it
-        server-side after their own Best Buy check, so a bot that sent letters until something stuck
-        would be racing that check and could claim a spelling for the wrong order."""
+    def test_a_refused_number_is_retried_with_a_letter_starting_at_B(self, bfmr, transport):
+        """The combined-carton case, and the reason this whole mechanism exists: Best Buy issues ONE
+        tracking number for the several orders it packs together, BFMR's tracker demands unique
+        numbers, and since 2026-08-23 BFMR no longer appends the letter itself. So we do — starting at
+        B, because the bare number is the original (their article says add "B", "C" or "D").
+
+        The ledger keeps the BARE number: the retailer will go on reporting it, and every later join
+        runs through bfmr_spellings, so writing the suffix back would only fork the row.
+        """
         transport.responses = [
             tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
-            FakeResponse(payload={"reservations_response": {}}),
+            FakeResponse(payload={"reservations_response": {}}),                 # bare: dropped
             tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 4}),
+            FakeResponse(payload={"reservations_response": {}}),                 # retry as ...B
+            tracker({"tracking_number": "529900000009B", "shipment_id": "S1"}),  # landed as B
         ]
-        bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
-        posted = [b["tracker_data"][0]["tracking_number"] for b in transport.bodies()]
-        assert posted == ["529900000009"], "only the number as the retailer printed it"
+        result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
+
+        assert result.submitted == ["529900000009"], "recorded under the LEDGER's bare spelling"
+        assert result.needs_manual == [], "no chore for a human — we resolved it"
+        sent = [b["tracker_data"][0]["tracking_number"] for b in transport.bodies()]
+        assert sent == ["529900000009", "529900000009B"], "bare first, then B — never A"
+
+    def test_a_spelling_already_in_the_tracker_is_skipped_without_a_request(self, bfmr, transport):
+        """What keeps a real carton to ONE attempt. By the time the third order in a box is sent, B is
+        visibly taken, so C is tried first rather than burning a request rediscovering that."""
+        # Attributed to OTHER orders in the same carton — that is what makes them "taken" without
+        # making them this order's shipment.
+        taken = [{"tracking_number": "529900000009", "shipment_id": "S0", "order_no": "O0"},
+                 {"tracking_number": "529900000009B", "shipment_id": "S1", "order_no": "O1"}]
+        transport.responses = [
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O2", "qty": 4}, *taken),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker(*taken),                                                      # bare still absent
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker(*taken, {"tracking_number": "529900000009C", "shipment_id": "S2",
+                             "order_no": "O2"}),
+        ]
+        bfmr.submit_tracking([submission(order_id="O2", tracking_number="529900000009")])
+        sent = [b["tracker_data"][0]["tracking_number"] for b in transport.bodies()]
+        assert sent == ["529900000009", "529900000009C"], "B was taken, so C was tried directly"
 
 
 class TestBfmrSuffixesDuplicatesItself:

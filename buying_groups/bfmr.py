@@ -61,6 +61,12 @@ log = logging.getLogger(__name__)
 #: POST /api/v2/my-tracker documents "Max 500 objects per request".
 MAX_TRACKER_OBJECTS = 500
 
+#: How many suffixed re-sends to spend on ONE refused number. Candidates already visible in My Tracker
+#: are skipped for free, so a real multi-order carton normally lands on the first attempt; this cap
+#: exists for the other case — a number BFMR refuses for a reason a letter cannot fix — so it costs a
+#: few requests rather than a march through the alphabet.
+MAX_SUFFIX_ATTEMPTS = 5
+
 #: BFMR's own `status` -> the ledger's Status vocabulary. Observed live: cancelled, paid, processed,
 #: returned, shipped.
 #:
@@ -91,12 +97,11 @@ _TERMINAL_BFMR_STATUSES = {"paid", "returned", "cancelled"}
 #: to "resubmit the tracking number and add a letter ("B", "C", or "D") to the very end of the number
 #: until the system accepts it".
 #:
-#: **AS OF 2026-08-13 BFMR DOES THE SUFFIXING ITSELF.** Submitting a number another earner already
-#: used now triggers a Best Buy check, BFMR appends the letter, emails a follow-up on receipt, and
-#: the suffixed number can be insured. So the suffix is no longer ours to CHOOSE — only ours to
-#: RECOGNISE, which is what everything below does. That makes this set more load-bearing than before,
-#: not less: it is now the ONLY thing standing between us and treating BFMR's own success as a
-#: failure, since every spelling that reaches us is one BFMR invented rather than one we sent.
+#: **BFMR briefly did the suffixing itself (2026-08-13); AS OF 2026-08-23 IT DOES NOT.** So the
+#: suffix is ours to CHOOSE again — `_resubmit_with_suffix` picks the letter and re-sends — as well as
+#: ours to RECOGNISE. Recognition stays exactly as load-bearing as before: a spelling can still reach
+#: us that we did not send (BFMR may hold one from the period when it suffixed, or from a manual fix),
+#: and every join below has to survive it.
 #:
 #: The consequence for us is a JOIN failure, and a silent one. The retailer — and therefore the
 #: ledger — only ever knows the bare number; BFMR stores the suffixed one. Compared literally, the
@@ -364,12 +369,17 @@ class BFMRClient(HttpClient):
         # So success is confirmed by RE-READING the tracker and checking the number is actually
         # there. That is shape-independent, which matters for an undocumented response, and it costs
         # one GET per batch.
-        landed = {_tracking_of(entry) for entry in self.fetch_tracker()}
+        # Confirm PER ORDER, not per tracking number. In a combined carton several orders share one
+        # base number, so "is this number in the tracker?" would see the FIRST order's shipment and
+        # report the second as landed when nothing was recorded for it — the exact silent loss the
+        # re-read exists to catch. `_find_shipment` is keyed on (order, spelling) and tolerates the
+        # suffix. `taken` stays number-only on purpose: it answers "is this LETTER free anywhere?".
+        entries = self.fetch_tracker()
+        landed = _landed_pairs(entries)
+        taken = {_tracking_of(entry) for entry in entries}
         for obj in batch:
             number = obj["tracking_number"]
-            if number in invalid_numbers:
-                result.failed.append((number, f"BFMR rejected it: {invalid}"))
-            elif any(spelling in landed for spelling in bfmr_spellings(number)):
+            if _confirmed(landed, obj.get("order_no", ""), number):
                 # ANY SPELLING COUNTS, not just the one we sent. BFMR now appends the duplicate
                 # letter ITSELF (their 2026-08-13 change): submitting a number another earner already
                 # used triggers a Best Buy check, and the shipment is recorded as "…B". Testing the
@@ -381,17 +391,60 @@ class BFMRClient(HttpClient):
                 # that is the key the checkbox and every later join use.
                 result.submitted.append(number)
             else:
-                # Landed under NO spelling at all. Since BFMR handles the suffixing itself, this is
-                # no longer the routine combined-carton case — it is either their Best Buy check
-                # still running, or a genuine silent drop. Reported as needing a human rather than as
-                # a failure, because no retry of ours distinguishes the two.
+                # Refused outright (invalid_items) or accepted-then-silently-dropped. Both are the
+                # Best Buy duplicate-carton case, and since 2026-08-23 BFMR no longer resolves it, so
+                # we append the letter ourselves rather than handing the user a manual chore.
                 #
-                # ALERTED IMMEDIATELY, not once the package is delivered. Their check being
-                # asynchronous means this can occasionally clear itself on the next run — but MOST
-                # BUYING GROUPS ONLY INSURE A PACKAGE WHOSE TRACKING NUMBER ARRIVED BEFORE DELIVERY,
-                #so waiting for certainty would forfeit exactly the cover this
-                # is meant to protect. A false alarm costs one glance at My Tracker.
-                result.needs_manual.append((number, _duplicate_tracking_hint(number)))
+                # `invalid` is passed through only so an exhausted retry can quote BFMR's own words
+                # instead of guessing at why the number was refused.
+                self._resubmit_with_suffix(
+                    obj, result, taken, rejected=number in invalid_numbers, invalid=invalid,
+                )
+
+    def _resubmit_with_suffix(self, obj: dict, result: SubmissionResult, taken: set[str],
+                              *, rejected: bool = False, invalid=None) -> None:
+        """Re-send one refused tracking number with a letter appended, until BFMR takes it.
+
+        Best Buy issues the SAME tracking number for several orders when it combines them into one
+        carton, and BFMR's tracker enforces uniqueness, so every order after the first is refused.
+        Their fix is to "add a letter to the very end of the number until the system accepts it".
+
+        STARTS AT B, because the bare number is the original — matching their article's "B", "C", "D".
+        Candidates already present in My Tracker are skipped WITHOUT spending a request, which is what
+        keeps a real carton to one attempt: by the time the third order in it is sent, B is visibly
+        taken, so C is tried first.
+
+        Success is confirmed by RE-READING the tracker, for the same reason the first attempt is: BFMR
+        has been seen to accept a request and record nothing. The ledger keeps the BARE number — every
+        later join runs through `bfmr_spellings`, and the sheet only ever knows what the retailer
+        issued.
+        """
+        bare = obj["tracking_number"]
+        attempts = 0
+        for letter in BFMR_DUPLICATE_SUFFIXES[1:]:   # skip "A": the bare number IS the original
+            candidate = bare + letter
+            if candidate in taken:
+                continue
+            if attempts >= MAX_SUFFIX_ATTEMPTS:
+                break
+            attempts += 1
+            response = self.request(
+                "POST", "/api/v2/my-tracker", mutating=True,
+                json_body={"tracker_data": [{**obj, "tracking_number": candidate}]},
+            )
+            if response is None:  # dry run — nothing was sent, so nothing can be confirmed
+                result.skipped.append((bare, f"dry run (refused; would retry as {candidate})"))
+                return
+            entries = self.fetch_tracker()
+            taken |= {_tracking_of(entry) for entry in entries}
+            if _confirmed(_landed_pairs(entries), obj.get("order_no", ""), candidate):
+                log.info("BFMR: %s was refused (Best Buy duplicate carton); accepted as %s.",
+                         bare, candidate)
+                result.submitted.append(bare)
+                return
+        result.needs_manual.append(
+            (bare, _duplicate_tracking_hint(bare, attempts, rejected=rejected, invalid=invalid))
+        )
 
     # --- payouts and insurance --------------------------------------------------------------
 
@@ -872,43 +925,61 @@ def _is_insurance_fee_row(entry: dict) -> bool:
     )
 
 
-def _duplicate_tracking_hint(tracking_number: str) -> str:
-    """The message for a submission BFMR accepted the request for but recorded under NO spelling.
+def _duplicate_tracking_hint(tracking_number: str, attempts: int = 0, *,
+                             rejected: bool = False, invalid=None) -> str:
+    """The message for a number BFMR would not take even with letters appended.
 
-    This used to be the routine Best Buy combined-carton case, and it told the user to append letters
-    by hand, file insurance by hand, and raise a support ticket. **BFMR AUTOMATED ALL THREE on
-    2026-08-13**: a tracking number another earner already used now triggers a Best Buy check, BFMR
-    appends the letter itself, emails a follow-up on receipt, and the suffixed number can be insured.
-    `_post_tracker_batch` recognises any of those spellings as landed, so a carton no longer reaches
-    this function at all.
-
-    What's left is the residue, and it is genuinely ambiguous: either their Best Buy check hasn't
-    finished, or the submission was silently dropped (which BFMR has done before — the reason the
-    tracker is re-read at all). Those two want opposite responses, and nothing in the API tells them
-    apart, so the message leads with the cheap check and stops short of prescribing a fix.
+    Best Buy reuses one tracking number across the orders it combines into a carton; BFMR's tracker
+    demands unique numbers, and their fix is to append a letter until it is accepted. BFMR automated
+    that on 2026-08-13 and stopped again on 2026-08-23, so `_resubmit_with_suffix` does it. Reaching
+    HERE means even the suffixed sends were refused or vanished, which a letter cannot fix — so the
+    message stops guessing and hands over the two facts a human needs: what we sent, and what BFMR
+    said about it.
     """
+    tried = (f"tried the bare number and then {attempts} suffixed spelling(s) "
+             f"(e.g. {tracking_number}B)" if attempts else "tried the bare number")
+    why = (f"BFMR rejected it outright: {invalid}\n" if rejected and invalid else
+           "BFMR accepted the request but recorded nothing under any spelling.\n")
     return (
-        f"{tracking_number}: BFMR accepted the request, but the number is in My Tracker under "
-        f"NO spelling — neither as sent nor with any letter appended.\n"
+        f"{tracking_number}: could not be handed to BFMR. We {tried}, and the number is in My "
+        f"Tracker under NO spelling.\n"
         f"\n"
-        f"LOOK IN MY TRACKER FIRST. Since 2026-08-13 BFMR handles duplicate tracking numbers "
-        f"itself: it runs a Best Buy check, appends a letter (e.g. {tracking_number}B), and emails "
-        f"you once the package is received. If that check is still running, the shipment simply "
-        f"isn't visible yet and THIS RESOLVES ITSELF — the next run will find it under whichever "
-        f"letter BFMR chose, tick Tracking Submitted, and file the insurance.\n"
+        f"{why}"
         f"\n"
-        f"IF IT IS STILL ABSENT ON THE NEXT RUN, the submission was dropped rather than delayed, "
-        f"and this package is neither submitted nor insured. Add the tracking to the purchase by "
-        f"hand in My Tracker (the purchase already carries the order number you submitted when you "
-        f"ordered, which is what lets the next run match it back), and raise a support ticket with "
-        f"the tracking number and proof of purchase if BFMR won't take it.\n"
+        f"THIS PACKAGE IS NEITHER SUBMITTED NOR INSURED, so it needs a hand. Add the tracking to the "
+        f"purchase by hand in My Tracker (the purchase already carries the order number you submitted "
+        f"when you ordered, which is what lets the next run match it back), appending a letter "
+        f"yourself if BFMR says the number is already in use. Raise a support ticket with the "
+        f"tracking number and proof of purchase if it still won't take it.\n"
         f"\n"
         f"Background: https://support.bfmr.com/hc/en-us/articles/50968170907547\n"
         f"\n"
-        f"NOTHING TO EDIT ON THE SHEET either way. The next run reads My Tracker, matches whichever "
-        f"letter ends up there back to {tracking_number}, and fills the payout, premium and status "
-        f"as they arrive."
+        f"NOTHING TO EDIT ON THE SHEET. The next run reads My Tracker, matches whichever letter ends "
+        f"up there back to {tracking_number}, and fills the payout, premium and status as they arrive."
     )
+
+
+def _landed_pairs(tracker: list[dict]) -> set[tuple[str, str]]:
+    """`(order, tracking spelling)` for everything currently in My Tracker."""
+    return {(_order_id_of(entry), _tracking_of(entry)) for entry in tracker if _tracking_of(entry)}
+
+
+def _confirmed(landed: set[tuple[str, str]], order_id: str, tracking_number: str) -> bool:
+    """Did THIS order's shipment actually land, under any spelling?
+
+    Scoped to the order deliberately. In a Best Buy combined carton several orders share one base
+    number, so asking only "is this number in the tracker?" would see the FIRST order's shipment and
+    report the second as submitted when nothing was recorded for it — precisely the silent loss the
+    post-submit re-read exists to catch, and the reason a carton would never reach the suffix retry.
+
+    An entry carrying NO order at all still counts as a match: it cannot be attributed to anyone, and
+    inventing an attribution would be worse than the pre-2026-08-23 behaviour it preserves. BFMR's
+    real tracker rows always carry an order number, so this is a tolerance, not a path we rely on.
+    """
+    for spelling in bfmr_spellings(tracking_number):
+        if (order_id, spelling) in landed or ("", spelling) in landed:
+            return True
+    return False
 
 
 def _find_shipment(index: dict, order_id: str, tracking_number: str) -> dict | None:
