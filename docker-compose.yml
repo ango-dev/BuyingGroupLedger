@@ -9,22 +9,23 @@ services:
     image: buying-group-ledger
     container_name: buying-group-ledger
     restart: unless-stopped
-    # OPTIONAL. Everything lives in config.json now; .env is only the OVERRIDE layer, for values you
-    # want to differ on this host without editing the config it shares. Delete these two lines if you
-    # have no overrides — but note RUN_INTERVAL_HOURS below is read by compose itself, not by Python,
-    # so that one can only come from the environment.
+    # OPTIONAL. Everything lives in config.json now, including the container knobs below — .env is
+    # purely the OVERRIDE layer, for values that should differ on THIS host without editing the
+    # config it shares. Delete these two lines if you have no overrides.
     env_file:
       - .env
     environment:
-      # Set RUN_INTERVAL_HOURS in .env to change the schedule without editing this file; 3 (= 8
-      # runs/day) is the default if it isn't set. Each run spends one of MaxOutDeals' 10 daily
-      # received-items calls, so preflight WARNS in the log when the interval implies more than
-      # that. See "Choosing an interval" in DEPLOY.md.
-      RUN_INTERVAL_HOURS: "${RUN_INTERVAL_HOURS:-3}"
-      RUN_ON_START: "false"       # set "true" to also run once when the container starts
-      PREFLIGHT_STRICT: "false"   # "true" = refuse to start when preflight fails, instead of
-                                  # alerting and running degraded (see docker/entrypoint.sh)
-      TZ: "America/New_York"      # the cron schedule follows this; UTC if unset
+      # PASSED THROUGH ONLY — no defaults here. These four live in config.json under `container`
+      # (run_interval_hours, run_on_start, preflight_strict, timezone), and docker/entrypoint.sh
+      # resolves them from there on start. Compose interpolates this file before any Python runs, so
+      # a default written here would ALWAYS win and the config file could never take effect.
+      #
+      # Left in place so an override still works — export one in .env or `docker run -e` and it beats
+      # the config file, exactly like every other setting.
+      RUN_INTERVAL_HOURS: "${RUN_INTERVAL_HOURS:-}"
+      RUN_ON_START: "${RUN_ON_START:-}"
+      PREFLIGHT_STRICT: "${PREFLIGHT_STRICT:-}"
+      TZ: "${TZ:-}"
     volumes:
       # THE config file: profiles, warehouses, cards, credentials and the inlined Google service
       # account. Read-only, because nothing in a scheduled run has any business rewriting what you

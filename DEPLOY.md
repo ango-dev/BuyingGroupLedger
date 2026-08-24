@@ -82,9 +82,9 @@ use `scp`/`rsync` over SSH, not email or a cloud drive:
 scp config.json .state.json you@ledger-vm:~/BuyingGroupLedger/
 ```
 
-`.env` is OPTIONAL — it is only the override layer now. Copy it only if this host needs a value to
-differ from the shared config, and note `RUN_INTERVAL_HOURS` can ONLY live there: docker-compose
-reads it itself, not through Python.
+`.env` is OPTIONAL — it is purely the override layer now, and NOTHING is environment-only. Copy it
+only if this host needs a value to differ from the shared config (a different `RUN_INTERVAL_HOURS`,
+say, or a scratch `GOOGLE_SHEET_ID` on a staging box). Anything set there wins over `config.json`.
 
 Then lock them down — `config.json` holds every password in plaintext:
 
@@ -152,24 +152,32 @@ docker compose logs -f
 The image builds for the host's own architecture and smoke-tests the supercronic binary during the
 build, so a wrong-architecture download fails the build loudly instead of crash-looping at 03:00.
 
-Settings live in `docker-compose.yml`:
+Container settings live in **`config.json`** under `container`, like everything else:
 
-| Variable | Default | Notes |
-|---|---|---|
-| `RUN_INTERVAL_HOURS` | `3` | 8×/day. Rejected and reset to 6 if not 1–23. See below before lowering. |
-| `RUN_ON_START` | `false` | `true` = also run once at container start. Useful for the first cutover. |
-| `TZ` | `America/New_York` | The cron schedule follows this. |
-| `PREFLIGHT_STRICT` | `false` | `true` = refuse to start when preflight fails. |
+| `container.*` key | Env override | Default | Notes |
+|---|---|---|---|
+| `run_interval_hours` | `RUN_INTERVAL_HOURS` | `6` | Rejected and reset to 6 if not 1–23. See below before lowering. |
+| `run_on_start` | `RUN_ON_START` | `false` | `true` = also run once at container start. Useful for the first cutover. |
+| `timezone` | `TZ` | `UTC` | The cron schedule follows this. |
+| `preflight_strict` | `PREFLIGHT_STRICT` | `false` | `true` = refuse to start when preflight fails. |
 
-Change the interval by editing `docker-compose.yml` and recreating the container:
+`docker-compose.yml` interpolates its own variables *before* any Python runs, so it cannot read
+`config.json` itself — `docker/entrypoint.sh` resolves these four on start via
+`python -m scripts.container_settings` and sources the result. An exported variable still wins, so
+compose passes them through with no defaults of its own.
+
+Change the interval by editing `config.json` and recreating the container:
 
 ```bash
-docker compose up -d          # re-reads the compose file; `docker compose restart` does NOT
+docker compose restart        # the entrypoint re-reads the mounted config.json on start
 docker compose logs | grep "scheduled every"
 ```
 
-`docker compose restart` reuses the container's existing environment, so it will silently keep the
-old schedule — always use `up -d`.
+`restart` is enough now: `config.json` is a bind mount and the entrypoint resolves the schedule from
+it every time the container starts. (It did NOT used to be — the interval came from the compose
+file's `environment:` block, which `restart` reuses, so a changed schedule was silently ignored until
+`up -d`. Use `up -d` if you edited `docker-compose.yml` itself, or if you set `RUN_INTERVAL_HOURS`
+as an environment override, since that is still baked in at create time.)
 
 ### Choosing an interval
 

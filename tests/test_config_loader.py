@@ -112,6 +112,88 @@ class TestEveryVariableHasAHome:
         assert migrator_table is ENV_TO_CONFIG
 
 
+class TestNothingIsEnvironmentOnly:
+    """Every setting has a config home; `.env` is purely the override layer.
+
+    The container knobs were the hard case: docker-compose interpolates its own file before any
+    Python runs, so `RUN_INTERVAL_HOURS` could never reach config.json without something resolving it
+    on the container's behalf. docker/entrypoint.sh now sources scripts/container_settings.py.
+    """
+
+    @pytest.mark.parametrize("name", [
+        "RUN_INTERVAL_HOURS", "RUN_ON_START", "PREFLIGHT_STRICT", "TZ",
+        "AMAZON_FORCE_AGENT", "AMAZON_BUSINESS_FORCE_AGENT",
+        "BESTBUY_FORCE_AGENT", "COSTCO_FORCE_AGENT",
+    ])
+    def test_the_formerly_env_only_settings_have_a_config_home(self, name):
+        assert name in ENV_TO_CONFIG
+
+    def test_the_container_resolver_emits_exported_shell_assignments(self, monkeypatch):
+        """`export`, not a bare assignment: TZ has to reach supercronic and every scrape it spawns.
+
+        Injects the settings rather than reloading the module. Reloading re-runs `load_dotenv()`,
+        which puts the developer's own .env back into the environment mid-test — correct behaviour
+        (the environment wins) but it makes the assertion depend on whose machine is running it.
+        Booleans are rendered as the `true`/`false` the entrypoint's `[ "$X" = "true" ]` compares.
+        """
+        from types import SimpleNamespace
+
+        import scripts.container_settings as cs
+
+        monkeypatch.setattr(cs, "settings", SimpleNamespace(
+            container_run_interval_hours=4,
+            container_run_on_start=True,
+            container_preflight_strict=False,
+            container_timezone="America/New_York",
+        ))
+
+        assert cs.render().splitlines() == [
+            "export RUN_INTERVAL_HOURS='4'",
+            "export RUN_ON_START='true'",
+            "export PREFLIGHT_STRICT='false'",
+            "export TZ='America/New_York'",
+        ]
+
+    def test_the_container_knobs_resolve_from_the_config_file(self, config_file, monkeypatch):
+        """The point of the whole exercise: with the environment silent, the config file decides."""
+        for name in ("RUN_INTERVAL_HOURS", "TZ"):
+            monkeypatch.delenv(name, raising=False)
+        config_file(container={"run_interval_hours": 4, "timezone": "America/New_York"})
+
+        assert _get_int("RUN_INTERVAL_HOURS", 6) == 4
+        assert _get_str("TZ", "UTC") == "America/New_York"
+
+    def test_a_value_with_a_quote_cannot_break_the_sourcing_shell(self):
+        """A timezone — or any future string value — must not be able to end the quoting early and
+        turn the rest of the value into shell commands, since the entrypoint SOURCES this."""
+        import subprocess
+        import sys
+
+        from scripts.container_settings import _quote
+
+        # Assert the property rather than the escaping: round-trip it through a real shell.
+        quoted = _quote("it's a 'value'; echo pwned")
+        out = subprocess.run(
+            ["sh", "-c", f"printf %s {quoted}"], capture_output=True, text=True, check=True,
+        ) if sys.platform != "win32" else None
+        if out is not None:
+            assert out.stdout == "it's a 'value'; echo pwned"
+        else:  # no POSIX sh on Windows; assert the escaping directly
+            assert quoted == "'it'" + chr(92) + "''s a '" + chr(92) + "''value'" + chr(92) + \
+                   "''; echo pwned'"
+
+    def test_force_agent_fails_closed_on_a_falsy_string(self, config_file, monkeypatch):
+        """A behaviour FIX. The old `if os.getenv("COSTCO_FORCE_AGENT")` treated ANY non-empty value
+        as true, so `COSTCO_FORCE_AGENT=0` forced the PAID agent — the opposite of what it reads as.
+        """
+        config_file()
+        monkeypatch.setenv("COSTCO_FORCE_AGENT", "0")
+        assert _get_bool("COSTCO_FORCE_AGENT", False) is False
+
+        monkeypatch.setenv("COSTCO_FORCE_AGENT", "1")
+        assert _get_bool("COSTCO_FORCE_AGENT", False) is True
+
+
 class TestCommentsSurvive:
     """JSON has no comments, so the config file uses `"// note"` keys."""
 

@@ -58,6 +58,19 @@ def _export_sdk_env() -> None:
 #: silently rename one the first time a path moved.
 ENV_TO_CONFIG = {
     "BROWSER_USE_API_KEY": "browser_use.api_key",
+    # Container/scheduling knobs. Read by docker/entrypoint.sh, which resolves them through
+    # scripts/container_settings.py rather than reading the environment itself — otherwise
+    # docker-compose would interpolate them before Python ever runs and the config file could not
+    # reach them.
+    "RUN_INTERVAL_HOURS": "container.run_interval_hours",
+    "RUN_ON_START": "container.run_on_start",
+    "PREFLIGHT_STRICT": "container.preflight_strict",
+    "TZ": "container.timezone",
+    # Dev/ops hooks: force a retailer down its PAID agent fallback to exercise that path.
+    "AMAZON_FORCE_AGENT": "dev.force_agent.amazon",
+    "AMAZON_BUSINESS_FORCE_AGENT": "dev.force_agent.amazon_business",
+    "BESTBUY_FORCE_AGENT": "dev.force_agent.bestbuy",
+    "COSTCO_FORCE_AGENT": "dev.force_agent.costco",
     "BROWSER_USE_LLM": "browser_use.llm",
     "BROWSER_USE_MAX_COST_USD": "browser_use.max_cost_usd",
     "LOOKBACK_DAYS": "scraping.lookback_days",
@@ -286,6 +299,29 @@ class Settings:
     # receipt carries your name, delivery address, card last 4 and order totals.
     oci_par_url_prefix: str = field(
         default=_get_str("OCI_PAR_URL_PREFIX"), repr=False)
+
+    # --- dev / ops hooks -------------------------------------------------------------------------
+    # Force a retailer down its AGENT fallback instead of its deterministic path, to exercise the
+    # expensive branch on purpose. Normally set for one command — `COSTCO_FORCE_AGENT=1 python
+    # main.py costco` — which is why .env remains the natural home for them even though config.json
+    # can hold them too.
+    #
+    # These now go through _get_bool, so only the affirmative spellings count. That is a behaviour
+    # FIX: the old `if os.getenv("COSTCO_FORCE_AGENT")` treated ANY non-empty value as true, so
+    # `COSTCO_FORCE_AGENT=0` forced the paid agent — the exact opposite of what it reads as.
+    amazon_force_agent: bool = _get_bool("AMAZON_FORCE_AGENT", False)
+    amazon_business_force_agent: bool = _get_bool("AMAZON_BUSINESS_FORCE_AGENT", False)
+    bestbuy_force_agent: bool = _get_bool("BESTBUY_FORCE_AGENT", False)
+    costco_force_agent: bool = _get_bool("COSTCO_FORCE_AGENT", False)
+
+    # --- container scheduling (read by docker/entrypoint.sh) --------------------------------------
+    # How many hours between scheduled runs. Each run spends one of MaxOutDeals' 10 daily
+    # received-items calls, so preflight warns when the interval implies more than that.
+    container_run_interval_hours: int = _get_int("RUN_INTERVAL_HOURS", 6)
+    container_run_on_start: bool = _get_bool("RUN_ON_START", False)
+    # Refuse to start when preflight fails, instead of alerting and running degraded.
+    container_preflight_strict: bool = _get_bool("PREFLIGHT_STRICT", False)
+    container_timezone: str = _get_str("TZ", "UTC")
 
     def google_credentials(self, scopes):
         """Google service-account credentials, from the config file or a standalone JSON file.

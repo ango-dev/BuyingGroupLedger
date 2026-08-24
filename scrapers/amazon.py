@@ -1,7 +1,7 @@
 import logging
-import os
 
 from alerts.notifier import alert
+from config.settings import settings
 from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
 
 log = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class AmazonScraper(BaseRetailerScraper):
         from scrapers.amazon_api import AmazonApiClient
 
         # Test/ops hook: force the agent-fallback path (e.g. to validate it) without breaking anything.
-        if os.getenv("AMAZON_FORCE_AGENT"):
+        if settings.amazon_force_agent:
             raise RuntimeError("AMAZON_FORCE_AGENT is set — forcing the agent fallback.")
 
         state = self._load_order_state()

@@ -1,8 +1,8 @@
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 
 from alerts.notifier import alert
+from config.settings import settings
 from scrapers.base import (
     ApiLoginError,
     BaseRetailerScraper,
@@ -204,7 +204,7 @@ class CostcoScraper(BaseRetailerScraper):
         from scrapers.costco_api import CostcoApiClient  # lazy: keeps curl_cffi/jwt optional
 
         # Test/ops hook: force the agent-fallback path (e.g. to validate it) without breaking the token.
-        if os.getenv("COSTCO_FORCE_AGENT"):
+        if settings.costco_force_agent:
             raise RuntimeError("COSTCO_FORCE_AGENT is set — forcing the agent fallback.")
 
         state = self._load_order_state()

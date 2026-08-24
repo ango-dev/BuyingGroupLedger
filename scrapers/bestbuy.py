@@ -1,7 +1,7 @@
 import logging
-import os
 
 from alerts.notifier import alert
+from config.settings import settings
 from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
 
 log = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ class BestBuyScraper(BaseRetailerScraper):
         from scrapers.bestbuy_mapping import build_order_items
 
         # Test/ops hook: force the agent-fallback path (e.g. to validate it) without breaking anything.
-        if os.getenv("BESTBUY_FORCE_AGENT"):
+        if settings.bestbuy_force_agent:
             raise RuntimeError("BESTBUY_FORCE_AGENT is set — forcing the agent fallback.")
 
         state = self._load_order_state()

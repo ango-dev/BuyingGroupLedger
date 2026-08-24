@@ -337,12 +337,24 @@ plus the Google service-account key inlined. It is gitignored. The example file 
 next to it, so this is the only thing to read.
 
 > **Environment variables override every value in it**, from `.env` or the shell — the name is in
-> each key's `// note`. That is the escape hatch for a one-off or a host-specific difference:
+> each key's `// note`. **Nothing is environment-only**, so `.env` is entirely optional; it exists
+> purely as the override layer, which is where dev and host-specific values belong:
+>
 > ```bash
+> COSTCO_FORCE_AGENT=1 python main.py costco               # exercise the paid agent fallback, once
 > BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking     # just this run
+> LOOKBACK_DAYS=14 python main.py amazon                   # re-scan a wider window
 > ```
-> `.env` is entirely optional now. Two variables have no config home: `RUN_INTERVAL_HOURS` (read by
-> `docker-compose.yml` itself, not by Python) and the `*_FORCE_AGENT` test hooks.
+>
+> Put something in the `.env` FILE when it should differ on *this machine* — a dev box pointed at a
+> scratch `GOOGLE_SHEET_ID`, or a host that runs on its own `RUN_INTERVAL_HOURS`. A blank value
+> (`FOO=`) does **not** override; it falls through to `config.json`, so commenting a line out works
+> the way you would expect.
+>
+> Even the container's own knobs come from the config file. `docker-compose.yml` interpolates its
+> variables before any Python runs, so `docker/entrypoint.sh` resolves `container.*`
+> (`run_interval_hours`, `run_on_start`, `preflight_strict`, `timezone`) through
+> `scripts/container_settings.py` on start — and still lets an exported variable win.
 
 **Already have the old six files?** `python -m scripts.migrate_config` (dry run, secrets masked),
 then `--apply`. It folds `.env`, `config.json`'s `profiles`, `config.json`'s `warehouses`, `config.json`'s `cards`,

@@ -12,6 +12,25 @@ mkdir -p /app/logs /app/data
 # deploy until the first scheduled run — and a warning that is usually false gets ignored.
 date -u +%FT%TZ > /app/logs/.started
 
+# --- settings ---------------------------------------------------------------------------------
+# Resolve the container's own knobs from config.json BEFORE anything uses them.
+#
+# docker-compose interpolates ${RUN_INTERVAL_HOURS:-3} when it PARSES the compose file, long before
+# any Python runs — so without this, these four would be the one corner of the setup that config.json
+# could not reach, and the schedule would have to be configured somewhere else from everything else.
+#
+# Anything already exported (by compose, or `docker run -e`) still wins: scripts/container_settings.py
+# resolves through config.settings, which puts the environment ahead of the file. So this fills in
+# what the environment did NOT say, it never overrides a deliberate one.
+if python -m scripts.container_settings > /tmp/container.env 2>/tmp/container.err; then
+    . /tmp/container.env
+else
+    # A broken/absent config must not stop the container here — preflight below reports it properly,
+    # with the diagnosis and the fix. Falling back to the shell defaults keeps that ordering.
+    echo "[entrypoint] could not read container settings from config.json; using defaults." >&2
+    sed 's/^/[entrypoint]   /' /tmp/container.err >&2 || true
+fi
+
 # --- preflight ------------------------------------------------------------------------------
 # Runs on EVERY container start, because the failures it catches are the silent ones: a missing
 # dependency degrades three retailers to the paid agent, and a bind mount whose host file is absent
@@ -31,7 +50,7 @@ if ! (cd /app && python -m scripts.preflight --alert); then
 fi
 
 # --- schedule -------------------------------------------------------------------------------
-HOURS="${RUN_INTERVAL_HOURS:-6}"
+HOURS="${RUN_INTERVAL_HOURS:-6}"   # set above from config.json unless the environment said otherwise
 if ! [[ "$HOURS" =~ ^[0-9]+$ ]] || [ "$HOURS" -lt 1 ] || [ "$HOURS" -gt 23 ]; then
     echo "[entrypoint] RUN_INTERVAL_HOURS='$HOURS' is not an integer in 1..23; falling back to 6." >&2
     HOURS=6
