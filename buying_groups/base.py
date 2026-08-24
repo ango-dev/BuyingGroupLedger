@@ -112,6 +112,12 @@ class TrackingSubmission:
     #: reuses a tracking number across the orders it combines into a carton. Deliberately required
     #: rather than defaulted: a silently-blank retailer would just switch that handling off.
     retailer: str
+    #: The address as the RETAILER printed it — a jig, i.e. one of the deliberately misspelled
+    #: variants a buying group hands out so each order routes distinctly. Never filed as a postal
+    #: address; `config.warehouses.insurance_address_for` maps it back to the real warehouse.
+    #: Required, not defaulted, for the same reason `retailer` is: a silently-blank one would just
+    #: switch the mapping off and insure every package against the profile address instead.
+    delivery_address: str
 
     def describe(self) -> str:
         """A short human label for logs and alerts — never sent to an API."""
@@ -243,6 +249,7 @@ class HttpClient:
         params: dict | None = None,
         json_body: dict | list | None = None,
         data: dict | None = None,
+        files: dict | None = None,
     ) -> Any:
         """Issue one request, retrying only on 429.
 
@@ -269,6 +276,12 @@ class HttpClient:
                     params=params,
                     json=json_body,
                     data=data,
+                    # Multipart when a caller asks for it. BFMR's insurance/file is documented (and
+                    # demonstrated) with `curl --form`, and its nested `address[city]` keys are the
+                    # part we cannot afford to get wrong on a path that spends money and cannot be
+                    # exercised in advance — so the documented encoding is matched exactly rather
+                    # than assumed equivalent to urlencoded.
+                    files=files,
                     timeout=self.timeout_seconds,
                 )
             except requests.RequestException as exc:

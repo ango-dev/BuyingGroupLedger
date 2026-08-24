@@ -611,6 +611,32 @@ light up (the formula stays blank until Payout Amount is filled).
 >
 > MaxOutDeals needs none of this — it keys on the tracking number alone, so posting is fully automatic.
 
+**Insurance is filed against the REAL warehouse, not the jig.** A buying group hands out
+deliberately misspelled address variants — `THIRTEEN SAMMPLE DR1VE` — so each order routes
+distinctly, and that is what the retailer prints and the ledger records. Filing it would put a
+fictional street on the policy, which is the kind of detail a claim is refused over. So each jig in
+`warehouses.json` points at the real address it delivers to:
+
+```json
+{
+  "buying_group": "BFMR",
+  "insurance_addresses": {
+    "sample": { "address_1": "13 Sample Drive", "city": "Testville",
+                   "state": "NH", "country": "USA", "zip": "03050-0000" }
+  },
+  "jigs": [
+    { "label": "BFMR-3", "street": "THIRTEEN SAMMPLE DR1VE", "zip": "03050",
+      "insure_as": "sample" }
+  ]
+}
+```
+
+`state` is the ISO 3166-2 code **without** the country prefix (`NH`, not `US-NH`) and `country` is
+ISO 3166-1 **alpha-3** (`USA`, not `US`) — both are validated when the config loads, because both
+mistakes look right and only fail at filing time. A jig with no `insure_as` sends no address at all
+and BFMR falls back to your profile; a jig pointing at a key that doesn't exist is refused at load.
+Name and package value are left alone — BFMR fills those from your account and the shipment items.
+
 Two groups are supported today, and they work nothing alike:
 
 | | **BFMR** | **MaxOutDeals** |

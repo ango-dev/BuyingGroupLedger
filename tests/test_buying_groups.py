@@ -42,6 +42,8 @@ def submission(**kw) -> TrackingSubmission:
         # Amazon by default, matching the default order id — so a test only gets the Best Buy
         # duplicate-carton handling when it deliberately asks for it.
         retailer="Amazon",
+        # No jig by default, so insurance tests file with no address unless one is asked for.
+        delivery_address="",
     )
     return TrackingSubmission(**{**defaults, **kw})
 
@@ -56,6 +58,18 @@ class FakeResponse:
         if self._payload is None:
             raise ValueError("not json")
         return self._payload
+
+
+def filed_form(transport) -> list[dict]:
+    """The insurance/file form fields of each POST, unwrapped from requests' multipart shape.
+
+    `files={"k": (None, "v")}` is how a multipart body carries plain form fields, so a test that read
+    `data` would silently see None and pass against a request that sends nothing.
+    """
+    return [
+        {key: value for key, (_filename, value) in call["files"].items()}
+        for call in transport.calls if call.get("files")
+    ]
 
 
 class Transport:
@@ -426,8 +440,7 @@ class TestBfmrInsurance:
             insured(("TBA1", 6.0, 1299)),
         ]
         bfmr.file_insurance([submission(total_cost=1299.0)])
-        posted = [c for c in transport.calls if c["method"] == "POST"]
-        assert posted[0]["data"] == {"tracking_number": "TBA1"}
+        assert filed_form(transport) == [{"tracking_number": "TBA1"}], "no package_value, no address"
 
     def test_the_value_threshold_excludes_cheap_shipments(self, bfmr, transport, monkeypatch):
         monkeypatch.setattr(bfmr, "min_insurance_value", 500.0)
@@ -502,6 +515,121 @@ class TestInsuredPresenceIsNotValue:
         result = bfmr.file_insurance([submission(tracking_number="TBA1")])
         assert result.skipped[0][1] == "already insured"
         assert "POST" not in [c["method"] for c in transport.calls]
+
+
+class TestInsuranceFilesTheRealAddress:
+    """A jig must never reach the insurer as a postal address.
+
+    BFMR hands out deliberately misspelled variants — the live config has "THIRTEEN Sample Drive",
+    "THIRTEEN SAMMPLE DRIVE" and "THIRTEEN SAMMPLE DR1VE", all of them the same real building —
+    so each order routes distinctly. The ledger records what the retailer printed, which is the jig.
+    Filing that would put a fictional street on the policy, and an address that does not exist is
+    exactly the detail a claim is refused over.
+    """
+
+    JIG = "BuyForMeRetail B999999, THIRTEEN SAMMPLE DR1VE, B999999, Testville, NH 03050-0000"
+
+    @staticmethod
+    def _warehouses(insure_as="sample"):
+        from models.warehouse import Warehouse
+        return [Warehouse.model_validate({
+            "buying_group": "BFMR",
+            "insurance_addresses": {"sample": {
+                "address_1": "13 Sample Drive", "city": "Testville",
+                "state": "NH", "country": "USA", "zip": "03050-0000"}},
+            "jigs": [{"label": "BFMR-3", "street": "THIRTEEN SAMMPLE DR1VE",
+                      "zip": "03050", "insure_as": insure_as}],
+        })]
+
+    def _file(self, bfmr, transport, monkeypatch, warehouses, address):
+        monkeypatch.setattr(bfmr, "_warehouse_cache", warehouses)
+        transport.responses = [
+            tracker({"tracking_number": "TBA1"}), insured(),
+            FakeResponse(payload={"message": "Shipment insurance filed successfully"}),
+            insured(("TBA1", 6.0, 1299)),
+        ]
+        return bfmr.file_insurance([submission(delivery_address=address)])
+
+    def test_the_real_warehouse_address_is_sent_not_the_jig(self, bfmr, transport, monkeypatch):
+        self._file(bfmr, transport, monkeypatch, self._warehouses(), self.JIG)
+        form = filed_form(transport)[0]
+
+        assert form["address[address_1]"] == "13 Sample Drive"
+        assert form["address[city]"] == "Testville"
+        assert form["address[state]"] == "NH", "ISO 3166-2 without the US- prefix"
+        assert form["address[country]"] == "USA", "ISO 3166-1 alpha-3, not US"
+        assert form["address[zip]"] == "03050-0000"
+        # The whole point: no spelling of the jig reaches the insurer.
+        assert not any("SAMMPLE" in v or "DR1VE" in v for v in form.values())
+
+    def test_blank_fields_are_omitted_so_the_profile_fills_them(self, bfmr, transport, monkeypatch):
+        """Sending "" is a VALUE and would overwrite good profile data with nothing; omitting a
+        field is what makes BFMR fall back to the profile."""
+        self._file(bfmr, transport, monkeypatch, self._warehouses(), self.JIG)
+        assert "address[address_2]" not in filed_form(transport)[0]
+
+    def test_an_unmapped_jig_sends_no_address_at_all(self, bfmr, transport, monkeypatch):
+        """Falling back to the profile address is the safe answer. A profile address may be the
+        wrong warehouse; a misspelled one is wrong everywhere."""
+        self._file(bfmr, transport, monkeypatch, self._warehouses(insure_as=""), self.JIG)
+        form = filed_form(transport)[0]
+        assert list(form) == ["tracking_number"]
+
+    def test_an_address_matching_no_jig_sends_no_address(self, bfmr, transport, monkeypatch):
+        self._file(bfmr, transport, monkeypatch, self._warehouses(), "742 Evergreen Terrace")
+        assert list(filed_form(transport)[0]) == ["tracking_number"]
+
+    def test_package_value_is_still_never_sent(self, bfmr, transport, monkeypatch):
+        """Adding the address must not smuggle a declared value in beside it — BFMR derives that
+        from the shipment items, and over-declaring buys a bigger premium than the box warrants."""
+        self._file(bfmr, transport, monkeypatch, self._warehouses(), self.JIG)
+        assert "package_value" not in filed_form(transport)[0]
+
+
+class TestInsuranceAddressConfig:
+    """Config-time validation, because the alternative is discovering it on a money path.
+
+    Every one of these mistakes looks right and returns a 400 that names the field — after the run
+    has already decided to insure the package, and while the package stays uninsured.
+    """
+
+    @staticmethod
+    def _warehouse(**address):
+        from models.warehouse import Warehouse
+        return Warehouse.model_validate({
+            "buying_group": "BFMR",
+            "insurance_addresses": {"w": {"address_1": "13 Sample Drive", **address}},
+            "jigs": [{"label": "j", "zip": "03050", "insure_as": "w"}],
+        })
+
+    @pytest.mark.parametrize("state", ["US-NH", "New Hampshire"])
+    def test_a_state_that_is_not_the_bare_iso_code_is_rejected(self, state):
+        with pytest.raises(ValueError, match="ISO 3166-2"):
+            self._warehouse(state=state)
+
+    def test_an_alpha_2_country_is_rejected(self):
+        """"US" is the Alpha-2 code and reads perfectly natural; BFMR wants Alpha-3."""
+        with pytest.raises(ValueError, match="alpha-3"):
+            self._warehouse(country="US")
+
+    def test_a_malformed_zip_is_rejected(self):
+        with pytest.raises(ValueError, match="digits and hyphens"):
+            self._warehouse(zip="03050 0000")
+
+    @pytest.mark.parametrize("zip_code", ["03050", "03050-0000"])
+    def test_both_documented_zip_forms_are_accepted(self, zip_code):
+        assert self._warehouse(zip=zip_code).insurance_addresses["w"].zip == zip_code
+
+    def test_a_jig_pointing_at_a_missing_address_is_rejected_at_load(self):
+        """Silently it would just send no address and insure against the profile — every package
+        from that jig filed to the wrong warehouse until someone made a claim."""
+        from models.warehouse import Warehouse
+        with pytest.raises(ValueError, match="names no entry in insurance_addresses"):
+            Warehouse.model_validate({
+                "buying_group": "BFMR",
+                "insurance_addresses": {"sample": {"address_1": "13 Sample Drive"}},
+                "jigs": [{"label": "j", "zip": "03050", "insure_as": "typo"}],
+            })
 
 
 class TestBfmrReads:
@@ -806,8 +934,7 @@ class TestBestBuyDuplicateTrackingSuffix:
             insured((self.BFMR, 7.4, 1599.96)),               # ...and it landed
         ]
         result = bfmr.file_insurance([submission(tracking_number=self.LEDGER)])
-        posted = [c for c in transport.calls if c["method"] == "POST"]
-        assert posted[0]["data"] == {"tracking_number": self.BFMR}
+        assert filed_form(transport)[0]["tracking_number"] == self.BFMR
         assert result.submitted == [self.LEDGER], "reported under the ledger's spelling"
 
     def test_a_package_bfmr_has_never_seen_is_filed_under_our_own_number(self, bfmr, transport):
@@ -816,8 +943,7 @@ class TestBestBuyDuplicateTrackingSuffix:
             insured(("BRAND-NEW", 2.0, 100)),
         ]
         bfmr.file_insurance([submission(tracking_number="BRAND-NEW")])
-        posted = [c for c in transport.calls if c["method"] == "POST"]
-        assert posted[0]["data"] == {"tracking_number": "BRAND-NEW"}
+        assert filed_form(transport)[0]["tracking_number"] == "BRAND-NEW"
 
     def test_a_void_also_targets_bfmrs_spelling(self, bfmr, transport):
         transport.responses = [
@@ -1142,7 +1268,7 @@ class TestBfmrSuffixesDuplicatesItself:
             insured(("529900000009B", 7.4, 1599.96)),
         ]
         assert bfmr.file_insurance([row]).submitted == ["529900000009"]
-        filed = [c["data"]["tracking_number"] for c in transport.calls if c.get("data")]
+        filed = [form["tracking_number"] for form in filed_form(transport)]
         assert filed == ["529900000009B"], "filed against the spelling BFMR holds, not the bare one"
 
 
