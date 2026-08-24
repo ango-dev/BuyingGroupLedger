@@ -471,3 +471,52 @@ def test_gift_card_netting_sees_the_corrected_basis():
 
     assert len(rows) == 1
     assert rows[0].total_cost == 60.0, "100 - 40, not the 80 an inflated 200 basis would give"
+
+
+# --- digital lines must never reach the ledger ----------------------------------------------------
+# An Amazon Gift Card Balance Reload reached the sheet on 2026-08-24 and booked $40.35 of cost against
+# an order that can never ship. Its status card reads "Applied Gift Card balance is added to your
+# account." — captured live — which none of the original markers matched.
+DIG = "114-9990031-9990031"
+
+
+def test_a_gift_card_reload_is_skipped_on_its_status_text():
+    html = _details(DIG, "August 23, 2026", [
+        _shipment(DIG, 0, "Applied Gift Card balance is added to your account.",
+                  [_item("Amazon Gift Card Balance Reload", "$40.35", qty=1)], track=False),
+    ])
+    assert build_order_items(html) == []
+
+
+def test_a_digital_item_is_skipped_even_when_the_status_is_unremarkable():
+    """Second net: the item name alone is enough when the status card is worded some new way."""
+    html = _details(DIG, "August 23, 2026", [
+        _shipment(DIG, 0, "Delivered August 23",
+                  [_item("Amazon Gift Card Balance Reload", "$40.35", qty=1)]),
+    ])
+    assert build_order_items(html) == []
+
+
+def test_a_PHYSICAL_gift_card_is_still_recorded():
+    """The false positive that would cost real money: a gift card in a greeting card SHIPS, has real
+    tracking, and is a reimbursable line. A bare "gift card" marker would silently drop it."""
+    html = _details(DIG, "August 23, 2026", [
+        _shipment(DIG, 0, "Delivered August 25",
+                  [_item("Amazon.com Gift Card in a Greeting Card", "$50.00", qty=1)]),
+    ])
+    rows = build_order_items(html, tracking_by_shipment={"1": "TBA1"})
+
+    assert len(rows) == 1
+    assert rows[0].item_name == "Amazon.com Gift Card in a Greeting Card"
+
+
+def test_a_digital_line_does_not_consume_a_shipment_number_from_a_physical_one():
+    """A mixed order still numbers the physical shipment 1 — the digital card is dropped whole."""
+    html = _details(DIG, "August 23, 2026", [
+        _shipment(DIG, 0, "Applied Gift Card balance is added to your account.",
+                  [_item("Amazon Gift Card Balance Reload", "$40.35", qty=1)], track=False),
+        _shipment(DIG, 1, "Delivered August 25", [_item("Widget", "$20.00", qty=1)], shipment_id="S2"),
+    ])
+    rows = build_order_items(html, tracking_by_shipment={"2": "TBA2"})
+
+    assert [r.item_name for r in rows] == ["Widget"]

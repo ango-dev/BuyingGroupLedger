@@ -65,9 +65,20 @@ _MONTHS = {
 _WEEKDAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4,
              "saturday": 5, "sunday": 6}
 
-# Digital line markers (best-effort — no digital fixture captured yet; the agent fallback also skips
-# digital). A shipment whose status/text is clearly a digital delivery has no physical package.
-_DIGITAL_MARKERS = ("digital delivery", "ready to redeem", "redeem your", "gift card claim")
+# Digital line markers, matched against a SHIPMENT'S STATUS TEXT. A shipment whose status says it was
+# delivered electronically has no physical package, so it is never a reimbursable order line.
+# "balance is added to your account" is what Amazon prints for a Gift Card Balance Reload — captured
+# live as "Applied Gift Card balance is added to your account." after one reached the sheet
+# and booked $40.35 of cost against an order that can never ship.
+_DIGITAL_MARKERS = ("digital delivery", "ready to redeem", "redeem your", "gift card claim",
+                    "balance is added to your account")
+
+# Matched against an ITEM NAME, as a second net for the case where the status card is worded in a way
+# we have not seen. Kept DELIBERATELY NARROW — these are literal product names that cannot describe a
+# shippable good. Do NOT add a bare "gift card": a physical gift card arrives in a box, has real
+# tracking, and dropping it would silently lose a reimbursable line, which is the worse failure
+# (CLAUDE.md: a missed order is missed reimbursement money).
+_DIGITAL_ITEM_MARKERS = ("gift card balance reload", "egift card", "e-gift card")
 
 
 # --- small pure helpers -------------------------------------------------------------------------
@@ -278,6 +289,10 @@ def parse_shipment_targets(order_details_html: str) -> list[dict]:
     return _shipment_targets(region)
 
 
+def _is_digital_item(item_name: str) -> bool:
+    """Second net for a digital line whose SHIPMENT status we don't recognise — see the marker list."""
+    low = (item_name or "").lower()
+    return any(marker in low for marker in _DIGITAL_ITEM_MARKERS)
 def _is_digital_shipment(status_text: str) -> bool:
     low = status_text.lower()
     return any(marker in low for marker in _DIGITAL_MARKERS)
@@ -506,6 +521,8 @@ def build_order_items(
             container = _item_container(title_el)
             item_name = title_el.get_text(" ", strip=True)
             if not item_name:
+                continue
+            if _is_digital_item(item_name):
                 continue
             qty_el = container.select_one(".od-item-view-qty")
             quantity = None
