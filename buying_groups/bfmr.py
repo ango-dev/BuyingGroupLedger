@@ -401,15 +401,18 @@ class BFMRClient(HttpClient):
         for obj in batch:
             number = obj["tracking_number"]
             if _confirmed(landed, obj.get("order_no", ""), number):
-                # ANY SPELLING COUNTS, not just the one we sent. BFMR now appends the duplicate
-                # letter ITSELF (their 2026-08-13 change): submitting a number another earner already
-                # used triggers a Best Buy check, and the shipment is recorded as "…B". Testing the
-                # bare number alone would therefore read BFMR's own success as a silent drop —
-                # alerting the user to do three obsolete manual steps, and worse, marking the package
-                # `needs_manual`, which excludes it from `file_insurance` (see sync_tracking's
-                # `blocked` set). That would skip insuring precisely the cartons BFMR just announced
-                # you CAN insure. The ledger's own spelling is what gets recorded as submitted, since
-                # that is the key the checkbox and every later join use.
+                # ANY SPELLING COUNTS, not just the one we sent. A shipment can be recorded as
+                # "…B" whether WE appended that letter on an earlier run (see _resubmit_with_suffix)
+                # or someone added it by hand in My Tracker — the API does not do it for us, despite
+                # BFMR's dashboard having briefly done so between 2026-08-13 and 2026-08-23.
+                #
+                # Testing the bare number alone would read every one of those as a silent drop:
+                # re-running the suffix retry against a carton already recorded, and marking the
+                # package `needs_manual`, which excludes it from `file_insurance` (see
+                # sync_tracking's `blocked` set) — so the carton would also go uninsured.
+                #
+                # The LEDGER's spelling is what gets recorded as submitted, since that is the key the
+                # checkbox and every later join use; the suffix stays BFMR-side only.
                 result.submitted.append(number)
             elif _is_bestbuy((retailers or {}).get(obj.get("order_no", ""))):
                 # Refused outright (invalid_items) or accepted-then-silently-dropped. For a Best Buy

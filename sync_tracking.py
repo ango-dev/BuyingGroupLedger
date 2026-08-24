@@ -124,6 +124,13 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "Shipment", "Status", "Total Cost", "Buying Group", SUBMITTED_COL, INSURANCE_COL,
         PAYOUT_AMOUNT_COL,
     )}
+    # Columns a sheet may predate, resolved only if present. They still have to be IN `idx` —
+    # `optional_cell` looks them up there, so a name missing from this map reads as "" on every row
+    # rather than as "absent from this sheet". That silently emptied `Retailer` for every submission,
+    # which switched the Best Buy suffix retry off entirely: `_is_bestbuy("")` is False, so no carton
+    # ever reached it. The feature was dead in production while its own unit tests passed, because
+    # they build a TrackingSubmission directly and never cross this seam.
+    idx.update({name: header.index(name) for name in ("Retailer",) if name in header})
 
     by_group: dict[str, list[TrackingSubmission]] = {}
     rows_by_tracking: dict[str, list[int]] = {}

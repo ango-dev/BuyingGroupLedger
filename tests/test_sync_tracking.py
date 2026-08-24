@@ -96,6 +96,54 @@ class TestEligibility:
         assert [s.row_number for s in plan["by_group"]["BFMR"]] == [2, 3]
 
 
+class TestRetailerReachesTheClient:
+    """The planner must carry Retailer through, and this seam is where it broke.
+
+    `_is_bestbuy` gates BFMR's duplicate-carton suffix retry, so a blank retailer switches the whole
+    feature off silently. It WAS blank for every row: `optional_cell` resolves a column through
+    `idx`, and "Retailer" had never been added to that map, so it read "" on every sheet rather than
+    only on a sheet that lacks the column.
+
+    Nothing caught it because the client-side tests build a TrackingSubmission directly with
+    retailer="Best Buy" — they prove the retry works, given a retailer, and never ask whether one
+    arrives. These tests cross that seam.
+    """
+
+    @staticmethod
+    def _bestbuy_row():
+        return shipped("BBY01-809900000006", "529900000009", **{"Retailer": "Best Buy"})
+
+    def test_the_retailer_column_reaches_the_submission(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [self._bestbuy_row()])
+        assert plan["by_group"]["BFMR"][0].retailer == "Best Buy"
+
+    def test_a_best_buy_row_actually_satisfies_the_gate_that_uses_it(self):
+        """Asserting the value alone would still pass if the gate expected another spelling, so
+        assert against the real predicate rather than a string."""
+        from buying_groups.bfmr import _is_bestbuy
+
+        plan = plan_tracking_submissions(HEADER_LIST, [self._bestbuy_row()])
+        assert _is_bestbuy(plan["by_group"]["BFMR"][0].retailer)
+
+    def test_a_non_best_buy_row_does_not_satisfy_it(self):
+        from buying_groups.bfmr import _is_bestbuy
+
+        plan = plan_tracking_submissions(
+            HEADER_LIST, [shipped("111-2", "TBA1", **{"Retailer": "Amazon"})])
+        assert not _is_bestbuy(plan["by_group"]["BFMR"][0].retailer)
+
+    def test_a_sheet_predating_the_column_still_syncs_the_row(self):
+        """The point of `optional_cell`: an older sheet loses the suffix retry, not the whole row."""
+        header = [c for c in HEADER_LIST if c != "Retailer"]
+        row_cells = self._bestbuy_row()
+        del row_cells[HEADER_LIST.index("Retailer")]
+
+        plan = plan_tracking_submissions(header, [row_cells])
+        submission = plan["by_group"]["BFMR"][0]
+        assert submission.retailer == ""
+        assert submission.order_id == "BBY01-809900000006", "the rest of the row survives"
+
+
 class TestUnresolvedSplitQuantity:
     def test_a_star_quantity_row_is_flagged_rather_than_submitted(self):
         """The undisclosed-split safety net writes Quantity '*' when a retailer rotates a tracking
