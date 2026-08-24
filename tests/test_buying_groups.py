@@ -927,30 +927,75 @@ class TestSilentlyDroppedSubmission:
         assert result.failed == [], "not a transient failure — no retry of ours can clear it"
         assert "NO spelling" in result.needs_manual[0][1]
 
-    def test_the_alert_only_asks_for_a_human_once_our_own_retries_are_spent(self, bfmr, transport,
-                                                                            monkeypatch):
+    def test_the_alert_only_asks_for_a_human_once_our_own_retries_are_spent(self, bfmr, transport):
         """BFMR appended the duplicate letter itself between 2026-08-13 and 2026-08-23; it no longer
         does, so the old message — "look in My Tracker, this RESOLVES ITSELF" — would now be advice to
-        wait for something that is never coming. Reaching a human means our suffixed sends were spent
+        wait for something that is never coming. Reaching a human means every letter B..Z was spent
         too, so the message says what we tried and hands over the repair."""
-        monkeypatch.setattr(bfmr_mod, "MAX_SUFFIX_ATTEMPTS", 1)
+        purchase = {"reserve_id": "R1", "purchase_id": "P1",
+                    "order_id": "BBY01-809900000003", "qty": 4}
+        # Only the opening exchange is queued; once the queue empties the transport answers every
+        # call with an empty payload, i.e. "BFMR recorded nothing" — so the retry walks to Z.
         transport.responses = [
-            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "BBY01-809900000003", "qty": 4}),
+            tracker(purchase),
             FakeResponse(payload={"reservations_response": {}}),
-            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "BBY01-809900000003", "qty": 4}),
-            FakeResponse(payload={"reservations_response": {}}),   # retry as ...B
-            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "BBY01-809900000003", "qty": 4}),
+            tracker(purchase),
         ]
-        result = bfmr.submit_tracking([submission(order_id="BBY01-809900000003", tracking_number="529900000009",
-                                   retailer="Best Buy")])
+        result = bfmr.submit_tracking([submission(
+            order_id="BBY01-809900000003", tracking_number="529900000009", retailer="Best Buy")])
         message = result.needs_manual[0][1]
 
-        assert "1 suffixed spelling(s)" in message, "say what we already tried, so it isn't repeated"
+        assert "25 suffixed spelling(s)" in message, "B..Z, so the reader knows nothing is left"
         assert "NEITHER SUBMITTED NOR INSURED" in message, "state the exposure plainly"
         assert "support.bfmr.com/hc/en-us/articles/50968170907547" in message
         assert "NOTHING TO EDIT ON THE SHEET" in message
         # The promise that BFMR finishes the job is exactly what stopped being true.
         assert "RESOLVES ITSELF" not in message
+
+    def test_the_retry_walks_the_whole_alphabet_rather_than_stopping_at_a_cap(self, bfmr, transport):
+        """There used to be a 5-attempt cap. It would stop one letter short of the spelling that
+        works on a carton holding more orders than that — abandoning the package the retry exists to
+        save."""
+        purchase = {"reserve_id": "R1", "purchase_id": "P1",
+                    "order_id": "BBY01-809900000003", "qty": 4}
+        transport.responses = [
+            tracker(purchase),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker(purchase),
+        ]
+        bfmr.submit_tracking([submission(
+            order_id="BBY01-809900000003", tracking_number="529900000009", retailer="Best Buy")])
+
+        sent = [b["tracker_data"][0]["tracking_number"]
+                for b in transport.bodies() if "tracker_data" in b]
+        assert sent[0] == "529900000009", "the bare number first"
+        assert sent[1:] == [f"529900000009{c}" for c in "BCDEFGHIJKLMNOPQRSTUVWXYZ"]
+
+    def test_it_stops_the_moment_bfmr_accepts_one(self, bfmr, transport):
+        """The walk is a ceiling, not a target: a carton must not keep spending requests after it
+        has landed."""
+        purchase = {"reserve_id": "R1", "purchase_id": "P1",
+                    "order_id": "BBY01-809900000003", "qty": 4}
+        landed_as_c = tracker(purchase, {
+            "reserve_id": "R1", "purchase_id": "P1", "shipment_id": "S1",
+            "order_id": "BBY01-809900000003", "tracking_number": "529900000009C", "qty": 4})
+        transport.responses = [
+            tracker(purchase),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker(purchase),                                    # bare number vanished
+            FakeResponse(payload={"reservations_response": {}}),  # ...B
+            tracker(purchase),                                    # B vanished too
+            FakeResponse(payload={"reservations_response": {}}),  # ...C
+            landed_as_c,                                          # C stuck
+        ]
+        result = bfmr.submit_tracking([submission(
+            order_id="BBY01-809900000003", tracking_number="529900000009", retailer="Best Buy")])
+
+        assert result.submitted == ["529900000009"], "recorded under the LEDGER's bare spelling"
+        assert result.needs_manual == []
+        sent = [b["tracker_data"][0]["tracking_number"]
+                for b in transport.bodies() if "tracker_data" in b]
+        assert sent == ["529900000009", "529900000009B", "529900000009C"], "stops at C"
 
     def test_a_manual_fix_is_picked_up_on_the_next_run(self, bfmr, transport):
         """THE ROUND TRIP. Once the package exists in My Tracker under any letter, the next run must

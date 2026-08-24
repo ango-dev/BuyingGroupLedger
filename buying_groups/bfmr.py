@@ -61,11 +61,19 @@ log = logging.getLogger(__name__)
 #: POST /api/v2/my-tracker documents "Max 500 objects per request".
 MAX_TRACKER_OBJECTS = 500
 
-#: How many suffixed re-sends to spend on ONE refused number. Candidates already visible in My Tracker
-#: are skipped for free, so a real multi-order carton normally lands on the first attempt; this cap
-#: exists for the other case — a number BFMR refuses for a reason a letter cannot fix — so it costs a
-#: few requests rather than a march through the alphabet.
-MAX_SUFFIX_ATTEMPTS = 5
+#: THE RETRY WALKS THE WHOLE ALPHABET — B through Z — until BFMR takes the number.
+#:
+#: There is deliberately no attempt cap. Their instruction is to keep appending letters "until the
+#: system accepts it", and a cap would stop one letter short of the spelling that would have worked,
+#: turning a package that could have been submitted into a manual chore — the failure this retry
+#: exists to remove. A carton with more orders in it than the cap allowed is exactly the case that
+#: needs the retry most.
+#:
+#: What keeps that cheap is skipping candidates already visible in My Tracker WITHOUT spending a
+#: request, so a real carton normally lands on its first send: by the time the third order in a box
+#: goes out, B is taken and C is tried first. The expensive case is a number no letter can fix, which
+#: costs a walk to Z before reporting it — accepted, because that case ends in a human's inbox either
+#: way and being certain we exhausted the fix is worth more than the requests saved.
 
 #: The suffix retry is for BEST BUY ONLY. The duplicate-tracking problem is Best
 #: Buy reusing ONE tracking number across the orders it packs into a carton; Amazon and Costco do not
@@ -438,7 +446,11 @@ class BFMRClient(HttpClient):
         carton, and BFMR's tracker enforces uniqueness, so every order after the first is refused.
         Their fix is to "add a letter to the very end of the number until the system accepts it".
 
-        STARTS AT B, because the bare number is the original — matching their article's "B", "C", "D".
+        STARTS AT B, because the bare number is the original — matching their article's "B", "C", "D" —
+        and walks to Z without an attempt cap, because their instruction is to keep going "until the
+        system accepts it" and stopping early would abandon a package one letter short of the spelling
+        that works.
+
         Candidates already present in My Tracker are skipped WITHOUT spending a request, which is what
         keeps a real carton to one attempt: by the time the third order in it is sent, B is visibly
         taken, so C is tried first.
@@ -454,8 +466,6 @@ class BFMRClient(HttpClient):
             candidate = bare + letter
             if candidate in taken:
                 continue
-            if attempts >= MAX_SUFFIX_ATTEMPTS:
-                break
             attempts += 1
             response = self.request(
                 "POST", "/api/v2/my-tracker", mutating=True,
