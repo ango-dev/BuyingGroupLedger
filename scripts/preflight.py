@@ -298,14 +298,14 @@ def check_money_switches() -> list[Result]:
         # — e.g. DEFAULT_CASHBACK_RATE=2 is rejected because it reads equally as 2% or 200%. That
         # makes every run die on import, so preflight has to name it rather than die the same way.
         return [Result(
-            FAIL, ".env values",
+            FAIL, "config values",
             f"config/settings.py could not be loaded: {type(exc).__name__}: {exc}. Every run fails "
             f"at import until this is fixed.",
         )]
 
     if not settings.buying_group_sync_enabled:
         return [Result(WARN, "buying-group sync", "DISABLED — tracking numbers are not submitted and "
-                                                  "no payout is read back (set BUYING_GROUP_SYNC_ENABLED=1).")]
+                                                  "no payout is read back (set buying_groups.sync_enabled to true in config.json).")]
 
     out = [Result(OK, "buying-group sync", "ENABLED — every run submits tracking and files BFMR "
                                            "insurance unattended, spending real money.")]

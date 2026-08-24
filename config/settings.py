@@ -15,7 +15,7 @@ are published in DEPLOY.md, docker-compose.yml and the README, and a derived sch
 rename them the first time a config path moved.
 
 NOT EVERYTHING BELONGS HERE. `*_FORCE_AGENT` and `RUN_INTERVAL_HOURS` stay environment-only, read at
-their point of use: they are one-off ops and test hooks (`COSTCO_FORCE_AGENT=1 python main.py
+their point of use: they are one-off ops and test hooks (`COSTCO_FORCE_AGENT=true python main.py
 costco`), and giving them a home in the config file would invite someone to leave one switched on.
 """
 
@@ -128,6 +128,10 @@ def _get_float(name: str, default: float) -> float:
 def _get_bool(name: str, default: bool) -> bool:
     """Read a flag. Only the affirmative spellings are true — anything else, including a typo, is
     false. A switch that guards spending money should fail closed.
+
+    WRITE THESE AS `true` / `false`, in config.json and in the environment alike, so a flag reads the
+    same in both places and nobody has to remember which way round 1 and 0 went. `1`, `yes` and `on`
+    are still accepted so an older script or shell alias keeps working.
 
     JSON has a real boolean, so config.json can say `true`; an environment variable is always a
     string. Both go through the same affirmative-spellings test, so a typo fails closed in EITHER
@@ -302,13 +306,14 @@ class Settings:
 
     # --- dev / ops hooks -------------------------------------------------------------------------
     # Force a retailer down its AGENT fallback instead of its deterministic path, to exercise the
-    # expensive branch on purpose. Normally set for one command — `COSTCO_FORCE_AGENT=1 python
+    # expensive branch on purpose. Normally set for one command — `COSTCO_FORCE_AGENT=true python
     # main.py costco` — which is why .env remains the natural home for them even though config.json
     # can hold them too.
     #
     # These now go through _get_bool, so only the affirmative spellings count. That is a behaviour
-    # FIX: the old `if os.getenv("COSTCO_FORCE_AGENT")` treated ANY non-empty value as true, so
-    # `COSTCO_FORCE_AGENT=0` forced the paid agent — the exact opposite of what it reads as.
+    # FIX: the old `if os.getenv("COSTCO_FORCE_AGENT")` treated ANY non-empty value as true, so both
+    # `COSTCO_FORCE_AGENT=0` and `=false` forced the paid agent — the exact opposite of what they
+    # read as. Write these as `true` / `false`; 1 / 0 / yes / on still parse, for old scripts.
     amazon_force_agent: bool = _get_bool("AMAZON_FORCE_AGENT", False)
     amazon_business_force_agent: bool = _get_bool("AMAZON_BUSINESS_FORCE_AGENT", False)
     bestbuy_force_agent: bool = _get_bool("BESTBUY_FORCE_AGENT", False)

@@ -252,7 +252,7 @@ class TestPromoCashback:
         assert rows[0].cashback_rate == 0.05
 
     def test_apply_promo_false_ignores_it(self):
-        # AMAZON_PROMO_CASHBACK_ENABLED=0 — the escape hatch if the earn line proves to be card-level
+        # AMAZON_PROMO_CASHBACK_ENABLED=false — the escape hatch if the earn line proves to be card-level
         # marketing rather than a real per-order promo.
         rows = [self._row(0.01)]
         tag_cards(rows, self.CARDS, default_rate=0.0, apply_promo=False)

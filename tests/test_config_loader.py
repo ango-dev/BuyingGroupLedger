@@ -288,3 +288,50 @@ class TestStateIsSeparate:
         save_costco_auth("profile-a", {"refresh_token": "aaa"})
 
         assert "refresh_token" not in path.read_text(encoding="utf-8")
+
+
+class TestTheReadmeTableStaysHonest:
+    """README.md publishes every variable name and the config key it overrides.
+
+    A published name is a promise: DEPLOY.md, docker-compose.yml and people's own shell aliases use
+    these, so one that quietly stops being read — or a new setting that never gets documented — is
+    exactly the kind of drift nobody notices until a value silently falls back to its default. The
+    table is generated from ENV_TO_CONFIG, so this asserts it still agrees with it.
+    """
+
+    @staticmethod
+    def _readme() -> str:
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+
+    @staticmethod
+    def _booleans() -> set[str]:
+        """The variables settings.py actually reads with _get_bool, read out of its source.
+
+        Derived rather than listed, so a boolean added later cannot pass by being forgotten here as
+        well as in the README — which would defeat the point of the check.
+        """
+        import re
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parents[1] / "config" / "settings.py").read_text(
+            encoding="utf-8")
+        return set(re.findall(r"_get_bool\(\s*\"([A-Z0-9_]+)\"", source))
+
+    def test_every_variable_is_documented_against_the_right_key(self):
+        import re
+
+        row = re.compile(r"^\| `([A-Z0-9_]+)`(?: †)? \| `([a-z0-9_.]+)` \|$", re.M)
+        assert dict(row.findall(self._readme())) == dict(ENV_TO_CONFIG)
+
+    def test_every_boolean_is_marked(self):
+        """The dagger is what tells a reader to write `true`, not 1. An unmarked boolean is worse
+        than an undocumented one: it reads as a free-text setting and invites `FOO=0`, which the
+        pre-consolidation code treated as ON."""
+        import re
+
+        marked = set(re.findall(r"^\| `([A-Z0-9_]+)` † \|", self._readme(), re.M))
+
+        assert self._booleans(), "no _get_bool calls found — the source scrape has rotted"
+        assert marked == self._booleans()

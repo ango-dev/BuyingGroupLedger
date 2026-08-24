@@ -18,7 +18,7 @@ class AmazonScraper(BaseRetailerScraper):
     # scrapers/amazon_mapping.py parses it; the pt page supplies each shipment's tracking number via
     # the same read_tracking_page selectors below. FALLBACK: on ANY failure (logged out, page shape,
     # network) scrape() alerts and defers to the Browser-Use agent (the base implementation driven by
-    # task_prompt below), which has its own logged-out handling. AMAZON_FORCE_AGENT=1 forces fallback.
+    # task_prompt below), which has its own logged-out handling. AMAZON_FORCE_AGENT=true forces fallback.
 
     def scrape(self):
         """Try the deterministic web-page path first; fall back to the Browser-Use agent on ANY failure.

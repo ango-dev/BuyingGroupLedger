@@ -274,7 +274,7 @@ class TestMoneySwitches:
         monkeypatch.delitem(sys.modules, "config.settings", raising=False)
         monkeypatch.setenv("DEFAULT_CASHBACK_RATE", "2")
 
-        result = _by_name(preflight.check_money_switches(), ".env values")
+        result = _by_name(preflight.check_money_switches(), "config values")
 
         assert result.level == FAIL
         assert "DEFAULT_CASHBACK_RATE" in result.detail or "outside 0-1" in result.detail

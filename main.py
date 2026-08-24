@@ -274,8 +274,9 @@ def run_buying_group_sync() -> None:
     """
     if not settings.buying_group_sync_enabled:
         log.info(
-            "Buying-group sync is disabled (set BUYING_GROUP_SYNC_ENABLED=1 once you've validated "
-            "it manually — see `python -m sync_tracking --help`)."
+            "Buying-group sync is disabled (set buying_groups.sync_enabled to true in config.json — "
+            "or BUYING_GROUP_SYNC_ENABLED=true for one run — once you've validated it manually; "
+            "see `python -m sync_tracking --help`)."
         )
         return
     try:

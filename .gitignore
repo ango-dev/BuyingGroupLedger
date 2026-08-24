@@ -4,6 +4,9 @@ config.json
 # Superseded by config.json (scripts/migrate_config.py folds them in). Kept ignored so an
 # un-migrated checkout still can't leak credentials.
 .env
+# ...and any hand-made copy of it. A `.env.bak` kept while migrating held every live secret and
+# was NOT covered by the bare `.env` line above, so `git add -A` would have committed it.
+.env.*
 service_account.json
 profiles.json
 warehouses.json

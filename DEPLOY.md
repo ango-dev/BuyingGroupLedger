@@ -92,9 +92,9 @@ Then lock them down — `config.json` holds every password in plaintext:
 chmod 600 config.json .state.json
 ```
 
-> **`config.json`'s `warehouses` and `config.json`'s `cards` are optional but are NOT no-ops if you skip them.** Without
-> `config.json`'s `warehouses` every order tags `Unclassified`, which means **nothing is ever submitted to a
-> buying group** — the sync skips unclassified rows rather than guessing. Without `config.json`'s `cards` every
+> **The `warehouses` and `cards` sections are optional but are NOT no-ops if you skip them.** Without
+> `warehouses` every order tags `Unclassified`, which means **nothing is ever submitted to a
+> buying group** — the sync skips unclassified rows rather than guessing. Without `cards` every
 > row falls back to `DEFAULT_CASHBACK_RATE` and your profit column is wrong but plausible-looking.
 > Preflight (step 3) reports both.
 
@@ -396,8 +396,8 @@ gap is where surprises live:
 
 - **It does contain** filesystem and process blast radius. A bad command wrecks a VM you can rebuild,
   not your daily driver, and rolling back is a snapshot restore.
-- **It does not contain the credentials.** This VM holds `.env`, `config.json`'s `profiles` and
-  `service_account.json` — live keys to your Google Sheet, both buying-group accounts, and Browser-Use.
+- **It does not contain the credentials.** This VM holds `config.json` — live keys to your Google
+  Sheet, both buying-group accounts, Browser-Use, the proxies and every retailer login, in plaintext.
   Anything running here can spend money and write to the ledger regardless of the VM boundary.
 - **It does not contain the network.** By default the VM reaches your LAN (including the Gitea host)
   and the internet. Restrict egress at the hypervisor or with `ufw` if you want that narrowed.
@@ -411,7 +411,7 @@ switches, what must never be run casually, and where to look first.
 
 Two things to tell it that it can't infer:
 
-- **A live run costs real money** and, with `BUYING_GROUP_SYNC_ENABLED=1`, files real insurance and
+- **A live run costs real money** and, with `BUYING_GROUP_SYNC_ENABLED=true`, files real insurance and
   submits real tracking to third parties. Reading logs, running `pytest`, and running `audit_sheet`
   or `preflight` are all free and safe. `python main.py` is not.
 - **`sync_tracking` defaults to a dry run** and only writes with `--apply`. Keep it that way unless
@@ -451,7 +451,7 @@ things are the MOD IP allowlist (step 2) and the scheduler itself.
 | `exec format error` on start | Wrong-architecture image. Rebuild on the host — don't copy an image built on a different architecture. |
 | `exec /usr/local/bin/entrypoint.sh: no such file` | CRLF line endings. `.gitattributes` forces LF on `*.sh`, `Dockerfile` and YAML; clone rather than copying files over from Windows by hand. |
 | Every retailer runs the agent; costs jump | A deterministic-path import is broken. Run preflight — this is exactly what it's for. |
-| Buying Group column is all `Unclassified` | `config.json`'s `warehouses` missing, or Docker made it an empty directory. Preflight distinguishes these. |
+| Buying Group column is all `Unclassified` | `config.json` has no `warehouses` section, or no jig matched the delivery address. Preflight distinguishes these. |
 | MOD calls rejected with a valid token | This host's IP isn't allowlisted (step 2), or your ISP rotated it. |
 | Container `(unhealthy)` but logs look fine | No run has completed within two intervals. Check the run lock: `cat logs/.run.lock` — it self-expires after 3h. |
 | Runs skipped with "another run appears to be in progress" | A stale lock from a killed run. It clears itself after 3h, or `rm logs/.run.lock`. |

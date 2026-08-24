@@ -252,19 +252,19 @@ etc.) — they're never resold, so they never hit the ledger.
 **Profit accounting** (Card through Total Profit) turns the ledger into a P&L rather than just a tracker:
 
 - **Card** and **Cashback Rate** are derived automatically from `Card Last 4`, which the scrapers
-  already capture, via a `config.json`'s `cards` config (see "Card / cashback config" below). Each card has an
+  already capture, via the `cards` section of `config.json` (see "Card / cashback config" below). Each card has an
   overall rate plus optional **per-retailer overrides**, so a card earning 1.5% generally and 5% at
   Amazon reports the right rate on each row. A card that isn't configured keeps a blank name — so the
   gap stays visible — but still gets your `DEFAULT_CASHBACK_RATE` so profit stays computable. The rate
   is the only cashback column; the dollar amount isn't stored, it's folded into Total Profit.
   On **Amazon**, if the order page advertises a bonus under the payment method ("Earn 5% back … plus an
   extra 1% back"), that extra is **added** to the card's configured rate for that order, so the single
-  Cashback Rate cell carries the true total (`AMAZON_PROMO_CASHBACK_ENABLED=0` turns it off).
+  Cashback Rate cell carries the true total (`AMAZON_PROMO_CASHBACK_ENABLED=false` turns it off).
 - **Gift cards earn no cashback**, so when one pays part of an Amazon or Amazon Business order the
   recorded cost is scaled down to what the *card* actually paid — Total Cost, Shipping and the cashback
   they drive all reflect card spend only, which raises reported profit by the gift-card amount. The
   reduction is capped at the pre-tax basis (Amazon applies gift cards to tax too, which this ledger
-  doesn't track). `AMAZON_GIFT_CARD_NETTING_ENABLED=0` records the full sticker cost instead.
+  doesn't track). `AMAZON_GIFT_CARD_NETTING_ENABLED=false` records the full sticker cost instead.
 
   **The accounting rule this implies:** a cost is recorded ONCE, where the money actually left your
   pocket. So if you *bought* the gift card, add its purchase as its own row and the two reconcile —
@@ -272,7 +272,7 @@ etc.) — they're never resold, so they never hit the ledger.
   $100 on the card, and a card bought at a discount shows the spread as real profit. If the gift card
   was *given* to you, there is no purchase row and its value is pure profit, which is correct.
   On **Amazon**, that purchase row is now created FOR you when the gift card was bought on a card that
-  carries an explicit Amazon rate in `config.json`'s `cards` — such a card is a reselling card, so the gift card is
+  carries an explicit Amazon rate in `config.json`'s `cards` section — such a card is a reselling card, so the gift card is
   funding inventory. It lands as a `delivered` row with cost and cashback and no tracking. A gift card
   bought on any other card is treated as personal and skipped, as are all other digital items; if you
   need one of those on the ledger, add it by hand.
@@ -298,7 +298,7 @@ etc.) — they're never resold, so they never hit the ledger.
 
 **Buying Group** classifies each row's `Delivery Address`: which buying group's warehouse the order
 shipped to, or `Unclassified` when the address matches no configured warehouse. It's derived at run time
-from a `config.json`'s `warehouses` config (see "Warehouse / jig config" below), so it also sets up the later
+from the `warehouses` section of `config.json` (see "Warehouse / jig config" below), so it also sets up the later
 buying-group tracking-post step. **Personal orders are dropped entirely** — an address matched to a group
 named `Personal` (your own reship/consumer addresses) never reaches the sheet. `Unclassified` is
 deliberately *not* treated as personal: a real warehouse you simply haven't configured yet is kept and
@@ -309,7 +309,7 @@ the tag untouched.
 
 ## Concepts
 
-- **Profile** = a Browser-Use cloud browser identity (`config.json`'s `profiles`) with its own **static ISP
+- **Profile** = a Browser-Use cloud browser identity (a `config.json` `profiles` entry) with its own **static ISP
   proxy** and the set of **retailers** it's logged into. One profile can cover several retailers.
 - **Sheet** = the source of truth. Each run reads it to decide what's new vs. what needs a re-check,
   and writes results back.
@@ -341,7 +341,7 @@ next to it, so this is the only thing to read.
 > purely as the override layer, which is where dev and host-specific values belong:
 >
 > ```bash
-> COSTCO_FORCE_AGENT=1 python main.py costco               # exercise the paid agent fallback, once
+> COSTCO_FORCE_AGENT=true python main.py costco               # exercise the paid agent fallback, once
 > BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking     # just this run
 > LOOKBACK_DAYS=14 python main.py amazon                   # re-scan a wider window
 > ```
@@ -356,8 +356,60 @@ next to it, so this is the only thing to read.
 > (`run_interval_hours`, `run_on_start`, `preflight_strict`, `timezone`) through
 > `scripts/container_settings.py` on start — and still lets an exported variable win.
 
+<details>
+<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (38 of them)</summary>
+
+The list is generated from `ENV_TO_CONFIG` in [config/settings.py](config/settings.py), which is the
+single place a name is mapped, and `tests/test_config_loader.py` fails if this table drifts from it.
+**Booleans (marked †) take `true` / `false`** — in the config file and the environment alike. `1`,
+`yes` and `on` still parse, but anything unrecognised is **false**, so a switch that spends money
+fails closed on a typo rather than turning itself on.
+
+| Variable | `config.json` key |
+|---|---|
+| `BROWSER_USE_API_KEY` | `browser_use.api_key` |
+| `BROWSER_USE_LLM` | `browser_use.llm` |
+| `BROWSER_USE_MAX_COST_USD` | `browser_use.max_cost_usd` |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | `google.service_account_file` |
+| `GOOGLE_SHEET_ID` | `google.sheet_id` |
+| `GOOGLE_SHEET_WORKSHEET_NAME` | `google.worksheet_name` |
+| `DISCORD_WEBHOOK_URL` | `alerts.discord_webhook_url` |
+| `ALERT_EMAIL_TO` | `alerts.email_to` |
+| `GMAIL_ADDRESS` | `alerts.gmail_address` |
+| `GMAIL_APP_PASSWORD` | `alerts.gmail_app_password` |
+| `AMAZON_GIFT_CARD_NETTING_ENABLED` † | `scraping.amazon_gift_card_netting_enabled` |
+| `AMAZON_PROMO_CASHBACK_ENABLED` † | `scraping.amazon_promo_cashback_enabled` |
+| `DEFAULT_CASHBACK_RATE` | `scraping.default_cashback_rate` |
+| `LOOKBACK_DAYS` | `scraping.lookback_days` |
+| `BFMR_API_BASE_URL` | `buying_groups.bfmr.api_base_url` |
+| `BFMR_API_KEY` | `buying_groups.bfmr.api_key` |
+| `BFMR_API_SECRET` | `buying_groups.bfmr.api_secret` |
+| `BFMR_MIN_INSURANCE_VALUE` | `buying_groups.bfmr.min_insurance_value` |
+| `MAXOUTDEALS_API_BASE_URL` | `buying_groups.mod.api_base_url` |
+| `MAXOUTDEALS_API_KEY` | `buying_groups.mod.api_key` |
+| `MAXOUTDEALS_EMAIL` | `buying_groups.mod.email` |
+| `MAXOUTDEALS_USER_ID` | `buying_groups.mod.user_id` |
+| `BUYING_GROUP_SYNC_ENABLED` † | `buying_groups.sync_enabled` |
+| `RECEIPT_CAPTURE_ENABLED` † | `receipts.capture_enabled` |
+| `OCI_BUCKET` | `receipts.oci.bucket` |
+| `OCI_PAR_URL_PREFIX` | `receipts.oci.par_url_prefix` |
+| `OCI_S3_ACCESS_KEY_ID` | `receipts.oci.s3_access_key_id` |
+| `OCI_S3_ENDPOINT_URL` | `receipts.oci.s3_endpoint_url` |
+| `OCI_S3_REGION` | `receipts.oci.s3_region` |
+| `OCI_S3_SECRET_ACCESS_KEY` | `receipts.oci.s3_secret_access_key` |
+| `PREFLIGHT_STRICT` † | `container.preflight_strict` |
+| `RUN_INTERVAL_HOURS` | `container.run_interval_hours` |
+| `RUN_ON_START` † | `container.run_on_start` |
+| `TZ` | `container.timezone` |
+| `AMAZON_FORCE_AGENT` † | `dev.force_agent.amazon` |
+| `AMAZON_BUSINESS_FORCE_AGENT` † | `dev.force_agent.amazon_business` |
+| `BESTBUY_FORCE_AGENT` † | `dev.force_agent.bestbuy` |
+| `COSTCO_FORCE_AGENT` † | `dev.force_agent.costco` |
+
+</details>
+
 **Already have the old six files?** `python -m scripts.migrate_config` (dry run, secrets masked),
-then `--apply`. It folds `.env`, `config.json`'s `profiles`, `config.json`'s `warehouses`, `config.json`'s `cards`,
+then `--apply`. It folds `.env`, `profiles.json`, `warehouses.json`, `cards.json`,
 `service_account.json` and `.costco/*.json` into `config.json` + `.state.json`, and never deletes the
 originals — so it is reversible by deleting `config.json`. Delete them yourself once a run has proven
 the new file works; preflight warns while they linger, because nothing reads them any more.
@@ -533,11 +585,11 @@ logs to `logs/run.log`. A lock (`logs/.run.lock`, auto-expires after 3h) prevent
 
 ### Warehouse / jig config (the "Buying Group" column)
 
-To classify each order by which buying group's warehouse it shipped to, fill the **`warehouses`** section of `config.json`
-at the repo root (gitignored — it holds real addresses). Copy `warehouses.example.json` and edit it:
+To classify each order by which buying group's warehouse it shipped to, fill the **`warehouses`**
+section of `config.json` — `config.example.json` has a commented starting point:
 
 ```json
-[
+"warehouses": [
   { "buying_group": "BFMR",
     "jigs": [
       { "label": "BFMR-A", "street": "123 Main St", "zip": "10001", "name_contains": "c/o BFMR" },
@@ -566,12 +618,11 @@ file order) wins and its `buying_group` is written to the row.
 
 ### Card / cashback config (the "Card" and "Cashback Rate" columns)
 
-Every scraper already captures the last 4 digits of the card an order was charged to. Create a
-**`config.json`'s `cards`** at the repo root (gitignored — it names your cards) to turn those digits into a card
-name and a cashback rate. Copy `cards.example.json`:
+Every scraper already captures the last 4 digits of the card an order was charged to. The **`cards`**
+section of `config.json` turns those digits into a card name and a cashback rate:
 
 ```json
-[
+"cards": [
   { "last4": "4321", "name": "Chase Freedom Unlimited", "cashback_rate": 0.015,
     "retailer_rates": { "Amazon": "5%", "Best Buy": "3%" } },
   { "last4": "8765", "name": "Citi Double Cash", "cashback_rate": "2%" },
@@ -586,7 +637,8 @@ category-dependent in practice. The rate for a row resolves in three tiers, most
 
 1. the card's **`retailer_rates`** entry for that row's retailer — this card, at this store
 2. the card's **`cashback_rate`** — its overall rate everywhere else
-3. **`DEFAULT_CASHBACK_RATE`** from `.env` — for cards you haven't configured at all
+3. **`DEFAULT_CASHBACK_RATE`** (`scraping.default_cashback_rate`) — for cards you haven't
+   configured at all
 
 Details:
 
@@ -599,11 +651,11 @@ Details:
 - `last4` is matched **normalized**, so it doesn't matter that Amazon says "ending in 4321", Best Buy
   sends `************4321`, and Costco sends `xxxx4321`.
 - Two *different* cards can genuinely share a last 4 across accounts. Add an optional **`profile`** (a
-  `config.json`'s `profiles` label) to scope an entry; the scoped entry wins over the catch-all, and genuinely
+  a `profiles` label) to scope an entry; the scoped entry wins over the catch-all, and genuinely
   ambiguous duplicates log a warning rather than one being silently picked. (There's no `retailer`
   scope — one physical card is used at many retailers, and what varies per retailer is the *rate*.)
 - A card that's charged but **not configured** gets a blank Card name (so the gap is visible, and a
-  name you type by hand survives) and the default rate. No `config.json`'s `cards` at all = every row gets the
+  name you type by hand survives) and the default rate. No `cards` section at all = every row gets the
   default rate and no name.
 - Like the warehouse config, this is offline and free — editing it re-derives the columns for **open**
   orders on the next run. Delivered rows are terminal and keep what they were tagged with.
@@ -670,15 +722,26 @@ Two groups are supported today, and they work nothing alike:
 | batching | one object per ledger row | one object per package (rows summed) |
 | limits | undocumented | **10/day** payouts, **30/day** tracking |
 
-```bash
-# .env
-BFMR_API_KEY=...           # both from Developer Tools in your BFMR account settings
-BFMR_API_SECRET=...
-BFMR_MIN_INSURANCE_VALUE=0 # 0 = insure every shipment
-MAXOUTDEALS_API_KEY=...    # MOD also needs the account id + email it wants in every request body
-MAXOUTDEALS_USER_ID=...
-MAXOUTDEALS_EMAIL=...
+```json
+"buying_groups": {
+  "bfmr": {
+    "// ": "both from Developer Tools in your BFMR account settings",
+    "api_key": "...",
+    "api_secret": "...",
+    "// min_insurance_value": "0 = insure every shipment",
+    "min_insurance_value": 0
+  },
+  "mod": {
+    "// ": "MOD also needs the account id + email it wants in the body of every request",
+    "api_key": "...",
+    "user_id": "...",
+    "email": "..."
+  }
+}
 ```
+
+(A key whose name starts with `//` is a comment — the loader strips them, so you can annotate your
+own `config.json` the way `config.example.json` does.)
 
 ⚠️ **MaxOutDeals rejects any call from an unregistered IP**, however valid your token. Add the machine
 that runs this under the **firewall tab** in your MOD profile — and again if you move hosts, change
@@ -751,7 +814,7 @@ rows record a real `0`.
 > There's nothing to edit on the sheet. The next run finds whichever letter you used, ticks
 > Tracking Submitted, and fills in the payout, premium and status as they arrive.
 
-Once you've done a dry run and a one-package live test, set `BUYING_GROUP_SYNC_ENABLED=1` to let the
+Once you've done a dry run and a one-package live test, set `BUYING_GROUP_SYNC_ENABLED=true` to let the
 scheduled run do it too — it's off by default because it spends real money unattended.
 
 ### Receipt capture (proof of purchase, in your own object storage)
@@ -764,14 +827,18 @@ order is terminal and never re-read, so once a run finishes, the chance to grab 
 So each run renders every **newly-seen** order's receipt to PDF, uploads it to OCI Object Storage,
 and writes a link into the **Receipt Link** column.
 
-```bash
-# .env — OCI_BUCKET is the master switch; blank means the whole feature is inert
-OCI_BUCKET=ledger-receipts
-OCI_S3_ENDPOINT_URL=https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
-OCI_S3_REGION=<region>
-OCI_S3_ACCESS_KEY_ID=...      # an OCI *customer secret key*, not the API signing key
-OCI_S3_SECRET_ACCESS_KEY=...
-OCI_PAR_URL_PREFIX=https://objectstorage.<region>.oraclecloud.com/p/<secret>/n/<ns>/b/<bucket>/o
+`receipts.oci` in `config.json` — `bucket` is the master switch; blank leaves the feature inert:
+
+```json
+"oci": {
+  "bucket": "ledger-receipts",
+  "s3_endpoint_url": "https://<namespace>.compat.objectstorage.<region>.oraclecloud.com",
+  "s3_region": "<region>",
+  "// s3_access_key_id": "an OCI *customer secret key*, NOT the API signing key",
+  "s3_access_key_id": "...",
+  "s3_secret_access_key": "...",
+  "par_url_prefix": "https://objectstorage.<region>.oraclecloud.com/p/<secret>/n/<ns>/b/<bucket>/o"
+}
 ```
 
 **One manual setup step: create a bucket-level PAR.** In the OCI console → your bucket →
@@ -794,7 +861,7 @@ rot, and revoking it is one more.
 
 > ⚠️ **The PAR URL is a secret, and receipts are PII.** Anyone holding it can read every receipt
 > under the prefix, and a receipt carries your name, delivery address, card last 4 and order totals.
-> Keep the bucket private and the URL in `.env`.
+> Keep the bucket private, and `chmod 600 config.json`.
 
 **One receipt per ORDER, not per shipment.** The object key is `receipts/<retailer>/<YYYY-MM>/<order-id>.pdf`
 — no shipment component — so a five-shipment order stores one invoice and all five rows carry the
@@ -917,9 +984,10 @@ the GraphQL API path; without it, Costco falls back to the agent every run. (Not
 > rotated token is discarded — which can strand the stored one and force a manual re-grab. Preflight
 > now probes the directory for writability rather than only checking the file exists.
 
-`config.json`'s `warehouses` and `config.json`'s `cards` are mounted the same way. Both are optional, **but a bind mount
-whose host file is missing makes Docker create an empty directory in its place** — so either create the
-file (even as `[]`) or delete that volume line. Without them the run still works: every address tags
+Warehouses and cards used to be two more bind mounts; they are sections of `config.json` now, so
+there is nothing extra to mount. That removes a real trap — **a bind mount whose host file is missing
+makes Docker create an empty directory in its place**, which reads as "present but empty" rather than
+as an error. Both sections are still optional, and the run works without them: every address tags
 `Unclassified` and every card falls back to `DEFAULT_CASHBACK_RATE`.
 
 ```bash
@@ -928,14 +996,12 @@ docker compose logs -f            # watch runs
 docker compose down               # stop
 ```
 
-Adjust the schedule in `docker-compose.yml` (`RUN_INTERVAL_HOURS`, currently 3 = 8x/day), then
-`docker compose up -d` to apply it — `docker compose restart` reuses the old environment and would
-silently keep the previous schedule. **3h is the practical floor**: every run spends one of
-MaxOutDeals' 10 daily received-items calls, so running more often makes payout write-back start
-failing (see "Choosing an interval" in [DEPLOY.md](DEPLOY.md)). Set
-`RUN_ON_START: "true"` to also run once at container start, and `TZ` to align the schedule to local
-time. To run **multiple instances**, copy the compose service with a different `config.json`'s `profiles`/`.env`
-mounted per instance (e.g. one per proxy pool).
+Adjust the schedule in `config.json` under `container` (`run_interval_hours`, `run_on_start`,
+`timezone`, `preflight_strict`), then `docker compose restart` — the entrypoint re-reads the mounted
+config on every start. **3h is the practical floor**: every run spends one of MaxOutDeals' 10 daily
+received-items calls, so running more often makes payout write-back start failing (see "Choosing an
+interval" in [DEPLOY.md](DEPLOY.md)). To run **multiple instances**, copy the compose service with a
+different `config.json` mounted per instance (e.g. one per proxy pool).
 
 The image builds for the host's own architecture (amd64 and arm64 both work — see
 **[DEPLOY.md](DEPLOY.md)** for the server runbook), and smoke-tests its scheduler binary during the
@@ -965,10 +1031,9 @@ fills a small disk months later.
 ## Moving to another machine
 
 Everything except the local environment is cloud-side (profiles, sheet, proxies), so migration is just:
-copy the project **except** `.venv/`, `__pycache__/`, `data/`, `logs/`; be sure to bring the gitignored
-`config.json` and `.state.json` (if you use Costco)
-`config.json`'s `warehouses` / `config.json`'s `cards` — all of those except the last two hold live credentials, so move them
-securely; then recreate the venv (`python -m venv .venv && …/pip install -r requirements.txt`) and
+copy the project **except** `.venv/`, `__pycache__/`, `data/`, `logs/`; be sure to bring the two
+gitignored files — `config.json` and, if you use Costco, `.state.json`. `config.json` holds every live
+credential in plaintext, so move it securely; then recreate the venv (`python -m venv .venv && …/pip install -r requirements.txt`) and
 re-install the scheduler on the new host. No re-login or re-sharing needed.
 
 **Two things do not travel with the files:**
@@ -1059,7 +1124,7 @@ trimmed JOB 2 example so re-checks don't re-fill identity fields.
 
 ```
 main.py                 orchestration + run lock
-config/settings.py      .env-backed settings
+config/settings.py      config.json-backed settings, env-overridable
 config/loader.py        config.json + .state.json access (one file each way)
 config/profiles.py      profiles section loader + Sheet order-state reader
 config/warehouses.py    warehouses section + address -> buying-group/jig classifier
