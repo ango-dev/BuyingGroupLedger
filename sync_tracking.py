@@ -147,6 +147,12 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
             i = idx[name]
             return str(row[i]).strip() if i < len(row) else ""
 
+        def optional_cell(name: str) -> str:
+            """A column the ledger may predate. Absent -> "", never a KeyError, because a sheet
+            missing a newer column must still sync every other field on the row."""
+            i = idx.get(name)
+            return str(row[i]).strip() if i is not None and i < len(row) else ""
+
         order_id = cell("Order ID")
         if not order_id:
             continue  # same rule as sync_csv_to_sheet: a blank Order ID is not a real row
@@ -227,6 +233,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
             shipment=cell("Shipment"),
             order_date=cell("Order Date"),
             buying_group=group_key,
+            retailer=optional_cell("Retailer"),
         ))
 
     return {

@@ -107,6 +107,11 @@ class TrackingSubmission:
     shipment: str
     order_date: str
     buying_group: str
+    #: The ledger's Retailer for this row. Carried because provider behaviour differs BY RETAILER —
+    #: BFMR's duplicate-tracking suffix applies only to Best Buy, which is the one retailer that
+    #: reuses a tracking number across the orders it combines into a carton. Deliberately required
+    #: rather than defaulted: a silently-blank retailer would just switch that handling off.
+    retailer: str
 
     def describe(self) -> str:
         """A short human label for logs and alerts — never sent to an API."""

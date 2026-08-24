@@ -74,23 +74,23 @@ MAX_SUFFIX_ATTEMPTS = 5
 #: that now looks submitted. Those keep their previous handling: rejected -> failed, vanished ->
 #: needs_manual.
 #:
-#: Matched on the ORDER-ID SHAPE rather than a retailer field, which keeps the guard inside this
-#: module instead of threading a new column through TrackingSubmission and every caller. Best Buy
-#: order numbers are `BBY01-<digits>` (the same shape scrapers/bestbuy_api.py keys on). If that ever
-#: changes the retry simply stops firing and the package goes to needs_manual WITH an alert — it
-#: degrades to the old manual chore rather than being lost.
-BESTBUY_ORDER_PREFIX = "BBY01-"
+#: Keyed on the ledger's RETAILER column, carried on TrackingSubmission, rather than sniffing the
+#: order-id shape. Compared loosely (case and spacing) so "Best Buy", "bestbuy" and "BestBuy" all
+#: match; an unrecognised or blank retailer simply does not retry, which degrades to the old manual
+#: chore WITH an alert rather than losing the package.
+BESTBUY_RETAILER = "bestbuy"
 
 
-def _is_bestbuy_order(order_id) -> bool:
-    return str(order_id or "").upper().startswith(BESTBUY_ORDER_PREFIX)
+def _is_bestbuy(retailer) -> bool:
+    return "".join(str(retailer or "").split()).lower() == BESTBUY_RETAILER
+
 
 #: BFMR's own `status` -> the ledger's Status vocabulary. Observed live: cancelled, paid, processed,
 #: returned, shipped.
 #:
 #: Only the two OUTCOMES map. `paid` and `returned` describe what the buying group did, which no
 #: retailer scrape can ever know, so BFMR is the authority on them. `shipped`/`processed`/`cancelled`
-#: map to "" ON PURPOSE — those describe the package's journey, the retailer scrape already tracks it
+#: map to "" ON PURPOSE â€” those describe the package's journey, the retailer scrape already tracks it
 #: far more precisely, and letting BFMR write them would have the two sources overwriting each other
 #: every run. (BFMR "cancelled" also means *the purchase* was cancelled, which is a different fact
 #: from the retailer cancelling the order.)
@@ -99,10 +99,10 @@ LEDGER_STATUS_BY_BFMR_STATUS = {
     "returned": "return",  # the ledger spells it "return"
 }
 
-#: BFMR statuses past the point where insuring a package makes sense — the purchase is settled.
+#: BFMR statuses past the point where insuring a package makes sense â€” the purchase is settled.
 #:
 #: This is what `insurance_status: "not_eligible"` actually tracks. The probe (2026-08-13) found it
-#: on 62 rows, every one of them in one of these states, and 58 of those were INSURED — so it marks
+#: on 62 rows, every one of them in one of these states, and 58 of those were INSURED â€” so it marks
 #: the end of the lifecycle, not a refusal to cover. Keying off BFMR's own `status` says that
 #: plainly, and stops "not eligible" being read as "BFMR won't insure this".
 _TERMINAL_BFMR_STATUSES = {"paid", "returned", "cancelled"}
@@ -116,13 +116,13 @@ _TERMINAL_BFMR_STATUSES = {"paid", "returned", "cancelled"}
 #: until the system accepts it".
 #:
 #: **BFMR briefly did the suffixing itself (2026-08-13); AS OF 2026-08-23 IT DOES NOT.** So the
-#: suffix is ours to CHOOSE again — `_resubmit_with_suffix` picks the letter and re-sends — as well as
+#: suffix is ours to CHOOSE again â€” `_resubmit_with_suffix` picks the letter and re-sends â€” as well as
 #: ours to RECOGNISE. Recognition stays exactly as load-bearing as before: a spelling can still reach
 #: us that we did not send (BFMR may hold one from the period when it suffixed, or from a manual fix),
 #: and every join below has to survive it.
 #:
-#: The consequence for us is a JOIN failure, and a silent one. The retailer — and therefore the
-#: ledger — only ever knows the bare number; BFMR stores the suffixed one. Compared literally, the
+#: The consequence for us is a JOIN failure, and a silent one. The retailer â€” and therefore the
+#: ledger â€” only ever knows the bare number; BFMR stores the suffixed one. Compared literally, the
 #: package looks absent from BFMR in all four places we ask about it: it reads as never submitted
 #: (so we re-submit and BFMR rejects it), as having no existing shipment (so we send a CREATE where
 #: an UPDATE was needed), as having no payout (so the money never reaches the row), and as
@@ -130,7 +130,7 @@ _TERMINAL_BFMR_STATUSES = {"paid", "returned", "cancelled"}
 #: premium). Live example: ledger `529900000009` vs BFMR `529900000009B`.
 #:
 #: THE WHOLE ALPHABET, not just the B/C/D their article names. Their three are an
-#: example, not a limit — a carton can hold more orders than that, and the cost of the two choices is
+#: example, not a limit â€” a carton can hold more orders than that, and the cost of the two choices is
 #: wildly asymmetric. Recognising a suffix we didn't need costs nothing; failing to recognise one
 #: loses the package at all four join points, silently. Matching a letter we never suggest is
 #: therefore the cheap side of the trade.
@@ -358,11 +358,14 @@ class BFMRClient(HttpClient):
 
             objects.append(_tracker_object(row, purchase, existing))
 
+        # Retailer per order, so the batch poster can tell a Best Buy carton from everything else.
+        retailers = {row.order_id: row.retailer for row in rows}
         for batch in _batched(_reductions_first(objects), MAX_TRACKER_OBJECTS):
-            self._post_tracker_batch(batch, result)
+            self._post_tracker_batch(batch, result, retailers)
         return result
 
-    def _post_tracker_batch(self, batch: list[dict], result: SubmissionResult) -> None:
+    def _post_tracker_batch(self, batch: list[dict], result: SubmissionResult,
+                            retailers: dict[str, str] | None = None) -> None:
         response = self.request(
             "POST", "/api/v2/my-tracker", mutating=True, json_body={"tracker_data": batch}
         )
@@ -408,7 +411,7 @@ class BFMRClient(HttpClient):
                 # you CAN insure. The ledger's own spelling is what gets recorded as submitted, since
                 # that is the key the checkbox and every later join use.
                 result.submitted.append(number)
-            elif _is_bestbuy_order(obj.get("order_no")):
+            elif _is_bestbuy((retailers or {}).get(obj.get("order_no", ""))):
                 # Refused outright (invalid_items) or accepted-then-silently-dropped. For a Best Buy
                 # order both are the duplicate-carton case, and since 2026-08-23 BFMR no longer
                 # resolves it, so we append the letter ourselves rather than handing over a chore.

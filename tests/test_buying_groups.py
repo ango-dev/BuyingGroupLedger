@@ -39,6 +39,9 @@ def submission(**kw) -> TrackingSubmission:
         row_number=2, order_id="111-2222222-3333333", tracking_number="TBA1",
         quantity=1, item_name="Widget", total_cost=100.0, shipment="1",
         order_date="2026-08-01", buying_group="BFMR",
+        # Amazon by default, matching the default order id — so a test only gets the Best Buy
+        # duplicate-carton handling when it deliberately asks for it.
+        retailer="Amazon",
     )
     return TrackingSubmission(**{**defaults, **kw})
 
@@ -938,7 +941,8 @@ class TestSilentlyDroppedSubmission:
             FakeResponse(payload={"reservations_response": {}}),   # retry as ...B
             tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "BBY01-809900000003", "qty": 4}),
         ]
-        result = bfmr.submit_tracking([submission(order_id="BBY01-809900000003", tracking_number="529900000009")])
+        result = bfmr.submit_tracking([submission(order_id="BBY01-809900000003", tracking_number="529900000009",
+                                   retailer="Best Buy")])
         message = result.needs_manual[0][1]
 
         assert "1 suffixed spelling(s)" in message, "say what we already tried, so it isn't repeated"
@@ -987,7 +991,8 @@ class TestSilentlyDroppedSubmission:
             FakeResponse(payload={"reservations_response": {}}),                 # retry as ...B
             tracker({"tracking_number": "529900000009B", "shipment_id": "S1"}),  # landed as B
         ]
-        result = bfmr.submit_tracking([submission(order_id="BBY01-809900000003", tracking_number="529900000009")])
+        result = bfmr.submit_tracking([submission(order_id="BBY01-809900000003", tracking_number="529900000009",
+                                   retailer="Best Buy")])
 
         assert result.submitted == ["529900000009"], "recorded under the LEDGER's bare spelling"
         assert result.needs_manual == [], "no chore for a human — we resolved it"
@@ -1028,7 +1033,8 @@ class TestSilentlyDroppedSubmission:
             tracker(*taken, {"tracking_number": "529900000009C", "shipment_id": "S2",
                              "order_no": "BBY01-809900000003"}),
         ]
-        bfmr.submit_tracking([submission(order_id="BBY01-809900000003", tracking_number="529900000009")])
+        bfmr.submit_tracking([submission(order_id="BBY01-809900000003", tracking_number="529900000009",
+                                   retailer="Best Buy")])
         sent = [b["tracker_data"][0]["tracking_number"] for b in transport.bodies()]
         assert sent == ["529900000009", "529900000009C"], "B was taken, so C was tried directly"
 
