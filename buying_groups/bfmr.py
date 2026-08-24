@@ -90,7 +90,7 @@ def _is_bestbuy(retailer) -> bool:
 #:
 #: Only the two OUTCOMES map. `paid` and `returned` describe what the buying group did, which no
 #: retailer scrape can ever know, so BFMR is the authority on them. `shipped`/`processed`/`cancelled`
-#: map to "" ON PURPOSE â€” those describe the package's journey, the retailer scrape already tracks it
+#: map to "" ON PURPOSE — those describe the package's journey, the retailer scrape already tracks it
 #: far more precisely, and letting BFMR write them would have the two sources overwriting each other
 #: every run. (BFMR "cancelled" also means *the purchase* was cancelled, which is a different fact
 #: from the retailer cancelling the order.)
@@ -99,10 +99,10 @@ LEDGER_STATUS_BY_BFMR_STATUS = {
     "returned": "return",  # the ledger spells it "return"
 }
 
-#: BFMR statuses past the point where insuring a package makes sense â€” the purchase is settled.
+#: BFMR statuses past the point where insuring a package makes sense — the purchase is settled.
 #:
 #: This is what `insurance_status: "not_eligible"` actually tracks. The probe (2026-08-13) found it
-#: on 62 rows, every one of them in one of these states, and 58 of those were INSURED â€” so it marks
+#: on 62 rows, every one of them in one of these states, and 58 of those were INSURED — so it marks
 #: the end of the lifecycle, not a refusal to cover. Keying off BFMR's own `status` says that
 #: plainly, and stops "not eligible" being read as "BFMR won't insure this".
 _TERMINAL_BFMR_STATUSES = {"paid", "returned", "cancelled"}
@@ -116,13 +116,13 @@ _TERMINAL_BFMR_STATUSES = {"paid", "returned", "cancelled"}
 #: until the system accepts it".
 #:
 #: **BFMR briefly did the suffixing itself (2026-08-13); AS OF 2026-08-23 IT DOES NOT.** So the
-#: suffix is ours to CHOOSE again â€” `_resubmit_with_suffix` picks the letter and re-sends â€” as well as
+#: suffix is ours to CHOOSE again — `_resubmit_with_suffix` picks the letter and re-sends — as well as
 #: ours to RECOGNISE. Recognition stays exactly as load-bearing as before: a spelling can still reach
 #: us that we did not send (BFMR may hold one from the period when it suffixed, or from a manual fix),
 #: and every join below has to survive it.
 #:
-#: The consequence for us is a JOIN failure, and a silent one. The retailer â€” and therefore the
-#: ledger â€” only ever knows the bare number; BFMR stores the suffixed one. Compared literally, the
+#: The consequence for us is a JOIN failure, and a silent one. The retailer — and therefore the
+#: ledger — only ever knows the bare number; BFMR stores the suffixed one. Compared literally, the
 #: package looks absent from BFMR in all four places we ask about it: it reads as never submitted
 #: (so we re-submit and BFMR rejects it), as having no existing shipment (so we send a CREATE where
 #: an UPDATE was needed), as having no payout (so the money never reaches the row), and as
@@ -130,7 +130,7 @@ _TERMINAL_BFMR_STATUSES = {"paid", "returned", "cancelled"}
 #: premium). Live example: ledger `529900000009` vs BFMR `529900000009B`.
 #:
 #: THE WHOLE ALPHABET, not just the B/C/D their article names. Their three are an
-#: example, not a limit â€” a carton can hold more orders than that, and the cost of the two choices is
+#: example, not a limit — a carton can hold more orders than that, and the cost of the two choices is
 #: wildly asymmetric. Recognising a suffix we didn't need costs nothing; failing to recognise one
 #: loses the package at all four join points, silently. Matching a letter we never suggest is
 #: therefore the cheap side of the trade.
