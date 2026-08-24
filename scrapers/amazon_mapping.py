@@ -80,6 +80,11 @@ _DIGITAL_MARKERS = ("digital delivery", "ready to redeem", "redeem your", "gift 
 # (CLAUDE.md: a missed order is missed reimbursement money).
 _DIGITAL_ITEM_MARKERS = ("gift card balance reload", "egift card", "e-gift card")
 
+# Asked ONLY of a line already known to be digital, to decide keep-vs-skip. Because it is gated behind
+# that, it can be broad without endangering a physical product: a "Gift Card Holder Box" SHIPS, so its
+# status is an ordinary "Delivered <date>", it is never digital, and it is never tested against this.
+_GIFT_CARD_HINTS = ("gift card", "egift", "e-gift", "balance reload")
+
 
 # --- small pure helpers -------------------------------------------------------------------------
 def _num(text) -> float | None:
@@ -298,6 +303,30 @@ def _is_digital_shipment(status_text: str) -> bool:
     return any(marker in low for marker in _DIGITAL_MARKERS)
 
 
+def _is_gift_card_line(status_text: str, item_name: str) -> bool:
+    """Is this digital line a gift card (a reload OR an ordinary gift-card purchase)?"""
+    blob = f"{status_text} {item_name}".lower()
+    return any(hint in blob for hint in _GIFT_CARD_HINTS)
+
+
+def _skip_digital(status_text: str, item_name: str, card_last4: str,
+                  keep_last4s: frozenset[str]) -> bool:
+    """Should this line be dropped as digital?
+
+    Digital lines have no package and are never reimbursable, so they are dropped — WITH ONE EXCEPTION:
+    a gift card bought on a card that carries an explicit Amazon rate in cards.json. You only give a
+    card a per-retailer rate on purpose, so that card is a reselling card and the gift card is funding
+    inventory. Its cost has to land on the ledger, because the balance later pays for an order whose
+    cost the scraper nets down (the gift-card accounting rule, the design notes) — without this row the
+    profit would be overstated by the gift-card amount. The same purchase on any other card, or on a
+    card missing from cards.json, is personal spending and stays out.
+
+    A non-gift-card digital line (a Kindle book, a membership) is dropped on EVERY card: no card makes
+    an eBook reimbursable.
+    """
+    if not (_is_digital_shipment(status_text) or _is_digital_item(item_name)):
+        return False
+    return not (_is_gift_card_line(status_text, item_name) and card_last4 in keep_last4s)
 def _promo_cashback_rate(region) -> float | None:
     """The BONUS rate Amazon advertises under the payment method, as a decimal fraction.
 
@@ -460,6 +489,7 @@ def build_order_items(
     tracking_by_shipment: dict[str, str] | None = None,
     today: str | None = None,
     net_gift_cards: bool = True,
+    keep_digital_last4s: frozenset[str] = frozenset(),
 ) -> list[OrderItem]:
     """Ledger rows for ONE order-details page. `tracking_by_shipment` maps a shipment's number
     ('Shipment 1') OR its Amazon shipmentId to a tracking number read from the pt page; absent leaves
@@ -496,7 +526,9 @@ def build_order_items(
         if wrapper is None:
             continue
         status_text = status_el.get_text(" ", strip=True)
-        if _is_digital_shipment(status_text):
+        # Digital and not paid on a reselling card -> never wanted. When it IS such a
+        # card, defer to the per-item check below, which can see the item name.
+        if _is_digital_shipment(status_text) and card_last4 not in keep_digital_last4s:
             continue
         shipment = shipment_label(i + 1)
         status = _status_from_text(status_text)
@@ -522,8 +554,16 @@ def build_order_items(
             item_name = title_el.get_text(" ", strip=True)
             if not item_name:
                 continue
-            if _is_digital_item(item_name):
+            if _skip_digital(status_text, item_name, card_last4, keep_digital_last4s):
                 continue
+            # A kept gift card completes the moment the balance lands: mark it terminal so
+            # the order closes instead of sitting in the open list being re-read forever.
+            item_status = (
+                "delivered"
+                if _is_gift_card_line(status_text, item_name)
+                and (_is_digital_shipment(status_text) or _is_digital_item(item_name))
+                else status
+            )
             qty_el = container.select_one(".od-item-view-qty")
             quantity = None
             if qty_el:
@@ -538,7 +578,7 @@ def build_order_items(
                     profile_label=profile_label,
                     order_id=order_id,
                     order_date=order_date,
-                    status=status,
+                    status=item_status,
                     order_url=f"{_BASE}/gp/css/order-details?orderID={order_id}",
                     tracking_number=tracking_number,
                     tracking_url=tracking_url,

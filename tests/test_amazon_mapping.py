@@ -520,3 +520,59 @@ def test_a_digital_line_does_not_consume_a_shipment_number_from_a_physical_one()
     rows = build_order_items(html, tracking_by_shipment={"2": "TBA2"})
 
     assert [r.item_name for r in rows] == ["Widget"]
+
+
+# --- a gift card bought on a RESELLING card is kept for bookkeeping -------------------------------
+# User rule 2026-08-24: a card with an explicit Amazon rate in cards.json is a reselling card, so a
+# gift card bought on it is funding inventory and its cost must land on the ledger (the balance later
+# pays for an order whose cost the scraper nets down). On any other card it is personal spending.
+BOOSTED = frozenset({"0315"})
+
+
+def _gift_card_order(status_text, item, card="0315"):
+    return _details(DIG, "August 23, 2026",
+                    [_shipment(DIG, 0, status_text, [_item(item, "$40.35", qty=1)], track=False)],
+                    card=card)
+
+
+def test_a_reload_on_a_reselling_card_is_kept_and_marked_delivered():
+    html = _gift_card_order("Applied Gift Card balance is added to your account.",
+                            "Amazon Gift Card Balance Reload")
+    rows = build_order_items(html, keep_digital_last4s=BOOSTED)
+
+    assert len(rows) == 1
+    assert rows[0].total_cost == 40.35
+    assert rows[0].status == "delivered", "terminal, or the order sits open being re-read forever"
+
+
+def test_the_same_reload_on_any_other_card_is_still_skipped():
+    html = _gift_card_order("Applied Gift Card balance is added to your account.",
+                            "Amazon Gift Card Balance Reload", card="9585")
+    assert build_order_items(html, keep_digital_last4s=BOOSTED) == []
+
+
+def test_an_ordinary_gift_card_purchase_is_kept_on_a_reselling_card():
+    """Not just reloads — a normal digital gift card counts too."""
+    html = _gift_card_order("Ready to Redeem", "Amazon.com Gift Card - Email Delivery")
+    rows = build_order_items(html, keep_digital_last4s=BOOSTED)
+
+    assert len(rows) == 1
+    assert rows[0].status == "delivered"
+
+
+def test_an_ordinary_gift_card_purchase_on_a_personal_card_is_skipped():
+    html = _gift_card_order("Ready to Redeem", "Amazon.com Gift Card - Email Delivery", card="4335")
+    assert build_order_items(html, keep_digital_last4s=BOOSTED) == []
+
+
+def test_a_non_gift_card_digital_line_is_dropped_even_on_a_reselling_card():
+    """No card makes an eBook reimbursable — the exception is gift cards only."""
+    html = _gift_card_order("Digital delivery", "Some Kindle Book")
+    assert build_order_items(html, keep_digital_last4s=BOOSTED) == []
+
+
+def test_without_a_boosted_set_every_gift_card_is_skipped():
+    """The default is the safe one: no cards.json entry -> nothing is kept."""
+    html = _gift_card_order("Applied Gift Card balance is added to your account.",
+                            "Amazon Gift Card Balance Reload")
+    assert build_order_items(html) == []

@@ -271,8 +271,11 @@ etc.) — they're never resold, so they never hit the ledger.
   a $40 card bought at face value and spent on a $100 order totals the same profit as simply paying
   $100 on the card, and a card bought at a discount shows the spread as real profit. If the gift card
   was *given* to you, there is no purchase row and its value is pure profit, which is correct.
-  Note you must add that row BY HAND: every scraper skips gift-card purchases as digital items
-  (there is no package to track), so one will never appear on its own.
+  On **Amazon**, that purchase row is now created FOR you when the gift card was bought on a card that
+  carries an explicit Amazon rate in `cards.json` — such a card is a reselling card, so the gift card is
+  funding inventory. It lands as a `delivered` row with cost and cashback and no tracking. A gift card
+  bought on any other card is treated as personal and skipped, as are all other digital items; if you
+  need one of those on the ledger, add it by hand.
 - **Insurance**, **Payout Date** and **Payout Amount** are filled by the buying-group sync (see
   "Buying groups" below) — or by hand until you enable it. The scrapers always write them blank, and
   the upsert's blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.

@@ -8,6 +8,7 @@ from models.card import Card, normalize_last4, normalize_retailer
 __all__ = [
     "CARDS_FILE",
     "KNOWN_RETAILERS",
+    "boosted_last4s",
     "load_cards",
     "normalize_last4",
     "resolve_card",
@@ -54,6 +55,22 @@ def _warn_about_unknown_retailer_rates(cards: list[Card]) -> None:
                 "(%s). Those rates will never apply — check the spelling.",
                 card.name, unknown, ", ".join(KNOWN_RETAILERS[:4]),
             )
+
+
+def boosted_last4s(retailer: str, cards: list[Card]) -> frozenset[str]:
+    """The last-4s of cards carrying an EXPLICIT `retailer_rates` entry for this retailer.
+
+    Such a card is a reselling card — you gave it a rate at this retailer on purpose — which is the
+    signal the Amazon mappings use to decide that a gift-card reload bought on it is funding inventory
+    rather than personal spending. A card with only an overall `cashback_rate`, or one missing from
+    cards.json entirely, is not boosted.
+
+    Deliberately keyed on the OVERRIDE EXISTING rather than on it beating the base rate: a card can be
+    listed with a retailer rate and no overall rate at all (there is one in the live file), so there is
+    nothing to compare against.
+    """
+    key = normalize_retailer(retailer)
+    return frozenset(c.last4 for c in cards if key in c.retailer_rates)
 
 
 def resolve_card(

@@ -27,8 +27,9 @@ scrapers/amazon_business.py falls back to the Browser-Use agent — never an aut
 
 import logging
 
+from config.cards import boosted_last4s, load_cards
 from config.settings import settings
-from scrapers.amazon_business_mapping import build_order_items, discover_orders, parse_shipment_targets
+from scrapers.amazon_business_mapping import RETAILER, build_order_items, discover_orders, parse_shipment_targets
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
 from models.order import TERMINAL_STATUSES
@@ -104,12 +105,17 @@ class AmazonBusinessApiClient:
             tracking_by_order = self._read_tracking_numbers(page, details_html)
 
         # Build rows (pure) with the tracking numbers injected so the invariant promotes to 'shipped'.
+        # A gift card bought on a card with an explicit Amazon rate in cards.json is funding
+        # inventory, so its purchase has to land on the ledger; on any other card it is personal
+        # spending and the mapping drops it. See scrapers/*_mapping._skip_digital.
+        keep_digital = boosted_last4s(RETAILER, load_cards())
         rows = []
         for oid, html in details_html.items():
             rows.extend(build_order_items(
                 html, self.profile.label, known_open_ids=frozenset(open_ids),
                 tracking_by_shipment=tracking_by_order.get(oid), today=today,
                 net_gift_cards=settings.amazon_gift_card_netting_enabled,
+                keep_digital_last4s=keep_digital,
             ))
 
         # Final keep filter using the authoritative per-order date already parsed into the rows.
