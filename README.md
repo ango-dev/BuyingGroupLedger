@@ -131,11 +131,30 @@ status/tracking/date/last-scraped **without clobbering** the item name, cost, ad
 Columns are in reading order — identity first, then the money columns left-to-right in the order you
 reason about them, then reference/audit columns you rarely scan:
 
-`Order Date · Status · Profile · Retailer · Item Name · Quantity · Order ID · Tracking Number ·
-Shipment · Delivery Date · Cost Per Item · Shipping · Total Cost · Card · Cashback Rate ·
+`Order Date · Status · Profile · Retailer · Order ID · Item Name · Shipment · Quantity ·
+Cost Per Item · Total Cost · Shipping · Card · Cashback Rate · COGS ·
 Insurance · Payout Amount · Payout Date · Total Profit · Buying Group ·
-Order Link · Tracking Link · Delivery Address · Card Last 4 · Last Scraped At ·
-Tracking Submitted · Receipt Link`
+Tracking Number · Tracking Submitted · Delivery Date ·
+Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Last Scraped At`
+
+> **Changing the column order is a MIGRATION, not an edit**, and it takes two steps.
+> `python -m scripts.reorder_sheet --apply` moves the row *values*; `python -m
+> scripts.apply_sheet_formats --apply` then puts the presentation back. Both are dry-run by default.
+>
+> The second step is not optional, and the reason is easy to miss: **this sheet is a Google Sheets
+> Table, and a table column's TYPE overrides the cell number format.** Set a cell to PERCENT under a
+> CURRENCY column and nothing happens — silently, with the API returning success. Types and formats
+> are both bound to a column *position*, so a reorder strands every one of them on its old letter. A
+> real instance: a $631 payout rendering as `63100%`, and the checkbox moving off Tracking Submitted
+> onto Delivery Address. `apply_sheet_formats` fixes both, derived from `HEADER` by name so it stays
+> correct after any future reorder.
+>
+> **Status is pinned at column B.** The sheet's status colour rules are `=$B2="delivered"` and
+> friends, and `reorder_sheet` rewrites values *without moving columns* — so moving Status would
+> leave all six rules colouring every row by whatever landed in B. Insert new columns after it.
+>
+> The date columns are deliberately left **untyped**: `Order Date` is in the upsert key and must stay
+> plain ISO text, or Sheets stores a serial and the next re-check duplicates the row.
 
 **Receipt Link** points at the order's captured receipt in object storage — see "Receipt capture"
 below. It's per *order*, so every row of a multi-item order carries the same link.
@@ -279,12 +298,21 @@ etc.) — they're never resold, so they never hit the ledger.
 - **Insurance**, **Payout Date** and **Payout Amount** are filled by the buying-group sync (see
   "Buying groups" below) — or by hand until you enable it. The scrapers always write them blank, and
   the upsert's blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.
-- **Total Profit** is a **live Google Sheets formula**, not a scraped number:
+- **COGS** and **Total Profit** are **live Google Sheets formulas**, not scraped numbers:
 
   ```
-  Total Profit = Payout Amount + Cashback − Total Cost − Shipping − Insurance
-  Cashback     = (Total Cost + Shipping) × Cashback Rate
+  COGS         = (Total Cost + Shipping) × (1 − Cashback Rate)
+  Total Profit = Payout Amount − COGS − Insurance
   ```
+
+  **COGS exists for end-of-year tax**, and the split is where the tax form wants it. Cashback is
+  netted into *cost* rather than counted as income, because a card reward earned on a purchase is a
+  purchase-price adjustment, not receipts. **Insurance is deliberately not in COGS** — a buying-group
+  premium is an ordinary business expense, a separate line on the form. Expand COGS and you get the
+  old single-cell profit formula exactly; the two are the same number, split where it's useful.
+
+  Unlike Total Profit, **COGS does not blank on an unpaid row**: the cost was incurred whether or not
+  the group has paid yet, and the year-end cost side has to count it.
 
   It's a formula so it recalculates the instant you type an Insurance or Payout Amount — a value
   computed at scrape time would go stale immediately, and a `delivered` row is terminal and never
@@ -295,6 +323,12 @@ etc.) — they're never resold, so they never hit the ledger.
   order's Total Cost`). Every retailer reports one *order-level* shipping total and repeats it on every
   row, so charging it per row would bill a 3-row order for shipping three times over and make the
   column's sum wrong. Pro-rata makes the column sum to exactly one shipping charge per order.
+
+**A cancelled order carries no money.** Cost, Shipping, Insurance, Payout and both formula columns
+are emptied on any row whose Status is `cancelled` — the order was refunded, so leaving the scraped
+cost there makes it look like a real purchase to anything summing the column, and at year end that is
+an overstated cost of goods. The row itself stays: what was ordered, from whom, and that it was
+cancelled is worth keeping. This is applied on every write, so future cancellations clean themselves.
 
 **Buying Group** classifies each row's `Delivery Address`: which buying group's warehouse the order
 shipped to, or `Unclassified` when the address matches no configured warehouse. It's derived at run time
@@ -1156,6 +1190,8 @@ tests/                  offline pytest suite (no credentials/network needed)
 run.sh / run.ps1        scheduler entry points
 scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
 scripts/sort_ledger.py  one-off: sort the sheet newest-first (dry run by default)
+scripts/reorder_sheet.py       migrate the live rows into the current column order
+scripts/apply_sheet_formats.py restore number formats + TABLE column types after a reorder
 scripts/                create_profile, install_cron, install_task_windows
 Dockerfile / docker-compose.yml / docker/entrypoint.sh   containerized, self-scheduling
 ```
