@@ -390,3 +390,46 @@ class TestMigratedFlagsAreRealBooleans:
 
         assert checked == len(BOOLEAN_SETTINGS), (
             "the example file no longer shows every flag, so this check has stopped covering them")
+
+
+class TestTheCredentialStoreNeverShipsInTheImage:
+    """config.json must be excluded from BOTH git and the Docker build context.
+
+    Consolidation moved every credential into one file, and `.dockerignore` — whose whole stated
+    purpose is "never bake secrets into the image" — kept naming the six files it replaced. So
+    `COPY . .` would have baked the Google private key, both buying-group API keys, the proxy and
+    retailer passwords and the OCI secret key into `buying-group-ledger`.
+
+    The `:ro` bind mount is what makes that invisible: the mounted file wins at runtime, so the
+    container behaves exactly right while the image quietly carries a full set of live credentials
+    wherever it is pushed or saved. Nothing would ever have raised.
+
+    Derived from the loader's own constants, so renaming either file moves this check with it.
+    """
+
+    @staticmethod
+    def _patterns(filename: str) -> set[str]:
+        from pathlib import Path
+
+        text = (Path(__file__).resolve().parents[1] / filename).read_text(encoding="utf-8")
+        return {line.strip() for line in text.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")}
+
+    @pytest.mark.parametrize("ignore_file", [".dockerignore", ".gitignore"])
+    def test_the_config_and_state_files_are_excluded(self, ignore_file):
+        from config.loader import CONFIG_FILE, STATE_FILE
+
+        patterns = self._patterns(ignore_file)
+
+        for path in (CONFIG_FILE, STATE_FILE):
+            assert path.name in patterns, (
+                f"{path.name} is not in {ignore_file} — it holds every live credential")
+
+    def test_dockerignore_still_covers_the_legacy_secret_files(self):
+        """They are gone from this machine, but an un-migrated host still has them next to a
+        Dockerfile that copies the whole tree."""
+        patterns = self._patterns(".dockerignore")
+
+        for name in (".env", "service_account.json", "profiles.json", "cards.json",
+                     "warehouses.json", ".costco/"):
+            assert name in patterns, f"{name} is not in .dockerignore"

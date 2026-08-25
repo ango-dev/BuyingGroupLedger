@@ -993,7 +993,7 @@ def check_buying_group_coverage(sheet: Sheet, opts: Options) -> Result:
 
     warehouses = load_warehouses()
     if not warehouses:
-        return Result("buying_group_coverage", "SKIP", "no warehouses.json -- nothing to classify against")
+        return Result("buying_group_coverage", "SKIP", "config.json has no `warehouses` -- nothing to classify against")
     plan = plan_buying_group_retag(sheet.header, sheet.grids.formatted[1:], warehouses)
     counts = " | ".join(f"{g} {c}" for g, c in sorted(plan["group_counts"].items()))
     details, status = [], "PASS"
@@ -1006,7 +1006,7 @@ def check_buying_group_coverage(sheet: Sheet, opts: Options) -> Result:
     unclassified = plan["group_counts"].get("Unclassified", 0)
     if unclassified:
         status = "WARN"
-        details.append(f"{unclassified} row(s) Unclassified -- a real warehouse may be missing from warehouses.json")
+        details.append(f"{unclassified} row(s) Unclassified -- a real warehouse may be missing from config.json `warehouses`")
     return Result("buying_group_coverage", status, counts or "no rows", _truncate(details, opts.max_detail))
 
 
@@ -1018,12 +1018,12 @@ def check_card_and_rate_coverage(sheet: Sheet, opts: Options) -> Result:
 
     cards = load_cards()
     if not cards:
-        return Result("card_and_rate_coverage", "SKIP", "no cards.json -- nothing to resolve against")
+        return Result("card_and_rate_coverage", "SKIP", "config.json has no `cards` -- nothing to resolve against")
     plan = plan_profit_backfill(
         sheet.header, sheet.grids.unformatted[1:], cards, settings.default_cashback_rate, refresh=True
     )
     details, status = [], "PASS"
-    for label, key in (("never filled", "fills"), ("disagree with cards.json", "changes")):
+    for label, key in (("never filled", "fills"), ("disagree with config.json `cards`", "changes")):
         entries = plan.get(key) or []
         if entries:
             status = "WARN"
@@ -1031,7 +1031,7 @@ def check_card_and_rate_coverage(sheet: Sheet, opts: Options) -> Result:
     unresolved = plan.get("unresolved") or []
     if unresolved:
         status = "WARN"
-        details.append(f"{len(unresolved)} card last-4(s) not in cards.json")
+        details.append(f"{len(unresolved)} card last-4(s) not in config.json `cards`")
     return Result("card_and_rate_coverage", status, "Card + Cashback Rate resolve cleanly" if status == "PASS" else "gaps found", _truncate(details, opts.max_detail))
 
 

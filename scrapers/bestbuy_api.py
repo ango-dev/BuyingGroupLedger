@@ -362,7 +362,7 @@ def _classify_signin_failure(info: dict, critical: list) -> tuple[str, str]:
 
     if re.search(r"password.{0,25}incorrect|incorrect.{0,25}password|couldn'?t find an account", haystack, re.I):
         return ("BAD CREDENTIAL — Best Buy says the password is wrong",
-                "Usually the stored password IS stale -> update auth.bestbuy.password in profiles.json. "
+                "Usually the stored password IS stale -> update the profile's auth.bestbuy.password in config.json. "
                 "But do not trust this banner blindly: observed that the SAME unchanged "
                 "password reached the identity-verification screen 25 minutes earlier and was then "
                 "reported 'incorrect', i.e. Best Buy also says this while an account is flagged and "

@@ -88,7 +88,7 @@ def _tag_cards(items: list, label: str) -> None:
     unknown = tag_cards(items, _cards(), apply_promo=settings.amazon_promo_cashback_enabled)
     if unknown:
         log.info(
-            "%s: %d row(s) have a card ending in digits not listed in cards.json (default "
+            "%s: %d row(s) have a card ending in digits not listed in config.json `cards` (default "
             "cashback rate applied).",
             label, unknown,
         )
@@ -225,7 +225,7 @@ def main(retailers: list[str]) -> None:
         scraper_cls = SCRAPERS[name]
         profiles = load_profiles_for_retailer(scraper_cls.retailer_key)
         if not profiles:
-            log.warning("No profiles configured for '%s' in profiles.json; skipping.", name)
+            log.warning("No profiles configured for '%s' in config.json `profiles`; skipping.", name)
             continue
 
         for profile in profiles:

@@ -753,7 +753,7 @@ class BFMRClient(HttpClient):
                 log.warning(
                     "BFMR: no warehouse address configured for the jig on row %s (%s); insuring "
                     "against the profile address instead. Set `insure_as` on that jig in "
-                    "warehouses.json.", row.row_number, row.delivery_address[:60],
+                    "config.json `warehouses`.", row.row_number, row.delivery_address[:60],
                 )
             response = self.request(
                 "POST",

@@ -141,7 +141,7 @@ def _print_plan(plan: dict, apply: bool, refresh: bool) -> None:
         print(f"    ... and {len(plan['fills']) - 12} more")
 
     verb = "CORRECTED" if refresh else "left alone (pass --refresh to correct them)"
-    print(f"\n  {len(plan['changes'])} non-blank cell(s) disagree with cards.json — {verb}")
+    print(f"\n  {len(plan['changes'])} non-blank cell(s) disagree with config.json `cards` — {verb}")
     for row_number, col, old, new in plan["changes"][:12]:
         print(f"    row {row_number:>3}  {col:<14} {old!r} -> {new}")
     if len(plan["changes"]) > 12:
@@ -152,7 +152,7 @@ def _print_plan(plan: dict, apply: bool, refresh: bool) -> None:
         print(f"  {plan['skipped_no_last4']} row(s) have no Card Last 4 recorded — card columns left blank")
     if plan["unresolved"]:
         cards_seen = sorted({last4 for _r, last4 in plan["unresolved"]})
-        print(f"  {len(plan['unresolved'])} row(s) charged a card NOT in cards.json (last 4: "
+        print(f"  {len(plan['unresolved'])} row(s) charged a card NOT in config.json `cards` (last 4: "
               f"{cards_seen}) — they get the default rate and no name")
 
 
@@ -163,13 +163,13 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true",
                         help="Actually write to the live sheet (default: dry run, read-only)")
     parser.add_argument("--refresh", action="store_true",
-                        help="Also correct non-blank cells that disagree with cards.json")
+                        help="Also correct non-blank cells that disagree with config.json `cards`")
     args = parser.parse_args()
 
     cards = load_cards()
     if not cards:
-        print("No cards.json found (or it's empty) — every row would get a blank Card and the "
-              "default rate. Configure cards.json first if that's not what you want.\n")
+        print("config.json has no `cards` section (or it is empty) — every row would get a blank Card and the "
+              "default rate. Configure it there first if that's not what you want.\n")
 
     worksheet = _get_worksheet()
     # UNFORMATTED so a percent-formatted Cashback Rate comes back as 0.04, not the display text "4%".

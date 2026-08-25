@@ -654,7 +654,7 @@ def _alert_on_unroutable(plan: dict, apply: bool) -> None:
     insure a package whose tracking number arrived BEFORE delivery).
 
     The fix is quick, which is exactly why it is worth interrupting someone for: add the warehouse's
-    address to warehouses.json, or set the row's Buying Group by hand, and the next run submits it.
+    address to config.json `warehouses`, or set the row's Buying Group by hand, and the next run submits it.
     """
     rows = plan.get("unroutable_tracked") or []
     if not rows:
@@ -672,7 +672,8 @@ def _alert_on_unroutable(plan: dict, apply: bool) -> None:
         "can be filed on them.\n\n"
         "MOST GROUPS ONLY INSURE A PACKAGE IF ITS TRACKING NUMBER WAS SUBMITTED BEFORE DELIVERY, so "
         "this is worth fixing now rather than at the end of the week.\n\n"
-        "Add the delivery address to warehouses.json (or set Buying Group on the row by hand) and "
+        "Add the delivery address to config.json `warehouses` (or set Buying Group on the row by hand) "
+        "and "
         f"the next run will submit them:\n{detail}",
     )
 

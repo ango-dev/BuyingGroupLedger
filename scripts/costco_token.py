@@ -32,7 +32,7 @@ Find it on costco.com under your account, or leave the default and adjust if a l
 Check what's stored (the token is shown masked):
     python -m scripts.costco_token --label profile-2 --show
 
-The token is written to .costco/<label>.json, which is gitignored — treat that file like a password.
+The token is written to .state.json under `costco.<label>`, which is gitignored — treat it like a password.
 """
 
 import argparse
@@ -167,7 +167,7 @@ def _grab_refresh_token(label: str) -> str | None:
 
     profile = next((p for p in load_profiles() if p.label == label), None)
     if profile is None:
-        sys.exit(f"No profile '{label}' in profiles.json.")
+        sys.exit(f"No profile '{label}' in config.json `profiles`.")
     if not profile.profile_id:
         sys.exit(f"Profile '{label}' has no profile_id — run scripts.create_profile and log into Costco first.")
 

@@ -10,7 +10,7 @@ proxy provider — this does the equivalent by creating the session explicitly w
 Usage (run from the project root):
     .venv\\Scripts\\python -m scripts.create_profile --label profile-1
 
-Requires a stub entry for that label already in profiles.json with the proxy filled in
+Requires a stub entry for that label already in config.json `profiles` with the proxy filled in
 (profile_id can be blank — this script fills it in for you). See profiles.example.json.
 
 Re-running against a label that already has a profile_id reuses that same profile and just
@@ -33,7 +33,7 @@ from config.profiles import load_profiles, save_profiles
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--label", required=True, help="Label of the profile entry in profiles.json")
+    parser.add_argument("--label", required=True, help="Label of the profile entry in config.json `profiles`")
     parser.add_argument(
         "--add-retailer",
         action="append",
@@ -47,13 +47,13 @@ def main() -> None:
     profile = next((p for p in profiles if p.label == args.label), None)
     if profile is None:
         sys.exit(
-            f"No entry with label '{args.label}' in profiles.json. Add a stub entry first "
+            f"No entry with label '{args.label}' in config.json `profiles`. Add a stub entry first "
             "(label, proxy, retailers — profile_id can stay blank), then re-run this script."
         )
 
     if not profile.proxy or not profile.proxy.host:
         sys.exit(
-            f"Profile '{args.label}' has no proxy configured in profiles.json. "
+            f"Profile '{args.label}' has no proxy configured in config.json. "
             "This script is for pinning a profile to a custom proxy at login time — fill in "
             "the proxy fields first."
         )
@@ -87,7 +87,7 @@ def main() -> None:
         print(f"  {session.live_url}")
         print()
         pending_retailers = list(profile.retailers) + [r for r in args.add_retailer if r not in profile.retailers]
-        retailers = ", ".join(pending_retailers) if pending_retailers else "(none listed yet in profiles.json)"
+        retailers = ", ".join(pending_retailers) if pending_retailers else "(none listed yet in config.json)"
         print(f"Open that URL in your own browser and log into: {retailers}")
         print("You can log into more than one retailer in the same session if this profile covers several.")
 
@@ -117,7 +117,7 @@ def main() -> None:
     profile.retailers.extend(newly_added)
     save_profiles(profiles)
 
-    print(f"\nSaved profile_id '{profile_id}' for '{args.label}' into profiles.json.")
+    print(f"\nSaved profile_id '{profile_id}' for '{args.label}' into config.json.")
     if newly_added:
         print(f"Added retailer(s) to '{args.label}': {', '.join(newly_added)}")
     print("Run main.py for a retailer this profile covers to confirm the login stuck.")

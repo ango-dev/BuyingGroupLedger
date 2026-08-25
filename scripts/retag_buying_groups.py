@@ -73,8 +73,8 @@ def main() -> None:
     warehouses = load_warehouses()
     if not warehouses:
         raise SystemExit(
-            "No warehouses.json found (or it's empty) — nothing to classify. "
-            "Copy warehouses.example.json to warehouses.json and configure your jigs first."
+            "config.json has no `warehouses` section (or it is empty) — nothing to classify. "
+            "config.example.json shows the shape; configure your jigs there first."
         )
 
     worksheet = _get_worksheet()
