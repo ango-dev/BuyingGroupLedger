@@ -32,7 +32,14 @@ from pathlib import Path
 from gspread.utils import ValueInputOption, ValueRenderOption
 
 from models.order import FIELDNAMES, normalize_shipment
-from sheets.ledger_sync import HEADER, _coerce, _get_worksheet, _write_profit_formulas
+from sheets.ledger_sync import (
+    HEADER,
+    _blank_money_for_cancelled,
+    _last_occupied_row,
+    _coerce,
+    _get_worksheet,
+    _write_profit_formulas,
+)
 
 log = logging.getLogger("reorder_sheet")
 
@@ -78,10 +85,15 @@ def plan_reorder(header: list[str], data_rows: list[list]) -> dict:
         # invisible until something like audit_sheet's shipment_is_int check goes looking for it.
         # No-op on non-numeric fields (card_last4, item_name, the Total Profit formula column, ...).
         new_row = [_coerce(_FIELD_FOR_HEADER[name], value) for name, value in zip(HEADER, new_row)]
+        # A CANCELLED order carries no money: the same rule sync_csv_to_sheet applies on every write,
+        # applied here so the rows ALREADY on the sheet get cleaned by this migration too. Cancelled is
+        # terminal, so those rows are never re-scraped and would otherwise keep their refunded costs
+        # forever — and at year end that is an overstated cost of goods.
+        new_row = _blank_money_for_cancelled(new_row)
         # Any OTHER formula the user added by hand would be rewritten as literal text by the RAW write
         # below (Total Profit is re-stamped afterwards, so it's exempt). Flag rather than clobber.
         for i, value in enumerate(new_row):
-            if isinstance(value, str) and value.startswith("=") and HEADER[i] != "Total Profit":
+            if isinstance(value, str) and value.startswith("=") and HEADER[i] not in ("Total Profit", "COGS"):
                 stray_formulas.append((offset + 2, HEADER[i]))
         new_rows.append(new_row)
 
@@ -140,7 +152,12 @@ def main() -> None:
         raise SystemExit("Sheet is empty — nothing to reorder.")
 
     header = [str(c) for c in existing[0]]
-    plan = plan_reorder(header, existing[1:])
+    # Bound to the real data block. `Tracking Submitted` is a checkbox, and an empty cell under one
+    # materialises as a real False — so `existing` runs to the GRID height (984 rows on a 42-row
+    # ledger), and rewriting all of it would blank 900+ rows RAW, stripping their number formats for
+    # nothing. _last_occupied_row is the same guard sync_csv_to_sheet uses for its append anchor.
+    last = _last_occupied_row(existing)
+    plan = plan_reorder(header, existing[1:last])
     _print_plan(plan, header, args.apply)
 
     if plan["already_correct"] and not plan["shipment_relabelled"]:

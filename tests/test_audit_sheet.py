@@ -24,7 +24,7 @@ import pytest
 from models.order import FIELDNAMES
 from scripts import audit_sheet
 from scripts.audit_sheet import Grids, Options, Sheet, run_checks
-from sheets.ledger_sync import HEADER, _profit_formula
+from sheets.ledger_sync import HEADER, _COL, _cogs_formula, _profit_formula
 from tests.test_ledger_sync import _as_sheet_text
 
 _SHEETS_EPOCH = date(1899, 12, 30)
@@ -140,6 +140,7 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
         "Insurance": Cell("", fmt="currency"),
         "Payout Amount": Cell("", fmt="currency"),
         "Payout Date": Cell(""),
+        "COGS": Cell(798.0, fmt="currency", formula=_cogs_formula(row_number)),
         "Total Profit": Cell("", formula=_profit_formula(row_number)),
         "Buying Group": Cell("BFMR"),
         "Order Link": Cell("https://www.bestbuy.com/order/1"),
@@ -365,12 +366,33 @@ def test_a_frozen_profit_formula_is_caught():
 
 
 def test_a_stale_formula_from_before_a_reorder_is_caught():
-    """A stale formula still evaluates and still shows a plausible dollar figure."""
-    stale = _profit_formula(2).replace("Q2", "X2")
+    """A stale formula still evaluates and still shows a plausible dollar figure.
+
+    The perturbed column is derived from _COL rather than written as a literal letter: this test used
+    to say .replace("Q2", "X2"), and when the 2026-08-13 reorder moved Payout Amount off Q that became
+    a silent no-op — the formula was left untouched, the check passed, and the test still "passed"
+    while asserting nothing at all.
+    """
+    stale = _profit_formula(2).replace(f'{_COL["payout_amount"]}2', "X2")
+    assert stale != _profit_formula(2), "the perturbation must actually change the formula"
     sheet = build(row_cells(2, **{"Total Profit": Cell("", formula=stale)}))
     result = result_for(sheet, "profit_formula_literal")
     assert result.status == "FAIL"
     assert result_for(sheet, "profit_formula_coverage").status == "PASS"
+
+
+def test_a_stale_cogs_formula_is_caught():
+    """COGS is the year-end cost figure, so a stale one misreports taxes, not just a cell."""
+    stale = _cogs_formula(2).replace(f'{_COL["total_cost"]}2', "X2")
+    assert stale != _cogs_formula(2)
+    sheet = build(row_cells(2, **{"COGS": Cell(798.0, formula=stale)}))
+    assert result_for(sheet, "cogs_formula_literal").status == "FAIL"
+    assert result_for(sheet, "cogs_formula_coverage").status == "PASS"
+
+
+def test_a_frozen_cogs_formula_is_caught():
+    sheet = build(row_cells(2, **{"COGS": Cell(798.0)}))
+    assert result_for(sheet, "cogs_formula_coverage").status == "FAIL"
 
 
 def test_a_hand_written_formula_elsewhere_is_caught():

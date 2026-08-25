@@ -1649,3 +1649,76 @@ class _FakeResponse:
     @property
     def text(self):
         return "test"
+
+
+class TestCancelledRowsCarryNoMoney:
+    """A cancelled order was refunded, so no money ever moved.
+
+    Leaving the scraped cost on the row makes it look like a real purchase to anything that sums the
+    column, and at year end that is an overstated cost of goods. The row itself STAYS — what was
+    ordered, from whom, and that it was cancelled is the bookkeeping worth keeping.
+    """
+
+    _MONEY = ("cost_per_item", "total_cost", "shipping", "insurance", "payout_amount", "payout_date")
+    _KEPT = ("order_id", "order_date", "item_name", "shipment", "retailer", "quantity", "status")
+
+    def test_an_appended_cancelled_row_lands_with_its_money_cells_empty(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(tmp_path, dict(
+            order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+            status="cancelled", retailer="Best Buy", quantity="2",
+            cost_per_item="199.00", total_cost="398.00", shipping="9.99",
+        ))
+
+        sync_csv_to_sheet(path)
+
+        written = sheet.data_rows()[0]
+        for field in self._MONEY:
+            assert written[FIELDNAMES.index(field)] == "", f"{field} should be blank on a cancelled row"
+        for field in self._KEPT:
+            assert str(written[FIELDNAMES.index(field)]).strip(), f"{field} must survive for bookkeeping"
+
+    def test_an_order_cancelled_on_a_re_check_has_its_recorded_money_cleared(self, sheet, tmp_path):
+        """The dangerous direction: the cost is ALREADY on the sheet from when the order looked real.
+
+        _merge_row's blank-never-overwrites rule would otherwise preserve it forever — cancelled is
+        terminal, so nothing would ever come back to clear it.
+        """
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                status="ordered", cost_per_item="199.00", total_cost="398.00", shipping="9.99"),
+        ]
+        path = write_csv_file(tmp_path, dict(
+            order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+            status="cancelled",
+        ))
+
+        result = sync_csv_to_sheet(path)
+
+        assert result["updated"] == 1 and result["appended"] == 0
+        written = sheet.data_rows()[0]
+        assert written[FIELDNAMES.index("status")] == "cancelled"
+        for field in self._MONEY:
+            assert written[FIELDNAMES.index(field)] == "", f"{field} survived a cancellation"
+
+    def test_a_live_order_is_untouched(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(tmp_path, dict(
+            order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+            status="delivered", cost_per_item="199.00", total_cost="398.00", shipping="9.99",
+        ))
+
+        sync_csv_to_sheet(path)
+
+        written = sheet.data_rows()[0]
+        assert written[FIELDNAMES.index("total_cost")] == 398.0
+        assert written[FIELDNAMES.index("shipping")] == 9.99
+
+    def test_the_helper_does_not_mutate_its_input(self):
+        original = row(order_id="A1", status="cancelled", total_cost="398.00")
+        before = list(original)
+
+        ledger_sync._blank_money_for_cancelled(original)
+
+        assert original == before

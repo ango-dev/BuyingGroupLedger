@@ -31,20 +31,18 @@ def test_column_order_is_pinned():
     existing rows just gain a trailing blank and no migration is needed.
     """
     assert FIELDNAMES == [
-        "order_date", "status", "profile_label", "retailer", "item_name", "quantity", "order_id",
-        "tracking_number", "shipment", "delivery_date",
-        "cost_per_item", "shipping", "total_cost", "card_name", "cashback_rate",
+        "order_date", "status", "retailer", "order_id", "item_name", "shipment", "quantity",
+        "cost_per_item", "total_cost", "shipping", "card_name", "cashback_rate", "cogs",
         "insurance", "payout_amount", "payout_date", "total_profit", "buying_group",
-        "order_url", "tracking_url", "delivery_address", "card_last4", "last_scraped_at",
-        "tracking_submitted", "receipt_url",
+        "tracking_number", "delivery_date", "tracking_submitted", "profile_label", "order_url",
+        "tracking_url", "receipt_url", "delivery_address", "card_last4", "last_scraped_at",
     ]
     assert HEADER == [
-        "Order Date", "Status", "Profile", "Retailer", "Item Name", "Quantity", "Order ID",
-        "Tracking Number", "Shipment", "Delivery Date",
-        "Cost Per Item", "Shipping", "Total Cost", "Card", "Cashback Rate",
-        "Insurance", "Payout Amount", "Payout Date", "Total Profit", "Buying Group",
-        "Order Link", "Tracking Link", "Delivery Address", "Card Last 4", "Last Scraped At",
-        "Tracking Submitted", "Receipt Link",
+        "Order Date", "Status", "Retailer", "Order ID", "Item Name", "Shipment", "Quantity",
+        "Cost Per Item", "Total Cost", "Shipping", "Card", "Cashback Rate", "COGS", "Insurance",
+        "Payout Amount", "Payout Date", "Total Profit", "Buying Group", "Tracking Number",
+        "Delivery Date", "Tracking Submitted", "Profile", "Order Link", "Tracking Link",
+        "Receipt Link", "Delivery Address", "Card Last 4", "Last Scraped At",
     ]
 
 

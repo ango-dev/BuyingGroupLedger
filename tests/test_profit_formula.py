@@ -40,28 +40,72 @@ class TestFormulaShape:
     def test_formula_shape_is_pinned(self):
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
         # here rather than quietly producing wrong money on the sheet.
-        assert ledger_sync._profit_formula(7) == (
-            '=IF(Q7="","",IFERROR(Q7+(M7+L7)*O7-M7-L7-P7,""))'
+        assert ledger_sync._cogs_formula(7) == (
+            '=IF(B7="cancelled","",IF(I7="","",IFERROR((I7+J7)*(1-L7),"")))'
         )
+        assert ledger_sync._profit_formula(7) == (
+            '=IF(B7="cancelled","",IF(O7="","",IFERROR(O7-M7-N7,"")))'
+        )
+
+    def test_profit_is_algebraically_what_it_always_was(self):
+        """THE REGRESSION PROOF for splitting COGS out of the profit formula.
+
+        Total Profit used to be `payout + (cost+ship)*rate - cost - ship - insurance`, computed in one
+        cell. It is now `payout - COGS - insurance`, where `COGS = (cost+ship)*(1-rate)`. Those are the
+        same number for every input — expand the second and you get the first — and this evaluates
+        both to prove it rather than asserting it in a comment. If a future edit to either formula
+        breaks the identity, every historical profit figure on the sheet silently changes.
+        """
+        for cost, ship, rate, ins, payout in [
+            (798.0, 0.0, 0.04, 0.0, 820.0),
+            (1709.91, 12.5, 0.135, 3.86, 1800.0),
+            (299.0, 0.0, 0.0, 0.0, 299.0),
+            (-399.99, 0.0, 0.05, 0.0, -387.0),   # a return: both sides go negative
+            (100.0, 5.0, 0.25, 2.5, 0.0),        # a zero payout is still a real number, not blank
+        ]:
+            cogs = (cost + ship) * (1 - rate)
+            new = payout - cogs - ins
+            old = payout + (cost + ship) * rate - cost - ship - ins
+            assert round(new, 9) == round(old, 9), (cost, ship, rate, ins, payout)
+
+    def test_a_cancelled_row_reports_no_cost_and_no_profit(self):
+        # A cancelled order was refunded, so it must not reach the year-end cost side. Both formulas
+        # short-circuit on Status, read through _COL so a reorder can't leave them pointing at the
+        # wrong column.
+        status = ledger_sync._col_letter(HEADER.index("Status"))
+        assert ledger_sync._cogs_formula(7).startswith(f'=IF({status}7="cancelled","",')
+        assert ledger_sync._profit_formula(7).startswith(f'=IF({status}7="cancelled","",')
 
     def test_formula_reads_the_intended_columns(self):
         # The self-checking half of the pin above: assert by HEADER NAME, so the intent survives a
         # future append even though the letters would change.
-        formula = ledger_sync._profit_formula(7)
-        for name in ("Shipping", "Total Cost", "Cashback Rate", "Insurance", "Payout Amount"):
+        profit = ledger_sync._profit_formula(7)
+        for name in ("COGS", "Insurance", "Payout Amount", "Status"):
             letter = ledger_sync._col_letter(HEADER.index(name))
-            assert f"{letter}7" in formula, f"{name} ({letter}) missing from the profit formula"
-        # Card, Payout Date, and Order ID are NOT part of the arithmetic. Order ID in particular:
-        # there's no SUMIF here (unlike the original design) — Shipping already holds this row's
-        # final cost-weighted share by the time this formula ever runs.
-        for name in ("Card", "Payout Date", "Order ID"):
+            assert f"{letter}7" in profit, f"{name} ({letter}) missing from the profit formula"
+        # The cost side now lives in COGS, so profit must NOT re-derive it — two copies of the same
+        # arithmetic is exactly what would drift.
+        for name in ("Card", "Payout Date", "Order ID", "Total Cost", "Shipping", "Cashback Rate"):
             letter = ledger_sync._col_letter(HEADER.index(name))
-            assert f"{letter}7" not in formula, f"{name} should not be part of the profit math"
+            assert f"{letter}7" not in profit, f"{name} should not be part of the profit math"
+
+        cogs = ledger_sync._cogs_formula(7)
+        for name in ("Total Cost", "Shipping", "Cashback Rate", "Status"):
+            letter = ledger_sync._col_letter(HEADER.index(name))
+            assert f"{letter}7" in cogs, f"{name} ({letter}) missing from the COGS formula"
+        # Insurance is an EXPENSE, not part of the cost of the goods. Order ID: no SUMIF here —
+        # Shipping already holds this row's final cost-weighted share by the time this runs.
+        for name in ("Insurance", "Payout Amount", "Order ID", "Card"):
+            letter = ledger_sync._col_letter(HEADER.index(name))
+            assert f"{letter}7" not in cogs, f"{name} should not be part of the COGS math"
 
     def test_blank_payout_leaves_the_cell_blank(self):
         # Not 0: an un-paid-out row would otherwise show a large fake loss and poison a column sum.
         payout = ledger_sync._col_letter(HEADER.index("Payout Amount"))
-        assert ledger_sync._profit_formula(7).startswith(f'=IF({payout}7="","",')
+        assert f'IF({payout}7="","",' in ledger_sync._profit_formula(7)
+        # COGS deliberately does NOT gate on payout: the cost was incurred whether or not the buying
+        # group has paid yet, and the year-end cost side has to count it.
+        assert f'IF({payout}7="","",' not in ledger_sync._cogs_formula(7)
 
 
 class TestFormulaIsWritten:
@@ -109,9 +153,13 @@ class TestFormulaIsWritten:
 
         sync_csv_to_sheet(path)
 
-        expected_col = ledger_sync._col_letter(HEADER.index("Total Profit"))
-        assert sheet.batched[0]["range"] == f"{expected_col}2"
-        assert sheet.data_rows()[0][FIELDNAMES.index("total_profit")].startswith("=")
+        # BOTH derived columns are stamped, in one batch — Total Profit reads the COGS cell, so
+        # stamping one without the other would leave a live formula pointing at a frozen number.
+        written = {e["range"] for e in sheet.batched}
+        for name, field in (("COGS", "cogs"), ("Total Profit", "total_profit")):
+            letter = ledger_sync._col_letter(HEADER.index(name))
+            assert f"{letter}2" in written, f"{name} formula was not written"
+            assert sheet.data_rows()[0][FIELDNAMES.index(field)].startswith("=")
 
     def test_nothing_synced_means_no_formula_call(self, sheet, tmp_path):
         sheet.rows = [list(HEADER)]

@@ -45,6 +45,7 @@ from sheets.ledger_sync import (
     _INT_FIELDS,
     _NUMERIC_FIELDS,
     _STATUS_RANK,
+    _cogs_formula,
     _parse_display_number,
     _profit_formula,
 )
@@ -539,74 +540,101 @@ def check_blank_order_id_rows(sheet: Sheet, opts: Options) -> Result:
 # --------------------------------------------------------------------------------------------------
 
 
-@check("profit_formula_coverage")
-def check_profit_formula_coverage(sheet: Sheet, opts: Options) -> Result:
+# The columns sheets.ledger_sync owns as LIVE FORMULAS, and the function that produces each. Driving
+# the three checks below off one map is what keeps them honest: adding a formula column without
+# teaching the auditor about it would otherwise make no_stray_formulas fail it as a hand edit while
+# nothing checked it was correct.
+_FORMULA_COLUMNS = {"COGS": _cogs_formula, "Total Profit": _profit_formula}
+
+
+def _formula_coverage(sheet: Sheet, opts: Options, column: str, name: str) -> Result:
     """"23/23 formulas intact" -- a frozen cell looks normal and just stops updating.
 
-    ledger_sync.py:520-524: a FORMATTED read carries the formula's evaluated NUMBER forward, and the
-    RAW row write freezes it into place. Only the FORMULA render mode can tell the difference.
+    A FORMATTED read carries the formula's evaluated NUMBER forward, and the RAW row write freezes it
+    into place. Only the FORMULA render mode can tell the difference.
     """
     missing, total = [], 0
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         total += 1
-        value = sheet.cell(sheet.grids.formula, row_number, "Total Profit")
+        value = sheet.cell(sheet.grids.formula, row_number, column)
         if not (isinstance(value, str) and value.startswith("=")):
             missing.append(f"row {row_number}: holds {value!r} instead of a formula")
     if not missing:
-        return Result("profit_formula_coverage", "PASS", f"{total}/{total} rows carry a formula")
-    return Result(
-        "profit_formula_coverage", "FAIL",
-        f"{total - len(missing)}/{total} rows carry a formula",
-        _truncate(missing, opts.max_detail),
-    )
+        return Result(name, "PASS", f"{total}/{total} rows carry a formula")
+    return Result(name, "FAIL", f"{total - len(missing)}/{total} rows carry a formula",
+                  _truncate(missing, opts.max_detail))
+
+
+def _formula_literal(sheet: Sheet, opts: Options, column: str, builder, name: str) -> Result:
+    """Nothing else in the repo can catch a STALE formula after a column reorder.
+
+    These formulas address columns by LETTER, and the design notes records those letters moving twice in one
+    day. A stale formula still evaluates and still shows a plausible dollar figure -- it's just
+    silently pointed at the wrong cells. Deriving the expectation from the builder rather than
+    hardcoding it means this follows any future reorder automatically.
+    """
+    wrong, total = [], 0
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        value = sheet.cell(sheet.grids.formula, row_number, column)
+        if not (isinstance(value, str) and value.startswith("=")):
+            continue  # the coverage check owns that failure
+        total += 1
+        expected = builder(row_number)
+        if value != expected:
+            wrong.append(
+                f"row {row_number}:\n"
+                f"      is:        {value}\n"
+                f"      should be: {expected}"
+            )
+    if not wrong:
+        return Result(name, "PASS", f"{total}/{total} match {builder.__name__}(row)")
+    return Result(name, "FAIL",
+                  f"{len(wrong)}/{total} formula(s) differ from the current schema -- likely stale "
+                  "after a reorder",
+                  _truncate(wrong, min(opts.max_detail, 4)))
+
+
+@check("profit_formula_coverage")
+def check_profit_formula_coverage(sheet: Sheet, opts: Options) -> Result:
+    return _formula_coverage(sheet, opts, "Total Profit", "profit_formula_coverage")
 
 
 @check("profit_formula_literal")
 def check_profit_formula_literal(sheet: Sheet, opts: Options) -> Result:
-    """Nothing else in the repo can catch a STALE formula after a column reorder.
+    return _formula_literal(sheet, opts, "Total Profit", _profit_formula, "profit_formula_literal")
 
-    The formula addresses columns by LETTER, and the design notes records those letters moving twice in one
-    day. A stale formula still evaluates and still shows a plausible dollar figure -- it's just
-    silently pointed at the wrong cells. Deriving the expectation from _profit_formula rather than
-    hardcoding it means this check follows any future reorder automatically.
-    """
-    wrong, total = [], 0
-    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-        value = sheet.cell(sheet.grids.formula, row_number, "Total Profit")
-        if not (isinstance(value, str) and value.startswith("=")):
-            continue  # coverage check owns that failure
-        total += 1
-        expected = _profit_formula(row_number)
-        if value != expected:
-            wrong.append(f"row {row_number}:\n      is:       {value}\n      should be: {expected}")
-    if not wrong:
-        return Result("profit_formula_literal", "PASS", f"{total}/{total} match _profit_formula(row)")
-    return Result(
-        "profit_formula_literal", "FAIL",
-        f"{len(wrong)}/{total} formula(s) differ from the current schema -- likely stale after a reorder",
-        _truncate(wrong, min(opts.max_detail, 4)),
-    )
+
+@check("cogs_formula_coverage")
+def check_cogs_formula_coverage(sheet: Sheet, opts: Options) -> Result:
+    return _formula_coverage(sheet, opts, "COGS", "cogs_formula_coverage")
+
+
+@check("cogs_formula_literal")
+def check_cogs_formula_literal(sheet: Sheet, opts: Options) -> Result:
+    """COGS is the year-end cost figure, so a stale one misreports taxes rather than just a cell."""
+    return _formula_literal(sheet, opts, "COGS", _cogs_formula, "cogs_formula_literal")
 
 
 @check("no_stray_formulas")
 def check_no_stray_formulas(sheet: Sheet, opts: Options) -> Result:
-    """A hand-written formula anywhere but Total Profit gets flattened to text by the next RAW write."""
-    profit_index = sheet.col("Total Profit")
+    """A hand-written formula anywhere but the derived columns gets flattened to text by the next
+    RAW write."""
+    owned = {sheet.col(name) for name in _FORMULA_COLUMNS}
     offenders = []
     for row_number, row in sheet.rows(sheet.grids.formula):
         for index, value in enumerate(row):
-            if index == profit_index:
+            if index in owned:
                 continue
             if isinstance(value, str) and value.startswith("="):
                 name = sheet.header[index] if index < len(sheet.header) else f"col {index + 1}"
                 offenders.append(f"row {row_number}, {name}: {value}")
     if not offenders:
-        return Result("no_stray_formulas", "PASS", "no hand-written formulas outside Total Profit")
-    return Result(
-        "no_stray_formulas", "FAIL",
-        f"{len(offenders)} formula(s) outside Total Profit -- the next sync flattens them to text",
-        _truncate(offenders, opts.max_detail),
-    )
+        return Result("no_stray_formulas", "PASS",
+                      f"no hand-written formulas outside {'/'.join(_FORMULA_COLUMNS)}")
+    return Result("no_stray_formulas", "FAIL",
+                  f"{len(offenders)} formula(s) outside {'/'.join(_FORMULA_COLUMNS)} -- the next "
+                  "sync flattens them to text",
+                  _truncate(offenders, opts.max_detail))
 
 
 # --------------------------------------------------------------------------------------------------

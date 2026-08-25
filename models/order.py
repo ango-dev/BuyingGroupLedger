@@ -69,35 +69,46 @@ TERMINAL_STATUSES = ("delivered", "cancelled", "paid", "return")
 # preferred way to add a column stays APPENDING at the end: existing rows just gain a trailing blank
 # and no migration is needed.
 FIELDNAMES = [
-    # --- identity: what was bought, when, and on whose account ---
+    # --- identity: the upsert key first (order_date + order_id + item_name + shipment), then what/how many ---
     "order_date",
     "status",
-    "profile_label",
     "retailer",
-    "item_name",
-    "quantity",
     "order_id",
-    "tracking_number",
+    "item_name",
     # Distinguishes shipments of one order so identical items split across shipments (same SKU in
     # shipment 1 and 2) don't collide on the upsert key. A BARE NUMBER ("1", "2", ...) — the old
     # "Shipment 1" wording was redundant under a column already headed "Shipment". Every retailer
     # numbers from 1, single included; "" only on legacy rows written before this column existed.
     # OrderItem normalizes any "Shipment N" input down to "N" (see _normalize_shipment).
     "shipment",
-    "delivery_date",
-    # --- money: cost in, cashback + payout back, profit out ---
+    "quantity",
+    # --- money: what it cost -> what the card gave back -> COGS -> what came back -> profit -> who paid ---
     "cost_per_item",
+    "total_cost",
     # Every scraper/agent emits the ORDER-LEVEL shipping total, repeated on every shipment row (see
     # OrderItem.shipping below) — sheets.ledger_sync.sync_csv_to_sheet is what turns that into each
     # row's actual cost-weighted SHARE before it lands on the sheet, so this field's value in a CSV
     # and its value in the ledger are deliberately NOT the same number.
     "shipping",
-    "total_cost",
     # Derived from card_last4 at run time (main.run_scrape -> config.cards.tag_cards): the friendly
     # card name and the cashback rate that applies to this row. Both blank when card_last4 is blank
     # (a partial re-check), so _merge_row preserves what the first full extraction recorded.
     "card_name",
     "cashback_rate",
+    # DERIVED IN THE SHEET like total_profit below, and for the same reason. Cost of Goods Sold for
+    # this row, net of the card rebate:
+    #
+    #     COGS = (total_cost + this row's SHARE of shipping) * (1 - cashback_rate)
+    #
+    # Cashback is netted into COST here rather than counted as income, because card rewards earned on
+    # a purchase are a purchase-price adjustment, not receipts — which is the characterisation a
+    # Schedule C wants. `insurance` is deliberately NOT in here: a buying-group premium is an ordinary
+    # business expense, not part of the cost of the goods, and folding it in would misreport both.
+    #
+    # UNLIKE total_profit this is populated whenever total_cost exists — it must NOT blank out on a
+    # row that hasn't paid out yet, because the cost was incurred regardless and the year-end cost
+    # side has to count it.
+    "cogs",
     # Filled by the buying-group sync (sync_tracking.py), or by hand. The scrapers always emit these
     # blank, and _merge_row's blank-never-overwrites rule is what keeps a re-scrape from wiping
     # numbers typed into the sheet by hand.
@@ -115,15 +126,9 @@ FIELDNAMES = [
     # Closes the money block: which buying group this row's payout is coming from. DERIVED from
     # delivery_address by config.warehouses.classify_address at run time (in main.run_scrape).
     "buying_group",
-    # --- reference / audit: rarely scanned, so parked at the end ---
-    "order_url",
-    "tracking_url",
-    # The raw address buying_group was classified from — kept back here with the other reference data
-    # rather than beside its tag, since it's long, wraps badly, and is only consulted when a
-    # classification looks wrong.
-    "delivery_address",
-    "card_last4",
-    "last_scraped_at",
+    # --- logistics: consulted per-shipment, not scanned ---
+    "tracking_number",
+    "delivery_date",
     # Has this row's tracking number been accepted by its buying group? A real BOOLEAN, so the
     # column works as a Google Sheets checkbox.
     #
@@ -134,6 +139,10 @@ FIELDNAMES = [
     # unticked box next to a shipped package is the thing worth noticing. It is a display of state,
     # not a source of truth. Blank on every scraper path, so _merge_row preserves it.
     "tracking_submitted",
+    "profile_label",
+    # --- reference / audit: rarely scanned, so parked at the end ---
+    "order_url",
+    "tracking_url",
     # A link to this ORDER's captured receipt in object storage (receipts/). One document per order,
     # so every row of a multi-item / multi-shipment order carries the same link — the receipt covers
     # the whole order, and duplicating the link is what makes it reachable from whichever row you
@@ -142,6 +151,12 @@ FIELDNAMES = [
     # Filled by receipts.capture.attach_receipts during the scrape and blank when receipt capture is
     # unconfigured, so _merge_row's blank-never-overwrites rule keeps a link already on the sheet.
     "receipt_url",
+    # The raw address buying_group was classified from — kept back here with the other reference data
+    # rather than beside its tag, since it's long, wraps badly, and is only consulted when a
+    # classification looks wrong.
+    "delivery_address",
+    "card_last4",
+    "last_scraped_at",
 ]
 
 
@@ -175,6 +190,10 @@ class OrderItem(BaseModel):
     payout_date: str = ""
     payout_amount: float | None = None
     # Always blank from here; sheets.ledger_sync writes a live formula into the cell instead.
+    # Both are DERIVED IN THE SHEET (live formulas) and always emitted blank from here — they
+    # exist on the model only so FIELDNAMES can name real fields and the columns hold their
+    # position in the CSV. See sheets.ledger_sync._cogs_formula / _profit_formula.
+    cogs: float | None = None
     total_profit: float | None = None
     # Always blank from a scraper; sync_tracking.py ticks it when a buying group accepts the tracking
     # number. Typed as a string, not a bool, precisely so the scrapers' blank survives _merge_row —
@@ -193,7 +212,8 @@ class OrderItem(BaseModel):
     _promo_cashback_rate: float | None = PrivateAttr(default=None)
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
-                     "cashback_rate", "insurance", "payout_amount", "total_profit", mode="before")
+                     "cashback_rate", "insurance", "payout_amount", "cogs", "total_profit",
+                     mode="before")
     @classmethod
     def _blank_to_none(cls, v):
         # The agent may send "" (or whitespace) for numbers it skipped — treat as None, not 0.

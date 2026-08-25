@@ -25,33 +25,40 @@ _SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)
 # migrate the live sheet (scripts/reorder_sheet.py) rather than silently scrambling existing rows.
 # ADDING a column means appending to BOTH lists, which needs no migration.
 HEADER = [
+    # --- identity ---
     "Order Date",
-    "Status",
-    "Profile",
+    "Status",  # PINNED AT COLUMN B — the sheet's status colour rules are `=$B2="delivered"` and
+               # friends, and reorder_sheet rewrites VALUES without moving columns, so moving Status
+               # would leave all six rules colouring every row by whatever landed in B instead.
     "Retailer",
-    "Item Name",
-    "Quantity",
     "Order ID",
-    "Tracking Number",
+    "Item Name",
     "Shipment",  # bare number ("1", "2"), not "Shipment 1" — the column heading already says it
-    "Delivery Date",
+    "Quantity",
+    # --- money, left to right in the order you reason about it ---
     "Cost Per Item",
-    "Shipping",
-    "Total Cost",
+    "Total Cost",  # = Quantity x Cost Per Item, so it sits directly after both
+    "Shipping",  # this row's cost-weighted SHARE of the order-level total
     "Card",  # derived from Card Last 4 (config.cards.resolve_card)
     "Cashback Rate",  # decimal fraction (0.02) — format the column as a percentage to taste
-    "Insurance",  # user-entered (BFMR/MaxOutDeals later)
-    "Payout Amount",  # user-entered (BFMR/MaxOutDeals later)
-    "Payout Date",  # user-entered (BFMR/MaxOutDeals later)
-    "Total Profit",  # a live sheet formula, written by _profit_formula
+    "COGS",  # a live sheet formula, written by _cogs_formula: cost + shipping, net of cashback
+    "Insurance",  # a buying-group premium — an EXPENSE, deliberately not part of COGS
+    "Payout Amount",
+    "Payout Date",
+    "Total Profit",  # a live sheet formula, written by _profit_formula: Payout - COGS - Insurance
     "Buying Group",  # derived from Delivery Address (config.warehouses.classify_address)
+    # --- logistics: consulted per shipment, not scanned ---
+    "Tracking Number",
+    "Delivery Date",
+    "Tracking Submitted",  # a checkbox; ticked by sync_tracking.py when a group accepts the number
+    "Profile",  # which browser profile scraped it — a scraper detail, never read while reconciling
+    # --- reference / audit ---
     "Order Link",
     "Tracking Link",
+    "Receipt Link",  # the order's captured receipt in object storage (receipts/capture.py)
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Last Scraped At",
-    "Tracking Submitted",  # a checkbox; ticked by sync_tracking.py when a group accepts the number
-    "Receipt Link",  # the order's captured receipt in object storage (receipts/capture.py)
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
@@ -103,33 +110,71 @@ def _col_letter(index: int) -> str:
 _COL = {field: _col_letter(i) for i, field in enumerate(FIELDNAMES)}
 
 
+def _cogs_formula(row_number: int) -> str:
+    """The live COGS (Cost of Goods Sold) formula for one sheet row.
+
+        COGS = (Total Cost + Shipping) * (1 - Cashback Rate)
+
+    THE CASHBACK IS NETTED INTO COST, not counted as income. Card rewards earned on a purchase are a
+    purchase-price adjustment rather than receipts, so this is the characterisation a Schedule C
+    wants — and it is why this column exists at all: it is the year-end cost figure, ready to SUMIF.
+
+    INSURANCE IS DELIBERATELY ABSENT. A buying-group premium is an ordinary business expense, not part
+    of the cost of the goods; folding it in here would overstate COGS and understate expenses, which
+    are separate lines on the form. _profit_formula subtracts it separately.
+
+    Shipping is read directly and is already this row's cost-weighted SHARE (see _reprorate_shipping),
+    so there is nothing to divide out — the same reasoning as _profit_formula.
+
+    A CANCELLED ROW REPORTS NOTHING. The order was refunded, so no cost was ever incurred and it
+    must not reach the year-end cost side — but the row itself stays for bookkeeping (see
+    _blank_money_for_cancelled, which empties the scraped money cells behind it). The guard is a
+    formula rather than a one-off cleanup so it also covers every FUTURE cancellation, and it reads
+    the Status cell through _COL rather than a literal column letter, so a reorder can't leave it
+    pointing at the wrong column.
+
+    UNLIKE _profit_formula this does NOT blank out on a row with no payout. The cost was incurred
+    whether or not the buying group has paid yet, and the year-end cost side has to count it; gating
+    it on payout would silently drop every not-yet-paid order from the total. It blanks only when
+    Total Cost itself is blank, i.e. there is no cost to report.
+    """
+    n = row_number
+    cost, ship, rate = _COL["total_cost"], _COL["shipping"], _COL["cashback_rate"]
+    status = _COL["status"]
+    return (
+        f'=IF({status}{n}="cancelled","",'
+        f'IF({cost}{n}="","",IFERROR(({cost}{n}+{ship}{n})*(1-{rate}{n}),"")))'
+    )
+
+
 def _profit_formula(row_number: int) -> str:
     """The live Total Profit formula for one sheet row.
 
-        Total Profit = Payout Amount + Cashback - Total Cost - Shipping - Insurance
-        Cashback     = (Total Cost + Shipping) * Cashback Rate
+        Total Profit = Payout Amount - COGS - Insurance
 
-    It's a formula, not a Python-computed number, because Insurance and Payout Amount are typed into
-    the sheet by hand (and later filled by the BFMR/MaxOutDeals step). A value computed at scrape time
-    would be stale the moment either is entered, and a delivered row is terminal — never re-scraped —
-    so it would stay stale forever.
+    This READS THE COGS CELL rather than re-deriving cost from its parts. It is algebraically the
+    same number as the older self-contained version — expand COGS and you get
+    `payout + (cost+ship)*rate - cost - ship - insurance` exactly — but with one expression of the
+    cost side instead of two that could drift apart. It also makes the row read the way the money
+    actually works: what came in, minus what the goods cost, minus the fee.
 
-    Reads Shipping directly — NO proration happens here. Every scraper/agent emits the order-level
-    shipping total repeated on every row, but sync_csv_to_sheet's _reprorate_shipping rewrites each
-    row's Shipping cell to its own cost-weighted SHARE of that total before this formula ever runs —
-    so by the time it reads the cell, there's nothing left to divide out (2026-08-13; a live SUMIF-
-    based split used to live here, folded straight into this formula, but the user wanted the split
-    itself visible in Shipping rather than only showing up inside Total Profit — see _reprorate_shipping's
-    docstring for why that split has to be computed in Python at sync time, not as a sheet formula).
+    It's a formula, not a Python-computed number, because Insurance and Payout Amount arrive after the
+    scrape (from the buying-group sync, or typed in). A value computed at scrape time would be stale
+    the moment either lands, and a delivered row is terminal — never re-scraped — so it would stay
+    stale forever.
 
     Returns "" (blank cell, not 0) until Payout Amount is filled, so an un-paid-out row doesn't
-    display a large fake loss that would poison a column sum.
+    display a large fake loss that would poison a column sum. COGS deliberately does NOT do this.
+
+    A CANCELLED ROW also reports nothing, for the same reason COGS does — see _cogs_formula.
     """
     n = row_number
-    cost, ship = _COL["total_cost"], _COL["shipping"]
-    rate, ins, payout = _COL["cashback_rate"], _COL["insurance"], _COL["payout_amount"]
-    profit = f"{payout}{n}+({cost}{n}+{ship}{n})*{rate}{n}-{cost}{n}-{ship}{n}-{ins}{n}"
-    return f'=IF({payout}{n}="","",IFERROR({profit},""))'
+    cogs, ins, payout = _COL["cogs"], _COL["insurance"], _COL["payout_amount"]
+    status = _COL["status"]
+    return (
+        f'=IF({status}{n}="cancelled","",'
+        f'IF({payout}{n}="","",IFERROR({payout}{n}-{cogs}{n}-{ins}{n},"")))'
+    )
 
 # Furthest-along status wins when two rows of ONE shipment are collapsed in a single sync (see
 # _collapse_records). Mirrors _rollup_status's spirit: cancelled overrides, then the buying-group
@@ -421,6 +466,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
 
     updates = 0
     appends: list[list] = []
+    cancelled_rows: list[int] = []
     claimed_rows: set[int] = set()
     written_rows: list[int] = []  # every row touched this sync -> gets its Total Profit formula
     split_events: list[dict] = []
@@ -505,7 +551,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                     if name_hdr_idx < len(match[1]) and str(match[1][name_hdr_idx]).strip():
                         sheet_row[name_field_idx] = match[1][name_hdr_idx]  # keep recorded name
             if match is None:
-                appends.append(sheet_row)
+                appends.append(_blank_money_for_cancelled(sheet_row))
                 continue
             row_number, existing_row = match
 
@@ -541,7 +587,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                     split_row[shipment_field_idx] = _coerce("shipment", label)
                     split_row[qty_field_idx] = "*"      # unknown per-box split — user fills it in
                     split_row[total_field_idx] = ""     # can't compute Total Cost without a quantity
-                    appends.append(split_row)
+                    appends.append(_blank_money_for_cancelled(split_row))
                     split_events.append({
                         "order_id": record["order_id"],
                         "item_name": (existing_row[name_hdr_idx] if name_hdr_idx < len(existing_row)
@@ -557,6 +603,9 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         # (e.g. a quantity carried over from a prior run) is written as a number, not text —
         # otherwise Sheets stores it as text and shows a leading-apostrophe '1.
         merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
+        merged = _blank_money_for_cancelled(merged)
+        if str(merged[_STATUS_FIELD_IDX] or "").strip().lower() == "cancelled":
+            cancelled_rows.append(row_number)
         worksheet.update(range_name=f"A{row_number}", values=[_blank_to_none(merged)])
         claimed_rows.add(row_number)
         written_rows.append(row_number)
@@ -576,6 +625,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         written_rows.extend(range(start_row, start_row + len(appends)))
 
     _reprorate_shipping(worksheet, touched_order_ids, raw_shipping_by_order)
+    _clear_cancelled_money(worksheet, cancelled_rows)
     _write_profit_formulas(worksheet, written_rows)
 
     if split_events:
@@ -721,8 +771,86 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
     return {"sorted_rows": len(row_numbers), "already_sorted": False}
 
 
+# The money AMOUNTS a cancelled order must not carry. Blanked rather than zeroed so they read as
+# "no such number" instead of "a real zero", and so a stray SUM over the raw column can't pick them up.
+#
+# cashback_rate and card_name are deliberately NOT here: they describe the CARD, not an amount, and
+# nothing sums them — while blanking the rate would trip audit_sheet's card/rate coverage check on
+# every cancelled row for no gain. COGS and Total Profit aren't here either; they're formulas that
+# blank themselves on a cancelled row (see _cogs_formula).
+_CANCELLED_BLANK_FIELDS = (
+    "cost_per_item", "total_cost", "shipping", "insurance", "payout_amount", "payout_date",
+)
+
+
+def _blank_money_for_cancelled(row: list) -> list:
+    """Empty the money cells on a CANCELLED row, keeping the row itself for bookkeeping.
+
+    A cancelled order was refunded, so no money ever moved: leaving the scraped cost on the row makes
+    it look like a real purchase to anything that sums the column, and at year end that is an
+    overstated cost of goods. The row still says what was ordered, from whom, and that it was
+    cancelled — which is the bookkeeping part worth keeping.
+
+    Applied at WRITE time (here and in scripts/reorder_sheet.py) rather than by a one-off cleanup,
+    because a cleanup only fixes the rows that exist when it runs. Cancelled is terminal, so a row
+    blanked here is never re-scraped and never re-populated.
+
+    Returns a new list; the input is not mutated.
+    """
+    try:
+        status = str(row[FIELDNAMES.index("status")] or "").strip().lower()
+    except (IndexError, ValueError):
+        return list(row)
+    if status != "cancelled":
+        return list(row)
+    out = list(row)
+    for field in _CANCELLED_BLANK_FIELDS:
+        i = FIELDNAMES.index(field)
+        if i < len(out):
+            out[i] = ""
+    return out
+
+
+def _clear_cancelled_money(worksheet, row_numbers: list[int]) -> None:
+    """Actually EMPTY the money cells on rows that just became cancelled.
+
+    _blank_money_for_cancelled puts "" in the row, which is enough for an APPEND (the cell was never
+    populated) but not for an UPDATE: _blank_to_none turns "" into None on the way out, and None means
+    "leave this cell alone", not "clear it". So a row that carried a real cost before it was cancelled
+    would keep that cost forever — and cancelled is terminal, so nothing would ever come back for it.
+
+    Uses USER_ENTERED with "", which _blank_to_none's own measurements record as the one combination
+    that clears the VALUE while preserving the cell's number format (RAW "" strips the format; RAW
+    None doesn't write at all). Same reason _write_profit_formulas is a separate USER_ENTERED batch.
+
+    Fails soft: the row data is already written, and the next sync re-clears.
+    """
+    if not row_numbers:
+        return
+    data = [
+        {"range": f"{_COL[field]}{n}", "values": [[""]]}
+        for n in sorted(set(row_numbers))
+        for field in _CANCELLED_BLANK_FIELDS
+    ]
+    try:
+        worksheet.batch_update(data, value_input_option="USER_ENTERED")
+        log.info("Cleared the money cells on %d cancelled row(s).", len(set(row_numbers)))
+    except Exception:
+        log.exception(
+            "Could not clear the money cells on %d cancelled row(s); they may still show a refunded "
+            "cost until the next sync.", len(set(row_numbers)),
+        )
+
+
 def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
-    """(Re)write the Total Profit formula into every row this sync touched — one batched API call.
+    """(Re)write BOTH derived formula columns — COGS and Total Profit — into every row this sync
+    touched, in one batched API call.
+
+    The name is historical: it predates COGS, and every caller means "restore this row's derived
+    formulas", so it was kept rather than churned across six call sites. Both columns are stamped
+    together because they have identical needs — same reason for existing, same failure mode, and
+    Total Profit READS the COGS cell, so stamping one without the other would leave a live formula
+    pointing at a frozen number.
 
     Why a SEPARATE write instead of putting the formula in the main row block: the row block is sent
     RAW so the sheet stores values exactly as scraped, which a formula string would land as literal
@@ -744,16 +872,16 @@ def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
     """
     if not row_numbers:
         return
-    col = _COL["total_profit"]
-    data = [
-        {"range": f"{col}{n}", "values": [[_profit_formula(n)]]}
-        for n in sorted(set(row_numbers))
-    ]
+    profit_col, cogs_col = _COL["total_profit"], _COL["cogs"]
+    data = []
+    for n in sorted(set(row_numbers)):
+        data.append({"range": f"{cogs_col}{n}", "values": [[_cogs_formula(n)]]})
+        data.append({"range": f"{profit_col}{n}", "values": [[_profit_formula(n)]]})
     try:
         worksheet.batch_update(data, value_input_option="USER_ENTERED")
     except Exception:
         log.exception(
-            "Could not write the Total Profit formula into %d row(s); the row data itself was "
+            "Could not write the COGS/Total Profit formulas into %d cell(s); the row data itself was "
             "written and the next sync will restore the formula.", len(data),
         )
 
@@ -796,6 +924,7 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
     oid_i = header.index("Order ID")
     ship_i = header.index("Shipping")
     cost_i = header.index("Total Cost")
+    status_i = header.index("Status")
     ship_col = _col_letter(ship_i)
 
     rows_by_order: dict[str, list[int]] = {}
@@ -813,6 +942,12 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
                  for n in row_numbers}
         cost_sum = sum(c for c in costs.values() if c)
         for n in row_numbers:
+            # A CANCELLED row carries no money (see _blank_money_for_cancelled), and this runs AFTER
+            # the row write — so without this it would put a freshly-computed 0.0 back into a cell the
+            # write had just emptied, undoing the blanking every single sync.
+            row_status = grid[n - 1][status_i] if status_i < len(grid[n - 1]) else ""
+            if str(row_status).strip().lower() == "cancelled":
+                continue
             share = round(total * (costs[n] or 0) / cost_sum, 2) if cost_sum else 0.0
             data.append({"range": f"{ship_col}{n}", "values": [[share]]})
 
