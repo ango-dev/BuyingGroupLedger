@@ -29,7 +29,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from config.loader import CONFIG_FILE, STATE_FILE
-from config.settings import ENV_TO_CONFIG
+from config.settings import BOOLEAN_SETTINGS, ENV_TO_CONFIG
 
 ROOT = Path(__file__).resolve().parent.parent
 LEGACY_PROFILES = ROOT / "profiles.json"
@@ -65,15 +65,23 @@ def _read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
-def _coerce(value: str):
+def _coerce(name: str, value: str):
     """Turn a .env string into the JSON type it obviously is.
 
     `.env` can only hold strings, but config.json has real types, and `"true"` or `"3"` sitting in a
     JSON file as strings would read as sloppy and invite someone to "fix" one into a type the
     settings then coerce differently. Left alone when ambiguous — notably a rate like "2%", which
     _get_rate understands and float() would mangle.
+
+    THE FLAGS NEED THE VARIABLE'S NAME, not just its value. `RECEIPT_CAPTURE_ENABLED=1` and
+    `RUN_INTERVAL_HOURS=1` are the same three characters, and reading the value alone makes both an
+    int — which is how a migrated config ended up with `"capture_enabled": 1`. It still WORKS, since
+    _get_bool accepts "1", so nothing ever complained; it just left a money switch written in the one
+    spelling that carries no hint which way round it goes. BOOLEAN_SETTINGS knows which is which.
     """
     text = value.strip()
+    if name in BOOLEAN_SETTINGS:
+        return text.lower() in {"1", "true", "yes", "on"}
     if text.lower() in {"true", "false"}:
         return text.lower() == "true"
     if text.endswith("%"):
@@ -102,7 +110,7 @@ def build_config() -> tuple[dict, dict, list[str]]:
         # The live environment wins over the file, so a value exported in the shell migrates too.
         value = os.getenv(name) or env.get(name)
         if value not in (None, ""):
-            _assign(config, path, _coerce(value))
+            _assign(config, path, _coerce(name, value))
     unmapped = sorted(set(env) - set(ENV_TO_CONFIG))
     if unmapped:
         notes.append(

@@ -125,6 +125,13 @@ def _get_float(name: str, default: float) -> float:
     return float(value) if value not in (None, "") else default
 
 
+#: Which settings are flags, recorded by `_get_bool` itself as `Settings`' field defaults are
+#: evaluated at import. Derived rather than hand-listed on purpose: anything that has to be kept in
+#: step by hand eventually is not, and the consumers here are a migrator that would write the wrong
+#: JSON type and a README table that would document the wrong spelling — both silent.
+BOOLEAN_SETTINGS: set[str] = set()
+
+
 def _get_bool(name: str, default: bool) -> bool:
     """Read a flag. Only the affirmative spellings are true — anything else, including a typo, is
     false. A switch that guards spending money should fail closed.
@@ -137,6 +144,7 @@ def _get_bool(name: str, default: bool) -> bool:
     string. Both go through the same affirmative-spellings test, so a typo fails closed in EITHER
     source rather than only in the one that happens to be a string.
     """
+    BOOLEAN_SETTINGS.add(name)
     raw = os.getenv(name)
     if raw is None or not raw.strip():
         raw = config_value(_config_path(name))

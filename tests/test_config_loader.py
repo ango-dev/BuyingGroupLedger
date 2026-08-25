@@ -13,7 +13,8 @@ import json
 import pytest
 
 from config import loader
-from config.settings import ENV_TO_CONFIG, _get_bool, _get_float, _get_int, _get_rate, _get_str
+from config.settings import (BOOLEAN_SETTINGS, ENV_TO_CONFIG, _get_bool, _get_float, _get_int,
+                             _get_rate, _get_str)
 
 
 class TestResolutionOrder:
@@ -307,17 +308,14 @@ class TestTheReadmeTableStaysHonest:
 
     @staticmethod
     def _booleans() -> set[str]:
-        """The variables settings.py actually reads with _get_bool, read out of its source.
+        """The variables settings.py actually reads with _get_bool — it records them itself.
 
-        Derived rather than listed, so a boolean added later cannot pass by being forgotten here as
-        well as in the README — which would defeat the point of the check.
+        Derived, not listed, so a boolean added later cannot pass by being forgotten here as well as
+        in the README, which would defeat the point of the check.
         """
-        import re
-        from pathlib import Path
+        from config.settings import BOOLEAN_SETTINGS
 
-        source = (Path(__file__).resolve().parents[1] / "config" / "settings.py").read_text(
-            encoding="utf-8")
-        return set(re.findall(r"_get_bool\(\s*\"([A-Z0-9_]+)\"", source))
+        return set(BOOLEAN_SETTINGS)
 
     def test_every_variable_is_documented_against_the_right_key(self):
         import re
@@ -335,3 +333,60 @@ class TestTheReadmeTableStaysHonest:
 
         assert self._booleans(), "no _get_bool calls found — the source scrape has rotted"
         assert marked == self._booleans()
+
+
+class TestMigratedFlagsAreRealBooleans:
+    """`.env` can only hold strings, so the migrator has to pick a JSON type for every value.
+
+    It got the flags wrong: reading the VALUE alone, `RECEIPT_CAPTURE_ENABLED=1` and
+    `RUN_INTERVAL_HOURS=1` are the same three characters, so both became the int 1 and a migrated
+    config carried `"capture_enabled": 1`. It still worked — _get_bool accepts "1" — which is exactly
+    why nobody noticed: no error, no warning, just a money switch written in the one spelling that
+    gives no hint which way round it goes.
+    """
+
+    @pytest.mark.parametrize("name", sorted(BOOLEAN_SETTINGS))
+    @pytest.mark.parametrize("raw, expected", [("1", True), ("0", False),
+                                               ("true", True), ("false", False)])
+    def test_a_flag_migrates_to_a_json_boolean(self, name, raw, expected):
+        from scripts.migrate_config import _coerce
+
+        value = _coerce(name, raw)
+
+        assert value is expected, f"{name}={raw} migrated as {value!r} ({type(value).__name__})"
+
+    def test_a_numeric_setting_is_still_a_number(self):
+        """The fix must not sweep up RUN_INTERVAL_HOURS=1, which really is the int 1."""
+        from scripts.migrate_config import _coerce
+
+        assert _coerce("RUN_INTERVAL_HOURS", "1") == 1
+        assert not isinstance(_coerce("RUN_INTERVAL_HOURS", "1"), bool)
+        assert _coerce("BROWSER_USE_MAX_COST_USD", "0.5") == 0.5
+        assert _coerce("DEFAULT_CASHBACK_RATE", "2%") == "2%"
+
+    def test_the_shipped_example_writes_its_flags_as_booleans(self):
+        """config.example.json is what people copy, so it is the spelling that propagates."""
+        import json
+        from pathlib import Path
+
+        from config.settings import ENV_TO_CONFIG
+
+        example = json.loads(
+            (Path(__file__).resolve().parents[1] / "config.example.json").read_text(
+                encoding="utf-8"))
+
+        checked = 0
+        for name in BOOLEAN_SETTINGS:
+            node = example
+            for part in ENV_TO_CONFIG[name].split("."):
+                if not isinstance(node, dict) or part not in node:
+                    node = None
+                    break
+                node = node[part]
+            if node is None:
+                continue
+            checked += 1
+            assert isinstance(node, bool), f"{ENV_TO_CONFIG[name]} is {node!r}, not a boolean"
+
+        assert checked == len(BOOLEAN_SETTINGS), (
+            "the example file no longer shows every flag, so this check has stopped covering them")
