@@ -72,6 +72,7 @@ FIELDNAMES = [
     # --- identity: the upsert key first (order_date + order_id + item_name + shipment), then what/how many ---
     "order_date",
     "status",
+    "profile_label",
     "retailer",
     "order_id",
     "item_name",
@@ -128,7 +129,6 @@ FIELDNAMES = [
     "buying_group",
     # --- logistics: consulted per-shipment, not scanned ---
     "tracking_number",
-    "delivery_date",
     # Has this row's tracking number been accepted by its buying group? A real BOOLEAN, so the
     # column works as a Google Sheets checkbox.
     #
@@ -139,7 +139,7 @@ FIELDNAMES = [
     # unticked box next to a shipped package is the thing worth noticing. It is a display of state,
     # not a source of truth. Blank on every scraper path, so _merge_row preserves it.
     "tracking_submitted",
-    "profile_label",
+    "delivery_date",
     # --- reference / audit: rarely scanned, so parked at the end ---
     "order_url",
     "tracking_url",

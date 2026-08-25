@@ -598,7 +598,10 @@ class TestContentOutsideTheSchema:
     def test_content_below_the_data_block_warns(self):
         """The append anchor is len(existing)+1, so a note under the data misplaces the next append."""
         note = [Cell("") for _ in HEADER]
-        note[4] = Cell("my notes")  # Item Name column, but no Order ID -- not a ledger row
+        # Indexed BY NAME, not by a literal: this said note[4] until the 2026-08-25 reorder moved
+        # Order ID to index 4, at which point the "note" became a real ledger row and the check had
+        # nothing to warn about — the test passed while asserting the opposite of its intent.
+        note[HEADER.index("Item Name")] = Cell("my notes")  # no Order ID -> not a ledger row
         assert result_for(build(row_cells(2), note), "content_outside_the_schema").status == "WARN"
 
     def test_a_blank_row_inside_the_data_block_warns(self):

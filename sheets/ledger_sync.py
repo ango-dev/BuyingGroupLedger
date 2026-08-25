@@ -30,6 +30,7 @@ HEADER = [
     "Status",  # PINNED AT COLUMN B — the sheet's status colour rules are `=$B2="delivered"` and
                # friends, and reorder_sheet rewrites VALUES without moving columns, so moving Status
                # would leave all six rules colouring every row by whatever landed in B instead.
+    "Profile",  # which browser profile scraped it
     "Retailer",
     "Order ID",
     "Item Name",
@@ -49,9 +50,8 @@ HEADER = [
     "Buying Group",  # derived from Delivery Address (config.warehouses.classify_address)
     # --- logistics: consulted per shipment, not scanned ---
     "Tracking Number",
-    "Delivery Date",
     "Tracking Submitted",  # a checkbox; ticked by sync_tracking.py when a group accepts the number
-    "Profile",  # which browser profile scraped it — a scraper detail, never read while reconciling
+    "Delivery Date",
     # --- reference / audit ---
     "Order Link",
     "Tracking Link",
