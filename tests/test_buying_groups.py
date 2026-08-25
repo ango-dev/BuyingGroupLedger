@@ -42,8 +42,6 @@ def submission(**kw) -> TrackingSubmission:
         # Amazon by default, matching the default order id — so a test only gets the Best Buy
         # duplicate-carton handling when it deliberately asks for it.
         retailer="Amazon",
-        # No jig by default, so insurance tests file with no address unless one is asked for.
-        delivery_address="",
     )
     return TrackingSubmission(**{**defaults, **kw})
 
@@ -61,15 +59,16 @@ class FakeResponse:
 
 
 def filed_form(transport) -> list[dict]:
-    """The insurance/file form fields of each POST, unwrapped from requests' multipart shape.
+    """The form body of each insurance/file POST.
 
-    `files={"k": (None, "v")}` is how a multipart body carries plain form fields, so a test that read
-    `data` would silently see None and pass against a request that sends nothing.
+    Asserts nothing went out as MULTIPART on the way past. A multipart body carries plain fields as
+    `files={"k": (None, "v")}`, so if the client ever switched back to that, a test reading `data`
+    would see nothing at all and pass against a request it never inspected.
     """
-    return [
-        {key: value for key, (_filename, value) in call["files"].items()}
-        for call in transport.calls if call.get("files")
-    ]
+    assert not any(call.get("files") for call in transport.calls), (
+        "insurance/file must send urlencoded form data, not multipart")
+    return [call["data"] for call in transport.calls
+            if call.get("data") and "tracking_number" in call["data"]]
 
 
 class Transport:
@@ -517,119 +516,41 @@ class TestInsuredPresenceIsNotValue:
         assert "POST" not in [c["method"] for c in transport.calls]
 
 
-class TestInsuranceFilesTheRealAddress:
-    """A jig must never reach the insurer as a postal address.
+class TestInsuranceSendsTheTrackingNumberAndNothingElse:
+    """The filing carries one field, and the omissions are the point.
 
-    BFMR hands out deliberately misspelled variants — the live config has "THIRTEEN Sample Drive",
-    "THIRTEEN SAMMPLE DRIVE" and "THIRTEEN SAMMPLE DR1VE", all of them the same real building —
-    so each order routes distinctly. The ledger records what the retailer printed, which is the jig.
-    Filing that would put a fictional street on the policy, and an address that does not exist is
-    exactly the detail a claim is refused over.
+    BFMR's insurance/file also accepts `address[...]`, but those are the PAYEE address — where a
+    claim pays out — not the shipment's destination. This was once read the other way round and the
+    ledger's delivery address (a deliberately misspelled routing jig) was mapped to a warehouse and
+    filed. Omitting the fields makes BFMR use the account profile, which IS the payee, so the
+    fallback is already correct and there is nothing for us to supply.
+
+    `name` and `package_value` are omitted for their own reasons: the account supplies the name, and
+    BFMR derives the value from the shipment items — declaring our own would risk over-declaring and
+    paying a bigger premium than the box warrants.
     """
 
-    JIG = "BuyForMeRetail B999999, THIRTEEN SAMMPLE DR1VE, B999999, Testville, NH 03050-0000"
-
-    @staticmethod
-    def _warehouses(insure_as="sample"):
-        from models.warehouse import Warehouse
-        return [Warehouse.model_validate({
-            "buying_group": "BFMR",
-            "insurance_addresses": {"sample": {
-                "address_1": "13 Sample Drive", "city": "Testville",
-                "state": "NH", "country": "USA", "zip": "03050-0000"}},
-            "jigs": [{"label": "BFMR-3", "street": "THIRTEEN SAMMPLE DR1VE",
-                      "zip": "03050", "insure_as": insure_as}],
-        })]
-
-    def _file(self, bfmr, transport, monkeypatch, warehouses, address):
-        monkeypatch.setattr(bfmr, "_warehouse_cache", warehouses)
+    def _file(self, bfmr, transport):
         transport.responses = [
             tracker({"tracking_number": "TBA1"}), insured(),
             FakeResponse(payload={"message": "Shipment insurance filed successfully"}),
             insured(("TBA1", 6.0, 1299)),
         ]
-        return bfmr.file_insurance([submission(delivery_address=address)])
+        return bfmr.file_insurance([submission()])
 
-    def test_the_real_warehouse_address_is_sent_not_the_jig(self, bfmr, transport, monkeypatch):
-        self._file(bfmr, transport, monkeypatch, self._warehouses(), self.JIG)
-        form = filed_form(transport)[0]
+    def test_the_body_is_exactly_the_tracking_number(self, bfmr, transport):
+        self._file(bfmr, transport)
 
-        assert form["address[address_1]"] == "13 Sample Drive"
-        assert form["address[city]"] == "Testville"
-        assert form["address[state]"] == "NH", "ISO 3166-2 without the US- prefix"
-        assert form["address[country]"] == "USA", "ISO 3166-1 alpha-3, not US"
-        assert form["address[zip]"] == "03050-0000"
-        # The whole point: no spelling of the jig reaches the insurer.
-        assert not any("SAMMPLE" in v or "DR1VE" in v for v in form.values())
+        assert filed_form(transport) == [{"tracking_number": "TBA1"}]
 
-    def test_blank_fields_are_omitted_so_the_profile_fills_them(self, bfmr, transport, monkeypatch):
-        """Sending "" is a VALUE and would overwrite good profile data with nothing; omitting a
-        field is what makes BFMR fall back to the profile."""
-        self._file(bfmr, transport, monkeypatch, self._warehouses(), self.JIG)
-        assert "address[address_2]" not in filed_form(transport)[0]
+    @pytest.mark.parametrize("field", [
+        "address[address_1]", "address[city]", "address[state]", "address[country]", "address[zip]",
+        "name", "package_value",
+    ])
+    def test_no_address_name_or_value_is_ever_sent(self, bfmr, transport, field):
+        self._file(bfmr, transport)
 
-    def test_an_unmapped_jig_sends_no_address_at_all(self, bfmr, transport, monkeypatch):
-        """Falling back to the profile address is the safe answer. A profile address may be the
-        wrong warehouse; a misspelled one is wrong everywhere."""
-        self._file(bfmr, transport, monkeypatch, self._warehouses(insure_as=""), self.JIG)
-        form = filed_form(transport)[0]
-        assert list(form) == ["tracking_number"]
-
-    def test_an_address_matching_no_jig_sends_no_address(self, bfmr, transport, monkeypatch):
-        self._file(bfmr, transport, monkeypatch, self._warehouses(), "742 Evergreen Terrace")
-        assert list(filed_form(transport)[0]) == ["tracking_number"]
-
-    def test_package_value_is_still_never_sent(self, bfmr, transport, monkeypatch):
-        """Adding the address must not smuggle a declared value in beside it — BFMR derives that
-        from the shipment items, and over-declaring buys a bigger premium than the box warrants."""
-        self._file(bfmr, transport, monkeypatch, self._warehouses(), self.JIG)
-        assert "package_value" not in filed_form(transport)[0]
-
-
-class TestInsuranceAddressConfig:
-    """Config-time validation, because the alternative is discovering it on a money path.
-
-    Every one of these mistakes looks right and returns a 400 that names the field — after the run
-    has already decided to insure the package, and while the package stays uninsured.
-    """
-
-    @staticmethod
-    def _warehouse(**address):
-        from models.warehouse import Warehouse
-        return Warehouse.model_validate({
-            "buying_group": "BFMR",
-            "insurance_addresses": {"w": {"address_1": "13 Sample Drive", **address}},
-            "jigs": [{"label": "j", "zip": "03050", "insure_as": "w"}],
-        })
-
-    @pytest.mark.parametrize("state", ["US-NH", "New Hampshire"])
-    def test_a_state_that_is_not_the_bare_iso_code_is_rejected(self, state):
-        with pytest.raises(ValueError, match="ISO 3166-2"):
-            self._warehouse(state=state)
-
-    def test_an_alpha_2_country_is_rejected(self):
-        """"US" is the Alpha-2 code and reads perfectly natural; BFMR wants Alpha-3."""
-        with pytest.raises(ValueError, match="alpha-3"):
-            self._warehouse(country="US")
-
-    def test_a_malformed_zip_is_rejected(self):
-        with pytest.raises(ValueError, match="digits and hyphens"):
-            self._warehouse(zip="03050 0000")
-
-    @pytest.mark.parametrize("zip_code", ["03050", "03050-0000"])
-    def test_both_documented_zip_forms_are_accepted(self, zip_code):
-        assert self._warehouse(zip=zip_code).insurance_addresses["w"].zip == zip_code
-
-    def test_a_jig_pointing_at_a_missing_address_is_rejected_at_load(self):
-        """Silently it would just send no address and insure against the profile — every package
-        from that jig filed to the wrong warehouse until someone made a claim."""
-        from models.warehouse import Warehouse
-        with pytest.raises(ValueError, match="names no entry in insurance_addresses"):
-            Warehouse.model_validate({
-                "buying_group": "BFMR",
-                "insurance_addresses": {"sample": {"address_1": "13 Sample Drive"}},
-                "jigs": [{"label": "j", "zip": "03050", "insure_as": "typo"}],
-            })
+        assert field not in filed_form(transport)[0]
 
 
 class TestBfmrReads:

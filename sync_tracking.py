@@ -131,8 +131,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     # which switched the Best Buy suffix retry off entirely: `_is_bestbuy("")` is False, so no carton
     # ever reached it. The feature was dead in production while its own unit tests passed, because
     # they build a TrackingSubmission directly and never cross this seam.
-    idx.update({name: header.index(name)
-                for name in ("Retailer", "Delivery Address") if name in header})
+    idx.update({name: header.index(name) for name in ("Retailer",) if name in header})
 
     by_group: dict[str, list[TrackingSubmission]] = {}
     rows_by_tracking: dict[str, list[int]] = {}
@@ -249,7 +248,6 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
             order_date=cell("Order Date"),
             buying_group=group_key,
             retailer=optional_cell("Retailer"),
-            delivery_address=optional_cell("Delivery Address"),
         ))
 
     return {

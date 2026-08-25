@@ -199,22 +199,27 @@ class TestCommentsSurvive:
     """JSON has no comments, so the config file uses `"// note"` keys."""
 
     def test_comment_keys_are_stripped_before_a_model_sees_them(self, config_file):
-        """`insurance_addresses` is typed `dict[str, InsuranceAddress]`, so a comment beside the
-        addresses would fail validation."""
-        config_file(warehouses=[{
-            "buying_group": "BFMR",
-            "// note": "why these exist",
-            "insurance_addresses": {
-                "// note": "state is NH, not US-NH",
-                "sample": {"address_1": "13 Sample Drive", "city": "Testville",
-                              "state": "NH", "country": "USA", "zip": "03050-0000"},
-            },
-            "jigs": [{"label": "j", "zip": "03050", "insure_as": "sample"}],
-        }])
-        from config.warehouses import load_warehouses
+        """A comment key is a REAL key, so a pydantic model handed one rejects it.
 
-        warehouse = load_warehouses()[0]
-        assert sorted(warehouse.insurance_addresses) == ["sample"]
+        `Card.retailer_rates` is typed `dict[str, ...]` — every key in it has to be a retailer — so a
+        `"// note"` sitting beside the rates is the case that actually fails validation rather than
+        being quietly ignored.
+        """
+        config_file(cards=[{
+            "// note": "why this card is here",
+            "last4": "4321",
+            "name": "Chase Freedom Unlimited",
+            "retailer_rates": {
+                "// note": "5% on Amazon while the promo runs",
+                "Amazon": "5%",
+            },
+        }])
+        from config.cards import load_cards
+
+        card = load_cards()[0]
+        # Keys are normalized to lowercase for loose matching; the point is that the comment is not
+        # among them and did not fail validation on the way in.
+        assert sorted(card.retailer_rates) == ["amazon"]
 
     def test_saving_profiles_preserves_comments_key_order_and_other_sections(self, config_file):
         """`create_profile` writes a profile_id back into the file a human authored. If that

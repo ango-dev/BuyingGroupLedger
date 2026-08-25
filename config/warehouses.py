@@ -1,11 +1,10 @@
 from config.loader import config_section
-from models.warehouse import InsuranceAddress, Warehouse, normalize_address
+from models.warehouse import Warehouse, normalize_address
 
 __all__ = [
     "PERSONAL",
     "UNCLASSIFIED",
     "classify_address",
-    "insurance_address_for",
     "is_personal",
     "load_warehouses",
     "normalize_address",
@@ -84,32 +83,6 @@ def classify_address(delivery_address: str, warehouses: list[Warehouse]) -> str:
             if substrings and all(s in normalized for s in substrings):
                 return warehouse.buying_group
     return UNCLASSIFIED
-
-
-def insurance_address_for(delivery_address: str, warehouses: list[Warehouse]):
-    """The REAL warehouse address behind a jig, or None if there isn't one configured.
-
-    A jig is a deliberately misspelled address variant — BFMR hands out "THIRTEEN SAMMPLE DR1VE"
-    and friends so each order routes distinctly — so what the ledger records as the delivery address
-    is a routing token, not somewhere the post office believes in. Insuring a package against it
-    would put a fictional street on the policy.
-
-    Matching reuses `classify_address`'s rule exactly (first jig in config order whose required
-    substrings all appear) so routing and insuring can never disagree about which jig an address is.
-
-    None is a SAFE answer, not a failure: the caller then sends no address at all, and BFMR falls
-    back to the profile. That is the documented behaviour and the right default for an unmapped jig
-    — better a profile address than a misspelled one.
-    """
-    if not delivery_address or not delivery_address.strip():
-        return None
-    normalized = normalize_address(delivery_address)
-    for warehouse in warehouses:
-        for jig in warehouse.jigs:
-            substrings = jig.required_substrings()
-            if substrings and all(s in normalized for s in substrings):
-                return warehouse.insurance_addresses.get(jig.insure_as) if jig.insure_as else None
-    return None
 
 
 def tag_and_filter_personal(items, warehouses) -> tuple[list, int, int]:

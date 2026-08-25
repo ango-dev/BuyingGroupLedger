@@ -735,31 +735,17 @@ light up (the formula stays blank until Payout Amount is filled).
 >
 > MaxOutDeals needs none of this — it keys on the tracking number alone, so posting is fully automatic.
 
-**Insurance is filed against the REAL warehouse, not the jig.** A buying group hands out
-deliberately misspelled address variants — `THIRTEEN SAMMPLE DR1VE` — so each order routes
-distinctly, and that is what the retailer prints and the ledger records. Filing it would put a
-fictional street on the policy, which is the kind of detail a claim is refused over. So each jig in
-each jig in `config.json` points at the real address it delivers to:
+**A filing carries the tracking number and nothing else.** BFMR's `insurance/file` also accepts
+`address[...]` fields, but those are the **payee** address — where a claim pays out — not the
+shipment's destination, so omitting them lets BFMR use the address on your account, which is already
+the right answer. `name` and `package_value` are omitted for their own reasons: your account supplies
+the name, and BFMR derives the value from the shipment's items, where declaring our own would risk
+over-declaring and paying a bigger premium than the box warrants.
 
-```json
-{
-  "buying_group": "BFMR",
-  "insurance_addresses": {
-    "sample": { "address_1": "13 Sample Drive", "city": "Testville",
-                   "state": "NH", "country": "USA", "zip": "03050-0000" }
-  },
-  "jigs": [
-    { "label": "BFMR-3", "street": "THIRTEEN SAMMPLE DR1VE", "zip": "03050",
-      "insure_as": "sample" }
-  ]
-}
-```
-
-`state` is the ISO 3166-2 code **without** the country prefix (`NH`, not `US-NH`) and `country` is
-ISO 3166-1 **alpha-3** (`USA`, not `US`) — both are validated when the config loads, because both
-mistakes look right and only fail at filing time. A jig with no `insure_as` sends no address at all
-and BFMR falls back to your profile; a jig pointing at a key that doesn't exist is refused at load.
-Name and package value are left alone — BFMR fills those from your account and the shipment items.
+Nothing ever files a **jig** as a postal address, either. A jig is a deliberately misspelled variant
+(`THIRTEEN SAMMPLE DR1VE`) that a group hands out so each order routes distinctly; it is a routing
+token, and the only thing it is matched against is the `warehouses` config that sets the Buying Group
+column.
 
 Two groups are supported today, and they work nothing alike:
 

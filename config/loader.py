@@ -103,8 +103,8 @@ def strip_comments(node):
 
     JSON has no comments, so the config file uses `"// something": "..."` keys — a convention this
     repo already used in the old warehouses.example.json. They are real keys, which means a pydantic
-    model handed one rejects it: `insurance_addresses` is typed `dict[str, InsuranceAddress]`, so a
-    comment sitting beside the addresses fails validation.
+    model handed one rejects it: `Card.retailer_rates` is typed `dict[str, ...]`, so a comment
+    sitting beside the per-retailer rates fails validation rather than being ignored.
 
     Stripped HERE rather than at load, and on a COPY, because `save_config` writes back exactly what
     `load_config` returned — stripping earlier would silently delete the author's comments the first

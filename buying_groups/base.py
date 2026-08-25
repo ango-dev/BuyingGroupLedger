@@ -112,12 +112,6 @@ class TrackingSubmission:
     #: reuses a tracking number across the orders it combines into a carton. Deliberately required
     #: rather than defaulted: a silently-blank retailer would just switch that handling off.
     retailer: str
-    #: The address as the RETAILER printed it — a jig, i.e. one of the deliberately misspelled
-    #: variants a buying group hands out so each order routes distinctly. Never filed as a postal
-    #: address; `config.warehouses.insurance_address_for` maps it back to the real warehouse.
-    #: Required, not defaulted, for the same reason `retailer` is: a silently-blank one would just
-    #: switch the mapping off and insure every package against the profile address instead.
-    delivery_address: str
 
     def describe(self) -> str:
         """A short human label for logs and alerts — never sent to an API."""

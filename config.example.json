@@ -123,19 +123,12 @@
     }
   ],
 
-  "// warehouses": "Which buying group an order belongs to, matched on its DELIVERY ADDRESS. A jig is a deliberately misspelled variant the group hands out ('THIRTEEN SAMMPLE DR1VE') so each order routes distinctly — so it is a routing token, never a postal address. `insure_as` points at the real warehouse to file insurance against; filing the jig would put a fictional street on the policy. Name a group literally `Personal` to have those rows dropped before the sheet is written.",
+  "// warehouses": "Which buying group an order belongs to, matched on its DELIVERY ADDRESS. A jig is a deliberately misspelled variant the group hands out ('THIRTEEN SAMMPLE DR1VE') so each order routes distinctly — it is a routing token, never a postal address, and nothing ever files it as one. Name a group literally `Personal` to have those rows dropped before the sheet is written.",
   "warehouses": [
     {
       "buying_group": "BFMR",
-      "insurance_addresses": {
-        "// ": "state is the ISO 3166-2 code WITHOUT the country prefix (NH, not US-NH); country is ISO 3166-1 alpha-3 (USA, not US). Both are validated when this file loads, because both mistakes look right and only fail when a premium is being paid.",
-        "sample": { "address_1": "13 Sample Drive", "city": "Testville", "state": "NH", "country": "USA", "zip": "03050-0000" },
-        "executive": { "address_1": "5 Sample Park Drive", "address_2": "Suite 6", "city": "Testville", "state": "NH", "country": "USA", "zip": "03050-0000" },
-        "broadway": { "address_1": "51 Sample Blvd", "address_2": "Unit 0002", "city": "Sampleton", "state": "NH", "country": "USA", "zip": "03040-0002" },
-        "spring": { "address_1": "38 Sample Street", "address_2": "Unit 0000", "city": "Sampleton", "state": "NH", "country": "USA", "zip": "03040-0000" }
-      },
       "jigs": [
-        { "label": "BFMR-A", "street": "THIRTEEN SAMMPLE DR1VE", "zip": "03050", "insure_as": "sample" }
+        { "label": "BFMR-A", "street": "THIRTEEN SAMMPLE DR1VE", "zip": "03050" }
       ]
     },
     {

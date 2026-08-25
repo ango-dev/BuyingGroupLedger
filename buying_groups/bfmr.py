@@ -53,7 +53,7 @@ from buying_groups.base import (
     parse_money,
 )
 from config.settings import settings
-from config.warehouses import insurance_address_for, load_warehouses
+from config.warehouses import load_warehouses
 
 __all__ = ["BFMRClient"]
 
@@ -736,32 +736,18 @@ class BFMRClient(HttpClient):
             # that matches nothing, reported as success, leaving the package uninsured. Observed
             # live on 529900000009 (BFMR holds 529900000009B).
             spelling = _held_spelling(spellings, row.tracking_number)
-            # THE JIG IS NOT AN ADDRESS. The ledger records the delivery address exactly as the
-            # retailer printed it, and for a buying group that is a deliberately misspelled variant
-            # ("THIRTEEN SAMMPLE DR1VE") handed out so each order routes distinctly. Filing that
-            # would put a fictional street on the policy — the kind of detail a claim is refused
-            # over — so it is mapped back to the group's real warehouse first.
+            # TRACKING NUMBER ONLY. BFMR's insurance/file also accepts `address[...]` fields, but
+            # those are the PAYEE address — where a claim pays out — not the shipment's destination.
+            # Omitting them makes BFMR use the address on the account profile, which IS the payee, so
+            # the fallback is already the right answer and there is nothing for us to supply.
             #
-            # No mapping -> no address fields, and BFMR falls back to the profile address. That is
-            # their documented behaviour and the right default: a profile address may be the wrong
-            # warehouse, but a misspelled one is wrong everywhere.
-            form = {"tracking_number": spelling}
-            postal = insurance_address_for(row.delivery_address, self._warehouses())
-            if postal is not None:
-                form.update(postal.as_form_fields())
-            elif row.delivery_address.strip():
-                log.warning(
-                    "BFMR: no warehouse address configured for the jig on row %s (%s); insuring "
-                    "against the profile address instead. Set `insure_as` on that jig in "
-                    "config.json `warehouses`.", row.row_number, row.delivery_address[:60],
-                )
+            # Name and package value are automatic for the same reason: the account supplies the one
+            # and the shipment's items the other.
             response = self.request(
                 "POST",
                 "/api/v2/insurance/file",
                 mutating=True,
-                # Multipart, matching BFMR's own documented `curl --form` example — the nested
-                # `address[...]` keys are not worth guessing at on a money path we cannot rehearse.
-                files={key: (None, str(value)) for key, value in form.items()},
+                data={"tracking_number": spelling},
             )
             if response is None:
                 result.skipped.append((row.tracking_number, "dry run"))
