@@ -65,10 +65,23 @@ def test_password_is_the_only_method():
             RetailerAuth(method=dropped)
 
 
-def test_the_totp_field_is_gone():
-    """Pydantic ignores unknown fields by default, so a leftover totp_secret would look accepted
-    while doing nothing — assert it genuinely isn't part of the model."""
-    assert "totp_secret" not in RetailerAuth.model_fields
+def test_the_totp_secret_is_configurable_again():
+    """REVERSED 2026-08-25: 2-Step Verification is now REQUIRED on the Best Buy account, because
+    leaving it off just meant Best Buy escalated to an identity challenge offering only "text me a
+    code" — which nothing here can answer. An authenticator code is the one challenge the script CAN
+    answer unattended, and it needs the enrolled seed. Pydantic ignores unknown fields, so a config
+    carrying totp_secret against a model without it would look accepted while doing nothing."""
+    assert "totp_secret" in RetailerAuth.model_fields
+    assert RetailerAuth().totp_secret == "", "absent secret is blank, not None"
+
+
+def test_neither_secret_shows_up_in_a_repr():
+    """A profile gets printed in logs and diagnostics. The password was already hidden; the TOTP seed
+    is strictly worse to leak, being a permanent key rather than one 30-second code."""
+    text = repr(RetailerAuth(method="password", username="u@e.com",
+                             password="hunter2-hunter2", totp_secret="JBSWY3DPEHPK3PXP"))
+    assert "hunter2-hunter2" not in text
+    assert "JBSWY3DPEHPK3PXP" not in text
 
 
 def test_auth_round_trips_through_save_and_load(config_file):

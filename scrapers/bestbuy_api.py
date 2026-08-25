@@ -35,6 +35,7 @@ from typing import NamedTuple
 
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
+from scrapers.totp import TotpError, seconds_remaining, totp
 
 log = logging.getLogger(__name__)
 
@@ -469,6 +470,83 @@ def _signin_reason(verdict: str, action: str) -> str:
     return f"{verdict}. WHAT TO DO: {action}" if verdict else ""
 
 
+TWO_STEP_MARKER = "twostepverification"
+#: Best Buy's 2-Step screen. `cia-trust-me` ("Don't ask for security codes on this device") arrives
+#: ALREADY TICKED, so this only has to avoid un-ticking it — but it is asserted rather than assumed,
+#: because leaving it off means a fresh code on every single run, and Best Buy sessions die in ~20
+#: minutes. Ticking it is what turns 2FA from a per-run obstacle into a one-off.
+TWO_STEP_CODE_INPUT = "#verificationCode"
+TWO_STEP_TRUST_CHECKBOX = "#cia-trust-me"
+
+#: Don't submit a code that expires mid-flight. A code is valid for its 30s window, and the submit
+#: plus Best Buy's own round trip can outlive the tail of one — which would fail as "invalid code" and
+#: read exactly like a wrong secret. Waiting out the last couple of seconds costs less than that
+#: misdiagnosis.
+_MIN_CODE_LIFE_SECONDS = 3
+
+
+def _on_two_step(page) -> bool:
+    try:
+        if TWO_STEP_MARKER in (page.url or "").lower():
+            return True
+        return page.locator(TWO_STEP_CODE_INPUT).count() > 0
+    except Exception:
+        return False
+
+
+def _answer_two_step(page, auth) -> bool:
+    """Fill Best Buy's 2-Step Verification screen from the enrolled authenticator secret.
+
+    Returns False (rather than raising) when no secret is configured, so the caller reports the usual
+    "a human is needed" verdict instead of a crash.
+    """
+    secret = getattr(auth, "totp_secret", "")
+    if not secret:
+        log.warning("Best Buy 2-Step Verification is required but no totp_secret is configured for "
+                    "this profile — add auth.bestbuy.totp_secret to config.json.")
+        return False
+    try:
+        if seconds_remaining() < _MIN_CODE_LIFE_SECONDS:
+            page.wait_for_timeout(int(_MIN_CODE_LIFE_SECONDS * 1000))
+        code = totp(secret)
+    except TotpError:
+        log.warning("Best Buy 2-Step Verification: the configured totp_secret is not valid base32.",
+                    exc_info=True)
+        return False
+
+    try:
+        page.wait_for_selector(TWO_STEP_CODE_INPUT, state="visible", timeout=20000)
+        # Trust this device, so the next run does not need a code at all.
+        try:
+            box = page.locator(TWO_STEP_TRUST_CHECKBOX)
+            if box.count() and not box.is_checked():
+                box.check(timeout=5000)
+        except Exception:
+            log.warning("Best Buy 2-Step: could not confirm the 'don't ask again' box; continuing.",
+                        exc_info=True)
+        page.fill(TWO_STEP_CODE_INPUT, code)
+        log.info("Best Buy: answering 2-Step Verification with a generated authenticator code.")
+    except Exception:
+        log.warning("Best Buy 2-Step: the code field never appeared.", exc_info=True)
+        return False
+
+    if not _click_continue(page):
+        for attempt in (
+            lambda: page.get_by_role("button", name="Continue", exact=False).first.click(timeout=8000),
+            lambda: page.press(TWO_STEP_CODE_INPUT, "Enter"),
+        ):
+            try:
+                attempt()
+                break
+            except Exception:
+                continue
+    try:
+        page.wait_for_url(lambda u: TWO_STEP_MARKER not in u.lower(), timeout=45000)
+    except Exception:
+        pass
+    return not _on_two_step(page)
+
+
 def _deterministic_login(page, auth) -> LoginOutcome:
     """Best Buy's 3-screen password login, agent-free (proven live). Handles the fresh
     (#fld-e editable) and remembered (email prefilled as static text, just click Continue) variants.
@@ -529,6 +607,18 @@ def _deterministic_login(page, auth) -> LoginOutcome:
                           timeout=45000)
     except Exception:
         pass
+
+    # 2-Step Verification: the password was ACCEPTED and Best Buy wants an authenticator code. This is
+    # now the expected path, not an exception — 2FA is required on the account precisely because it is
+    # the one challenge that can be answered unattended.
+    if _on_two_step(page) and not _answer_two_step(page, auth):
+        _log_signin_diagnostics(page, "could not answer 2-Step Verification", failed_requests)
+        return LoginOutcome(False, bool(_auth_critical(failed_requests)),
+                            "2-STEP VERIFICATION — Best Buy asked for an authenticator code and it "
+                            "could not be supplied. WHAT TO DO: set auth.bestbuy.totp_secret in "
+                            "config.json to the base32 key from the account's authenticator "
+                            "enrolment (Account Settings -> Sign-in & Security).")
+
     if _looks_logged_out(page):
         # Everything clicked and filled, yet we are still on a sign-in URL. Live this was
         # the auth POST being rejected at the network layer, which no selector work can fix.

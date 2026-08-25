@@ -34,35 +34,39 @@ class ProxyConfig(BaseModel):
 class RetailerAuth(BaseModel):
     """How to re-authenticate this retailer when a run lands on a sign-in page.
 
-    **USERNAME + PASSWORD IS THE ONLY SUPPORTED METHOD**. Google SSO, Apple and
-    authenticator-app TOTP were all removed rather than left as options: each was a second login path
-    that had to keep working, and every one of them is exercised only when a session happens to die,
-    so a break in one would surface days later as a mystery logout.
+    **USERNAME + PASSWORD + AUTHENTICATOR-APP 2FA.** Google SSO and Apple remain removed — each was a
+    second login path exercised only when a session happened to die, so a break in one surfaced days
+    later as a mystery logout.
 
-    **YOU MUST DISABLE 2-STEP VERIFICATION ON THE BEST BUY ACCOUNT.** There is no code path that
-    answers a 2FA challenge any more. Best Buy's own prompt calls it "Sign in with a verification
-    code"; turn it off under Account Settings → Sign-in & Security. If it is on, the login stops at
-    the challenge screen, the run alerts as logged out, and no order is ever read.
+    **2-STEP VERIFICATION IS NOW REQUIRED ON THE BEST BUY ACCOUNT, reversing the
+    2026-08-13 "turn it off" rule.** Leaving it off did not make sign-in reliable: Best Buy kept
+    escalating untrusted sessions to an identity challenge that offers only "text me a code", which
+    nothing here can answer. Enrolling an authenticator app replaces that with a challenge we CAN
+    answer unattended — Best Buy's screen reads "Enter the code from your authenticator app" — and it
+    carries a "Don't ask for security codes on this device" box, so clearing it once buys a trusted
+    device rather than a code every run.
 
-    The password reaches Best Buy two ways, and they are not equally exposed:
+    `totp_secret` is the base32 key from that enrolment (the "can't scan the QR?" key). Store it as
+    shown; spacing and case are normalised. Without it the run stops at the 2-step screen and alerts.
 
-    - **The deterministic path (`scrapers/bestbuy_api.py`, primary)** types it into a CDP browser on
-      this machine. It never builds a prompt, so the password never leaves the host.
-    - **The agent fallback (`scrapers/bestbuy.py`)** puts it in the task prompt, because Browser-Use
-      v4 has no secret-injection channel — unknown kwargs to `runs.create` 422. So it is visible to
-      the LLM and stored in the cloud run history.
+    The secrets reach Best Buy two ways, and they are not equally exposed:
 
-    That second exposure is the accepted cost of dropping SSO, and it is much smaller than it was
-    when SSO was chosen: since the deterministic path landed (2026-08-10) the agent only runs when
-    that path fails outright.
+    - **The deterministic path (`scrapers/bestbuy_api.py`, primary)** types them into a CDP browser on
+      this machine, generating the code locally with `scrapers/totp.py`. Nothing leaves the host.
+    - **The agent fallback (`scrapers/bestbuy.py`)** puts the password in the task prompt, because
+      Browser-Use v4 has no secret-injection channel. **The TOTP secret is deliberately NOT given to
+      the agent**: a one-time code is derivable only from the seed, so handing the seed to an LLM and
+      its cloud run history would trade a per-run secret for a permanent one. The agent therefore
+      cannot pass 2FA — it alerts and skips, which is the correct outcome for an auth failure.
     """
 
     method: Literal["password"] = "password"
     username: str = ""
-    # repr=False: this is the retailer account password. It is already exposed to the agent
-    # fallback by necessity (v4 has no secret channel), so it must not ALSO leak everywhere a
-    # profile happens to be printed.
+    # repr=False on both: these are account credentials. The password is already exposed to the agent
+    # fallback by necessity, so it must not ALSO leak everywhere a profile happens to be printed --
+    # and the TOTP seed is strictly worse, being a permanent key rather than a single code.
     password: str = Field(default="", repr=False)
+    totp_secret: str = Field(default="", repr=False)
 
 
 class ProfileConfig(BaseModel):

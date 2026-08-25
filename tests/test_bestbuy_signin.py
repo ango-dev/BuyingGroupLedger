@@ -427,3 +427,110 @@ class TestFailureReasonReachesTheAlert:
         outcome = bestbuy_api._deterministic_login(_P(), RetailerAuth(
             method="password", username="u@e.com", password="pw"))
         assert outcome.ok is False and outcome.reason == ""
+
+
+class TestTwoStepVerification:
+    """Best Buy's 2-Step screen ("Enter the code from your authenticator app") is now the EXPECTED
+    path, not an exception: 2FA is required on the account because an authenticator code is the one
+    challenge that can be answered unattended. Confirmed live — #verificationCode plus a
+    #cia-trust-me box labelled "Don't ask for security codes on this device", pre-ticked.
+    """
+
+    SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+
+    class _Page:
+        """A page sitting on the 2-Step screen."""
+
+        def __init__(self, *, trust_checked=True, has_field=True):
+            self.url = "https://www.bestbuy.com/identity/signin/twoStepVerification?token=tid%3Ax"
+            self.filled = {}
+            self.checked = trust_checked
+            self.has_field = has_field
+            self.clicked = []
+
+        def wait_for_selector(self, selector, **k):
+            if not self.has_field:
+                raise RuntimeError("no code field")
+
+        def fill(self, selector, value):
+            self.filled[selector] = value
+
+        def locator(self, selector):
+            page = self
+
+            class _L:
+                first = property(lambda s: s)
+
+                def count(self):
+                    # The 2-step controls exist only WHILE on the 2-step page. A fake that always
+                    # reported them present would make leaving the screen undetectable, and the
+                    # success check is exactly "are we off it now?".
+                    return 1 if "twostepverification" in page.url.lower() else 0
+
+                def is_checked(self):
+                    return page.checked
+
+                def check(self, timeout=None):
+                    page.checked = True
+
+                def click(self, timeout=None):
+                    page.clicked.append(selector)
+                    page.url = "https://www.bestbuy.com/purchasehistory/purchases"
+
+                def scroll_into_view_if_needed(self, timeout=None):
+                    pass
+
+            return _L()
+
+        def get_by_role(self, role, name=None, exact=None):
+            return self.locator(f"role:{name}")
+
+        def eval_on_selector(self, selector, expression):
+            raise RuntimeError("not needed")
+
+        def evaluate(self, script):
+            return None
+
+        def wait_for_url(self, matcher, timeout=None):
+            pass
+
+        def wait_for_timeout(self, ms):
+            pass
+
+    def _auth(self, secret=SECRET):
+        return RetailerAuth(method="password", username="u@e.com", password="pw", totp_secret=secret)
+
+    def test_the_generated_code_is_entered(self):
+        from scrapers.totp import totp
+        page = self._Page()
+        assert bestbuy_api._answer_two_step(page, self._auth()) is True
+        entered = page.filled["#verificationCode"]
+        assert entered == totp(self.SECRET), "the code must be generated from the enrolled secret"
+        assert len(entered) == 6 and entered.isdigit()
+
+    def test_the_dont_ask_again_box_is_left_ticked(self):
+        """It arrives pre-ticked, and it is what turns 2FA from a per-run obstacle into a one-off —
+        Best Buy sessions die in ~20 minutes, so an untrusted device would need a code every run."""
+        page = self._Page(trust_checked=True)
+        bestbuy_api._answer_two_step(page, self._auth())
+        assert page.checked is True
+
+    def test_an_unticked_box_is_ticked(self):
+        page = self._Page(trust_checked=False)
+        bestbuy_api._answer_two_step(page, self._auth())
+        assert page.checked is True, "trust the device even if Best Buy stops pre-ticking it"
+
+    def test_no_configured_secret_declines_instead_of_crashing(self):
+        # The caller turns this into the usual "a human is needed" verdict; an exception here would
+        # escape as a page-shape error and spend the paid agent on an auth problem.
+        assert bestbuy_api._answer_two_step(self._Page(), self._auth(secret="")) is False
+
+    def test_an_invalid_secret_declines_rather_than_sending_a_wrong_code(self):
+        """A wrong code reads exactly like a wrong password at the sign-in screen, which is how a
+        config typo becomes a password reset."""
+        page = self._Page()
+        assert bestbuy_api._answer_two_step(page, self._auth(secret="not base32 !!")) is False
+        assert page.filled == {}, "nothing was submitted"
+
+    def test_a_missing_code_field_declines(self):
+        assert bestbuy_api._answer_two_step(self._Page(has_field=False), self._auth()) is False

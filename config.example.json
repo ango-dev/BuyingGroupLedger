@@ -111,9 +111,9 @@
         "password": "REPLACE_WITH_PROXY_PASSWORD"
       },
       "retailers": ["amazon", "bestbuy"],
-      "// auth": "Username + password is the only supported method. TURN 2-STEP VERIFICATION OFF on the Best Buy account — nothing here can answer a challenge.",
+      "// auth": "Username + password, plus a TOTP seed. TURN 2-STEP VERIFICATION ON for the Best Buy account and paste its authenticator secret into `totp_secret` — the deterministic path generates the 6-digit code itself and ticks 'Don't ask for security codes on this device'. Leave `totp_secret` blank only if the account has 2-Step off; a challenge with no seed fails the login rather than falling back to the paid agent, which is never given the seed.",
       "auth": {
-        "bestbuy": { "method": "password", "username": "you@example.com", "password": "" }
+        "bestbuy": { "method": "password", "username": "you@example.com", "password": "", "totp_secret": "" }
       }
     },
     {
