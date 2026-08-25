@@ -168,3 +168,99 @@ def test_every_row_has_the_costco_shipment_label_populated(details):
     assert items, "fixture should produce rows"
     assert all(r.shipment.isdigit() for r in items)
     assert all(r.order_date and r.order_date[4] == "-" for r in items)
+
+
+# --- A re-labelled package must not become a second shipment -------------------------------------
+# Costco can re-issue a NEW tracking number for the SAME physical carton when a package is delayed
+# (Amazon does this too — the design notes). Shipment is part of the upsert key, so keying on the carrier
+# label would both append a phantom row AND, because the numbering is a sort, renumber packages
+# already written to the sheet. `packageNumber` is the carton's own id, so it survives the re-label.
+
+_SPLIT_ORDER = "1399000004"          # one SKU, two UPS boxes, same shippedDate
+_PKG_A = "00009999990181363460"      # tracking ...047 -> Shipment 1
+_PKG_B = "00009999990181363477"      # tracking ...056 -> Shipment 2
+
+
+def _split_order_line(details):
+    """Deep copy of the fixture, plus the Dell line whose `shipment` list holds the two boxes."""
+    copied = json.loads(json.dumps(details))
+    detail = next(d for d in copied if d["orderNumber"] == _SPLIT_ORDER)
+    line = next(
+        li for st in detail["shipToAddress"] for li in st["orderLineItems"]
+        if li["itemNumber"] == "1953694"
+    )
+    return copied, line
+
+
+def _package(line, package_number):
+    return next(p for p in line["shipment"] if p["packageNumber"] == package_number)
+
+
+def test_a_re_issued_tracking_number_on_the_same_package_is_not_a_second_shipment(details):
+    """Both labels present at once (the state the page shows mid-relabel) is still ONE carton."""
+    copied, line = _split_order_line(details)
+    dead = _package(line, _PKG_B)
+    reissued = dict(dead, trackingNumber="1Z999TST0000000007",
+                    shippedDate="2026-06-27T09:00:00", deliveredDate=None)
+    line["shipment"].append(reissued)
+
+    rows = _rows_for(build_order_items(copied, "p"), _SPLIT_ORDER)
+    assert len(rows) == 2, "the re-labelled carton must not add a third row"
+    assert set(_by_shipment(rows)) == {"1", "2"}
+    # The LIVE label wins — submitting the dead number to a buying group is not undoable.
+    assert _by_shipment(rows)["2"].tracking_number == "1Z999TST0000000007"
+    assert _by_shipment(rows)["1"].tracking_number == "1Z999TST0000000002"
+    # Quantity still sums to the line total, so cost is neither doubled nor lost.
+    assert round(sum(r.total_cost for r in rows), 2) == 1799.98
+
+
+def test_a_re_issued_label_does_not_renumber_the_other_packages(details):
+    """The regression with the big blast radius: the old key sorted by tracking STRING, so a re-issued
+    number that sorts earlier stole Shipment 1 and pushed the untouched carton to Shipment 2 — mis-keying
+    rows already on the sheet. Numbering by packageNumber pins each carton where it was."""
+    copied, line = _split_order_line(details)
+    # A re-label on carton B whose tracking sorts BEFORE carton A's ...047.
+    _package(line, _PKG_B)["trackingNumber"] = "1A000000000000000000"
+
+    rows = _rows_for(build_order_items(copied, "p"), _SPLIT_ORDER)
+    by_tracking = {r.tracking_number: r.shipment for r in rows}
+    assert by_tracking["1Z999TST0000000002"] == "1", "the untouched carton keeps its shipment number"
+    assert by_tracking["1A000000000000000000"] == "2", "the re-labelled carton keeps ITS number too"
+
+
+def test_a_package_without_a_package_number_still_groups_by_tracking(details):
+    """Tracking stays the fallback, so a package Costco reports with no packageNumber still gets a row
+    rather than vanishing from the ledger."""
+    copied, line = _split_order_line(details)
+    for package in line["shipment"]:
+        package.pop("packageNumber", None)
+
+    rows = _rows_for(build_order_items(copied, "p"), _SPLIT_ORDER)
+    assert len(rows) == 2
+    assert {r.tracking_number for r in rows} == {"1Z999TST0000000002", "1Z999TST0000000003"}
+    assert set(_by_shipment(rows)) == {"1", "2"}
+
+
+def test_shipment_numbering_follows_package_number_not_the_tracking_string(details):
+    """Pin the key itself: swapping ONLY the tracking numbers between the two cartons must swap which
+    tracking number each shipment carries, without moving the shipment numbers themselves."""
+    copied, line = _split_order_line(details)
+    a, b = _package(line, _PKG_A), _package(line, _PKG_B)
+    a["trackingNumber"], b["trackingNumber"] = b["trackingNumber"], a["trackingNumber"]
+
+    rows = _rows_for(build_order_items(copied, "p"), _SPLIT_ORDER)
+    by_shipment = _by_shipment(rows)
+    assert by_shipment["1"].tracking_number == "1Z999TST0000000003"
+    assert by_shipment["2"].tracking_number == "1Z999TST0000000002"
+
+
+def test_an_unshipped_package_still_lands_in_the_trailing_bucket(details):
+    """Only packages that actually shipped consume a number; a carton with no tracking yet must not
+    claim one (and must not raise on the shipment lookup)."""
+    copied, line = _split_order_line(details)
+    _package(line, _PKG_B)["trackingNumber"] = ""
+
+    rows = _rows_for(build_order_items(copied, "p"), _SPLIT_ORDER)
+    assert len(rows) == 1, "one shipped carton, so one row"
+    assert rows[0].shipment == "1"
+    assert rows[0].tracking_number == "1Z999TST0000000002"
