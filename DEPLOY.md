@@ -45,9 +45,14 @@ NTP synchronised.
 ```bash
 uname -m                 # x86_64 on a VM; aarch64 on a 64-bit Pi
 docker --version         # 20.10+
-docker compose version   # v2 (the plugin, not the old docker-compose binary)
+docker compose version   # v2.24+ (the plugin, not the old docker-compose binary)
 timedatectl              # confirm the timezone and that NTP is synced
 ```
+
+**v2.24 (Dec 2023) is the floor**, because `docker-compose.yml` marks `.env` as `required: false` —
+without that, every compose command fails with "env file not found" on a host that has no overrides,
+which is now the normal state. On an older Compose either `touch .env` or delete the `env_file:`
+block.
 
 Ubuntu 24.04 ships neither Docker nor a recent Node by default. Install Docker:
 
@@ -91,6 +96,39 @@ Then lock them down — `config.json` holds every password in plaintext:
 ```bash
 chmod 600 config.json .state.json
 ```
+
+### Upgrading a host that is already running the old six-file layout
+
+**Order matters here, and getting it wrong fails quietly.** A bind mount whose host file is missing
+makes Docker create an empty *directory* in its place, so starting the container before `config.json`
+is on the host leaves you with a `config.json/` directory: preflight names that case specifically,
+but the container still starts and scrapes nothing on every schedule until someone reads the alert.
+
+```bash
+docker compose down                     # on the host: stop the scheduler first
+
+# from your main PC — copy the migrated files across BEFORE pulling
+scp config.json .state.json you@ledger-vm:~/BuyingGroupLedger/
+
+# back on the host
+cd ~/BuyingGroupLedger && git pull
+chmod 600 config.json .state.json
+: > .env                                # see below — do NOT delete it if Compose is older than 2.24
+docker compose build
+docker compose run --rm --entrypoint python ledger -m scripts.preflight   # must pass BEFORE starting
+docker compose up -d && docker compose logs -f
+```
+
+> **Empty the old `.env`, don't leave it populated.** Every value in it now lives in `config.json`,
+> and `.env` still *wins* — so a stale copy silently overrides the file you edit from then on, and
+> the symptom is a config change that appears to do nothing. Emptying it keeps the file present for
+> older Compose versions while giving it no values; a blank `FOO=` does not override either.
+>
+> The old `profiles.json` / `warehouses.json` / `cards.json` / `service_account.json` / `.costco/`
+> can stay on the host — nothing reads them — but preflight warns while they linger, precisely so
+> nobody edits a file that has no effect. Delete them once a run has proven the new config works.
+
+---
 
 > **The `warehouses` and `cards` sections are optional but are NOT no-ops if you skip them.** Without
 > `warehouses` every order tags `Unclassified`, which means **nothing is ever submitted to a

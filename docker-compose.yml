@@ -1,5 +1,6 @@
-# One service = one instance. Run more instances by copying this with different mounted
-# profiles.json / .env (e.g. per proxy pool). Secrets are injected at runtime, never baked in.
+# One service = one instance. Run more instances by copying this with a different mounted
+# config.json (e.g. per proxy pool). Secrets are injected at runtime, never baked in --
+# .dockerignore keeps config.json and .state.json out of the build context.
 #
 # Works as-is on a Raspberry Pi (64-bit OS): the image builds for the host's own architecture, and
 # no browser runs locally — Browser-Use Cloud holds it. See "Raspberry Pi" in README.md.
@@ -11,9 +12,15 @@ services:
     restart: unless-stopped
     # OPTIONAL. Everything lives in config.json now, including the container knobs below — .env is
     # purely the OVERRIDE layer, for values that should differ on THIS host without editing the
-    # config it shares. Delete these two lines if you have no overrides.
+    # config it shares.
+    #
+    # `required: false` is load-bearing: a plain `- .env` makes EVERY compose command fail outright
+    # with "env file not found" when the file is absent, which is the normal state on a fresh host
+    # that has no overrides. Needs Compose v2.24+ (2023-12); on an older one, delete these lines
+    # instead, or `touch .env`.
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       # PASSED THROUGH ONLY — no defaults here. These four live in config.json under `container`
       # (run_interval_hours, run_on_start, preflight_strict, timezone), and docker/entrypoint.sh
