@@ -69,12 +69,10 @@ TERMINAL_STATUSES = ("delivered", "cancelled", "paid", "return")
 # preferred way to add a column stays APPENDING at the end: existing rows just gain a trailing blank
 # and no migration is needed.
 FIELDNAMES = [
-    # --- identity: the upsert key first (order_date + order_id + item_name + shipment), then what/how many ---
+    # --- identity: what it is ---
     "order_date",
     "status",
-    "profile_label",
     "retailer",
-    "order_id",
     "item_name",
     # Distinguishes shipments of one order so identical items split across shipments (same SKU in
     # shipment 1 and 2) don't collide on the upsert key. A BARE NUMBER ("1", "2", ...) — the old
@@ -83,7 +81,29 @@ FIELDNAMES = [
     # OrderItem normalizes any "Shipment N" input down to "N" (see _normalize_shipment).
     "shipment",
     "quantity",
-    # --- money: what it cost -> what the card gave back -> COGS -> what came back -> profit -> who paid ---
+    # --- what happened to it: the shipment's own story, in the order it happens ---
+    # Opens the shipment block: the order's own identifier, immediately before the shipment's
+    # (tracking_number) and whether that shipment was handed over (tracking_submitted). Also part
+    # of the upsert key -- see the module note above.
+    "order_id",
+    "tracking_number",
+    # Has this row's tracking number been accepted by its buying group? A real BOOLEAN, so the
+    # column works as a Google Sheets checkbox.
+    #
+    # A DELIBERATE EXCEPTION to this project's "derive, don't store" rule. Whether a number has been
+    # submitted is something the group knows and is re-derived every run, which is why
+    # sync_tracking.py does NOT consult this column to decide what to send — a local mirror of remote
+    # state drifts the moment a post succeeds and the sheet write doesn't. It exists to be SEEN: an
+    # unticked box next to a shipped package is the thing worth noticing. It is a display of state,
+    # not a source of truth. Blank on every scraper path, so _merge_row preserves it.
+    "tracking_submitted",
+    "delivery_date",
+    # Closes the shipment story: which buying group this package went to. It is also the routing
+    # key sync_tracking.py submits on, which is why it sits with the tracking columns rather than
+    # with the payout it eventually produces. DERIVED from delivery_address by
+    # config.warehouses.classify_address at run time (in main.run_scrape).
+    "buying_group",
+    # --- money: what it cost -> what the card gave back -> COGS -> what came back -> profit ---
     "cost_per_item",
     "total_cost",
     # Every scraper/agent emits the ORDER-LEVEL shipping total, repeated on every shipment row (see
@@ -124,23 +144,10 @@ FIELDNAMES = [
     # stale, and a delivered row is never re-scraped to refresh it. Kept in FIELDNAMES (emitted blank)
     # so the column still exists positionally in the CSV and the sheet row.
     "total_profit",
-    # Closes the money block: which buying group this row's payout is coming from. DERIVED from
-    # delivery_address by config.warehouses.classify_address at run time (in main.run_scrape).
-    "buying_group",
-    # --- logistics: consulted per-shipment, not scanned ---
-    "tracking_number",
-    # Has this row's tracking number been accepted by its buying group? A real BOOLEAN, so the
-    # column works as a Google Sheets checkbox.
-    #
-    # A DELIBERATE EXCEPTION to this project's "derive, don't store" rule. Whether a number has been
-    # submitted is something the group knows and is re-derived every run, which is why
-    # sync_tracking.py does NOT consult this column to decide what to send — a local mirror of remote
-    # state drifts the moment a post succeeds and the sheet write doesn't. It exists to be SEEN: an
-    # unticked box next to a shipped package is the thing worth noticing. It is a display of state,
-    # not a source of truth. Blank on every scraper path, so _merge_row preserves it.
-    "tracking_submitted",
-    "delivery_date",
     # --- reference / audit: rarely scanned, so parked at the end ---
+    # Which browser profile scraped the row. A scraper detail, never read while reconciling, so it
+    # sits with the reference columns rather than taking a place near the front.
+    "profile_label",
     "order_url",
     "tracking_url",
     # A link to this ORDER's captured receipt in object storage (receipts/). One document per order,

@@ -31,18 +31,18 @@ def test_column_order_is_pinned():
     existing rows just gain a trailing blank and no migration is needed.
     """
     assert FIELDNAMES == [
-        "order_date", "status", "profile_label", "retailer", "order_id", "item_name", "shipment",
-        "quantity", "cost_per_item", "total_cost", "shipping", "card_name", "cashback_rate",
-        "cogs", "insurance", "payout_amount", "payout_date", "total_profit", "buying_group",
-        "tracking_number", "tracking_submitted", "delivery_date", "order_url", "tracking_url",
-        "receipt_url", "delivery_address", "card_last4", "last_scraped_at",
+        "order_date", "status", "retailer", "item_name", "shipment", "quantity", "order_id",
+        "tracking_number", "tracking_submitted", "delivery_date", "buying_group", "cost_per_item",
+        "total_cost", "shipping", "card_name", "cashback_rate", "cogs", "insurance",
+        "payout_amount", "payout_date", "total_profit", "profile_label", "order_url",
+        "tracking_url", "receipt_url", "delivery_address", "card_last4", "last_scraped_at",
     ]
     assert HEADER == [
-        "Order Date", "Status", "Profile", "Retailer", "Order ID", "Item Name", "Shipment",
-        "Quantity", "Cost Per Item", "Total Cost", "Shipping", "Card", "Cashback Rate", "COGS",
-        "Insurance", "Payout Amount", "Payout Date", "Total Profit", "Buying Group",
-        "Tracking Number", "Tracking Submitted", "Delivery Date", "Order Link", "Tracking Link",
-        "Receipt Link", "Delivery Address", "Card Last 4", "Last Scraped At",
+        "Order Date", "Status", "Retailer", "Item Name", "Shipment", "Quantity", "Order ID",
+        "Tracking Number", "Tracking Submitted", "Delivery Date", "Buying Group", "Cost Per Item",
+        "Total Cost", "Shipping", "Card", "Cashback Rate", "COGS", "Insurance", "Payout Amount",
+        "Payout Date", "Total Profit", "Profile", "Order Link", "Tracking Link", "Receipt Link",
+        "Delivery Address", "Card Last 4", "Last Scraped At",
     ]
 
 

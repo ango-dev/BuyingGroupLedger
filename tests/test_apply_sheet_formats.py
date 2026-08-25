@@ -17,9 +17,10 @@ from scripts.apply_sheet_formats import (
     PERCENT_COLUMNS,
     TABLE_COLUMN_TYPES,
     plan_formats,
+    plan_stale_checkbox_padding,
     plan_table_columns,
 )
-from sheets.ledger_sync import HEADER
+from sheets.ledger_sync import HEADER, _col_letter
 
 
 def _table(**types):
@@ -117,3 +118,67 @@ class TestCellFormats:
     def test_a_missing_column_is_reported_rather_than_silently_skipped(self):
         plan = plan_formats([h for h in HEADER if h != "COGS"])
         assert "COGS" in plan["missing"]
+
+
+class TestStaleCheckboxPadding:
+    """An empty cell under a BOOLEAN column materialises a real False all the way down the table.
+
+    Move that column in a reorder and reorder_sheet rewrites only the DATA block, so every row below
+    it keeps the False in the column the checkbox used to occupy. It used to clear itself by luck --
+    the vacated column normally became untyped, and clearing a type clears its values. The lifecycle
+    reorder put Total Profit (CURRENCY) there instead, and a TYPED column does not clear them.
+
+    Not cosmetic: ledger_sync._last_occupied_row only forgives a row whose SOLE content is a checkbox
+    False, so two of them made the append anchor jump from row 43 to 984 -- the next scraped order
+    would have landed ~940 rows below the ledger.
+    """
+
+    def _grid(self, stale_col=None, rows_below=3):
+        header = list(HEADER)
+        data = [""] * len(header)
+        data[header.index("Order ID")] = "A1"
+        grid = [header, data]
+        for _ in range(rows_below):
+            pad = [""] * len(header)
+            pad[header.index("Tracking Submitted")] = "FALSE"   # where it belongs now
+            if stale_col is not None:
+                pad[header.index(stale_col)] = "FALSE"          # left behind by the move
+            grid.append(pad)
+        return grid, header
+
+    def test_padding_left_in_a_vacated_column_is_found(self):
+        grid, header = self._grid(stale_col="Total Profit")
+
+        ranges = plan_stale_checkbox_padding(grid, header, "Tracking Submitted")
+
+        letter = _col_letter(header.index("Total Profit"))
+        assert ranges == [f"{letter}3:{letter}5"], ranges
+
+    def test_the_checkbox_in_its_CURRENT_column_is_left_alone(self):
+        # That padding is expected and _last_occupied_row already forgives it.
+        grid, header = self._grid(stale_col=None)
+
+        assert plan_stale_checkbox_padding(grid, header, "Tracking Submitted") == []
+
+    def test_it_never_reaches_into_the_data_block(self):
+        """A real row is rewritten by the reorder, so anything in it is data. Clearing into the block
+        would delete a genuine value."""
+        grid, header = self._grid(stale_col="Total Profit")
+
+        ranges = plan_stale_checkbox_padding(grid, header, "Tracking Submitted")
+
+        first_row = int(ranges[0].split(":")[0].lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+        assert first_row == 3, "must start below the last row carrying an Order ID"
+
+    def test_one_range_per_column_never_one_per_cell(self):
+        # ~940 single-cell requests would be an absurd payload.
+        grid, header = self._grid(stale_col="Total Profit", rows_below=200)
+
+        assert len(plan_stale_checkbox_padding(grid, header, "Tracking Submitted")) == 1
+
+    def test_a_clean_sheet_needs_no_clearing(self):
+        header = list(HEADER)
+        data = [""] * len(header)
+        data[header.index("Order ID")] = "A1"
+
+        assert plan_stale_checkbox_padding([header, data], header, "Tracking Submitted") == []

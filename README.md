@@ -128,14 +128,15 @@ One row per line item (its real quantity preserved — a qty-3 line is one row, 
 **Order ID + Order Date + Item Name + Shipment** (safe upsert — re-checks update
 status/tracking/date/last-scraped **without clobbering** the item name, cost, address, etc.):
 
-Columns are in reading order — identity first, then the money columns left-to-right in the order you
-reason about them, then reference/audit columns you rarely scan:
+Columns follow the order events happen to an order, so the sheet reads forward as a timeline —
+what it is → what happened to it → what it cost → what came back → profit, with the
+rarely-scanned reference/audit columns parked at the end:
 
-`Order Date · Status · Profile · Retailer · Order ID · Item Name · Shipment · Quantity ·
+`Order Date · Status · Retailer · Item Name · Shipment · Quantity ·
+Order ID · Tracking Number · Tracking Submitted · Delivery Date · Buying Group ·
 Cost Per Item · Total Cost · Shipping · Card · Cashback Rate · COGS ·
-Insurance · Payout Amount · Payout Date · Total Profit · Buying Group ·
-Tracking Number · Tracking Submitted · Delivery Date ·
-Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Last Scraped At`
+Insurance · Payout Amount · Payout Date · Total Profit ·
+Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Last Scraped At`
 
 > **Changing the column order is a MIGRATION, not an edit**, and it takes two steps.
 > `python -m scripts.reorder_sheet --apply` moves the row *values*; `python -m

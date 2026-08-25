@@ -147,3 +147,47 @@ class TestPlanReorder:
         plan = plan_reorder(list(OLD_HEADER), [old])
 
         assert plan["stray_formulas"] == []
+
+
+class TestTheMigrationWindow:
+    """reorder_sheet runs at the ONE moment the code's schema and the sheet's disagree — that is what
+    it exists to resolve. Anything it derives from FIELDNAMES/HEADER is therefore pointing at the new
+    order while the data in front of it is still in the old one."""
+
+    def test_the_checkbox_is_located_in_the_sheets_header_not_the_codes(self):
+        """`Tracking Submitted` materialises a real False in every empty row it covers, and
+        _last_occupied_row skips rows whose only content is that False.
+
+        Looked up via FIELDNAMES it lands on whatever column the NEW order puts there — so the
+        padding is not recognised, every grid row counts as occupied, and the reorder rewrites the
+        whole grid. Live, that was 983 rows on a 42-row ledger, blanking 900+ rows RAW and stripping
+        their number formats for nothing.
+        """
+        from sheets.ledger_sync import _last_occupied_row
+
+        # A sheet in the OLD order: the checkbox sits at the END, where FIELDNAMES no longer has it.
+        old_header = [h for h in HEADER if h != "Tracking Submitted"] + ["Tracking Submitted"]
+        checkbox_i = old_header.index("Tracking Submitted")
+        real_row = [""] * len(old_header)
+        real_row[old_header.index("Order ID")] = "A1"
+        padding = [""] * len(old_header)
+        padding[checkbox_i] = "FALSE"
+        grid = [old_header, real_row] + [list(padding) for _ in range(50)]
+
+        assert _last_occupied_row(grid, checkbox_i) == 2, "padding rows must not count as occupied"
+        # And the failure mode this guards against, spelled out:
+        assert _last_occupied_row(grid) == len(grid), \
+            "looked up via FIELDNAMES the checkbox is missed and the whole grid reads as occupied"
+
+    def test_a_sheet_already_in_the_current_order_still_works_without_the_hint(self):
+        # The default path must keep working -- most callers are not mid-migration.
+        from models.order import FIELDNAMES
+        from sheets.ledger_sync import _last_occupied_row
+
+        checkbox_i = FIELDNAMES.index("tracking_submitted")
+        real_row = [""] * len(HEADER)
+        real_row[HEADER.index("Order ID")] = "A1"
+        padding = [""] * len(HEADER)
+        padding[checkbox_i] = "FALSE"
+
+        assert _last_occupied_row([list(HEADER), real_row, padding, list(padding)]) == 2

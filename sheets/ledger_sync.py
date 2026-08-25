@@ -25,34 +25,37 @@ _SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)
 # migrate the live sheet (scripts/reorder_sheet.py) rather than silently scrambling existing rows.
 # ADDING a column means appending to BOTH lists, which needs no migration.
 HEADER = [
-    # --- identity ---
+    # --- what it is ---
     "Order Date",
     "Status",  # PINNED AT COLUMN B — the sheet's status colour rules are `=$B2="delivered"` and
                # friends, and reorder_sheet rewrites VALUES without moving columns, so moving Status
                # would leave all six rules colouring every row by whatever landed in B instead.
-    "Profile",  # which browser profile scraped it
     "Retailer",
-    "Order ID",
     "Item Name",
     "Shipment",  # bare number ("1", "2"), not "Shipment 1" — the column heading already says it
     "Quantity",
-    # --- money, left to right in the order you reason about it ---
+    # --- what happened to it, in the order it happens ---
+    "Order ID",
+    "Tracking Number",
+    "Tracking Submitted",  # a checkbox; ticked by sync_tracking.py when a group accepts the number.
+                           # Kept directly after the number it refers to.
+    "Delivery Date",
+    "Buying Group",  # where the package went, and the key sync_tracking.py routes on. DERIVED from
+                     # Delivery Address (config.warehouses.classify_address).
+    # --- what it cost, left to right in the order you reason about it ---
     "Cost Per Item",
     "Total Cost",  # = Quantity x Cost Per Item, so it sits directly after both
     "Shipping",  # this row's cost-weighted SHARE of the order-level total
     "Card",  # derived from Card Last 4 (config.cards.resolve_card)
     "Cashback Rate",  # decimal fraction (0.02) — format the column as a percentage to taste
     "COGS",  # a live sheet formula, written by _cogs_formula: cost + shipping, net of cashback
+    # --- what came back ---
     "Insurance",  # a buying-group premium — an EXPENSE, deliberately not part of COGS
     "Payout Amount",
     "Payout Date",
     "Total Profit",  # a live sheet formula, written by _profit_formula: Payout - COGS - Insurance
-    "Buying Group",  # derived from Delivery Address (config.warehouses.classify_address)
-    # --- logistics: consulted per shipment, not scanned ---
-    "Tracking Number",
-    "Tracking Submitted",  # a checkbox; ticked by sync_tracking.py when a group accepts the number
-    "Delivery Date",
     # --- reference / audit ---
+    "Profile",  # which browser profile scraped it — never read while reconciling
     "Order Link",
     "Tracking Link",
     "Receipt Link",  # the order's captured receipt in object storage (receipts/capture.py)
@@ -997,7 +1000,7 @@ def _retry_transient(call, *, what: str, attempts: int = 3, base_delay: float = 
             delay *= 2
 
 
-def _last_occupied_row(existing: list[list]) -> int:
+def _last_occupied_row(existing: list[list], checkbox_index: int | None = None) -> int:
     """The last row that really holds something — ignoring a row whose ONLY content is an unticked
     checkbox.
 
@@ -1014,7 +1017,13 @@ def _last_occupied_row(existing: list[list]) -> int:
     genuine note parked below the ledger still counts, so appends continue to land after it rather
     than overwriting it — which is the behaviour `len(existing)` was chosen for in the first place.
     """
-    checkbox = FIELDNAMES.index("tracking_submitted")
+    # `checkbox_index` exists for the MIGRATION WINDOW. Defaulting to FIELDNAMES is right whenever
+    # the sheet already matches the current schema, but scripts/reorder_sheet.py reads a sheet that is
+    # BY DEFINITION still in the OLD column order — so FIELDNAMES points at the wrong column, the
+    # materialised FALSEs are not recognised as checkbox padding, and every grid row counts as
+    # occupied. That made the reorder rewrite 983 rows on a 42-row ledger. Callers holding the sheet's
+    # own header pass the index from THAT.
+    checkbox = FIELDNAMES.index("tracking_submitted") if checkbox_index is None else checkbox_index
     for number in range(len(existing), 0, -1):
         row = existing[number - 1]
         for i, cell in enumerate(row):

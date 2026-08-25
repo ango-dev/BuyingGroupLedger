@@ -156,7 +156,10 @@ def main() -> None:
     # materialises as a real False — so `existing` runs to the GRID height (984 rows on a 42-row
     # ledger), and rewriting all of it would blank 900+ rows RAW, stripping their number formats for
     # nothing. _last_occupied_row is the same guard sync_csv_to_sheet uses for its append anchor.
-    last = _last_occupied_row(existing)
+    # Locate the checkbox in the SHEET'S header, not the code's: this script runs precisely when
+    # the two disagree.
+    checkbox_i = header.index("Tracking Submitted") if "Tracking Submitted" in header else None
+    last = _last_occupied_row(existing, checkbox_i)
     plan = plan_reorder(header, existing[1:last])
     _print_plan(plan, header, args.apply)
 

@@ -84,6 +84,50 @@ def plan_table_columns(table: dict, header: list[str]) -> list[dict]:
     return out
 
 
+#: Cell text a Google Sheets checkbox leaves behind. An EMPTY cell under a BOOLEAN column materialises
+#: as a real False, so these are values, not blanks.
+_CHECKBOX_TEXT = {"true", "false"}
+
+
+def plan_stale_checkbox_padding(grid: list[list], header: list[str], checkbox: str) -> list[str]:
+    """A1 column ranges below the data block still holding checkbox padding from a FORMER position.
+
+    THE FAILURE THIS FIXES. `Tracking Submitted` is a BOOLEAN column, and an empty cell under one
+    materialises a real False all the way down the table -- harmless where it belongs. Move that column
+    in a reorder and `reorder_sheet` rewrites only the DATA block, so every row below it keeps the
+    False in the column the checkbox used to occupy.
+
+    It used to clear itself by luck: the vacated column normally became untyped, and clearing a
+    column's type clears its materialised values. The 2026-08-25 lifecycle reorder put `Total Profit`
+    (CURRENCY) where the checkbox had been, and a typed column does NOT clear them -- so 941 rows kept
+    a literal FALSE in the Total Profit column.
+
+    That is not cosmetic. `ledger_sync._last_occupied_row` only forgives a row whose SOLE content is a
+    checkbox False; two of them makes the row look occupied, so the append anchor jumped from row 43
+    to 984 and the next scraped order would have landed ~940 rows below the ledger.
+
+    Returns one range per offending column (never one per cell -- that would be ~940 requests).
+    """
+    if not grid:
+        return []
+    oid = header.index("Order ID") if "Order ID" in header else 0
+    last_data = max(
+        (n for n, row in enumerate(grid[1:], start=2)
+         if oid < len(row) and str(row[oid]).strip()),
+        default=1,
+    )
+    keep = header.index(checkbox) if checkbox in header else -1
+    ranges = []
+    for col in range(len(header)):
+        if col == keep:
+            continue  # where the checkbox lives now: its padding is expected
+        if any(col < len(grid[n - 1]) and str(grid[n - 1][col]).strip().lower() in _CHECKBOX_TEXT
+               for n in range(last_data + 1, len(grid) + 1)):
+            letter = _col_letter(col)
+            ranges.append(f"{letter}{last_data + 1}:{letter}{len(grid)}")
+    return ranges
+
+
 def plan_formats(header: list[str]) -> dict:
     """Read-only: which column gets which format, and which must be CLEARED.
 
@@ -175,6 +219,12 @@ def main() -> None:
         for name, was, now in changes:
             print(f"    {name:<20} {was or '(none)':<9} -> {now or '(none)'}")
 
+    grid = worksheet.get_values()
+    stale = plan_stale_checkbox_padding(grid, header, "Tracking Submitted")
+    if stale:
+        print(f"\n  Stale checkbox padding to clear (left by a former BOOLEAN column): "
+              f"{', '.join(stale)}")
+
     if not args.apply:
         print("\nDry run only — nothing written. Re-run with --apply to make these changes.")
         return
@@ -189,6 +239,12 @@ def main() -> None:
             "fields": "columnProperties",
         }})
     spreadsheet.batch_update({"requests": requests})
+    if stale:
+        # batch_clear, NOT batch_update: a 1x1 values array only clears the range's FIRST cell, and
+        # sizing a full matrix for ~940 rows would be absurd. values.batchClear also clears values
+        # WITHOUT touching formatting, which is exactly the scope wanted here.
+        worksheet.batch_clear(stale)
+        print(f"Cleared stale checkbox padding in {len(stale)} column(s).")
     print(f"\nApplied formats down to row {last_row}.")
     print("Verify with `python -m scripts.audit_sheet`.")
 

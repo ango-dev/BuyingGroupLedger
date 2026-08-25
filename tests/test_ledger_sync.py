@@ -489,26 +489,36 @@ class TestSyncUpsert:
 
         assert sheet.rows[0] == HEADER
 
-    def test_legacy_sheet_without_shipment_column_is_migrated(self, sheet, tmp_path):
-        # A real legacy header is the CURRENT header TRUNCATED at the point that column was added —
-        # every column since has been appended after it. Build it that way (not by filtering the name
-        # out of HEADER, which stops being a prefix as soon as another column is appended, and the
-        # migration deliberately only accepts a prefix).
-        legacy_header = list(HEADER[: HEADER.index("Shipment")])
-        legacy_row = [str(i) for i in range(len(legacy_header))]
+    def test_a_truncated_legacy_header_is_migrated(self, sheet, tmp_path):
+        """A real legacy header is the CURRENT header TRUNCATED -- every newer column was appended
+        after it. Built that way rather than by filtering a name out of HEADER, because the migration
+        deliberately only accepts a PREFIX.
+
+        Truncated at the TIGHTEST viable point: the shortest prefix that still contains all four
+        upsert-key columns. Anything shorter and the sheet has no key to match on at all, so this is
+        the boundary the migration has to survive.
+
+        The truncation point is DERIVED, not named. This test used to truncate at "Shipment", which
+        quietly stopped being meaningful when the 2026-08-25 reorder moved Shipment ahead of Order ID
+        -- the prefix no longer contained Order ID, and the test raised instead of asserting.
+        """
+        last_key = max(HEADER.index(c) for c in ("Order Date", "Order ID", "Item Name", "Shipment"))
+        legacy_header = list(HEADER[: last_key + 1])
+        legacy_row = [""] * len(legacy_header)
         legacy_row[legacy_header.index("Order ID")] = "A1"
         legacy_row[legacy_header.index("Order Date")] = "2026-08-08"
         legacy_row[legacy_header.index("Item Name")] = "Widget"
+        legacy_row[legacy_header.index("Shipment")] = "1"
         sheet.rows = [legacy_header, legacy_row]
-        # Matches the legacy row's implicit blank Shipment cell.
         path = write_csv_file(
             tmp_path,
-            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="", status="shipped"),
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                 status="shipped"),
         )
 
         sync_csv_to_sheet(path)
 
-        assert sheet.rows[0] == HEADER, "header row should be migrated to include Shipment"
+        assert sheet.rows[0] == HEADER, "header row should be migrated to the full schema"
         assert len(sheet.data_rows()) == 1, "legacy row should match, not duplicate"
 
     def test_sheet_without_buying_group_column_is_migrated(self, sheet, tmp_path):
