@@ -928,3 +928,61 @@ class TestRowsAreDateDescending:
         )
 
         assert result_for(sheet, "rows_are_date_descending").status == "WARN"
+
+
+class TestCogsInputsComplete:
+    """COGS is the year-end cost figure and every way it breaks is silent.
+
+    cashback_rate_sane only asks whether a rate is PLAUSIBLE; it cannot see a missing one. A blank
+    rate makes COGS count the full cost, which overstates the cost side and under-reports tax while
+    looking entirely normal.
+    """
+
+    def test_a_healthy_row_passes(self):
+        assert result_for(build(row_cells(2)), "cogs_inputs_complete").status == "PASS"
+
+    def test_cogs_without_a_cashback_rate_fails(self):
+        sheet = build(row_cells(2, **{"Cashback Rate": Cell("")}))
+
+        result = result_for(sheet, "cogs_inputs_complete")
+
+        assert result.status == "FAIL"
+        assert any("no rate resolved" in d for d in result.details)
+
+    def test_a_payout_without_cogs_fails(self):
+        # Income recorded with no cost against it -- profit overstated.
+        sheet = build(row_cells(2, **{"COGS": Cell(""), "Payout Amount": Cell(800.0)}))
+
+        assert result_for(sheet, "cogs_inputs_complete").status == "FAIL"
+
+    def test_cogs_without_a_payout_is_reported_but_never_fails(self):
+        """The normal state of a shipped-but-unpaid order, and at a year boundary it IS the straddle
+        -- the cost and income sides fall in different tax years. Worth seeing, never worth failing."""
+        sheet = build(row_cells(2, Status=Cell("shipped"), **{"Payout Amount": Cell("")}))
+
+        result = result_for(sheet, "cogs_inputs_complete")
+
+        assert result.status == "PASS"
+        assert "no payout yet" in result.summary
+
+    def test_a_cancelled_row_is_exempt(self):
+        # It carries no money by design; flagging it would fail every audit forever.
+        sheet = build(row_cells(2, Status=Cell("cancelled"), **{
+            "COGS": Cell(""), "Total Cost": Cell(""), "Cashback Rate": Cell(""),
+            "Payout Amount": Cell(""),
+        }))
+
+        assert result_for(sheet, "cogs_inputs_complete").status == "PASS"
+
+    def test_a_gift_card_row_is_not_counted_as_an_unpaid_straddle(self):
+        """A gift card will NEVER have a payout of its own -- the income arrives through the order it
+        funded, whose cost was netted down by the card. Counting it as a straddle would misreport the
+        year-boundary number it exists to surface."""
+        sheet = build(row_cells(2, **{"Buying Group": Cell("Gift Card"), "Payout Amount": Cell("")}))
+
+        result = result_for(sheet, "cogs_inputs_complete")
+
+        assert result.status == "PASS"
+        assert "no payout yet" not in result.summary
+        assert any("gift-card row(s) carry cost with no payout, as designed" in d
+                   for d in result.details) or "gift-card" in result.summary

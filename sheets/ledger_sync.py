@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 
 from alerts.notifier import alert
 from config.settings import settings
-from config.warehouses import classify_address, is_personal
+from config.warehouses import classify_address, is_deliberately_unrouted, is_personal
 from models.order import FIELDNAMES, TERMINAL_STATUSES, shipment_label
 
 log = logging.getLogger(__name__)
@@ -1171,6 +1171,15 @@ def plan_buying_group_retag(header: list[str], data_rows: list[list[str]], wareh
         name = row[name_idx].strip() if name_idx < len(row) else ""
         addr = row[addr_idx].strip() if addr_idx < len(row) else ""
         old_tag = row[bg_idx].strip() if bg_idx is not None and bg_idx < len(row) else ""
+        # A DELIBERATELY UNROUTED tag is sticky. A gift card row is hand-entered bookkeeping, and
+        # classify_address knows nothing about it: shipped to the user's own address it would classify
+        # Personal and be DELETED, and shipped to a jig it would be retagged into a buying group it
+        # was never part of. Neither is recoverable from the sheet afterwards, so the tag wins.
+        if is_deliberately_unrouted(old_tag):
+            group_counts[old_tag] = group_counts.get(old_tag, 0) + 1
+            unchanged += 1
+            continue
+
         new_tag = classify_address(addr, warehouses)
 
         if is_personal(new_tag):

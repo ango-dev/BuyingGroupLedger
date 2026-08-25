@@ -15,7 +15,7 @@ import logging
 from buying_groups.base import BuyingGroupClient, normalize_group
 from buying_groups.bfmr import BFMRClient
 from buying_groups.maxoutdeals import MaxOutDealsClient
-from config.warehouses import PERSONAL, UNCLASSIFIED
+from config.warehouses import DELIBERATELY_UNROUTED, PERSONAL, UNCLASSIFIED
 
 __all__ = ["PROVIDERS", "get_client", "resolve_group"]
 
@@ -40,13 +40,19 @@ _ALIASES: dict[str, str] = {
 def resolve_group(buying_group: str) -> str:
     """Map a `Buying Group` cell to a canonical provider key, or "" if it routes nowhere.
 
-    Returns "" for `Unclassified`, `Personal`, a blank cell, and any group with no adapter. All four
-    are legitimately un-postable, and the caller reports the counts rather than guessing: an
-    Unclassified row is a real warehouse someone forgot to configure, and silently posting it to
+    Returns "" for `Unclassified`, `Personal`, `Gift Card`, a blank cell, and any group with no
+    adapter. All are legitimately un-postable, and the caller reports the counts rather than guessing:
+    an Unclassified row is a real warehouse someone forgot to configure, and silently posting it to
     whichever group happened to be first would be far worse than leaving it visible.
+
+    NOTE the caller must still tell these apart — `Gift Card` is unrouted on purpose and silent, while
+    a blank or Unclassified row with a tracking number is money about to be lost. See
+    config.warehouses.is_deliberately_unrouted.
     """
     key = normalize_group(buying_group)
-    if not key or key in (normalize_group(UNCLASSIFIED), normalize_group(PERSONAL)):
+    unrouted = {normalize_group(UNCLASSIFIED), normalize_group(PERSONAL)}
+    unrouted |= {normalize_group(t) for t in DELIBERATELY_UNROUTED}
+    if not key or key in unrouted:
         return ""
     return _ALIASES.get(key, "")
 

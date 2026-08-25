@@ -1722,3 +1722,45 @@ class TestCancelledRowsCarryNoMoney:
         ledger_sync._blank_money_for_cancelled(original)
 
         assert original == before
+
+
+class TestGiftCardTagIsSticky:
+    """`Gift Card` is a DELIBERATE non-routing tag, and classify_address knows nothing about it.
+
+    A gift card shipped to the user's own address would classify Personal and be planned for DELETION;
+    one shipped to a jig would be retagged into a buying group it was never part of. Neither is
+    recoverable from the sheet afterwards, so the tag has to win over the address.
+    """
+
+    warehouses = [
+        Warehouse(buying_group="BFMR", jigs=[Jig(zip="10001")]),
+        Warehouse(buying_group="Personal", jigs=[Jig(zip="94103")]),
+    ]
+
+    def test_a_gift_card_at_a_personal_address_is_not_deleted(self):
+        rows = [row(order_id="GC1", order_date="2026-08-08", item_name="$500 gift card",
+                    delivery_address="1 Home St, San Francisco CA 94103", buying_group="Gift Card")]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["deletions"] == []
+        assert plan["updates"] == []
+        assert plan["group_counts"] == {"Gift Card": 1}
+
+    def test_a_gift_card_at_a_warehouse_address_is_not_retagged(self):
+        rows = [row(order_id="GC1", order_date="2026-08-08", item_name="$500 gift card",
+                    delivery_address="123 Main St, New York NY 10001", buying_group="Gift Card")]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["updates"] == [], "the tag must win over the address"
+        assert plan["unchanged"] == 1
+
+    def test_an_ordinary_row_is_still_classified_normally(self):
+        # The exemption must be narrow: it keys off the TAG, never off a blank address.
+        rows = [row(order_id="A1", order_date="2026-08-08", item_name="W",
+                    delivery_address="123 Main St, New York NY 10001", buying_group="")]
+
+        plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
+
+        assert plan["updates"] == [(2, "A1", "W", "", "BFMR")]

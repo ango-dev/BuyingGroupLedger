@@ -641,3 +641,35 @@ class TestSettledPackagesAreNotReSubmitted:
         plan = plan_tracking_submissions(header, rows)
         assert plan["rows_by_tracking"].get("1Z1") == [2]
         assert plan["by_group"]["MOD"], "the row stays in the group's list for the payout read"
+
+
+class TestGiftCardRowsAreUnroutedOnPurpose:
+    """A gift card is bookkeeping, not a resale: it cost real money, it ships with a tracking number
+    like anything else, and it will never be submitted to or paid by any buying group.
+
+    The distinction that matters is DELIBERATE vs ACCIDENTAL. An Unclassified row with a tracking
+    number is money about to be lost and rightly alerts on every run; a gift card doing the same thing
+    forever would train the user to ignore that alert.
+    """
+
+    def test_a_shipped_gift_card_never_reaches_the_unroutable_alert(self):
+        rows = [
+            shipped("GC-1", "1Z111", group="Gift Card"),
+            shipped("A", "1Z999", group="Unclassified"),
+        ]
+
+        plan = plan_tracking_submissions(list(HEADER), rows)
+
+        assert [r[1] for r in plan["unroutable_tracked"]] == ["A"], \
+            "the gift card must not be alerted on; the Unclassified row must be"
+
+    def test_it_is_still_counted_as_skipped_so_it_stays_visible(self):
+        # Silent is not the same as invisible -- the run summary should still say it was passed over.
+        plan = plan_tracking_submissions(list(HEADER), [shipped("GC-1", "1Z111", group="Gift Card")])
+
+        assert plan["skipped_unroutable"] == {"Gift Card": 1}
+
+    def test_it_is_never_submitted_to_any_group(self):
+        plan = plan_tracking_submissions(list(HEADER), [shipped("GC-1", "1Z111", group="Gift Card")])
+
+        assert plan["by_group"] == {}

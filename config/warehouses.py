@@ -24,8 +24,37 @@ UNCLASSIFIED = "Unclassified"
 PERSONAL = "Personal"
 
 
+# The reserved group name for a purchase that is DELIBERATELY not a buying-group order — a gift card
+# bought to fund a later order being the case this exists for. Such a row is real bookkeeping (it cost
+# real money) but it will never route anywhere and will never be paid out, so it must be told apart
+# from the two accidental non-routing tags above:
+#
+#   Unclassified  a warehouse someone forgot to configure       -> a gap to FIX, worth alerting on
+#   Personal      the user's own address                        -> DROPPED, never reaches the ledger
+#   Gift Card     deliberately not a resale                     -> KEPT, and silent
+#
+# Without the distinction a gift card shipped with a tracking number lands in sync_tracking's
+# `unroutable_tracked`, which alerts on every run as though a reimbursement were about to be lost.
+#
+# The COST still counts: the scrapers net a gift card applied to an order OFF that order's cost (see
+# amazon_mapping), so the card's own row carries the outlay exactly once and the totals stay right.
+GIFT_CARD = "Gift Card"
+
+#: Tags that route to no buying group ON PURPOSE. Widen this rather than special-casing "Gift Card"
+#: in each consumer, if a second kind of non-resale purchase ever needs the same treatment.
+DELIBERATELY_UNROUTED = (GIFT_CARD,)
+
+
 def is_personal(buying_group: str) -> bool:
     return buying_group.strip().lower() == PERSONAL.lower()
+
+
+def is_deliberately_unrouted(buying_group: str) -> bool:
+    """Is this row unrouted BY DESIGN (a gift card), rather than through a config gap?
+
+    The difference decides whether a shipped, unroutable row is an emergency or a non-event.
+    """
+    return (buying_group or "").strip().lower() in {t.lower() for t in DELIBERATELY_UNROUTED}
 
 
 def load_warehouses() -> list[Warehouse]:
@@ -96,6 +125,13 @@ def tag_and_filter_personal(items, warehouses) -> tuple[list, int, int]:
     dropped_personal = 0
     unclassified = 0
     for item in items:
+        # A DELIBERATE tag already on the item wins over the address. The gift-card purchase row the
+        # Amazon mappings create carries `Gift Card` and no address at all; re-deriving from the
+        # address would blank it, and a gift card that DID have an address would be classified into a
+        # buying group it was never part of (or as Personal, and silently dropped).
+        if is_deliberately_unrouted(item.buying_group):
+            kept.append(item)
+            continue
         item.buying_group = classify_address(item.delivery_address, warehouses)
         if is_personal(item.buying_group):
             dropped_personal += 1

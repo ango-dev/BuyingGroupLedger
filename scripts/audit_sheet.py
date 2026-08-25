@@ -1320,6 +1320,73 @@ def check_unresolved_split_quantity(sheet: Sheet, opts: Options) -> Result:
     return Result("unresolved_split_quantity", "PASS", "no unresolved split rows")
 
 
+@check("cogs_inputs_complete")
+def check_cogs_inputs_complete(sheet: Sheet, opts: Options) -> Result:
+    """COGS is the year-end cost figure, and every way it goes wrong is SILENT.
+
+    `cashback_rate_sane` only asks whether a rate is plausible; it cannot see a MISSING one. But COGS
+    is `(Total Cost + Shipping) * (1 - Cashback Rate)`, so a blank rate quietly computes the FULL cost
+    as cost of goods -- overstating COGS, understating income, and under-reporting tax. Nothing else
+    in the audit looks at it, and the number stays perfectly plausible while being wrong.
+
+    Three shapes, in decreasing severity:
+
+    - **COGS with no Cashback Rate** -- FAIL. The cost side is overstated by the rebate.
+    - **A payout with no COGS** -- FAIL. Income recorded with no cost against it, so profit is
+      overstated. Usually a Total Cost that never landed.
+    - **COGS with no payout** -- reported, not failed. It is the NORMAL state of an order that has
+      shipped but not been paid yet, and at a year boundary it is exactly the straddle that makes the
+      cost and income sides fall in different tax years. Worth seeing, never worth failing.
+
+    Gift-card rows are exempt from the third shape entirely: a gift card is a real cost that will
+    NEVER have a payout of its own, because the income arrives through the order it funded (whose own
+    cost was netted down by the card, so nothing is double-counted).
+    """
+    from config.warehouses import is_deliberately_unrouted
+
+    grid, unf = sheet.grids.formatted, sheet.grids.unformatted
+    no_rate, no_cogs, unpaid, gift = [], [], [], 0
+    for row_number, _ in sheet.ledger_rows(grid):
+        status = str(sheet.cell(grid, row_number, "Status")).strip().lower()
+        if status == "cancelled":
+            continue  # carries no money by design -- see ledger_sync._blank_money_for_cancelled
+        cogs = _parse_display_number(sheet.cell(unf, row_number, "COGS"))
+        rate = _parse_display_number(sheet.cell(unf, row_number, "Cashback Rate"))
+        payout = _parse_display_number(sheet.cell(unf, row_number, "Payout Amount"))
+        order_id = sheet.cell(grid, row_number, "Order ID")
+
+        if cogs and rate is None:
+            card = sheet.cell(grid, row_number, "Card")
+            no_rate.append(f"row {row_number}: order {order_id} (card {card!r}) -- COGS counts the "
+                           "full cost because no rate resolved")
+        if payout and not cogs:
+            no_cogs.append(f"row {row_number}: order {order_id} paid {payout} with no COGS")
+        if cogs and not payout:
+            if is_deliberately_unrouted(sheet.cell(grid, row_number, "Buying Group")):
+                gift += 1
+            else:
+                unpaid.append((row_number, cogs, status))
+
+    note = []
+    if unpaid:
+        total = sum(c for _n, c, _s in unpaid)
+        note.append(f"{len(unpaid)} row(s) hold {total:,.2f} of COGS with no payout yet -- at a year "
+                    "boundary these land in a different tax year from their income")
+    if gift:
+        note.append(f"{gift} gift-card row(s) carry cost with no payout, as designed")
+
+    if no_rate or no_cogs:
+        return Result(
+            "cogs_inputs_complete", "FAIL",
+            f"{len(no_rate)} row(s) with COGS but no Cashback Rate, {len(no_cogs)} with a payout but "
+            "no COGS -- the year-end totals are wrong",
+            _truncate(no_rate + no_cogs + note, opts.max_detail),
+        )
+    return Result("cogs_inputs_complete", "PASS",
+                  "every row's COGS has its cost and rate" + (f"; {note[0]}" if note else ""),
+                  tuple(note[1:]) if len(note) > 1 else ())
+
+
 @check("cashback_rate_sane")
 def check_cashback_rate_sane(sheet: Sheet, opts: Options) -> Result:
     """A rate must be a fraction in [0, 1].

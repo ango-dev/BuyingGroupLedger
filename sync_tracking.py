@@ -62,6 +62,7 @@ from gspread.utils import ValueInputOption, ValueRenderOption
 
 from alerts.notifier import alert
 from buying_groups.base import BuyingGroupError, PayoutRecord, TrackingSubmission
+from config.warehouses import is_deliberately_unrouted
 from buying_groups.registry import PROVIDERS, get_client, resolve_group
 from sheets.ledger_sync import (
     HEADER,
@@ -192,6 +193,12 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         if not group_key:
             label = group_written or "(blank)"
             skipped_unroutable[label] = skipped_unroutable.get(label, 0) + 1
+            if is_deliberately_unrouted(group_written):
+                # A gift card is not a resale: it routes nowhere BY DESIGN, will never be paid out,
+                # and ships with a tracking number like anything else. Without this it would land in
+                # unroutable_tracked below and alert on EVERY run for the life of the row, training
+                # the user to ignore the one alert that means real money is about to be lost.
+                continue
             # A SHIPPED package routing to no group is unsubmittable to ANY of them, which is the
             # same loss as a rejected submission and needs the same urgency — see
             # _alert_on_unroutable. Only rows that HAVE a tracking number are collected: an

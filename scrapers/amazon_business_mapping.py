@@ -44,6 +44,7 @@ import re
 
 from bs4 import BeautifulSoup
 
+from config.warehouses import GIFT_CARD
 from models.order import OrderItem, shipment_label
 
 log = logging.getLogger(__name__)
@@ -590,14 +591,20 @@ def build_order_items(
                 continue
             if _skip_digital(status_text, item_name, card_last4, keep_digital_last4s):
                 continue
+            kept_gift_card = (
+                _is_gift_card_line(status_text, item_name)
+                and (_is_digital_shipment(status_text) or _is_digital_item(item_name))
+            )
             # A kept gift card completes the moment the balance lands: mark it terminal so
             # the order closes instead of sitting in the open list being re-read forever.
-            item_status = (
-                "delivered"
-                if _is_gift_card_line(status_text, item_name)
-                and (_is_digital_shipment(status_text) or _is_digital_item(item_name))
-                else status
-            )
+            item_status = "delivered" if kept_gift_card else status
+            # ...and tag it as DELIBERATELY unrouted. It is a real cost funding inventory, but it will
+            # never be submitted to a buying group and will never be paid out on its own — the income
+            # arrives through the order the balance pays for, whose cost `_net_gift_card` reduces by
+            # this amount. Left blank it would instead read as an ordinary order still awaiting
+            # payment, which is what audit_sheet's cogs_inputs_complete counts as a year-boundary
+            # straddle. config.warehouses.tag_and_filter_personal preserves this tag.
+            item_group = GIFT_CARD if kept_gift_card else ""
             qty_el = container.select_one(".od-item-view-qty")
             quantity = None
             if qty_el:
@@ -613,6 +620,7 @@ def build_order_items(
                     order_id=order_id,
                     order_date=order_date,
                     status=item_status,
+                    buying_group=item_group,
                     order_url=f"{_BASE}/gp/css/order-details?orderID={order_id}",
                     tracking_number=tracking_number,
                     tracking_url=tracking_url,

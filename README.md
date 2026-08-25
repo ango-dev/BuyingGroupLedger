@@ -295,6 +295,21 @@ etc.) — they're never resold, so they never hit the ledger.
   funding inventory. It lands as a `delivered` row with cost and cashback and no tracking. A gift card
   bought on any other card is treated as personal and skipped, as are all other digital items; if you
   need one of those on the ledger, add it by hand.
+
+  Such a row is tagged **`Gift Card`** in the Buying Group column, and that tag is *deliberate
+  non-routing* — distinct from the two accidental kinds:
+
+  | Tag | Meaning | Behaviour |
+  |---|---|---|
+  | `Unclassified` | a warehouse nobody configured | a gap to FIX — **alerts** if the row has tracking |
+  | `Personal` | your own address | **dropped**, never reaches the ledger |
+  | `Gift Card` | not a resale at all | **kept**, routed nowhere, and silent |
+
+  The distinction earns its keep: a gift card ships with a tracking number like anything else, and
+  without it every gift-card row would sit in `sync_tracking`'s unroutable list alerting on every run
+  as though a reimbursement were about to be lost — training you to ignore the one alert that means
+  exactly that. The tag also **wins over the delivery address**, so a card shipped to your own home
+  isn't classified `Personal` and deleted. Hand-entered gift-card rows should carry the same tag.
 - **Insurance**, **Payout Date** and **Payout Amount** are filled by the buying-group sync (see
   "Buying groups" below) — or by hand until you enable it. The scrapers always write them blank, and
   the upsert's blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.

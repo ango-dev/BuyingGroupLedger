@@ -636,3 +636,28 @@ def test_the_real_block_picks_the_track_link_over_its_siblings():
     url = parse_shipment_targets(html)[0]["tracking_url"]
 
     assert "progress-tracker/package?" in url and "cancel" not in url
+
+
+def test_a_kept_gift_card_row_is_tagged_as_deliberately_unrouted():
+    """It funds inventory, so its cost belongs on the ledger — but it will never be submitted to a
+    buying group and never paid out on its own. Left blank it reads as an ordinary order still
+    awaiting payment, which audit_sheet's cogs_inputs_complete would count as a year-boundary
+    straddle for the life of the row."""
+    from config.warehouses import GIFT_CARD, is_deliberately_unrouted, tag_and_filter_personal
+    from models.warehouse import Jig, Warehouse
+
+    html = _gift_card_order("Applied Gift Card balance is added to your account.",
+                            "Amazon Gift Card Balance Reload")
+    rows = build_order_items(html, keep_digital_last4s=BOOSTED)
+
+    assert len(rows) == 1
+    assert rows[0].buying_group == GIFT_CARD
+
+    # And the tag must SURVIVE the classifier, which otherwise overwrites buying_group from the
+    # address — a gift card has none, so it would be blanked back to "".
+    kept, dropped, _unclassified = tag_and_filter_personal(
+        rows, [Warehouse(buying_group="BFMR", jigs=[Jig(zip="10001")])]
+    )
+    assert len(kept) == 1 and dropped == 0
+    assert kept[0].buying_group == GIFT_CARD
+    assert is_deliberately_unrouted(kept[0].buying_group)

@@ -1586,3 +1586,24 @@ class TestPayoutRecordDefaults:
         """The two providers expose different subsets — MOD's CSV has no paid-date column at all."""
         record = PayoutRecord(tracking_number="1Z9")
         assert record.payout_amount is None and record.payout_date == ""
+
+
+class TestDeliberatelyUnroutedTags:
+    """Three tags route nowhere, for three different reasons, and the caller must tell them apart:
+    Unclassified is a gap to fix, Personal never reaches the ledger, Gift Card is kept and silent."""
+
+    def test_gift_card_routes_nowhere(self):
+        from buying_groups.registry import resolve_group
+        assert resolve_group("Gift Card") == ""
+        assert resolve_group("gift card") == "", "matching must be case-insensitive"
+
+    def test_only_gift_card_is_deliberate(self):
+        from config.warehouses import is_deliberately_unrouted
+        assert is_deliberately_unrouted("Gift Card")
+        for other in ("Unclassified", "Personal", "", "BFMR", "MOD"):
+            assert not is_deliberately_unrouted(other), other
+
+    def test_real_groups_still_route(self):
+        from buying_groups.registry import resolve_group
+        assert resolve_group("BFMR") == "BFMR"
+        assert resolve_group("MOD") == "MOD"
