@@ -1,7 +1,7 @@
 """
 RECON tool: map Amazon Business's sign-in flow from a genuinely logged-out session.
 
-One-off developer tool used to BUILD `scrapers/amazon_business_signin.py` — the deterministic,
+One-off developer tool used to BUILD `scrapers/amazon_signin.py` — the deterministic,
 agent-free self-login that lets a lapsed Amazon Business session heal itself, the way
 `bestbuy_api._deterministic_login` does for Best Buy. It does NOT run in production.
 
@@ -18,14 +18,19 @@ actually decide the design can only be answered live:
 
 Two modes:
 
-    python -m scripts.amazon_business_signin_probe --label profile-alpha            # INSPECT: submits nothing
-    python -m scripts.amazon_business_signin_probe --label profile-alpha --login    # runs the real sign-in
+    python -m scripts.amazon_business_signin_probe --label profile-alpha          # INSPECT: submits nothing
+    python -m scripts.amazon_business_signin_probe --label profile-alpha --login  # runs the real sign-in
+
+CONSUMER Amazon is probed with the same tool — one identity system serves both accounts, so only the
+credentials differ (`--retailer amazon` reads `auth["amazon"]` instead):
+
+    python -m scripts.amazon_business_signin_probe --label profile-bravo --retailer amazon
 
 INSPECT loads the order-history page, confirms the session is logged out, and dumps the sign-in DOM.
 It cannot reach the password or OTP screens — those exist only after a real submission — so --login
 is what settles question 1 above.
 
---login uses the profile's own `auth["amazon-business"]` credentials from config.json and answers an
+--login uses the profile's own `auth[<retailer>]` credentials from config.json and answers an
 authenticator challenge with `scrapers.totp`. It stops and dumps at anything it does not recognise
 rather than clicking around: a wrong guess here costs an Amazon account lock, not a retry.
 
@@ -303,7 +308,7 @@ class _Stop(Exception):
         self.code = code
 
 
-def run(label: str, out_dir: Path, do_login: bool) -> int:
+def run(label: str, out_dir: Path, do_login: bool, retailer: str = "amazon-business") -> int:
     # Importing config.settings is what puts BROWSER_USE_API_KEY into os.environ, where the SDK reads
     # it. The key normally lives in config.json, and load_dotenv() alone does not find it there — so
     # without this the probe dies at "No API key provided" with a perfectly valid configuration.
@@ -317,10 +322,10 @@ def run(label: str, out_dir: Path, do_login: bool) -> int:
     if not profile.profile_id:
         sys.exit(f"Profile '{label}' has no profile_id — run scripts.create_profile first.")
 
-    auth = profile.auth.get("amazon-business")
+    auth = profile.auth.get(retailer)
     if do_login and (auth is None or not auth.username or not auth.password):
         sys.exit(
-            f"--login needs credentials: add an auth block for 'amazon-business' to profile "
+            f"--login needs credentials: add an auth block for '{retailer}' to profile "
             f"'{label}' in config.json (method/username/password/totp_secret)."
         )
 
@@ -332,7 +337,8 @@ def run(label: str, out_dir: Path, do_login: bool) -> int:
 
     out_dir.mkdir(parents=True, exist_ok=True)
     findings: dict = {"probed_at": datetime.now(timezone.utc).isoformat(), "profile": label,
-                      "mode": "login" if do_login else "inspect", "screens": []}
+                      "retailer": retailer, "mode": "login" if do_login else "inspect",
+                      "screens": []}
     failed_requests: list = []
     exit_code = 0
 
@@ -372,7 +378,7 @@ def run(label: str, out_dir: Path, do_login: bool) -> int:
             # will actually run. It refuses to guess between two accounts, which matters more here
             # than anywhere else in the flow: signing into the wrong one scrapes a different
             # account's orders and looks like a completely successful run.
-            from scrapers import amazon_business_signin as signin
+            from scrapers import amazon_signin as signin
 
             if signin.on_account_switcher(page):
                 action = signin.handle_account_switcher(page, auth)
@@ -489,7 +495,7 @@ def run(label: str, out_dir: Path, do_login: bool) -> int:
 
                 if not auth.totp_secret:
                     log.error("The OTP screen is up but no totp_secret is configured — add it to "
-                              "auth['amazon-business'].totp_secret and re-run.")
+                              f"auth['{retailer}'].totp_secret and re-run.")
                     findings["result"] = "otp_but_no_secret"
                     raise _Stop(1)
 
@@ -582,8 +588,13 @@ def main() -> None:
     parser.add_argument("--out", default=".amazon_business_signin_capture", help="Output dir (gitignored)")
     parser.add_argument("--login", action="store_true",
                         help="Actually sign in (default: inspect the sign-in page, submit nothing)")
+    parser.add_argument("--retailer", default="amazon-business",
+                        choices=["amazon-business", "amazon"],
+                        help="Which auth block to use, and which account is being probed. Both run "
+                             "on amazon.com and share one identity system, so the same probe covers "
+                             "them; only the credentials differ.")
     args = parser.parse_args()
-    raise SystemExit(run(args.label, Path(args.out), args.login))
+    raise SystemExit(run(args.label, Path(args.out), args.login, args.retailer))
 
 
 if __name__ == "__main__":

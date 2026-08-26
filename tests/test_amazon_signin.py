@@ -17,7 +17,7 @@ is the whole reason the probe was run first.
 import pytest
 
 from models.profile import RetailerAuth
-from scrapers import amazon_business_signin as signin
+from scrapers import amazon_signin as signin
 from scrapers.totp import totp
 
 SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"

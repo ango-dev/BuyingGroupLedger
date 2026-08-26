@@ -21,7 +21,7 @@ Three reads, one logged-in session:
      `/gp/your-account/ship-track…`), read via the scraper's `read_tracking_page`, then rebuild rows so
      the `_shipped_requires_tracking` invariant promotes them to `shipped`.
 
-A lapsed session SIGNS ITSELF BACK IN (scrapers/amazon_business_signin.py) when the profile carries
+A lapsed session SIGNS ITSELF BACK IN (scrapers/amazon_signin.py) when the profile carries
 an `auth["amazon-business"]` block, answering Amazon's authenticator challenge with a code generated
 on this host. That reverses the original "no deterministic re-login (Amazon has OTP/2FA)" rule, which
 made this the one retailer that could not heal itself — the design notes watched it cost two consecutive
@@ -36,7 +36,7 @@ import logging
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
 from scrapers.amazon_business_mapping import RETAILER, build_order_items, discover_orders, parse_shipment_targets
-from scrapers.amazon_business_signin import deterministic_login, looks_logged_out
+from scrapers.amazon_signin import deterministic_login, looks_logged_out
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
 from models.order import TERMINAL_STATUSES

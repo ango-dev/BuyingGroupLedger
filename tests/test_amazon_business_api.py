@@ -10,7 +10,7 @@ keep-filter.
 import pytest
 
 import scrapers.amazon_business_api as api
-import scrapers.amazon_business_signin as signin
+import scrapers.amazon_signin as signin
 from models.profile import RetailerAuth
 from scrapers.amazon_business_api import AmazonBusinessApiClient
 from tests.test_amazon_business_mapping import _details, _history, _item, _order_card, _shipment

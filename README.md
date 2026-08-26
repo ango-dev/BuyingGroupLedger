@@ -17,7 +17,7 @@ when a scraper reads page 1 of a paginated order history and misses the rest, or
 overwrites a good tracking number with a blank. Most of the work below is invariants, idempotency and
 auditing aimed squarely at that class of bug — see **[Design notes](#design-notes)**.
 
-> **Status:** running in production against real accounts. `pytest` runs 1340 offline tests that need
+> **Status:** running in production against real accounts. `pytest` runs 1343 offline tests that need
 > no credentials and no network.
 
 ---
@@ -490,6 +490,13 @@ Fill a profile's `proxy` in `config.json`'s `profiles` list (leave `profile_id` 
 
 It opens a live browser URL — log into the retailer(s) there, press Enter, and it saves the
 `profile_id` back into `config.json`. Re-run it any time to log back in if a session expires.
+
+> ⚠️ **Close that browser window when you're done, and don't leave one open while runs are
+> scheduled.** A profile's state is saved when a session *closes*, so the last session to close wins.
+> A stale window lingering in the background will write its own (possibly logged-out) cookies over
+> the profile, silently discarding a sign-in a scheduled run had just completed. The symptom is
+> "it logs in every run and never stays logged in", which looks exactly like a broken login — so
+> rule this out first.
 
 **Auto-auth (username + password + an authenticator code).** A dead session is a run that records
 nothing, and the two retailers that log out do it for different reasons: **Best Buy**'s web sessions

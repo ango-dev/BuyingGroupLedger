@@ -6,7 +6,11 @@ The HTML parsing is covered by tests/test_amazon_mapping.py; here a fake CDP pag
 final date keep-filter.
 """
 
+import pytest
+
 import scrapers.amazon_api as amazon_api
+import scrapers.amazon_signin as signin
+from models.profile import RetailerAuth
 from scrapers.amazon_api import AmazonApiClient
 from tests.test_amazon_mapping import _details, _item, _shipment
 
@@ -64,7 +68,13 @@ class _FakeCdp:
 
 
 class _Profile:
+    """A real ProfileConfig always has an `auth` dict (empty when nothing is configured), and the
+    client reads it to decide whether a lapsed session can sign itself back in."""
+
     label = "profile-bravo"
+
+    def __init__(self, auth=None):
+        self.auth = auth or {}
 
 
 def _history(*pairs):
@@ -196,3 +206,71 @@ def test_logged_out_raises(monkeypatch):
         assert False, "expected ApiLoginError"
     except amazon_api.ApiLoginError:
         pass
+
+
+def _auth():
+    return RetailerAuth(method="password", username="u@example.com", password="pw",
+                        totp_secret="GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+
+
+class TestConsumerAmazonSelfLogin:
+    """Consumer Amazon shares amazon.com's ONE identity system with Business, so it shares
+    scrapers/amazon_signin.py. What is per-retailer is only which auth block is read -- and, far more
+    importantly, WHICH ACCOUNT it must never sign into.
+    """
+
+    @staticmethod
+    def _logged_out_page():
+        """A session sitting on Amazon's sign-in form (every sign-in selector reports present)."""
+
+        class _P(_FakePage):
+            def __init__(self):
+                super().__init__("<html></html>", {})
+
+            def locator(self, *a, **k):
+                class L:
+                    def count(self):
+                        return 1
+
+                return L()
+
+        return _P()
+
+    def test_no_auth_block_still_raises_and_names_the_fix(self, monkeypatch):
+        """The guard that keeps this change inert for a profile that has not opted in: still
+        ApiLoginError (alert + SKIP), never a fall-through to the paid agent, never a crash."""
+        page = self._logged_out_page()
+        monkeypatch.setattr(amazon_api, "CdpBrowser", _FakeCdp(page))
+
+        client = AmazonApiClient(_Profile())
+        with pytest.raises(amazon_api.ApiLoginError, match="no auth block"):
+            client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+    def test_it_reads_the_amazon_auth_block_not_the_business_one(self, monkeypatch):
+        """The two Amazon accounts are deliberately on separate profiles (CLAUDE.md). Reading the
+        wrong key would sign the consumer profile in with the BUSINESS credentials -- the exact
+        account linking the split exists to prevent."""
+        page = self._logged_out_page()
+        monkeypatch.setattr(amazon_api, "CdpBrowser", _FakeCdp(page))
+        seen = []
+        monkeypatch.setattr(amazon_api, "deterministic_login",
+                            lambda p, a: seen.append(a) or signin.LoginOutcome(False, False, "nope"))
+
+        consumer, business = _auth(), RetailerAuth(method="password", username="biz@example.com",
+                                                   password="bizpw")
+        client = AmazonApiClient(_Profile(auth={"amazon": consumer,
+                                                "amazon-business": business}))
+        with pytest.raises(amazon_api.ApiLoginError):
+            client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+        assert seen == [consumer], "the consumer profile must never be handed Business credentials"
+
+    def test_a_failed_self_login_carries_its_reason_to_the_alert(self, monkeypatch):
+        page = self._logged_out_page()
+        monkeypatch.setattr(amazon_api, "CdpBrowser", _FakeCdp(page))
+        monkeypatch.setattr(amazon_api, "deterministic_login", lambda p, a: signin.LoginOutcome(
+            False, False, "ACCOUNT SWITCHER -- none unambiguously matched"))
+
+        client = AmazonApiClient(_Profile(auth={"amazon": _auth()}))
+        with pytest.raises(amazon_api.ApiLoginError, match="ACCOUNT SWITCHER"):
+            client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")

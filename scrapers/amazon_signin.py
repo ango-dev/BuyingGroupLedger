@@ -1,4 +1,11 @@
-"""Amazon Business's sign-in, driven deterministically — so a lapsed session heals itself.
+"""Amazon's sign-in, driven deterministically — so a lapsed session heals itself.
+
+SHARED BY BOTH AMAZON ACCOUNTS (consumer `amazon_api` and `amazon_business_api`).
+The the design notes standalone rule keeps their ORDER parsers apart, because the
+order-details DOM genuinely diverges between consumer and Business. The SIGN-IN page
+does not: amazon.com has one identity system, and a live probe of BOTH accounts on
+2026-08-25 found the same four screen shapes and the same element ids. Sharing it means
+one place to fix when Amazon serves a fifth shape, instead of two that drift.
 
 Amazon Business used to be the ONE retailer here that could not recover from a logged-out session:
 `amazon_business_api` raised on sight of a sign-in page, the scraper alerted and skipped, and nothing
@@ -190,10 +197,10 @@ def _fill_first(page, selectors, value: str, what: str = "field") -> str:
             continue
         try:
             page.fill(selector, value)
-            log.info("Amazon Business sign-in: filled the %s via %s.", what, selector)
+            log.info("Amazon sign-in: filled the %s via %s.", what, selector)
             return selector
         except Exception:  # noqa: BLE001 — try the next spelling
-            log.debug("Amazon Business sign-in: fill via %s failed", selector, exc_info=True)
+            log.debug("Amazon sign-in: fill via %s failed", selector, exc_info=True)
     return ""
 
 
@@ -207,19 +214,19 @@ def _click_first(page, selectors, what: str) -> bool:
             if loc.count() == 0:
                 continue
             loc.click(timeout=8000)
-            log.info("Amazon Business sign-in: clicked %s via %s.", what, selector)
+            log.info("Amazon sign-in: clicked %s via %s.", what, selector)
             return True
         except Exception:  # noqa: BLE001 — try the next strategy, report only if all fail
-            log.debug("Amazon Business sign-in: click %s via %s failed", what, selector, exc_info=True)
+            log.debug("Amazon sign-in: click %s via %s failed", what, selector, exc_info=True)
     for selector in selectors:
         try:
             page.eval_on_selector(selector, "el => el.click()")
-            log.info("Amazon Business sign-in: clicked %s via a dispatched el.click() on %s.",
+            log.info("Amazon sign-in: clicked %s via a dispatched el.click() on %s.",
                      what, selector)
             return True
         except Exception:  # noqa: BLE001
             continue
-    log.warning("Amazon Business sign-in: could not click %s.", what)
+    log.warning("Amazon sign-in: could not click %s.", what)
     return False
 
 
@@ -240,14 +247,14 @@ def _keep_signed_in(page) -> bool:
             if box.count() == 0:
                 continue
             if box.is_checked():
-                log.debug("Amazon Business sign-in: 'Keep me signed in' already ticked (%s).", selector)
+                log.debug("Amazon sign-in: 'Keep me signed in' already ticked (%s).", selector)
                 return True
             box.check(timeout=4000)
-            log.info("Amazon Business sign-in: ticked 'Keep me signed in' via %s.", selector)
+            log.info("Amazon sign-in: ticked 'Keep me signed in' via %s.", selector)
             return True
         except Exception:  # noqa: BLE001 — never let an optional nicety break the sign-in
             continue
-    log.debug("Amazon Business sign-in: no 'Keep me signed in' control found; continuing.")
+    log.debug("Amazon sign-in: no 'Keep me signed in' control found; continuing.")
     return False
 
 
@@ -365,7 +372,7 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
     try:
         info = page.evaluate(_DIAGNOSTIC_JS)
     except Exception:  # noqa: BLE001 — diagnostics must never mask the original failure
-        log.warning("Amazon Business sign-in: %s (page state unreadable).", what_failed, exc_info=True)
+        log.warning("Amazon sign-in: %s (page state unreadable).", what_failed, exc_info=True)
 
     critical = _auth_critical(failed_requests)
 
@@ -375,19 +382,19 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
         # Lead with the verdict: this is the line a human reads first in a wall of scheduled-run logs.
         log.warning("Amazon Business sign-in FAILED — %s. WHAT TO DO: %s", verdict, action)
         if info.get("errors"):
-            log.warning("Amazon Business sign-in: the page says: %s", info["errors"])
-        log.warning("Amazon Business sign-in: %s. Page state: %s", what_failed,
+            log.warning("Amazon sign-in: the page says: %s", info["errors"])
+        log.warning("Amazon sign-in: %s. Page state: %s", what_failed,
                     {k: v for k, v in info.items() if k != "text"})
 
     if failed_requests:
         if critical:
             log.warning(
-                "Amazon Business sign-in: %d auth-critical request(s) FAILED at the network layer — "
+                "Amazon sign-in: %d auth-critical request(s) FAILED at the network layer — "
                 "a connectivity/anti-bot problem, NOT a page-shape one, so the agent fallback cannot "
                 "fix it either: %s", len(critical), critical[:6],
             )
         else:
-            log.warning("Amazon Business sign-in: %d request(s) failed (none auth-critical): %s",
+            log.warning("Amazon sign-in: %d request(s) failed (none auth-critical): %s",
                         len(failed_requests), failed_requests[:6])
     return verdict, action
 
@@ -440,25 +447,25 @@ def handle_account_switcher(page, auth) -> str:
     if len(matched) == 1:
         try:
             tiles.nth(matched[0]).click(timeout=10000)
-            log.info("Amazon Business sign-in: switched into the account matching the configured "
+            log.info("Amazon sign-in: switched into the account matching the configured "
                      "username (%d account tile(s) offered).", total)
             page.wait_for_timeout(4000)
             return "switched"
         except Exception:  # noqa: BLE001
-            log.warning("Amazon Business sign-in: could not click the matching account tile.",
+            log.warning("Amazon sign-in: could not click the matching account tile.",
                         exc_info=True)
             return ""
 
     if len(matched) > 1:
         # Never guess between two accounts. Whichever is picked, the ledger silently fills with
         # someone else's orders and nothing about the run looks wrong.
-        log.warning("Amazon Business sign-in: %d account tiles match the configured username — "
+        log.warning("Amazon sign-in: %d account tiles match the configured username — "
                     "refusing to guess which account to sign into.", len(matched))
         return ""
 
     # No tile for this account. "Add account" is the deterministic escape hatch: it leads to a fresh
     # email + password form for the account we actually want, rather than into someone else's.
-    log.info("Amazon Business sign-in: none of the %d offered account(s) match the configured "
+    log.info("Amazon sign-in: none of the %d offered account(s) match the configured "
              "username; using 'Add account' to sign in fresh.", total)
     if _click_first(page, (ADD_ACCOUNT_LINK,), "Add account"):
         page.wait_for_timeout(4000)
@@ -492,12 +499,12 @@ def _trust_this_device(page) -> bool:
                 box.check(timeout=5000)
             # Say which it was. "Already ticked" and "we ticked it" are different facts about the
             # account, and only one of them is evidence that this run is what trusted the device.
-            log.info("Amazon Business 2FA: trusting this device via %s (%s).", selector,
+            log.info("Amazon 2FA: trusting this device via %s (%s).", selector,
                      "was already ticked" if was_checked else "was UNTICKED, ticked it now")
             return True
         except Exception:  # noqa: BLE001
             continue
-    log.warning("Amazon Business 2FA: could not find the 'don't ask for codes on this device' box; "
+    log.warning("Amazon 2FA: could not find the 'don't ask for codes on this device' box; "
                 "continuing without it — expect a code on the next lapse too.")
     return False
 
@@ -511,7 +518,7 @@ def _answer_otp(page, auth) -> bool:
     """
     secret = getattr(auth, "totp_secret", "")
     if not secret:
-        log.warning("Amazon Business 2-step verification is required but no totp_secret is configured "
+        log.warning("Amazon 2-step verification is required but no totp_secret is configured "
                     "for this profile — add auth['amazon-business'].totp_secret to config.json.")
         return False
     try:
@@ -519,14 +526,14 @@ def _answer_otp(page, auth) -> bool:
             page.wait_for_timeout(int(_MIN_CODE_LIFE_SECONDS * 1000))
         code = totp(secret)
     except TotpError:
-        log.warning("Amazon Business 2-step verification: the configured totp_secret is not valid "
+        log.warning("Amazon 2-step verification: the configured totp_secret is not valid "
                     "base32.", exc_info=True)
         return False
 
     try:
         page.wait_for_selector(OTP_SELECTORS[0], state="visible", timeout=20000)
     except Exception:  # noqa: BLE001 — the id may have changed; _fill_first still tries the others
-        log.debug("Amazon Business 2FA: %s never appeared; trying the other spellings.",
+        log.debug("Amazon 2FA: %s never appeared; trying the other spellings.",
                   OTP_SELECTORS[0], exc_info=True)
 
     # Trust the device BEFORE submitting — afterwards the screen is gone and the box with it.
@@ -534,7 +541,7 @@ def _answer_otp(page, auth) -> bool:
 
     filled = _fill_first(page, OTP_SELECTORS, code, "2FA code")
     if not filled:
-        log.warning("Amazon Business 2FA: the code field never appeared.")
+        log.warning("Amazon 2FA: the code field never appeared.")
         return False
     log.info("Amazon Business: answering 2-step verification with a generated authenticator code.")
 
@@ -542,7 +549,7 @@ def _answer_otp(page, auth) -> bool:
         try:
             page.press(filled, "Enter")
         except Exception:  # noqa: BLE001
-            log.debug("Amazon Business 2FA: pressing Enter failed too.", exc_info=True)
+            log.debug("Amazon 2FA: pressing Enter failed too.", exc_info=True)
 
     try:
         page.wait_for_url(lambda u: OTP_MARKER not in u.lower(), timeout=45000)

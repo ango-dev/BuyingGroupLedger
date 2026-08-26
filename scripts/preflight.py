@@ -473,6 +473,7 @@ def check_run_interval() -> list[Result]:
 SELF_LOGIN_RETAILERS = {
     "bestbuy": "Account Settings -> Sign-in & Security",
     "amazon-business": "Login & Security -> 2-step verification -> Authenticator App",
+    "amazon": "Login & Security -> 2-step verification -> Authenticator App",
 }
 
 
