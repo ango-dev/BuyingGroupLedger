@@ -413,3 +413,67 @@ class TestExitCode:
 def test_flags_are_accepted(flag, monkeypatch):
     monkeypatch.setattr(preflight, "run_checks", lambda: [Result(OK, "x", "fine")])
     assert preflight.main([flag]) == 0
+
+
+class TestSelfLogin:
+    """A retailer that CAN heal a lapsed session but has nothing to heal it with.
+
+    This is the silent shape preflight exists for: nothing fails at boot, nothing fails on a warm
+    run, and the gap shows up only as a run that quietly recorded zero rows for one retailer. Amazon
+    Business did exactly that for two consecutive runs before anyone noticed.
+    """
+
+    @staticmethod
+    def _profile(auth=None, retailers=("amazon-business",)):
+        from models.profile import ProfileConfig
+
+        return ProfileConfig(label="profile-alpha", profile_id="x", retailers=list(retailers),
+                             auth=auth or {})
+
+    def _run(self, monkeypatch, profile):
+        monkeypatch.setattr("config.profiles.load_profiles", lambda: [profile])
+        return preflight.check_self_login()
+
+    def test_no_auth_block_warns_and_names_the_consequence(self, monkeypatch):
+        results = self._run(monkeypatch, self._profile())
+
+        assert [r.level for r in results] == [WARN]
+        assert "records NOTHING" in results[0].detail
+        assert "auth['amazon-business']" in results[0].detail
+
+    def test_a_password_with_no_seed_is_called_out_separately(self, monkeypatch):
+        """It fails LATER than a missing password: the password is accepted and the run then stops
+        dead at the code screen, so "the password is right" is not evidence of anything."""
+        from models.profile import RetailerAuth
+
+        auth = {"amazon-business": RetailerAuth(method="password", username="u@e.com", password="pw")}
+        results = self._run(monkeypatch, self._profile(auth))
+
+        assert [r.level for r in results] == [WARN]
+        assert "totp_secret is EMPTY" in results[0].detail
+
+    def test_fully_configured_passes(self, monkeypatch):
+        from models.profile import RetailerAuth
+
+        auth = {"amazon-business": RetailerAuth(method="password", username="u@e.com",
+                                                password="pw", totp_secret="GEZDGNBV")}
+        results = self._run(monkeypatch, self._profile(auth))
+
+        assert [r.level for r in results] == [OK]
+
+    def test_a_retailer_the_profile_does_not_have_is_not_reported(self, monkeypatch):
+        """Costco needs no auth block at all — its path runs on a stored token and opens no browser."""
+        results = self._run(monkeypatch, self._profile(retailers=["costco"]))
+
+        assert results == []
+
+    def test_a_broken_profiles_file_skips_rather_than_crashing(self, monkeypatch):
+        def boom():
+            raise RuntimeError("config.json is malformed")
+
+        monkeypatch.setattr("config.profiles.load_profiles", boom)
+
+        # A preflight that crashes while reporting is worse than useless; the config check above
+        # already reports the real problem.
+        results = preflight.check_self_login()
+        assert [r.level for r in results] == [WARN] and "skipped" in results[0].detail

@@ -111,7 +111,7 @@
         "password": "REPLACE_WITH_PROXY_PASSWORD"
       },
       "retailers": ["amazon", "bestbuy"],
-      "// auth": "Username + password, plus a TOTP seed. TURN 2-STEP VERIFICATION ON for the Best Buy account and paste its authenticator secret into `totp_secret` — the deterministic path generates the 6-digit code itself and ticks 'Don't ask for security codes on this device'. Leave `totp_secret` blank only if the account has 2-Step off; a challenge with no seed fails the login rather than falling back to the paid agent, which is never given the seed.",
+      "// auth": "Username + password, plus a TOTP seed, keyed by retailer. TURN 2-STEP VERIFICATION ON for the account and paste its authenticator secret into `totp_secret` — the deterministic path generates the 6-digit code itself and ticks the 'don't ask on this device' box. Leave `totp_secret` blank only if the account has 2-Step off; a challenge with no seed fails the login rather than falling back to the paid agent, which is never given the seed (a seed is a permanent key, not one 30-second code). Supported for `bestbuy` and `amazon-business`.",
       "auth": {
         "bestbuy": { "method": "password", "username": "you@example.com", "password": "", "totp_secret": "" }
       }
@@ -119,7 +119,11 @@
     {
       "label": "profile-2",
       "profile_id": "REPLACE_WITH_BROWSER_USE_PROFILE_ID",
-      "retailers": ["amazon-business", "costco"]
+      "retailers": ["amazon-business", "costco"],
+      "// auth amazon-business": "Amazon Business self-login. Without this block a lapsed session records NOTHING until you re-run scripts/create_profile by hand. `totp_secret` is the base32 key from Login & Security -> 2-step verification -> Authenticator App -> \"Can't scan the barcode?\" — enrol an AUTHENTICATOR APP rather than SMS/email, because a texted code is one nothing here can receive. Costco needs no auth block: its data path runs on a stored refresh token and opens no browser.",
+      "auth": {
+        "amazon-business": { "method": "password", "username": "you@example.com", "password": "", "totp_secret": "" }
+      }
     }
   ],
 

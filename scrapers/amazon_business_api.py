@@ -21,8 +21,14 @@ Three reads, one logged-in session:
      `/gp/your-account/ship-track…`), read via the scraper's `read_tracking_page`, then rebuild rows so
      the `_shipped_requires_tracking` invariant promotes them to `shipped`.
 
-No deterministic re-login (Amazon has OTP/2FA). Logged-out → raise `AmazonBusinessApiError`, and
-scrapers/amazon_business.py falls back to the Browser-Use agent — never an auto-login.
+A lapsed session SIGNS ITSELF BACK IN (scrapers/amazon_business_signin.py) when the profile carries
+an `auth["amazon-business"]` block, answering Amazon's authenticator challenge with a code generated
+on this host. That reverses the original "no deterministic re-login (Amazon has OTP/2FA)" rule, which
+made this the one retailer that could not heal itself — the design notes watched it cost two consecutive
+runs. Without an auth block the behaviour is unchanged: raise and let the caller alert and skip.
+
+EITHER WAY THE PAID AGENT IS NEVER RUN FOR A LOGIN FAILURE — it cannot fix auth, so it would only
+spend money rediscovering the logout. `ApiLoginError` is what carries that distinction.
 """
 
 import logging
@@ -30,6 +36,7 @@ import logging
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
 from scrapers.amazon_business_mapping import RETAILER, build_order_items, discover_orders, parse_shipment_targets
+from scrapers.amazon_business_signin import deterministic_login, looks_logged_out
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
 from models.order import TERMINAL_STATUSES
@@ -40,7 +47,15 @@ log = logging.getLogger(__name__)
 ORDER_HISTORY_URL = "https://www.amazon.com/your-orders/orders"
 ORDER_DETAILS_URL = "https://www.amazon.com/gp/css/order-details?orderID={}"  # redirects to /your-orders
 _MAX_PAGES = 40  # hard stop so a layout change can't loop forever (~400 orders)
-_SIGNIN_MARKERS = ("/ap/signin", "/ap/mfa", "/ap/cvf", "signin")
+#: The key an auth block is filed under — the scraper's `retailer_key`, not its display name.
+_AUTH_KEY = "amazon-business"
+
+# Things the page shows only when it wants you to sign in. Used ONLY as corroboration once discovery
+# has already found zero orders -- deliberately NOT folded into looks_logged_out, because a false
+# positive THERE would send a perfectly good session into a doomed self-login. Here the run is
+# failing either way and the only open question is whether to spend money on the agent, so the safe
+# direction is to assume logged out.
+_SIGNIN_CTA_SELECTORS = ("#ap_email", "#ap_password", "#ap-claim", "a[href*='/ap/signin']")
 
 
 class AmazonBusinessApiError(Exception):
@@ -48,14 +63,23 @@ class AmazonBusinessApiError(Exception):
     network) — the caller should fall back to the agent."""
 
 
-def _looks_logged_out(page) -> bool:
-    url = (page.url or "").lower()
-    if any(m in url for m in _SIGNIN_MARKERS):
-        return True
-    try:
-        return page.locator("#ap_email, #ap_password, input[name='email']").count() > 0
-    except Exception:
-        return False
+def _signin_affordances(page) -> list[str]:
+    """Which sign-in CTAs the page is showing, if any.
+
+    A silently-expired session and a genuine markup change look IDENTICAL at the point discovery
+    comes back empty, and they have opposite correct responses: a logout must skip for free, while a
+    shape change is exactly what the paid agent is for. Best Buy proved the cost of not telling them
+    apart: the logged-out page tripped neither the URL check nor the form selectors,
+    the agent ran, and $0.02 bought the conclusion "logged out" that was already available for free.
+    """
+    found = []
+    for selector in _SIGNIN_CTA_SELECTORS:
+        try:
+            if page.locator(selector).count() > 0:
+                found.append(selector)
+        except Exception:  # noqa: BLE001 — a selector engine hiccup must not mask the real failure
+            continue
+    return found
 
 
 class AmazonBusinessApiClient:
@@ -125,23 +149,94 @@ class AmazonBusinessApiClient:
                 kept.append(r)
         return kept
 
+    def _sign_in_here(self, page) -> None:
+        """Self-heal a lapsed session, raising the right error if it can't.
+
+        Every failure route out of here is `ApiLoginError`, so the caller alerts and SKIPS and the
+        paid agent is never run — it cannot fix an auth failure. What differs is the MESSAGE, and
+        that matters more than it looks: a missing auth block, a rejected password, an unanswerable
+        SMS challenge and a network-layer rejection need four different responses from whoever reads
+        the alert, and they are indistinguishable without being told.
+        """
+        auth = (self.profile.auth or {}).get(_AUTH_KEY)
+        if auth is None:
+            raise ApiLoginError(
+                "Amazon Business session is logged out and this profile has no auth block, so there "
+                "is nothing to sign in with. Either add auth['amazon-business'] (method/username/"
+                "password/totp_secret) to config.json, or re-login by hand with "
+                "`python -m scripts.create_profile`. The agent is NOT run for a login failure — it "
+                "cannot fix auth."
+            )
+
+        log.info("Amazon Business [%s]: session logged out; attempting deterministic self-login.",
+                 self.profile.label)
+        outcome = deterministic_login(page, auth)
+        if not outcome.ok:
+            log.warning("Amazon Business [%s]: deterministic self-login did not succeed.",
+                        self.profile.label)
+            # Lead with the classified reason when the page told us one — an SMS challenge, a
+            # rejected password and an anti-bot reset all end here, and the alert is useless unless
+            # it says WHICH.
+            raise ApiLoginError(
+                outcome.reason
+                or ("Amazon Business session is logged out and deterministic login did not succeed; "
+                    "the auth requests died at the NETWORK layer (anti-bot/transport, not the page "
+                    "flow — changing egress does not help)."
+                    if outcome.transport_failed else
+                    "Amazon Business session is logged out and deterministic login did not succeed.")
+            )
+        log.info("Amazon Business [%s]: deterministic self-login succeeded.", self.profile.label)
+        page.goto(ORDER_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)
+
     def _discover(self, page, since_date: str, today: str) -> dict[str, str]:
         """{order_id: order_date} for every order back to `since_date`, CLICK-THROUGH paginating the
         business order-history SPA.
 
         Business is newest-first and paginates client-side, so we read a page, then click the "next"
         control (`li.a-last a`) and re-read, stopping once a full page is entirely older than
-        `since_date` (everything past it is older too) or a page adds no new ids. Raises if the very
-        first page is logged out."""
+        `since_date` (everything past it is older too) or a page adds no new ids. Signs itself back
+        in if the very first page is logged out."""
         page.goto(ORDER_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(3000)
-        if _looks_logged_out(page):
-            raise ApiLoginError(
-                "Amazon Business session is logged out. Amazon login has OTP/2FA, so the deterministic "
-                "path does not auto-login; the agent is NOT run for a login failure (it can't fix auth) "
-                "— this run alerts and skips."
-            )
 
+        attempted_login = False
+        if looks_logged_out(page):
+            self._sign_in_here(page)
+            attempted_login = True
+
+        dates = self._read_paginated_history(page, since_date)
+
+        # DISCOVERY CAME BACK EMPTY. Two causes, opposite responses, and the parse alone cannot tell
+        # them apart. A logout must never reach the agent (it cannot fix auth, and costs real money
+        # to confirm what is already known); a real markup change is precisely what the agent is for.
+        if not dates and (affordances := _signin_affordances(page)):
+            log.info("Amazon Business [%s]: no orders parsed and the page is offering to sign in "
+                     "(%s) — treating as a lapsed session, not a shape change.",
+                     self.profile.label, ", ".join(affordances))
+            if not attempted_login:
+                # The session expired without tripping looks_logged_out. Recovering it here turns a
+                # lost run into a normal one.
+                self._sign_in_here(page)
+                attempted_login = True
+                dates = self._read_paginated_history(page, since_date)
+            if not dates:
+                raise ApiLoginError(
+                    "Amazon Business order history is empty and still showing a sign-in prompt; the "
+                    "session is logged out. Not running the agent — it cannot fix an auth failure."
+                )
+
+        log.info("Amazon Business [%s]: discovered %d order(s) across paginated history.",
+                 self.profile.label, len(dates))
+        return dates
+
+    def _read_paginated_history(self, page, since_date: str) -> dict[str, str]:
+        """Walk the click-through history from the page currently loaded.
+
+        Split out of `_discover` so it can be run a SECOND time after a late-detected logout is
+        healed — otherwise recovering the session would still return the empty result parsed before
+        signing in.
+        """
         dates: dict[str, str] = {}
         for _ in range(_MAX_PAGES):
             page_dates = discover_orders(page.content())
@@ -158,9 +253,6 @@ class AmazonBusinessApiClient:
                 break
             if not self._go_next_page(page):
                 break  # last page
-
-        log.info("Amazon Business [%s]: discovered %d order(s) across paginated history.",
-                 self.profile.label, len(dates))
         return dates
 
     def _go_next_page(self, page) -> bool:

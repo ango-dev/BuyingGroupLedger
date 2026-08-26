@@ -7,7 +7,11 @@ startIndex URL), the pt-page tracking-number hop promoting a shipment to 'shippe
 keep-filter.
 """
 
+import pytest
+
 import scrapers.amazon_business_api as api
+import scrapers.amazon_business_signin as signin
+from models.profile import RetailerAuth
 from scrapers.amazon_business_api import AmazonBusinessApiClient
 from tests.test_amazon_business_mapping import _details, _history, _item, _order_card, _shipment
 
@@ -95,7 +99,13 @@ class _FakeCdp:
 
 
 class _Profile:
+    """A real ProfileConfig always has an `auth` dict (empty when nothing is configured), and the
+    client reads it to decide whether a lapsed session can sign itself back in."""
+
     label = "profile-alpha"
+
+    def __init__(self, auth=None):
+        self.auth = auth or {}
 
 
 def _install_fake(monkeypatch, pages, details_by_id, logged_out=False):
@@ -194,11 +204,101 @@ def test_discovery_stops_when_page_all_older_than_window(monkeypatch):
     assert {r.order_id for r in rows} == {in_win}
 
 
-def test_logged_out_raises(monkeypatch):
+def test_logged_out_with_no_auth_block_raises_and_says_what_to_do(monkeypatch):
+    """A profile that never opted in behaves exactly as it did before self-login existed.
+
+    This is the guard that keeps the feature from changing anything for a profile with no credentials
+    configured: it must still be ApiLoginError (which alerts and SKIPS), never a fall-through to the
+    paid agent, and never a crash.
+    """
     _install_fake(monkeypatch, ["<html></html>"], {}, logged_out=True)
     client = AmazonBusinessApiClient(_Profile())
-    try:
+    with pytest.raises(api.ApiLoginError, match="no auth block"):
         client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
-        assert False, "expected ApiLoginError"
-    except api.ApiLoginError:
-        pass
+
+
+def test_a_lapsed_session_signs_itself_back_in_and_the_run_continues(monkeypatch):
+    """The whole point: a logged-out Amazon Business run used to record NOTHING until a human
+    intervened. With credentials configured it heals itself and scrapes normally."""
+    oid = "111-1111111-1111111"
+    page = _install_fake(monkeypatch, [_history(_order_card(oid, "August 9, 2026"))],
+                         {oid: _deliv(oid, "August 9, 2026")}, logged_out=True)
+
+    calls = []
+
+    def _fake_login(p, auth):
+        calls.append(auth)
+        p._logged_out = False           # the session is now live, as a real sign-in would leave it
+        return signin.LoginOutcome(True)
+
+    monkeypatch.setattr(api, "deterministic_login", _fake_login)
+
+    auth = RetailerAuth(method="password", username="u@e.com", password="pw", totp_secret="")
+    client = AmazonBusinessApiClient(_Profile(auth={"amazon-business": auth}))
+    rows = client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+    assert len(calls) == 1, "exactly one sign-in attempt — retrying is what locks an Amazon account"
+    assert {r.order_id for r in rows} == {oid}, "the run must continue after healing, not just log"
+
+
+def test_a_failed_self_login_reports_its_reason_and_never_reaches_the_agent(monkeypatch):
+    """The verdict has to travel: an SMS challenge, a stale password and an anti-bot rejection all
+    end here, and the alert is useless unless it names which one. ApiLoginError (not
+    AmazonBusinessApiError) is also what stops the PAID agent being spent on an auth failure."""
+    _install_fake(monkeypatch, ["<html></html>"], {}, logged_out=True)
+    monkeypatch.setattr(api, "deterministic_login", lambda p, a: signin.LoginOutcome(
+        False, False, "OTP TO PHONE/EMAIL — Amazon wants a code it sent to a human. WHAT TO DO: "
+                      "enrol an authenticator app"))
+
+    auth = RetailerAuth(method="password", username="u@e.com", password="pw")
+    client = AmazonBusinessApiClient(_Profile(auth={"amazon-business": auth}))
+    with pytest.raises(api.ApiLoginError, match="OTP TO PHONE/EMAIL"):
+        client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+
+def test_a_late_detected_logout_signs_in_rather_than_spending_the_agent(monkeypatch):
+    """Best Buy proved this one live: a session can expire without tripping the
+    logged-out check, discovery then parses zero orders, and the empty result reads as a page-shape
+    change — which sends the run to the PAID agent to rediscover a logout for money. If the page is
+    offering to sign in, it is a lapsed session."""
+    oid = "111-1111111-1111111"
+
+    class _LateLogout(_FakePage):
+        """Looks signed in (no sign-in URL) but serves an empty history until signed in."""
+
+        def __init__(self):
+            super().__init__([_history(_order_card(oid, "August 9, 2026"))],
+                             {oid: _deliv(oid, "August 9, 2026")})
+            self.signed_in = False
+
+        def content(self):
+            if not self.signed_in and "your-orders/orders" in self._current:
+                return "<html><body><input id='ap-claim' type='hidden'></body></html>"
+            return super().content()
+
+        def locator(self, selector, *a, **k):
+            if "ap-claim" in selector or "ap_email" in selector:
+                class _L:
+                    def __init__(self, n):
+                        self._n = n
+
+                    def count(self):
+                        return self._n
+                # looks_logged_out must NOT fire (that is the premise), but the affordance check must.
+                return _L(0 if "ap_password" in selector else (0 if self.signed_in else 1))
+            return super().locator(selector, *a, **k)
+
+    page = _LateLogout()
+    monkeypatch.setattr(api, "CdpBrowser", _FakeCdp(page))
+    monkeypatch.setattr(api, "looks_logged_out", lambda p: False)
+
+    def _fake_login(p, auth):
+        p.signed_in = True
+        return signin.LoginOutcome(True)
+
+    monkeypatch.setattr(api, "deterministic_login", _fake_login)
+
+    auth = RetailerAuth(method="password", username="u@e.com", password="pw")
+    client = AmazonBusinessApiClient(_Profile(auth={"amazon-business": auth}))
+    rows = client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+    assert {r.order_id for r in rows} == {oid}, "re-discovery after signing in must actually re-read"

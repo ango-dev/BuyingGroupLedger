@@ -467,12 +467,66 @@ def check_run_interval() -> list[Result]:
     )]
 
 
+#: Retailers whose session lapses AND that can sign themselves back in, mapped to where the
+#: authenticator seed is enrolled. Both are opt-in per profile: no auth block means a lapsed session
+#: records NOTHING until a human re-authenticates by hand.
+SELF_LOGIN_RETAILERS = {
+    "bestbuy": "Account Settings -> Sign-in & Security",
+    "amazon-business": "Login & Security -> 2-step verification -> Authenticator App",
+}
+
+
+def check_self_login() -> list[Result]:
+    """A retailer that can heal a lapsed session, but has no credentials to do it with.
+
+    This is the silent-misconfiguration shape preflight exists for. Nothing fails at boot, nothing
+    fails on a warm run, and the gap only shows up as a run that quietly recorded zero rows for one
+    retailer — days later, if anyone happens to read the log. Amazon Business did exactly that for
+    two consecutive runs before it was noticed.
+
+    A missing TOTP seed is called out separately, because it fails LATER than the password does: the
+    password is accepted and the run then stops dead at the 2-step screen.
+    """
+    try:
+        from config.profiles import load_profiles
+        profiles = load_profiles()
+    except Exception as exc:  # noqa: BLE001 — a broken config.json is already reported above
+        return [Result(WARN, "self-login", f"could not read profiles ({exc}); skipped.")]
+
+    out = []
+    for profile in profiles:
+        for retailer, where in SELF_LOGIN_RETAILERS.items():
+            if retailer not in profile.retailers:
+                continue
+            name = f"self-login [{profile.label}/{retailer}]"
+            auth = (profile.auth or {}).get(retailer)
+            if auth is None or not auth.username or not auth.password:
+                out.append(Result(
+                    WARN, name,
+                    f"no usable auth block, so a lapsed session records NOTHING for {retailer} until "
+                    f"someone runs `python -m scripts.create_profile --label {profile.label}` by "
+                    f"hand. Add auth['{retailer}'] (method/username/password/totp_secret) to "
+                    f"config.json to let it heal itself.",
+                ))
+            elif not auth.totp_secret:
+                out.append(Result(
+                    WARN, name,
+                    f"password is set but totp_secret is EMPTY. If the account has 2-step "
+                    f"verification on, sign-in gets as far as the code screen and then stops — the "
+                    f"password being right is not enough. Paste the base32 key from {where}.",
+                ))
+            else:
+                out.append(Result(OK, name, "password + authenticator seed configured"))
+    return out
+
+
 def run_checks() -> list[Result]:
     results: list[Result] = []
     results += check_deterministic_imports()
     results += check_config_files()
     results += check_env()
     results += check_costco_tokens()
+    results += check_self_login()
     results += check_money_switches()
     results += check_receipt_capture()
     results += check_run_interval()
