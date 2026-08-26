@@ -438,3 +438,91 @@ class TestTheCredentialStoreNeverShipsInTheImage:
         for name in (".env", "service_account.json", "profiles.json", "cards.json",
                      "warehouses.json", ".costco/"):
             assert name in patterns, f"{name} is not in .dockerignore"
+
+
+class TestEveryBrowserScriptReachesTheApiKey:
+    """A script that drives the cloud browser must import `config.settings`.
+
+    The Browser-Use SDK reads BROWSER_USE_API_KEY out of `os.environ` ITSELF — nothing hands it over
+    — and importing `config.settings` is the only thing that puts the config.json value there
+    (`_export_sdk_env`). The one-off scripts predate the consolidation and called `load_dotenv()`
+    instead, which was sufficient when the key lived in `.env` and finds nothing now: five of them
+    died at "No API key provided" against a completely valid setup.
+
+    Checked by SOURCE rather than by importing, because the correct fix is sometimes a lazy import
+    inside the function that needs it (scripts/amazon_business_signin_probe.py does this to keep
+    `--help` fast), and an import-and-inspect test would call that broken.
+    """
+
+    #: Importing one of these means the script talks to the cloud browser and needs the key.
+    BROWSER_IMPORTS = ("browser_use_sdk", "scrapers.cdp", "from scrapers.cdp")
+
+    @staticmethod
+    def _scripts():
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1] / "scripts"
+        return sorted(p for p in root.glob("*.py") if p.name != "__init__.py")
+
+    def test_every_script_that_drives_a_browser_imports_config_settings(self):
+        offenders = []
+        checked = 0
+        for path in self._scripts():
+            source = path.read_text(encoding="utf-8")
+            if not any(marker in source for marker in self.BROWSER_IMPORTS):
+                continue
+            checked += 1
+            if "config.settings" not in source:
+                offenders.append(path.name)
+
+        assert checked, "no browser-driving scripts found — the marker list has rotted"
+        assert not offenders, (
+            f"these drive the cloud browser but never import config.settings, so the API key in "
+            f"config.json never reaches the SDK: {offenders}")
+
+    def test_no_script_relies_on_load_dotenv_for_the_api_key(self):
+        """`load_dotenv()` is not wrong, it is just not sufficient any more — and a bare call with a
+        comment about the API key next to it is the exact pattern that broke."""
+        offenders = [
+            path.name for path in self._scripts()
+            if "load_dotenv()" in path.read_text(encoding="utf-8")
+            and "config.settings" not in path.read_text(encoding="utf-8")
+        ]
+
+        assert not offenders, f"{offenders} call load_dotenv() without importing config.settings"
+
+
+class TestEveryScriptCanPrintItsOwnHelp:
+    """`--help` must not die on the console encoding it will actually be printed to.
+
+    argparse renders the module docstring, and Windows consoles default to cp1252. A character
+    outside it — `→` in one probe's usage banner — makes `--help` traceback with a UnicodeEncodeError
+    before printing anything useful, which reads as "the script is broken" rather than "one arrow is
+    unprintable". Em-dashes, `…` and `§` all survive cp1252, so this is a narrow check, not a ban on
+    typography.
+    """
+
+    def test_no_script_docstring_uses_a_character_cp1252_cannot_print(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1] / "scripts"
+        offenders = {}
+        for path in sorted(root.glob("*.py")):
+            if path.name == "__init__.py":
+                continue
+            # argparse prints everything down to the first definition: the docstring and any
+            # module-level help strings above it.
+            head = path.read_text(encoding="utf-8").split("def ")[0]
+            bad = sorted({c for c in head if not _cp1252_safe(c)})
+            if bad:
+                offenders[path.name] = [f"U+{ord(c):04X}" for c in bad]
+
+        assert not offenders, f"--help would raise UnicodeEncodeError on a cp1252 console: {offenders}"
+
+
+def _cp1252_safe(char: str) -> bool:
+    try:
+        char.encode("cp1252")
+    except UnicodeEncodeError:
+        return False
+    return True

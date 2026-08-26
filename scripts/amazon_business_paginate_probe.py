@@ -18,7 +18,7 @@ To build a deterministic (agent-free) paginator we need that POST's request shap
      that the returned HTML carries the next page's `order-details?orderID=` links + "Order placed"
      dates.
 
-Output → gitignored `.amazon_business_capture/` (real PII). Cookie/auth header VALUES redacted.
+Output -> gitignored `.amazon_business_capture/` (real PII). Cookie/auth header VALUES redacted.
 
     .venv\\Scripts\\python -m scripts.amazon_business_paginate_probe --label profile-alpha
 
@@ -33,9 +33,11 @@ import re
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv()  # CdpBrowser -> Browser-Use reads BROWSER_USE_API_KEY
+# CdpBrowser talks to Browser-Use, which reads BROWSER_USE_API_KEY out of the ENVIRONMENT itself.
+# Importing config.settings is what puts it there: the key lives in config.json now, and load_dotenv()
+# alone does not look in that file. Without this the script dies at "No API key provided" against a
+# perfectly valid setup. (config.settings loads .env too, so the override layer still works.)
+import config.settings  # noqa: F401
 
 log = logging.getLogger("ab_paginate_probe")
 

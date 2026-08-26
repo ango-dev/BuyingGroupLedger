@@ -29,11 +29,11 @@ import logging
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-# CdpBrowser talks to Browser-Use, which reads BROWSER_USE_API_KEY from the environment. Nothing
-# else this script imports pulls in config.settings, so the .env has to be loaded here.
-load_dotenv()
+# CdpBrowser talks to Browser-Use, which reads BROWSER_USE_API_KEY out of the ENVIRONMENT itself.
+# Importing config.settings is what puts it there: the key lives in config.json now, and load_dotenv()
+# alone does not look in that file. Without this the script dies at "No API key provided" against a
+# perfectly valid setup. (config.settings loads .env too, so the override layer still works.)
+import config.settings  # noqa: F401
 
 from config.profiles import load_profiles_for_retailer  # noqa: E402
 from receipts.sources import (  # noqa: E402

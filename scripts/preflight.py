@@ -167,7 +167,12 @@ def check_config_files(root: Path = ROOT) -> list[Result]:
         out.append(Result(FAIL, "config.json sections", f"could not be read ({exc})."))
 
     # Google credentials: inlined in config.json, unless a standalone file is pointed at.
-    sa = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "")
+    #
+    # Resolved through the helper, not os.getenv: `google.service_account_file` is a config key like
+    # any other now, so reading only the environment would skip the existence check entirely for
+    # anyone who set the path in the file — and a missing file there fails every run at sync.
+    from config.settings import _get_str as _resolve
+    sa = _resolve("GOOGLE_SERVICE_ACCOUNT_FILE")
     if sa:
         sa_path = Path(sa) if Path(sa).is_absolute() else root / sa
         out.append(_check_path(sa_path, required=True, parses_json=True,
@@ -345,7 +350,7 @@ def check_receipt_capture() -> list[Result]:
                             "OCI_S3_SECRET_ACCESS_KEY", "OCI_PAR_URL_PREFIX"]):
         return [Result(WARN, "receipt capture",
                        "not configured — orders record normally with a blank Receipt Link. Set the "
-                       "OCI_* values in .env to store proof of purchase for each order.")]
+                       "`receipts.oci` values in config.json to store proof of purchase for each order.")]
     if missing:
         return [Result(
             FAIL, "receipt capture",
@@ -414,10 +419,20 @@ def check_run_interval() -> list[Result]:
     until the daily reset. So this is a WARNING, not a failure — the user may well accept it to get
     fresher shipment status.
     """
+    # Environment first, then config.json — the same order docker/entrypoint.sh resolves it in.
+    #
+    # os.getenv ALONE IS NOT ENOUGH ANY MORE. The interval moved into config.json under
+    # `container.run_interval_hours`, and compose passes the variable through with no default, so on
+    # a normal container host the environment says nothing and this check used to return [] — silently
+    # skipping the MOD daily-limit warning on exactly the deployment it was written for.
+    from config.loader import config_value
     raw = (os.getenv("RUN_INTERVAL_HOURS") or "").strip()
     if not raw:
-        # Not a container deployment (the native cron path takes its interval as an argument to
-        # scripts/install_cron.sh, which does this same check itself).
+        configured = config_value("container.run_interval_hours")
+        raw = "" if configured is None else str(configured).strip()
+    if not raw:
+        # Neither source names one: not a container deployment. (The native cron path takes its
+        # interval as an argument to scripts/install_cron.sh, which does this same check itself.)
         return []
 
     if not raw.isdigit() or not 1 <= int(raw) <= 23:

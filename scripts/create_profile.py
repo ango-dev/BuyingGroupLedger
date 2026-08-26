@@ -28,6 +28,10 @@ import sys
 # explicitly stop one. v2's sessions.create()/.stop() do exactly what this script needs.
 from browser_use_sdk import BrowserUse, CustomProxy
 
+# BrowserUse() reads BROWSER_USE_API_KEY out of the ENVIRONMENT itself. Importing config.settings is
+# what puts it there, since the key lives in config.json now — without it this dies at "No API key
+# provided" against a perfectly valid setup. (config.settings loads .env too, so overrides still win.)
+import config.settings  # noqa: F401
 from config.profiles import load_profiles, save_profiles
 
 

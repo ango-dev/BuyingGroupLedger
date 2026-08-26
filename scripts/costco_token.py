@@ -41,14 +41,13 @@ import logging
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from config.loader import STATE_FILE
 from scrapers.costco_api import DEFAULT_WAREHOUSES, load_costco_auth, save_costco_auth
 
-# The CDP grab talks to Browser-Use, which reads BROWSER_USE_API_KEY from the environment; this
-# script doesn't import config.settings, so load .env ourselves.
-load_dotenv()
+# The CDP grab talks to Browser-Use, which reads BROWSER_USE_API_KEY out of the ENVIRONMENT itself.
+# scrapers.costco_api pulls in config.settings, whose import puts the config.json value there (and
+# loads .env). Kept explicit so a future import tidy-up cannot quietly break the grab.
+import config.settings  # noqa: E402,F401
 
 log = logging.getLogger("costco_token")
 

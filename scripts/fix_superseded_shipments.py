@@ -35,6 +35,11 @@ from pathlib import Path
 
 from gspread.utils import ValueInputOption, ValueRenderOption
 
+# This drives the cloud browser, and the Browser-Use SDK reads BROWSER_USE_API_KEY out of the
+# ENVIRONMENT itself. Importing config.settings is what puts the config.json value there. It
+# currently arrives transitively via sheets.ledger_sync, but stated explicitly so an import
+# tidy-up somewhere else cannot quietly break this script with a valid config.
+import config.settings  # noqa: F401
 from models.order import shipment_label
 from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet, _write_profit_formulas
 
