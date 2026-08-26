@@ -470,10 +470,16 @@ def check_run_interval() -> list[Result]:
 #: Retailers whose session lapses AND that can sign themselves back in, mapped to where the
 #: authenticator seed is enrolled. Both are opt-in per profile: no auth block means a lapsed session
 #: records NOTHING until a human re-authenticates by hand.
+#: Each entry is (where the authenticator seed is enrolled, is a seed EXPECTED at all).
+#: **Costco expects none**: it had no US 2-step verification as of 2026-08-25, so a blank
+#: `totp_secret` there is correct rather than a gap. Warning about it would train someone to ignore
+#: this check, which is the one outcome worse than not having it. If Costco ever adds 2FA, flip the
+#: flag and pick up the deferred work in the design notes.
 SELF_LOGIN_RETAILERS = {
-    "bestbuy": "Account Settings -> Sign-in & Security",
-    "amazon-business": "Login & Security -> 2-step verification -> Authenticator App",
-    "amazon": "Login & Security -> 2-step verification -> Authenticator App",
+    "bestbuy": ("Account Settings -> Sign-in & Security", True),
+    "amazon-business": ("Login & Security -> 2-step verification -> Authenticator App", True),
+    "amazon": ("Login & Security -> 2-step verification -> Authenticator App", True),
+    "costco": ("no 2-step verification exists on Costco US today", False),
 }
 
 
@@ -496,26 +502,33 @@ def check_self_login() -> list[Result]:
 
     out = []
     for profile in profiles:
-        for retailer, where in SELF_LOGIN_RETAILERS.items():
+        for retailer, (where, expects_totp) in SELF_LOGIN_RETAILERS.items():
             if retailer not in profile.retailers:
                 continue
             name = f"self-login [{profile.label}/{retailer}]"
             auth = (profile.auth or {}).get(retailer)
             if auth is None or not auth.username or not auth.password:
+                consequence = (
+                    "a lapsed browser session cannot mint a refresh token or capture receipts"
+                    if retailer == "costco" else
+                    f"a lapsed session records NOTHING for {retailer}"
+                )
                 out.append(Result(
                     WARN, name,
-                    f"no usable auth block, so a lapsed session records NOTHING for {retailer} until "
-                    f"someone runs `python -m scripts.create_profile --label {profile.label}` by "
-                    f"hand. Add auth['{retailer}'] (method/username/password/totp_secret) to "
-                    f"config.json to let it heal itself.",
+                    f"no usable auth block, so {consequence} until someone runs "
+                    f"`python -m scripts.create_profile --label {profile.label}` by hand. Add "
+                    f"auth['{retailer}'] (method/username/password) to config.json to let it heal "
+                    f"itself.",
                 ))
-            elif not auth.totp_secret:
+            elif expects_totp and not auth.totp_secret:
                 out.append(Result(
                     WARN, name,
                     f"password is set but totp_secret is EMPTY. If the account has 2-step "
                     f"verification on, sign-in gets as far as the code screen and then stops — the "
                     f"password being right is not enough. Paste the base32 key from {where}.",
                 ))
+            elif not expects_totp:
+                out.append(Result(OK, name, f"password configured; no seed needed ({where})"))
             else:
                 out.append(Result(OK, name, "password + authenticator seed configured"))
     return out

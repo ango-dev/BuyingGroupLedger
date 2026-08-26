@@ -461,11 +461,33 @@ class TestSelfLogin:
 
         assert [r.level for r in results] == [OK]
 
-    def test_a_retailer_the_profile_does_not_have_is_not_reported(self, monkeypatch):
-        """Costco needs no auth block at all — its path runs on a stored token and opens no browser."""
-        results = self._run(monkeypatch, self._profile(retailers=["costco"]))
+    def test_a_retailer_with_no_self_login_support_is_not_reported(self, monkeypatch):
+        """Only retailers this repo can actually sign in are checked; anything else is silent."""
+        results = self._run(monkeypatch, self._profile(retailers=["walmart"]))
 
         assert results == []
+
+    def test_costco_with_no_seed_passes_because_costco_has_no_2fa(self, monkeypatch):
+        """Costco had no US 2-step verification as of 2026-08-25, so a blank totp_secret is CORRECT
+        there. Warning about it would train someone to ignore this check, which is worse than not
+        having it. If Costco adds 2FA, the flag flips and this test should fail loudly."""
+        from models.profile import RetailerAuth
+
+        auth = {"costco": RetailerAuth(method="password", username="u@e.com", password="pw")}
+        results = self._run(monkeypatch, self._profile(auth, retailers=["costco"]))
+
+        assert [r.level for r in results] == [OK]
+        assert "no seed needed" in results[0].detail
+
+    def test_costco_with_no_auth_block_names_ITS_consequence_not_the_scraping_one(self, monkeypatch):
+        """Costco's data path is browserless and unaffected by a lapsed browser session, so the
+        warning must not claim the ledger stops recording. What actually stops is minting a refresh
+        token and capturing receipts."""
+        results = self._run(monkeypatch, self._profile(retailers=["costco"]))
+
+        assert [r.level for r in results] == [WARN]
+        assert "refresh token" in results[0].detail and "receipts" in results[0].detail
+        assert "records NOTHING" not in results[0].detail
 
     def test_a_broken_profiles_file_skips_rather_than_crashing(self, monkeypatch):
         def boom():

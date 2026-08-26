@@ -175,11 +175,14 @@ class CostcoScraper(BaseRetailerScraper):
             return False
 
         if not token:
-            # The grab is opportunistic: it captures the token endpoint's RESPONSE, so it comes up
-            # empty when the app had no reason to refresh. Reaching here means the profile's own
-            # Costco session is dead too, which genuinely needs a human.
-            log.warning("Costco [%s]: no refresh token captured — the profile's Costco session is "
-                        "probably logged out too.", self.profile.label)
+            # The grab captures the token endpoint's RESPONSE, so it comes up empty when no exchange
+            # happened. Since 2026-08-25 it also SIGNS ITSELF IN first when the browser session has
+            # lapsed (scrapers/costco_signin.py), and a sign-in performs an exchange of its own — so
+            # reaching here now means either the profile has no auth['costco'] block, or the sign-in
+            # itself failed and has already logged its own verdict above.
+            log.warning("Costco [%s]: no refresh token captured. Either this profile has no "
+                        "auth['costco'] block to sign in with, or the sign-in failed — see the "
+                        "Costco sign-in verdict logged just above.", self.profile.label)
             return False
 
         data = _load(self.profile.label)

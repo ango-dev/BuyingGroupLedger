@@ -153,15 +153,59 @@ def _log_storage_shape(origin: str, local_storage: dict) -> None:
             ctype = obj.get("credentialType")
             if ctype:
                 shape += f" credentialType={ctype}"
+        elif isinstance(value, str):
+            # Describe the VALUE without ever printing it. A bare length cannot tell an encrypted
+            # blob from a JWT from a plain id, and that distinction is the whole question when a
+            # token is hiding under an obfuscated key name.
+            shape = f"<{len(value)} chars"
+            if value.startswith("eyJ"):
+                # Base64url-encoded JSON: the start of a JWT, and a refresh token's usual look.
+                shape += f", JWT-like, {value.count('.')} dot-segments"
+            elif value.count(".") >= 2:
+                shape += f", {value.count('.')} dot-segments"
+            else:
+                alphabet = set(value)
+                if alphabet and alphabet <= set(
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=-_"):
+                    shape += ", base64-ish"
+                else:
+                    shape += ", mixed/opaque"
+            shape += ">"
         else:
-            shape = f"<{len(value)} chars>" if isinstance(value, str) else type(value).__name__
+            shape = type(value).__name__
         log.info("    %s @ %s = %s", key, origin, shape)
+        # An opaque dotted blob is either an encrypted cache (a dead end -- the documented finding)
+        # or a delimited container we can open. Decode each segment far enough to report its JSON
+        # FIELD NAMES, never its contents, so the difference is settled by evidence instead of
+        # assumption. MSAL cache entries carry `credentialType`/`secret`, so if those names appear
+        # here the token is recoverable from storage after all.
+        if isinstance(value, str) and "." in value and 60 < len(value) < 4000:
+            import base64 as _b64
+            for i, seg in enumerate(value.split(".")[:10]):
+                if len(seg) < 8:
+                    continue
+                try:
+                    raw = _b64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
+                except Exception:
+                    continue
+                inner = _try_json(raw.decode("utf-8", "ignore"))
+                if isinstance(inner, dict):
+                    log.info("        segment %d decodes to json{%s}", i,
+                             ",".join(sorted(inner.keys())[:10]))
 
 
 def _grab_refresh_token(label: str) -> str | None:
-    """Reconnect to the profile's Browser-Use browser over CDP and read the Costco refresh token
-    from signin.costco.com local storage. Requires the profile to be logged into costco.com."""
+    """Reconnect to the profile's Browser-Use browser over CDP and capture a Costco refresh token.
+
+    SIGNS ITSELF IN FIRST if the browser session has lapsed and the profile carries an
+    `auth["costco"]` block -- which is what turned this from opportunistic into dependable. The
+    sign-in performs a token exchange of its own, and that response is what the capture reads, so the
+    old weakness ("it only works when the app happened to refresh while we watched") does not apply
+    once a login has just occurred. Without an auth block the behaviour is unchanged: it hunts for a
+    refresh that may never come, and returns None if the session is dead.
+    """
     from config.profiles import load_profiles
+    from scrapers import costco_signin
     from scrapers.cdp import CdpBrowser
 
     profile = next((p for p in load_profiles() if p.label == label), None)
@@ -174,93 +218,274 @@ def _grab_refresh_token(label: str) -> str | None:
         "() => { const o = {}; for (let i = 0; i < localStorage.length; i++)"
         " { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return o; }"
     )
+    # SESSIONSTORAGE WAS NEVER READ, and that is a real hole rather than an oversight worth
+    # shrugging at: MSAL.js is routinely configured with `cacheLocation: "sessionStorage"`, and
+    # sessionStorage is scoped to the TAB as well as the origin, so nothing in a localStorage or
+    # IndexedDB sweep can see it. Observed 2026-08-25: www.costco.com's localStorage came back
+    # completely EMPTY while the account was signed in, which is exactly what a sessionStorage-backed
+    # cache looks like from here.
+    read_ss = (
+        "() => { const o = {}; try { for (let i = 0; i < sessionStorage.length; i++)"
+        " { const k = sessionStorage.key(i); o[k] = sessionStorage.getItem(k); } } catch (e) {}"
+        " return o; }"
+    )
     # A sentinel URL we fulfill ourselves with a blank page, so the document sits on the EXACT
     # signin.costco.com origin (no server redirect) and that origin's localStorage is readable.
     sentinel = "https://signin.costco.com/__ls_probe__"
 
-    with CdpBrowser(profile) as page:
-        page.context.route(sentinel, lambda route: route.fulfill(
-            status=200, content_type="text/html", body="<html><body>probe</body></html>"))
+    def _one_pass(sign_in: bool) -> str | None:
+        """One browser session: optionally sign in, then watch for a token redeem and sweep."""
+        with CdpBrowser(profile) as page:
+            page.context.route(sentinel, lambda route: route.fulfill(
+                status=200, content_type="text/html", body="<html><body>probe</body></html>"))
 
-        # STRATEGY 0 (most robust): the app silently refreshes its token on load of an authenticated
-        # area — the B2C token endpoint's RESPONSE carries a fresh refresh_token. Capture it there,
-        # since the stored copy is encrypted/opaque.
-        captured: dict[str, str] = {}
+            # STRATEGY 0 (most robust): the app silently refreshes its token on load of an authenticated
+            # area — the B2C token endpoint's RESPONSE carries a fresh refresh_token. Capture it there,
+            # since the stored copy is encrypted/opaque.
+            captured: dict[str, str] = {}
 
-        def _on_response(resp):
-            if "oauth2/v2.0/token" not in resp.url or captured.get("rt"):
-                return
+            def _on_response(resp):
+                # Match on "/token" rather than the full "oauth2/v2.0/token" path: B2C's endpoint has
+                # appeared under more than one casing/prefix, and a near-miss here fails SILENTLY --
+                # the capture simply never happens and the run reports "no token found", which reads
+                # like a dead session rather than a predicate that did not match.
+                url = resp.url or ""
+                if "/token" not in url.lower() or captured.get("rt"):
+                    return
+                # Say what came back, in KEY NAMES ONLY -- these bodies hold live credentials, so values
+                # must never reach a log. Without this, a token response that does not carry a
+                # refresh_token is indistinguishable from no response at all.
+                body = None
+                try:
+                    body = resp.json()
+                except Exception:
+                    try:
+                        log.info("Token-ish response %s -> status=%s, body was not JSON (%d bytes).",
+                                 url[:100], resp.status, len(resp.body() or b""))
+                    except Exception:
+                        log.info("Token-ish response %s -> status=%s, body unreadable.",
+                                 url[:100], resp.status)
+                    return
+                if isinstance(body, dict):
+                    log.info("Token-ish response %s -> status=%s, JSON keys=%s.",
+                             url[:100], resp.status, sorted(body.keys())[:12])
+                if isinstance(body, dict) and body.get("refresh_token"):
+                    captured["rt"] = body["refresh_token"]
+                    log.info("Captured refresh_token from a token-endpoint response.")
+
+            page.on("response", _on_response)
+
+            # SIGN IN IF THE BROWSER SESSION HAS LAPSED TOO. Until 2026-08-25 this was the one Costco
+            # failure that genuinely needed a human: a logged-out profile cannot refresh anything, so
+            # the grab had nothing to watch and the run ended there. Signing in restores the session so
+            # the grab can run at all.
+            #
+            # IT DOES NOT GUARANTEE A CAPTURE, and the opposite was asserted here first: a fresh login
+            # leaves MSAL's cache FULL, so nothing refreshes and nothing is captured. Three live runs
+            # signed in successfully and produced ZERO /token requests. The capture still needs MSAL to
+            # actually redeem the refresh token -- which it does when its cached token has EXPIRED, i.e.
+            # exactly the state costco.py calls this from. Making it deterministic after a fresh login
+            # needs the cached entries EVICTED first; that is not built.
+            #
+            # Ordering is still not incidental: the response handler is attached ABOVE, before any
+            # navigation, so any exchange that does happen is already being watched.
             try:
-                body = resp.json()
-            except Exception:
-                return
-            if isinstance(body, dict) and body.get("refresh_token"):
-                captured["rt"] = body["refresh_token"]
-                log.info("Captured refresh_token from a token-endpoint response.")
-
-        page.on("response", _on_response)
-        for url in ("https://www.costco.com/OrderStatusCmd",
-                    "https://www.costco.com/myaccount/orderdetails",
-                    "https://www.costco.com/"):
+                page.goto("https://www.costco.com/myaccount", wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(5000)
+                # Costco redirects to B2C on its own schedule, so report WHERE we actually landed and
+                # what we concluded. Without this line a skipped self-login is indistinguishable from a
+                # session that was genuinely still warm -- which is exactly the ambiguity that cost a
+                # paid run to diagnose on 2026-08-25.
+                logged_out = costco_signin.looks_logged_out(page)
+                log.info("Costco [%s]: pass %d landed on %s (logged_out=%s).", label,
+                         1 if sign_in else 2, (page.url or "")[:110], logged_out)
+                if logged_out and not sign_in:
+                    # Pass 2 deliberately does not sign in: pass 1 already did, and its whole purpose
+                    # is to arrive with a COLD MSAL cache against the warm cookie that left behind.
+                    # Landing logged out here means the sign-in did not stick, which is worth saying
+                    # rather than silently sweeping empty storage.
+                    log.warning("Costco [%s]: still logged out on the fresh-browser pass — the "
+                                "sign-in did not persist, so there is no session to redeem against.",
+                                label)
+                if logged_out and sign_in:
+                    auth = (profile.auth or {}).get("costco")
+                    if auth is None:
+                        log.warning(
+                            "Costco [%s]: the browser session is logged out and this profile has no "
+                            "auth block, so it cannot sign itself in. Add auth['costco'] "
+                            "(method/username/password) to config.json, or log in by hand with "
+                            "`python -m scripts.create_profile`.", label)
+                    else:
+                        log.info("Costco [%s]: browser session logged out; attempting deterministic "
+                                 "self-login before grabbing a token.", label)
+                        outcome = costco_signin.deterministic_login(page, auth)
+                        if outcome.ok:
+                            log.info("Costco [%s]: deterministic self-login succeeded.", label)
+                        else:
+                            log.warning("Costco [%s]: deterministic self-login did not succeed. %s",
+                                        label, outcome.reason or "")
+            except Exception:  # noqa: BLE001 -- a failed recovery must not replace the real diagnosis
+                log.warning("Costco [%s]: self-login attempt errored; continuing with the grab.",
+                            label, exc_info=True)
             if captured.get("rt"):
-                break
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(6000)  # let MSAL's silent token XHR fire
-            except Exception:
-                log.warning("Navigation to %s failed while forcing a token refresh.", url, exc_info=True)
-        if captured.get("rt"):
-            return captured["rt"]
+                # The login's own exchange already handed us a token; no need to go hunting.
+                return captured["rt"]
 
-        candidates: list[dict] = []
-        # 1) Warm cookies on the main site.
-        try:
-            page.goto("https://www.costco.com/", wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(2500)
-            candidates.append({"origin": "www.costco.com (live)", "ls": page.evaluate(read_ls)})
-        except Exception:
-            log.warning("Could not load costco.com to warm the session.", exc_info=True)
-        # 2) Sit on the signin origin via the sentinel and read its localStorage + IndexedDB.
-        try:
-            page.goto(sentinel, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(500)
-            candidates.append({"origin": "signin.costco.com (sentinel)", "ls": page.evaluate(read_ls)})
+            # SWEEP IMMEDIATELY AFTER THE LOGIN, before navigating anywhere else. MSAL writes its cache
+            # as part of completing the flow, and the late sweep below only reaches the sign-in origin
+            # after several costco.com navigations -- so anything the site clears on unload would be
+            # gone by then. The user reports a readable
+            # `<account>-<policy>.<tenant>-signin.costco.com-refreshtoken-<clientId>----` key holding the
+            # token as `secret`, which is MSAL's canonical key format, so it IS written somewhere; this
+            # looks for it at the earliest possible moment.
+            for origin_label, read_js in (("post-login www.costco.com localStorage", read_ls),
+                                          ("post-login www.costco.com sessionStorage", read_ss)):
+                try:
+                    entries = page.evaluate(read_js) or {}
+                except Exception:
+                    continue
+                hits = [k for k in entries if "token" in k.lower()]
+                if hits:
+                    log.info("post-login: %s has %d key(s) containing 'token': %s",
+                             origin_label, len(hits), hits[:6])
+                token = _extract_refresh_token(entries)
+                if token:
+                    log.info("Captured refresh_token from %s immediately after signing in.", origin_label)
+                    return token
             try:
-                idb = page.evaluate(_READ_INDEXEDDB)
-                for db_name, stores in (idb or {}).items():
-                    if not isinstance(stores, dict):
-                        continue
-                    for store_name, rows in stores.items():
-                        count = len(rows) if isinstance(rows, list) else "?"
-                        log.info("IndexedDB @ signin.costco.com: %s / %s -> %s record(s)", db_name, store_name, count)
-                        token = _find_token_deep(rows)
-                        if token:
-                            log.info("Found RefreshToken in IndexedDB %s/%s", db_name, store_name)
-                            return token
+                page.goto(sentinel, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(500)
+                for origin_label, read_js in (("post-login signin.costco.com localStorage", read_ls),
+                                              ("post-login signin.costco.com sessionStorage", read_ss)):
+                    entries = page.evaluate(read_js) or {}
+                    hits = [k for k in entries if "token" in k.lower()]
+                    log.info("post-login: %s -> %d key(s), %d containing 'token'%s",
+                             origin_label, len(entries), len(hits),
+                             (": " + ", ".join(hits[:4])) if hits else "")
+                    token = _extract_refresh_token(entries)
+                    if token:
+                        log.info("Captured refresh_token from %s immediately after signing in.",
+                                 origin_label)
+                        return token
             except Exception:
-                log.warning("IndexedDB read on the signin origin failed.", exc_info=True)
-        except Exception:
-            log.warning("Sentinel navigation to the signin origin failed.", exc_info=True)
-        # 3) Whatever else the persisted storage state knows about.
-        try:
-            for origin in page.context.storage_state().get("origins", []):
-                candidates.append({
-                    "origin": f"{origin.get('origin')} (storage_state)",
-                    "ls": {e["name"]: e["value"] for e in origin.get("localStorage", [])},
-                })
-        except Exception:
-            log.warning("storage_state() enumeration failed.", exc_info=True)
+                log.warning("post-login sentinel read failed.", exc_info=True)
 
-        for c in candidates:
-            token = _extract_refresh_token(c["ls"])
-            if token:
-                return token
-        # Nothing matched — dump the structure of the signin origin so we can see where it lives.
-        log.info("No refresh token matched. Storage structure (values redacted):")
-        for c in candidates:
-            if "signin.costco.com" in c["origin"]:
-                _log_storage_shape(c["origin"], c["ls"])
-    return None
+            # The SPA route comes FIRST and is not interchangeable with the others. The myaccount
+            # single-page app is what boots MSAL and asks it for an access token, which is what drives
+            # the /token call this capture reads. The legacy servlet URLs below it (OrderStatusCmd et al)
+            # are server-rendered and may never start the SPA at all -- observed 2026-08-25: a login
+            # followed only by those produced ZERO token-endpoint requests, while a run that visited the
+            # SPA route did produce one.
+            for url in ("https://www.costco.com/myaccount/#/app/orderstatus",
+                        "https://www.costco.com/OrderStatusCmd",
+                        "https://www.costco.com/myaccount/orderdetails",
+                        "https://www.costco.com/"):
+                if captured.get("rt"):
+                    break
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    page.wait_for_timeout(6000)  # let MSAL's silent token XHR fire
+                except Exception:
+                    log.warning("Navigation to %s failed while forcing a token refresh.", url, exc_info=True)
+            if captured.get("rt"):
+                return captured["rt"]
+
+            candidates: list[dict] = []
+            # 1) Warm cookies on the main site.
+            try:
+                # The myaccount SPA, not the homepage: it is what boots MSAL and populates its cache.
+                # sessionStorage is per-TAB, so it must be read from the same tab that ran the SPA --
+                # which is why this reads immediately rather than after the sentinel hop below.
+                page.goto("https://www.costco.com/myaccount/#/app/orderstatus",
+                          wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(6000)
+                candidates.append({"origin": "www.costco.com (localStorage)", "ls": page.evaluate(read_ls)})
+                candidates.append({"origin": "www.costco.com (sessionStorage)", "ls": page.evaluate(read_ss)})
+            except Exception:
+                log.warning("Could not load costco.com to warm the session.", exc_info=True)
+            # 2) Sit on the signin origin via the sentinel and read its localStorage + IndexedDB.
+            try:
+                page.goto(sentinel, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(500)
+                candidates.append({"origin": "signin.costco.com (sentinel, localStorage)",
+                                   "ls": page.evaluate(read_ls)})
+                candidates.append({"origin": "signin.costco.com (sentinel, sessionStorage)",
+                                   "ls": page.evaluate(read_ss)})
+                try:
+                    idb = page.evaluate(_READ_INDEXEDDB)
+                    for db_name, stores in (idb or {}).items():
+                        if not isinstance(stores, dict):
+                            continue
+                        for store_name, rows in stores.items():
+                            count = len(rows) if isinstance(rows, list) else "?"
+                            log.info("IndexedDB @ signin.costco.com: %s / %s -> %s record(s)", db_name, store_name, count)
+                            token = _find_token_deep(rows)
+                            if token:
+                                log.info("Found RefreshToken in IndexedDB %s/%s", db_name, store_name)
+                                return token
+                except Exception:
+                    log.warning("IndexedDB read on the signin origin failed.", exc_info=True)
+            except Exception:
+                log.warning("Sentinel navigation to the signin origin failed.", exc_info=True)
+            # 3) Whatever else the persisted storage state knows about.
+            try:
+                for origin in page.context.storage_state().get("origins", []):
+                    candidates.append({
+                        "origin": f"{origin.get('origin')} (storage_state)",
+                        "ls": {e["name"]: e["value"] for e in origin.get("localStorage", [])},
+                    })
+            except Exception:
+                log.warning("storage_state() enumeration failed.", exc_info=True)
+
+            for c in candidates:
+                token = _extract_refresh_token(c["ls"])
+                if token:
+                    return token
+            # Nothing matched -- dump EVERY origin's structure so we can see where the token lives.
+            #
+            # This used to filter to `signin.costco.com`, which quietly hid the other origins: an origin
+            # with keys and an origin that was never printed looked identical in the log, and on
+            # 2026-08-25 that led to the confident-but-unfounded conclusion "www.costco.com storage is
+            # empty". An absence the code guarantees is not evidence of anything.
+            log.info("No refresh token matched. Storage structure (values redacted):")
+            for c in candidates:
+                hits = [k for k in (c.get("ls") or {}) if "token" in k.lower()]
+                if hits:
+                    log.info("  NOTE: %s holds %d key(s) whose NAME contains 'token': %s",
+                             c["origin"], len(hits), hits[:8])
+            for c in candidates:
+                entries = c.get("ls") or {}
+                if not entries:
+                    log.info("    (no entries) @ %s", c["origin"])
+                    continue
+                _log_storage_shape(c["origin"], entries)
+        return None
+
+    # PASS 1: recover the session if it has lapsed. This is what makes the grab possible at all
+    # against a logged-out profile -- but on its own it rarely CAPTURES anything, because our
+    # sign-in completes Costco's WCS flow (server-side) and hands the SPA a ready-made
+    # `authToken_*`, leaving MSAL with nothing to acquire and nothing to redeem.
+    token = _one_pass(sign_in=True)
+    if token:
+        return token
+
+    # PASS 2: THROW THE BROWSER AWAY AND OPEN A FRESH ONE.
+    #
+    # This is the condition observed to actually capture, and it is worth stating plainly because
+    # it is the opposite of the intuitive one. Four live runs: the three that SIGNED IN saw zero
+    # `/token` requests, while the one that captured had a WARM session in a BRAND-NEW browser.
+    # A new cloud browser starts with an empty MSAL cache, so the SPA cannot serve itself from
+    # cache and must acquire -- and with the B2C SSO cookie left warm by pass 1, that acquisition
+    # succeeds and redeems, putting a plaintext refresh_token on the wire where the response
+    # handler is waiting.
+    #
+    # So the two passes are not a retry. Pass 1 supplies the warm cookie; pass 2 supplies the cold
+    # cache. Neither produces a capture alone, which is exactly why this went unexplained for so
+    # long. It costs a second cloud browser, and only on the path where the first pass already
+    # failed -- i.e. a run that would otherwise have ended with a human being asked to intervene.
+    log.info("Costco [%s]: no token captured in the first pass; retrying in a FRESH browser so "
+             "MSAL has to acquire rather than serve itself from cache.", label)
+    return _one_pass(sign_in=False)
 
 
 def _load(label: str) -> dict:

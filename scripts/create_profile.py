@@ -96,19 +96,46 @@ def main() -> None:
         print("You can log into more than one retailer in the same session if this profile covers several.")
 
         # Retailers with stored credentials re-log-in on their own (see models.profile.RetailerAuth).
-        # The one prerequisite is on the ACCOUNT, not in this session: 2-step verification has to be
-        # off, because no path here can answer a challenge.
+        # THE ADVICE HERE USED TO BE THE OPPOSITE ("turn 2-step verification OFF"), and it was wrong:
+        # leaving it off did not make sign-in reliable, because the sites escalate an untrusted
+        # session to a challenge that offers only "text me a code" -- which nothing here can answer.
+        # An AUTHENTICATOR code is the one challenge a script CAN answer unattended, so 2FA on with a
+        # stored seed is now the supported configuration. See the design notes.
         auto_auth = [r for r, a in profile.auth.items() if a.username and a.password]
         if auto_auth:
+            # One source of truth for which retailers expect a seed -- Costco has no US 2FA, so
+            # telling anyone to enrol one there would be noise, and noise is what makes a warning
+            # get ignored.
+            try:
+                from scripts.preflight import SELF_LOGIN_RETAILERS
+            except Exception:  # noqa: BLE001 -- guidance must never break profile setup
+                SELF_LOGIN_RETAILERS = {}
             print()
-            print(
-                f"IMPORTANT: {', '.join(sorted(auto_auth))} auto-auth with a stored username + password "
-                "in this profile. TURN 2-STEP VERIFICATION OFF on those accounts (Account Settings -> "
-                "Sign-in & Security) — nothing here can answer a verification code, so with it on a "
-                "lapsed session stops at the challenge screen and the run reports logged-out instead."
-            )
+            print(f"IMPORTANT: {', '.join(sorted(auto_auth))} sign themselves back in from this "
+                  "profile using the stored username + password, so a lapsed session heals itself.")
+            for retailer in sorted(auto_auth):
+                _, expects_totp = SELF_LOGIN_RETAILERS.get(retailer, ("", True))
+                seed = (profile.auth[retailer].totp_secret or "").strip()
+                if not expects_totp:
+                    print(f"  - {retailer}: no 2-step verification exists on this retailer today, so "
+                          f"no authenticator seed is needed.")
+                elif seed:
+                    print(f"  - {retailer}: 2-step verification is configured (a code is generated "
+                          f"locally and the 'don't ask on this device' box is ticked).")
+                else:
+                    print(f"  - {retailer}: TURN 2-STEP VERIFICATION ON with an AUTHENTICATOR APP and "
+                          f"put its base32 key in auth['{retailer}'].totp_secret. Not SMS or email -- "
+                          f"the challenge served follows what the account has enrolled, and a texted "
+                          f"code is one this cannot receive.")
         print()
         input("Press Enter here once you're done logging in (this stops the session and saves cookies)... ")
+        # THEN CLOSE THE BROWSER WINDOW. A profile's state is saved when a session CLOSES, so the last
+        # session to close wins. A window left open in the background will later write its own
+        # (possibly logged-out) cookies over the profile, silently discarding a sign-in a scheduled
+        # run had just completed. Diagnosed live, where it looked exactly like a retailer
+        # refusing to stay logged in.
+        print("Now CLOSE that browser window. Leaving it open lets it overwrite this profile later "
+              "-- the last session to close wins, and a stale one can undo a scheduled run's sign-in.")
     finally:
         try:
             client.sessions.stop(session.id)

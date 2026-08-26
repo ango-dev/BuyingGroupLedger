@@ -19,6 +19,7 @@ cards.json
 .receipt_capture/
 .amazon_business_signin_capture/
 .amazon_consumer_signin_capture/
+.costco_signin_capture/
 data/
 logs/
 __pycache__/
