@@ -521,10 +521,10 @@ def _answer_otp(page, auth) -> bool:
         log.warning("Amazon 2-step verification is required but no totp_secret is configured "
                     "for this profile — add auth['amazon-business'].totp_secret to config.json.")
         return False
+    # Validate the seed NOW, before touching the page: a malformed secret must decline without
+    # submitting anything. The code generated here is deliberately discarded -- see below.
     try:
-        if seconds_remaining() < _MIN_CODE_LIFE_SECONDS:
-            page.wait_for_timeout(int(_MIN_CODE_LIFE_SECONDS * 1000))
-        code = totp(secret)
+        totp(secret)
     except TotpError:
         log.warning("Amazon 2-step verification: the configured totp_secret is not valid "
                     "base32.", exc_info=True)
@@ -538,6 +538,22 @@ def _answer_otp(page, auth) -> bool:
 
     # Trust the device BEFORE submitting — afterwards the screen is gone and the box with it.
     _trust_this_device(page)
+
+    # MINT THE CODE HERE, AS LATE AS POSSIBLE, AND NOT ONE LINE EARLIER.
+    #
+    # This ordering is the whole fix for a real production failure (2026-08-27): a code was
+    # generated at the TOP of this function and only typed after `wait_for_selector` (up to 20s) and
+    # the trusted-device tick. A TOTP window is 30 seconds, so on a slower host the code had rolled
+    # over by the time it was submitted and Amazon answered "The code you entered is not valid" --
+    # which is indistinguishable from a wrong seed, and sent the diagnosis after the seed and the
+    # clock, both of which were provably fine. The freshness guard was checked at the top too, so it
+    # guarded the one moment that did not matter.
+    #
+    # Waiting out the tail of a window costs at most a few seconds; submitting a stale code costs
+    # the run and looks like a credential problem.
+    if seconds_remaining() < _MIN_CODE_LIFE_SECONDS:
+        page.wait_for_timeout(int((seconds_remaining() + 0.5) * 1000))
+    code = totp(secret)
 
     filled = _fill_first(page, OTP_SELECTORS, code, "2FA code")
     if not filled:

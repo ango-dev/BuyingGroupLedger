@@ -284,7 +284,11 @@ class TestTwoStepVerification:
 
     def test_a_stale_code_is_waited_out_rather_than_submitted(self, monkeypatch):
         """A code that expires mid-flight comes back as "invalid code" — indistinguishable from a
-        wrong seed, and it sends you to reset a password that was never the problem."""
+        wrong seed, and it sends you to reset a password that was never the problem.
+
+        The wait covers the REMAINDER of the window (plus a little), rather than a fixed few
+        seconds: what matters is landing in the next window, not how long we sit there.
+        """
         waits = []
         monkeypatch.setattr(signin, "seconds_remaining", lambda: 1.0)
         page = self._otp_page()
@@ -292,7 +296,8 @@ class TestTwoStepVerification:
 
         signin._answer_otp(page, _auth())
 
-        assert waits and max(waits) >= signin._MIN_CODE_LIFE_SECONDS * 1000
+        assert waits, "a code with almost no life left must not be submitted as-is"
+        assert max(waits) >= 1000, "the wait must at least outlast the remaining window"
 
 
 class TestTheLoginDeclinesSafely:
@@ -596,3 +601,73 @@ class TestTheFreshSignInPageAmazonServesAfterAFullSignOut:
         signin.deterministic_login(page, _auth())
 
         assert page.filled.get("#ap_email_login") == "u@example.com", "the email step must still run"
+
+
+class TestTheCodeIsMintedLast:
+    """REGRESSION, caught in production 2026-08-27 on the live server.
+
+    A code was generated at the TOP of `_answer_otp` and only typed after `wait_for_selector` (up to
+    20s) and the trusted-device tick. A TOTP window is 30 seconds, so on a slower host the code had
+    rolled over before submission and Amazon answered "The code you entered is not valid" — which
+    looks exactly like a wrong seed. It cost a diagnosis that ruled out the seed (hash-identical to a
+    working machine) and the clock (+0.4s) before the ordering was suspected.
+
+    So the invariant is ordering, and ordering is what these pin: the code must be minted AFTER every
+    slow page interaction and immediately BEFORE it is typed.
+    """
+
+    class _RecordingPage(FakePage):
+        """Records the order of page interactions and of code generation."""
+
+        def __init__(self):
+            super().__init__(
+                visible={"#auth-mfa-otpcode", "#auth-mfa-remember-device", "#auth-signin-button"},
+                present={"#auth-mfa-otpcode", "#auth-mfa-remember-device", "#auth-signin-button"},
+                checked={"#auth-mfa-remember-device": False}, url=OTP_URL)
+            self.events: list[str] = []
+            # Submitting leaves the 2-step screen, as the real one does — otherwise _answer_otp
+            # correctly reports failure and the ordering assertions never get reached.
+            self._on_submit = lambda page, selector: (
+                setattr(page, "url", SIGNED_IN_URL),
+                page.present.discard("#auth-mfa-otpcode"),
+                page.visible.discard("#auth-mfa-otpcode"),
+            )
+
+        def wait_for_selector(self, selector, **kwargs):
+            self.events.append("wait_for_selector")
+
+        def locator(self, selector):
+            if selector == "#auth-mfa-remember-device":
+                self.events.append("trust_box")
+            return super().locator(selector)
+
+        def fill(self, selector, value):
+            self.events.append("fill")
+            super().fill(selector, value)
+
+    def test_the_code_is_generated_after_the_waiting_and_just_before_the_fill(self, monkeypatch):
+        page = self._RecordingPage()
+        real_totp = signin.totp
+
+        def spy(secret, **kw):
+            page.events.append("totp")
+            return real_totp(secret, **kw)
+
+        monkeypatch.setattr(signin, "totp", spy)
+
+        assert signin._answer_otp(page, _auth()) is True
+
+        # The seed is validated up front (one throwaway generation), so ignore that first call and
+        # look at the one that produces the submitted code.
+        assert page.events[-2:] == ["totp", "fill"], (
+            f"the submitted code must be minted immediately before it is typed; got {page.events}")
+        assert "wait_for_selector" in page.events[:-2]
+        assert "trust_box" in page.events[:-2], "the slow steps must happen BEFORE the code exists"
+
+    def test_an_invalid_seed_still_declines_before_touching_the_page(self):
+        """Moving generation later must not lose the early bail-out: a malformed seed has to be
+        caught before anything is typed, or a config typo becomes a submitted wrong code."""
+        page = self._RecordingPage()
+
+        assert signin._answer_otp(page, _auth(secret="not base32 !!")) is False
+        assert page.filled == {} and "fill" not in page.events

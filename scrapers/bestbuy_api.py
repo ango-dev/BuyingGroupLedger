@@ -505,10 +505,10 @@ def _answer_two_step(page, auth) -> bool:
         log.warning("Best Buy 2-Step Verification is required but no totp_secret is configured for "
                     "this profile — add auth.bestbuy.totp_secret to config.json.")
         return False
+    # Validate the seed NOW, before touching the page: a malformed secret must decline without
+    # submitting anything. The code generated here is deliberately discarded -- see below.
     try:
-        if seconds_remaining() < _MIN_CODE_LIFE_SECONDS:
-            page.wait_for_timeout(int(_MIN_CODE_LIFE_SECONDS * 1000))
-        code = totp(secret)
+        totp(secret)
     except TotpError:
         log.warning("Best Buy 2-Step Verification: the configured totp_secret is not valid base32.",
                     exc_info=True)
@@ -524,6 +524,14 @@ def _answer_two_step(page, auth) -> bool:
         except Exception:
             log.warning("Best Buy 2-Step: could not confirm the 'don't ask again' box; continuing.",
                         exc_info=True)
+        # MINT THE CODE HERE, AS LATE AS POSSIBLE, AND NOT ONE LINE EARLIER. The code used to be
+        # generated at the top of this function and only typed after `wait_for_selector` (up to 20s)
+        # and the trust tick -- longer than a 30s TOTP window on a slow host, so it could be stale on
+        # arrival. Caught in production on Amazon 2026-08-27 (identical code path); fixed here too
+        # before it bites, since Best Buy signs in far more often than either Amazon.
+        if seconds_remaining() < _MIN_CODE_LIFE_SECONDS:
+            page.wait_for_timeout(int((seconds_remaining() + 0.5) * 1000))
+        code = totp(secret)
         page.fill(TWO_STEP_CODE_INPUT, code)
         log.info("Best Buy: answering 2-Step Verification with a generated authenticator code.")
     except Exception:
