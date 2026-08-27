@@ -226,8 +226,8 @@ def test_a_lapsed_session_signs_itself_back_in_and_the_run_continues(monkeypatch
 
     calls = []
 
-    def _fake_login(p, auth):
-        calls.append(auth)
+    def _fake_login(p, auth, auth_key=None):
+        calls.append((auth, auth_key))
         p._logged_out = False           # the session is now live, as a real sign-in would leave it
         return signin.LoginOutcome(True)
 
@@ -238,6 +238,8 @@ def test_a_lapsed_session_signs_itself_back_in_and_the_run_continues(monkeypatch
     rows = client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
 
     assert len(calls) == 1, "exactly one sign-in attempt — retrying is what locks an Amazon account"
+    assert calls[0][1] == "amazon-business", (
+        "the shared module must be told WHICH auth block this is, or its alerts name the wrong one")
     assert {r.order_id for r in rows} == {oid}, "the run must continue after healing, not just log"
 
 
@@ -246,7 +248,7 @@ def test_a_failed_self_login_reports_its_reason_and_never_reaches_the_agent(monk
     end here, and the alert is useless unless it names which one. ApiLoginError (not
     AmazonBusinessApiError) is also what stops the PAID agent being spent on an auth failure."""
     _install_fake(monkeypatch, ["<html></html>"], {}, logged_out=True)
-    monkeypatch.setattr(api, "deterministic_login", lambda p, a: signin.LoginOutcome(
+    monkeypatch.setattr(api, "deterministic_login", lambda p, a, k=None: signin.LoginOutcome(
         False, False, "OTP TO PHONE/EMAIL — Amazon wants a code it sent to a human. WHAT TO DO: "
                       "enrol an authenticator app"))
 
@@ -292,7 +294,7 @@ def test_a_late_detected_logout_signs_in_rather_than_spending_the_agent(monkeypa
     monkeypatch.setattr(api, "CdpBrowser", _FakeCdp(page))
     monkeypatch.setattr(api, "looks_logged_out", lambda p: False)
 
-    def _fake_login(p, auth):
+    def _fake_login(p, auth, auth_key=None):
         p.signed_in = True
         return signin.LoginOutcome(True)
 

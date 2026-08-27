@@ -254,7 +254,8 @@ class TestConsumerAmazonSelfLogin:
         monkeypatch.setattr(amazon_api, "CdpBrowser", _FakeCdp(page))
         seen = []
         monkeypatch.setattr(amazon_api, "deterministic_login",
-                            lambda p, a: seen.append(a) or signin.LoginOutcome(False, False, "nope"))
+                            lambda p, a, k=None: seen.append((a, k))
+                            or signin.LoginOutcome(False, False, "nope"))
 
         consumer, business = _auth(), RetailerAuth(method="password", username="biz@example.com",
                                                    password="bizpw")
@@ -263,12 +264,16 @@ class TestConsumerAmazonSelfLogin:
         with pytest.raises(amazon_api.ApiLoginError):
             client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
 
-        assert seen == [consumer], "the consumer profile must never be handed Business credentials"
+        assert [a for a, _ in seen] == [consumer], (
+            "the consumer profile must never be handed Business credentials")
+        assert seen[0][1] == "amazon", (
+            "the shared module must be told this is the CONSUMER block, or its alerts tell the user "
+            "to edit auth['amazon-business'] — the wrong profile entirely")
 
     def test_a_failed_self_login_carries_its_reason_to_the_alert(self, monkeypatch):
         page = self._logged_out_page()
         monkeypatch.setattr(amazon_api, "CdpBrowser", _FakeCdp(page))
-        monkeypatch.setattr(amazon_api, "deterministic_login", lambda p, a: signin.LoginOutcome(
+        monkeypatch.setattr(amazon_api, "deterministic_login", lambda p, a, k=None: signin.LoginOutcome(
             False, False, "ACCOUNT SWITCHER -- none unambiguously matched"))
 
         client = AmazonApiClient(_Profile(auth={"amazon": _auth()}))

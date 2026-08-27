@@ -691,3 +691,58 @@ def test_the_shared_module_never_names_one_retailer_in_a_log_line():
     ]
 
     assert not offenders, f"shared logging must stay retailer-neutral; found: {offenders}"
+
+
+class TestTheAlertsNameTheRightConfigBlock:
+    """`amazon_signin` is shared by BOTH Amazon accounts, and its verdicts are ACTIONABLE — they tell
+    a human which config key to edit. Six of them hardcoded `auth['amazon-business']`, so a consumer
+    `profile-bravo` failure instructed the user to fix the Business profile: the wrong account, the
+    wrong file section, and a change that could not possibly help.
+
+    A log prefix naming the wrong retailer is confusing; instructions naming the wrong retailer are
+    actively harmful, which is why this is pinned by behaviour rather than by a source grep.
+    """
+
+    CASES = (
+        ({"errors": ["Your password is incorrect"], "url": SIGNIN_URL}, ()),
+        ({"errors": [], "url": "https://www.amazon.com/ap/cvf/verify", "text": ""}, ()),
+        ({"errors": ["Invalid code. Please try again."], "url": OTP_URL}, ()),
+    )
+
+    def test_consumer_verdicts_never_mention_the_business_config_key(self):
+        for info, critical in self.CASES:
+            _, action = signin._classify_signin_failure(info, list(critical), "amazon")
+            assert "amazon-business" not in action, f"consumer verdict names the wrong block: {action}"
+
+    def test_business_verdicts_name_the_business_config_key(self):
+        for info, critical in self.CASES:
+            _, action = signin._classify_signin_failure(info, list(critical), "amazon-business")
+            if "auth[" in action:
+                assert "auth['amazon-business']" in action, (
+                    f"business verdict must name its own block: {action}")
+
+    def test_the_two_step_failure_reason_names_the_callers_block(self):
+        """The reason travels into ApiLoginError and out through the alert, so it is the line a human
+        acts on when 2FA cannot be answered."""
+        for key in ("amazon", "amazon-business"):
+            page = FakePage(visible={"#ap_password", "#signInSubmit"},
+                            present={"#ap_password", "#signInSubmit", "#auth-mfa-otpcode"})
+            page._on_submit = lambda p, sel: setattr(p, "url", OTP_URL)
+
+            outcome = signin.deterministic_login(page, _auth(secret=""), key)
+
+            assert outcome.ok is False
+            assert f"auth['{key}'].totp_secret" in outcome.reason, (
+                f"the alert must name {key}'s own config block; got: {outcome.reason}")
+
+    def test_a_missing_secret_warning_names_the_callers_block(self, caplog):
+        import logging
+
+        page = FakePage(visible={"#auth-mfa-otpcode", "#auth-signin-button"},
+                        present={"#auth-mfa-otpcode", "#auth-signin-button"}, url=OTP_URL)
+
+        with caplog.at_level(logging.WARNING, logger=signin.__name__):
+            signin._answer_otp(page, _auth(secret=""), "amazon")
+
+        assert "auth['amazon'].totp_secret" in caplog.text
+        assert "amazon-business" not in caplog.text

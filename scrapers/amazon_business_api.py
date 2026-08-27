@@ -170,7 +170,10 @@ class AmazonBusinessApiClient:
 
         log.info("Amazon Business [%s]: session logged out; attempting deterministic self-login.",
                  self.profile.label)
-        outcome = deterministic_login(page, auth)
+        # Pass our own auth key: the sign-in module is shared by both Amazon accounts, and its
+        # alerts tell a human WHICH config block to edit. Naming the wrong one sends the fix
+        # to the wrong profile.
+        outcome = deterministic_login(page, auth, _AUTH_KEY)
         if not outcome.ok:
             log.warning("Amazon Business [%s]: deterministic self-login did not succeed.",
                         self.profile.label)

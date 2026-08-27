@@ -291,7 +291,7 @@ def _auth_critical(failed_requests: list | None) -> list:
             if any(host in f.get("url", "") for host in _AUTH_CRITICAL_HOSTS)]
 
 
-def _classify_signin_failure(info: dict, critical: list) -> tuple[str, str]:
+def _classify_signin_failure(info: dict, critical: list, auth_key: str = "amazon") -> tuple[str, str]:
     """(verdict, what to do about it) for a stalled sign-in.
 
     Every one of these failures ends identically — "submitted the password and we are still on an
@@ -308,7 +308,7 @@ def _classify_signin_failure(info: dict, critical: list) -> tuple[str, str]:
     if re.search(r"password is incorrect|your password is wrong|cannot find an account|"
                  r"there was a problem.{0,40}password", haystack, re.I):
         return ("BAD CREDENTIAL — Amazon says the password is wrong",
-                "Update the profile's auth['amazon-business'].password in config.json, and STOP "
+                f"Update the profile's auth['{auth_key}'].password in config.json, and STOP "
                 "retrying: repeated failed sign-ins are what escalate an Amazon account to a forced "
                 "reset or a lock.")
     if re.search(r"account has been locked|too many (failed )?attempts|temporarily locked", haystack, re.I):
@@ -326,12 +326,12 @@ def _classify_signin_failure(info: dict, critical: list) -> tuple[str, str]:
         return ("OTP TO PHONE/EMAIL — Amazon wants a code it sent to a human",
                 "Nothing here can receive that code. Enrol an AUTHENTICATOR APP on the Amazon "
                 "Business account (Login & Security -> 2-step verification) and put its base32 seed "
-                "in auth['amazon-business'].totp_secret — an authenticator code is the one challenge "
+                f"in auth['{auth_key}'].totp_secret — an authenticator code is the one challenge "
                 "this can answer unattended. Until then, sign in by hand via scripts/create_profile.")
     if OTP_MARKER in url or re.search(r"invalid.{0,20}code|code.{0,20}(is )?(incorrect|invalid)",
                                       haystack, re.I):
         return ("2FA CODE REJECTED — the authenticator code was not accepted",
-                "Check auth['amazon-business'].totp_secret matches the seed enrolled on the account, "
+                f"Check auth['{auth_key}'].totp_secret matches the seed enrolled on the account, "
                 "and that this machine's clock is correct — TOTP is time-based, so a drifting clock "
                 "produces valid-looking codes that are always wrong.")
     if critical:
@@ -361,7 +361,8 @@ _DIAGNOSTIC_JS = r"""() => {
 }"""
 
 
-def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None = None):
+def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None = None,
+                            auth_key: str = "amazon"):
     """Say WHY sign-in stalled, since the caller can only return False.
 
     A bare failure costs the whole retailer for that run and tells you nothing — a changed DOM, a
@@ -378,7 +379,7 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
 
     verdict = action = ""
     if info:
-        verdict, action = _classify_signin_failure(info, critical)
+        verdict, action = _classify_signin_failure(info, critical, auth_key)
         # Lead with the verdict: this is the line a human reads first in a wall of scheduled-run logs.
         log.warning("Amazon sign-in FAILED — %s. WHAT TO DO: %s", verdict, action)
         if info.get("errors"):
@@ -509,7 +510,7 @@ def _trust_this_device(page) -> bool:
     return False
 
 
-def _answer_otp(page, auth) -> bool:
+def _answer_otp(page, auth, auth_key: str = "amazon") -> bool:
     """Answer Amazon's authenticator challenge with a code generated on this host.
 
     Returns False rather than raising when no usable secret is configured, so the caller reports the
@@ -519,7 +520,7 @@ def _answer_otp(page, auth) -> bool:
     secret = getattr(auth, "totp_secret", "")
     if not secret:
         log.warning("Amazon 2-step verification is required but no totp_secret is configured "
-                    "for this profile — add auth['amazon-business'].totp_secret to config.json.")
+                    f"for this profile — add auth['{auth_key}'].totp_secret to config.json.")
         return False
     # Validate the seed NOW, before touching the page: a malformed secret must decline without
     # submitting anything. The code generated here is deliberately discarded -- see below.
@@ -574,7 +575,7 @@ def _answer_otp(page, auth) -> bool:
     return not _on_otp(page)
 
 
-def deterministic_login(page, auth) -> LoginOutcome:
+def deterministic_login(page, auth, auth_key: str = "amazon") -> LoginOutcome:
     """Sign an Amazon account back in, agent-free, from a page already sitting on the auth flow.
 
     Shared by BOTH Amazon clients (consumer `amazon_api` and `amazon_business_api`) -- which is why
@@ -596,7 +597,8 @@ def deterministic_login(page, auth) -> LoginOutcome:
     failed_requests = _watch_failed_requests(page)
 
     def _fail(what_failed: str, reason: str = "") -> LoginOutcome:
-        verdict, action = _log_signin_diagnostics(page, what_failed, failed_requests) or ("", "")
+        verdict, action = _log_signin_diagnostics(
+            page, what_failed, failed_requests, auth_key) or ("", "")
         return LoginOutcome(False, bool(_auth_critical(failed_requests)),
                             reason or _signin_reason(verdict, action))
 
@@ -615,7 +617,7 @@ def deterministic_login(page, auth) -> LoginOutcome:
                 return _fail(
                     "could not pick this profile's account off the 'Switch accounts' page",
                     "ACCOUNT SWITCHER — Amazon offered a choice of remembered accounts and none "
-                    "unambiguously matched auth['amazon-business'].username. WHAT TO DO: check that "
+                    f"unambiguously matched auth['{auth_key}'].username. WHAT TO DO: check that "
                     "username is the Business account's own email. Nothing was clicked on purpose — "
                     "signing into the WRONG account would scrape another account's orders into this "
                     "ledger and look like a completely successful run.")
@@ -625,11 +627,11 @@ def deterministic_login(page, auth) -> LoginOutcome:
             # The password was ACCEPTED and Amazon wants a code. This is the EXPECTED path, not an
             # exception — the authenticator is enrolled precisely because it is answerable unattended.
             seen.add("otp")
-            if not _answer_otp(page, auth):
+            if not _answer_otp(page, auth, auth_key):
                 return _fail(
                     "could not answer 2-step verification",
                     "2-STEP VERIFICATION — Amazon asked for an authenticator code and it could not "
-                    "be supplied. WHAT TO DO: set auth['amazon-business'].totp_secret in config.json "
+                    f"be supplied. WHAT TO DO: set auth['{auth_key}'].totp_secret in config.json "
                     "to the base32 key from the account's authenticator enrolment (Login & Security "
                     "-> 2-step verification -> Authenticator App -> \"Can't scan the barcode?\").")
             continue
