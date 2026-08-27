@@ -671,3 +671,23 @@ class TestTheCodeIsMintedLast:
 
         assert signin._answer_otp(page, _auth(secret="not base32 !!")) is False
         assert page.filled == {} and "fill" not in page.events
+
+
+def test_the_shared_module_never_names_one_retailer_in_a_log_line():
+    """`amazon_signin` serves BOTH Amazon accounts, so a retailer name in its own logging is wrong
+    half the time — and the worst offender was the VERDICT line, which is the first thing a human
+    reads when diagnosing a failed sign-in. Live logs on 2026-08-25 show consumer `profile-bravo`
+    runs announcing themselves as "Amazon Business", which would send a diagnosis to the wrong
+    account. The caller's own line names the retailer; these must not.
+    """
+    import inspect
+    import re
+
+    source = inspect.getsource(signin)
+    offenders = [
+        line.strip()
+        for line in source.splitlines()
+        if re.search(r"log\.(info|warning|error)\(", line) and "Amazon Business" in line
+    ]
+
+    assert not offenders, f"shared logging must stay retailer-neutral; found: {offenders}"

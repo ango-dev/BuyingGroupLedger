@@ -380,7 +380,7 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
     if info:
         verdict, action = _classify_signin_failure(info, critical)
         # Lead with the verdict: this is the line a human reads first in a wall of scheduled-run logs.
-        log.warning("Amazon Business sign-in FAILED — %s. WHAT TO DO: %s", verdict, action)
+        log.warning("Amazon sign-in FAILED — %s. WHAT TO DO: %s", verdict, action)
         if info.get("errors"):
             log.warning("Amazon sign-in: the page says: %s", info["errors"])
         log.warning("Amazon sign-in: %s. Page state: %s", what_failed,
@@ -559,7 +559,7 @@ def _answer_otp(page, auth) -> bool:
     if not filled:
         log.warning("Amazon 2FA: the code field never appeared.")
         return False
-    log.info("Amazon Business: answering 2-step verification with a generated authenticator code.")
+    log.info("Amazon: answering 2-step verification with a generated authenticator code.")
 
     if not _click_first(page, OTP_SUBMIT_SELECTORS, "the 2FA submit"):
         try:
@@ -575,7 +575,12 @@ def _answer_otp(page, auth) -> bool:
 
 
 def deterministic_login(page, auth) -> LoginOutcome:
-    """Sign Amazon Business back in, agent-free, from a page already sitting on the auth flow.
+    """Sign an Amazon account back in, agent-free, from a page already sitting on the auth flow.
+
+    Shared by BOTH Amazon clients (consumer `amazon_api` and `amazon_business_api`) -- which is why
+    nothing here names a retailer. The CALLER's own log line identifies which account is signing in;
+    a retailer name in these messages would be wrong half the time, and the line a human reads first
+    when diagnosing is the worst possible place to be wrong.
 
     Handles both shapes Amazon serves: the REMEMBERED variant (email prefilled in a hidden input, the
     password field already on the landing page — what this account got on 2026-08-25) and the fresh
