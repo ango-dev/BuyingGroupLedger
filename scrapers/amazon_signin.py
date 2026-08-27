@@ -120,10 +120,21 @@ OTP_SUBMIT_SELECTORS = ("#auth-signin-button", "#signInSubmit", "input[type=subm
 REMEMBER_DEVICE_SELECTORS = ("#auth-mfa-remember-device", "input[name='rememberDevice']",
                              "input[type=checkbox][name*='remember' i]")
 
-#: Don't submit a code that expires mid-flight. A code is valid for its 30s window and the submit plus
-#: Amazon's round trip can outlive the tail of one — which comes back as "invalid code" and reads
-#: exactly like a wrong seed, i.e. it sends you to reset a password that was never the problem.
-_MIN_CODE_LIFE_SECONDS = 3
+#: How much life a code must have LEFT before it is worth submitting.
+#:
+#: 3 seconds was the original value and it was too small — it assumed submission is instant. It is
+#: not: minting is followed by a visibility probe, a fill, and a click, and each is a round trip to a
+#: CLOUD browser. On the main PC that is ~1s and 3s of headroom always sufficed; on the live Docker
+#: host the same steps take longer, so a code minted with 4s left could expire in flight. Amazon then
+#: says "The code you entered is not valid", which is indistinguishable from a wrong seed — and cost
+#: a full diagnosis (2026-08-27) that cleared the seed (hash-identical to a working machine) and the
+#: clock (+0.4s) before the margin was suspected.
+#:
+#: 10s is chosen to cover a slow round trip several times over. The cost is bounded and trivial: at
+#: worst one wait of under 10s, on a sign-in that already takes ~20s, and only when the code happens
+#: to be minted near the end of its window. Submitting a stale code costs the whole run and reads as
+#: a credential problem.
+_MIN_CODE_LIFE_SECONDS = 10
 
 #: Alert text that is NOT evidence of anything. Observed live: the sign-in page carried a
 #: passkey failure banner ("Sorry, your passkey isn't working… Sign in with your password") while the
@@ -555,8 +566,15 @@ def _answer_otp(page, auth, auth_key: str = "amazon") -> bool:
     if seconds_remaining() < _MIN_CODE_LIFE_SECONDS:
         page.wait_for_timeout(int((seconds_remaining() + 0.5) * 1000))
     code = totp(secret)
+    # Log the code's remaining life. If a future run is rejected anyway, this is the line that says
+    # whether it expired in flight (a small number here, then a rejection) or was simply wrong (a
+    # large number here, then a rejection) -- the two are indistinguishable from Amazon's message,
+    # which is precisely what made this expensive to diagnose the first time.
+    life = seconds_remaining()
 
     filled = _fill_first(page, OTP_SELECTORS, code, "2FA code")
+    if filled:
+        log.info("Amazon 2FA: code had %.1fs of life left when it was entered.", life)
     if not filled:
         log.warning("Amazon 2FA: the code field never appeared.")
         return False

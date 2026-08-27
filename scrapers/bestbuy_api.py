@@ -478,11 +478,21 @@ TWO_STEP_MARKER = "twostepverification"
 TWO_STEP_CODE_INPUT = "#verificationCode"
 TWO_STEP_TRUST_CHECKBOX = "#cia-trust-me"
 
-#: Don't submit a code that expires mid-flight. A code is valid for its 30s window, and the submit
-#: plus Best Buy's own round trip can outlive the tail of one — which would fail as "invalid code" and
-#: read exactly like a wrong secret. Waiting out the last couple of seconds costs less than that
-#: misdiagnosis.
-_MIN_CODE_LIFE_SECONDS = 3
+#: How much life a code must have LEFT before it is worth submitting.
+#:
+#: 3 seconds was the original value and it was too small — it assumed submission is instant. It is
+#: not: minting is followed by a visibility probe, a fill, and a click, and each is a round trip to a
+#: CLOUD browser. On the main PC that is ~1s and 3s of headroom always sufficed; on the live Docker
+#: host the same steps take longer, so a code minted with 4s left could expire in flight. Amazon then
+#: says "The code you entered is not valid", which is indistinguishable from a wrong seed — and cost
+#: a full diagnosis (2026-08-27) that cleared the seed (hash-identical to a working machine) and the
+#: clock (+0.4s) before the margin was suspected.
+#:
+#: 10s is chosen to cover a slow round trip several times over. The cost is bounded and trivial: at
+#: worst one wait of under 10s, on a sign-in that already takes ~20s, and only when the code happens
+#: to be minted near the end of its window. Submitting a stale code costs the whole run and reads as
+#: a credential problem.
+_MIN_CODE_LIFE_SECONDS = 10
 
 
 def _on_two_step(page) -> bool:
@@ -533,6 +543,11 @@ def _answer_two_step(page, auth) -> bool:
             page.wait_for_timeout(int((seconds_remaining() + 0.5) * 1000))
         code = totp(secret)
         page.fill(TWO_STEP_CODE_INPUT, code)
+        # See the note on _MIN_CODE_LIFE_SECONDS: a rejection with a LARGE number here means a wrong
+        # seed, with a SMALL number it expired in flight. Amazon/Best Buy's own message cannot tell
+        # them apart.
+        log.info("Best Buy 2-Step: code had %.1fs of life left when it was entered.",
+                 seconds_remaining())
         log.info("Best Buy: answering 2-Step Verification with a generated authenticator code.")
     except Exception:
         log.warning("Best Buy 2-Step: the code field never appeared.", exc_info=True)
