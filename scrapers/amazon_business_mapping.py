@@ -64,10 +64,17 @@ _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
 # completion signal for orders Amazon never gets a carrier delivery scan for, so nothing else marks
 # them done.
 _RECEIVED_COUNT_RE = re.compile(r"(\d+)\s*/\s*(\d+)\s+items?\s+marked as received", re.IGNORECASE)
+# The paying card's earn line, printed under the payment method: "Earn 5% back (cap applies) plus an
+# extra 1% back on select items". Only the EXTRA is read -- the base rate is cards.json's job.
+# ORIGINALLY NOT PORTED HERE, on the assumption that the promo was a consumer-only offer. That was
+# WRONG: verified live on order 111-9990009-9990009 (profile-alpha, card 0315) -- a
+# Business order-details page carries the identical element, with identical wording, inside the same
+# `#orderDetails` region, so Business orders were silently losing the bonus percent.
+_EXTRA_PCT_RE = re.compile(r"extra\s+(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
+_EARN_LINE_SELECTOR = ".pmts-payments-instrument-supplemental-box-paystationpaymentmethod"
 # Order-summary line that only renders when a gift card actually paid part of the order. Twin of the
 # consumer rule in scrapers/amazon_mapping.py — kept duplicated because this module is deliberately a
-# standalone copy of the Amazon trio. NOTE: the consumer path also reads a promo cashback rate off the
-# payment block; that is intentionally NOT ported here (Amazon consumer only, by decision).
+# standalone copy of the Amazon trio.
 _GIFT_CARD_RE = re.compile(r"Gift Card Amount:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 # What the order is actually worth — the ceiling its shipment cards may not exceed.
 _SUBTOTAL_RE = re.compile(r"Item\(s\) Subtotal:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
@@ -366,6 +373,32 @@ def _is_digital_shipment(status_text: str) -> bool:
     return any(marker in low for marker in _DIGITAL_MARKERS)
 
 
+def _promo_cashback_rate(region) -> float | None:
+    """The BONUS rate Amazon advertises under the payment method, as a decimal fraction.
+
+    Twin of scrapers/amazon_mapping._promo_cashback_rate -- duplicated, not imported, because this
+    module is deliberately a standalone copy of the Amazon trio.
+
+    Amazon prints the paying card's earn line there ("Earn 5% back (cap applies) plus an extra 1% back
+    on select items"). Only the "extra N%" is taken; the card's base rate stays in cards.json, and
+    config.cards.tag_cards adds the two together. Returns None when there is no such line (most cards).
+
+    Scoped to the payment element rather than the page text so unrelated marketing ("extra 5% off!")
+    in a recommendations rail can never be mistaken for this order's promo.
+    """
+    for el in region.select(_EARN_LINE_SELECTOR):
+        m = _EXTRA_PCT_RE.search(el.get_text(" ", strip=True))
+        if not m:
+            continue
+        try:
+            rate = float(m.group(1)) / 100
+        except ValueError:
+            continue
+        if 0 < rate <= 1:
+            return rate
+    return None
+
+
 def _gift_card_amount(summary_el) -> float | None:
     """"Gift Card Amount: -$14.04" from the order summary, as a POSITIVE number; None when absent."""
     if summary_el is None:
@@ -645,4 +678,9 @@ def build_order_items(
     rows = _reconcile_against_subtotal(rows, _order_subtotal(summary_el), order_id)
     if net_gift_cards:
         _net_gift_card(rows, _gift_card_amount(summary_el))
+    # Rides to config.cards.tag_cards, which folds it into cashback_rate (see OrderItem). The
+    # AMAZON_PROMO_CASHBACK_ENABLED toggle already gates BOTH Amazons at the tag_cards call site.
+    promo = _promo_cashback_rate(region)
+    for row in rows:
+        row._promo_cashback_rate = promo
     return rows

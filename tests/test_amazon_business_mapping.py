@@ -429,12 +429,39 @@ def test_netting_can_be_switched_off():
     assert rows[0].cost_per_item == 100.00
 
 
-def test_business_never_reads_a_promo_rate():
-    """Promo cashback is Amazon-consumer only by decision; Business must leave it unset even when an
-    earn line with an 'extra N%' is on the page, so tag_cards has nothing to add."""
+def test_business_reads_the_promo_rate_off_the_earn_line():
+    """Business DOES carry the promo. This test used to assert the opposite -- promo cashback was left
+    out of this module on the assumption that the offer was consumer-only. Verified live on
+    order 111-9990009-9990009 (card 0315): the Business order-details page renders the identical
+    element with identical wording, so Business orders had been silently losing the bonus percent."""
     html = _one_item_order(
         extra_chrome='<li class="pmts-payments-instrument-supplemental-box-paystationpaymentmethod">'
-                     "<span>Earn 5% back plus an extra 1% back on select items</span></li>",
+                     "<span>Earn 5% back (cap applies) plus an extra 1% back on select items</span></li>",
+    )
+    assert build_order_items(html)[0]._promo_cashback_rate == 0.01
+
+
+def test_business_earn_line_without_an_extra_is_not_a_promo():
+    """A plain earn line is the card's BASE rate, which is cards.json's job -- reading it here would
+    double-count the base rate on top of itself."""
+    html = _one_item_order(
+        extra_chrome='<li class="pmts-payments-instrument-supplemental-box-paystationpaymentmethod">'
+                     "<span>Earn 5% back (cap applies)</span></li>",
+    )
+    assert build_order_items(html)[0]._promo_cashback_rate is None
+
+
+def test_business_no_earn_line_means_no_promo():
+    assert build_order_items(_one_item_order())[0]._promo_cashback_rate is None
+
+
+def test_business_promo_outside_order_details_is_ignored():
+    """Scoped to the payment element inside the order region, so marketing copy in a recommendations
+    rail ("extra 5% off!") can never be mistaken for this order's promo."""
+    html = _one_item_order().replace(
+        "</body>",
+        '<li class="pmts-payments-instrument-supplemental-box-paystationpaymentmethod">'
+        "<span>Earn 2% back plus an extra 9% back</span></li></body>",
     )
     assert build_order_items(html)[0]._promo_cashback_rate is None
 

@@ -218,8 +218,8 @@ class Settings:
 
     # Amazon prints the paying card's earn line under the payment method, e.g. "Earn 5% back (cap
     # applies) plus an extra 1% back on select items". ON = that EXTRA percentage is added to the
-    # card's cards.json rate for that order (Amazon consumer only). Turn it OFF to fall back to the
-    # cards.json rate alone — the escape hatch if that text turns out to be card-level marketing
+    # card's cards.json rate for that order (Amazon AND Amazon Business). Turn it OFF to fall back to
+    # the cards.json rate alone — the escape hatch if that text turns out to be card-level marketing
     # rather than a per-order promo, since it would then inflate every order on that card.
     amazon_promo_cashback_enabled: bool = _get_bool(
         "AMAZON_PROMO_CASHBACK_ENABLED", True)
