@@ -477,6 +477,8 @@ def _grab_refresh_token(label: str) -> str | None:
     # This is the condition observed to actually capture, and it is worth stating plainly because
     # it is the opposite of the intuitive one. Four live runs: the three that SIGNED IN saw zero
     # `/token` requests, while the one that captured had a WARM session in a BRAND-NEW browser.
+    # PROVEN AS A FALLBACK 2026-08-29: profile-bravo (logged out, no token at all) signed in on pass 1,
+    # saw zero /token, and pass 2 captured within 17s of the fresh browser opening.
     # A new cloud browser starts with an empty MSAL cache, so the SPA cannot serve itself from
     # cache and must acquire -- and with the B2C SSO cookie left warm by pass 1, that acquisition
     # succeeds and redeems, putting a plaintext refresh_token on the wire where the response

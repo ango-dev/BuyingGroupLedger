@@ -13,15 +13,16 @@ jobs that genuinely need a logged-in costco.com session:
      that gap** — the grab can now run at all against a lapsed profile.
 
      **IT DOES NOT, HOWEVER, MAKE THE CAPTURE DETERMINISTIC.** The capture needs MSAL to perform a
-     real token REDEEM while the handler watches, and nothing here can command that: across six live
-     runs it fired three times (including once mid-sign-in) and failed three times. TWO different
+     real token REDEEM while the handler watches, and nothing here can command that: across seven live
+     runs it fired four times (including once mid-sign-in) and failed three times. TWO different
      causal stories were written into this file and both were falsified by the next run, so no third
      one is offered — see the design notes for the run-by-run table. What holds up is the mechanism, not
      any rule about when it triggers.
 
      `scripts/costco_token._grab_refresh_token` therefore takes TWO passes: this sign-in warms the
      session, then a FRESH browser (empty MSAL cache) gives the SPA no choice but to acquire. Two
-     independent chances at the same redeem.
+     independent chances at the same redeem -- and the second one is PROVEN: on 2026-08-29 a
+     profile with no token at all signed in on pass 1, captured nothing, and captured on pass 2.
   2. **Receipts.** `receipts/capture.py` renders costco.com order pages in a CDP browser, and nothing
      keeps that session warm precisely because the data path opens none. A sign-in here leaves it
      warm as a side effect.
