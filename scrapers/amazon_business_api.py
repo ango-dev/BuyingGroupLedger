@@ -36,7 +36,8 @@ import logging
 import diagnostics
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
-from scrapers.amazon_business_mapping import RETAILER, build_order_items, discover_orders, parse_shipment_targets
+from scrapers.amazon_business_mapping import (RETAILER, build_order_items, discover_orders,
+                                              history_rendered, parse_shipment_targets)
 from scrapers.amazon_signin import deterministic_login, looks_logged_out
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
@@ -100,7 +101,7 @@ class AmazonBusinessApiClient:
         with CdpBrowser(self.profile) as page:
             dates = self._discover(page, since_date, today)
             if not dates:
-                raise AmazonBusinessApiError("No orders found on the order-history page (shape changed?).")
+                return []  # _discover has already ruled out logout and shape change
 
             to_fetch = [
                 oid for oid, date in dates.items()
@@ -234,6 +235,17 @@ class AmazonBusinessApiClient:
                     "Amazon Business order history is empty and still showing a sign-in prompt; the "
                     "session is logged out. Not running the agent — it cannot fix an auth failure."
                 )
+        # STILL EMPTY, AND NOT LOGGED OUT. Only the page's container decides (see amazon_api): an
+        # empty link selector is what an account with no orders looks like.
+        if not dates:
+            if history_rendered(page.content()):
+                log.info("Amazon Business [%s]: order history rendered with no orders — nothing to "
+                         "record.", self.profile.label)
+                diagnostics.note("amazon-business", "order history rendered with 0 orders (legitimate)")
+                return {}
+            raise AmazonBusinessApiError(
+                "The order-history page rendered without its orders container "
+                "(select[name='timeFilter'] / #ab-your-orders-anticsrf-token) — shape changed?")
 
         log.info("Amazon Business [%s]: discovered %d order(s) across paginated history.",
                  self.profile.label, len(dates))

@@ -304,3 +304,21 @@ def test_a_late_detected_logout_signs_in_rather_than_spending_the_agent(monkeypa
     client = AmazonBusinessApiClient(_Profile(auth={"amazon-business": auth}))
     rows = client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
     assert {r.order_id for r in rows} == {oid}, "re-discovery after signing in must actually re-read"
+
+
+class TestAnEmptyAccountIsNotAShapeChange:
+    """Only the page's CONTAINER decides: an empty link selector is what an
+    account with no orders looks like. Rendered container + no links = nothing to record; no
+    container = the markup changed and the run must fail loudly (dossier)."""
+
+    def test_rendered_history_with_no_orders_returns_nothing(self, monkeypatch):
+        _install_fake(monkeypatch,
+                      ["<html><select name='timeFilter'><option>last30</option></select></html>"], {})
+        client = AmazonBusinessApiClient(_Profile())
+        assert client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10") == []
+
+    def test_history_without_its_container_is_a_shape_change(self, monkeypatch):
+        _install_fake(monkeypatch, ["<html><div>totally new markup</div></html>"], {})
+        client = AmazonBusinessApiClient(_Profile())
+        with pytest.raises(api.AmazonBusinessApiError):
+            client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")

@@ -279,3 +279,22 @@ class TestConsumerAmazonSelfLogin:
         client = AmazonApiClient(_Profile(auth={"amazon": _auth()}))
         with pytest.raises(amazon_api.ApiLoginError, match="ACCOUNT SWITCHER"):
             client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+
+class TestAnEmptyAccountIsNotAShapeChange:
+    """Only the page's CONTAINER decides: an empty card selector is exactly
+    what an account with no orders looks like. Rendered container + no cards = nothing to record;
+    no container = the markup changed and the run must fail loudly (dossier)."""
+
+    def test_rendered_history_with_no_cards_returns_nothing(self, monkeypatch):
+        page = _FakePage("<html><select name='timeFilter'><option>last30</option></select></html>", {})
+        monkeypatch.setattr(amazon_api, "CdpBrowser", _FakeCdp(page))
+        client = AmazonApiClient(_Profile())
+        assert client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10") == []
+
+    def test_history_without_its_container_is_a_shape_change(self, monkeypatch):
+        page = _FakePage("<html><div>totally new markup</div></html>", {})
+        monkeypatch.setattr(amazon_api, "CdpBrowser", _FakeCdp(page))
+        client = AmazonApiClient(_Profile())
+        with pytest.raises(amazon_api.AmazonApiError):
+            client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")

@@ -54,7 +54,14 @@ _EARN_LINE_SELECTOR = ".pmts-payments-instrument-supplemental-box-paystationpaym
 #: Every selector this parser depends on, by name — the failure dossier's selector audit runs these
 #: against the captured page so a report can say WHICH one stopped matching. The parser itself keeps
 #: using its literals below; tests/test_diagnostics.py asserts each of those literals is listed here.
+#: What proves the order-history page RENDERED, independent of whether it holds any orders. Both
+#: captured consumer pages (.amazon_capture/order_history_*.html) carry the time-filter control
+#: exactly once. An account with no orders in the window renders this and zero cards — that is a
+#: legitimate empty, not a shape change; the container missing is the shape change.
+HISTORY_RENDERED_SELECTOR = "select[name='timeFilter'], #time-filter"
+
 SELECTORS: dict[str, str] = {
+    "history_container": HISTORY_RENDERED_SELECTOR,
     "history_order_card": ".order-card, .js-order-card",
     "any_link": "a[href]",
     "details_root": "#orderDetails",
@@ -227,6 +234,17 @@ def _format_address(text: str) -> str:
 
 
 # --- discovery (STEP 1) -------------------------------------------------------------------------
+def history_rendered(order_history_html: str) -> bool:
+    """Did the order-history page render its container (time filter) at all?
+
+    Paired with an empty `discover_orders` this separates "no orders" (return nothing, quietly)
+    from "the markup changed" (fail loudly with a dossier). Only the container counts — an empty
+    card selector is exactly what an empty account looks like.
+    """
+    soup = BeautifulSoup(order_history_html or "", "html.parser")
+    return soup.select_one(HISTORY_RENDERED_SELECTOR) is not None
+
+
 def discover_orders(order_history_html: str) -> dict[str, str]:
     """{order_id: order_date(YYYY-MM-DD or '')} for every REAL order on the order-history page.
 

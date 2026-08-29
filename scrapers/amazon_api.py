@@ -27,7 +27,8 @@ from datetime import date
 import diagnostics
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
-from scrapers.amazon_mapping import RETAILER, build_order_items, discover_orders, parse_shipment_targets
+from scrapers.amazon_mapping import (RETAILER, build_order_items, discover_orders, history_rendered,
+                                     parse_shipment_targets)
 from scrapers.amazon_signin import deterministic_login, looks_logged_out
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
@@ -120,7 +121,7 @@ class AmazonApiClient:
         with CdpBrowser(self.profile) as page:
             dates = self._discover(page, since_date, today)
             if not dates:
-                raise AmazonApiError("No orders found on the order-history page (shape changed?).")
+                return []  # _discover has already ruled out logout and shape change
 
             to_fetch = [
                 oid for oid, date in dates.items()
@@ -227,6 +228,7 @@ class AmazonApiClient:
         page is logged out."""
         dates: dict[str, str] = {}
         first = True
+        html = ""
         for tf in _time_filters_for(since_date, today):
             for pageno in range(_MAX_PAGES_PER_FILTER):
                 url = ORDER_HISTORY_PAGE.format(tf=tf, start=pageno * _PAGE_SIZE)
@@ -241,7 +243,8 @@ class AmazonApiClient:
                         # and the run silently under-fetches.
                         page.goto(url, wait_until="domcontentloaded", timeout=60000)
                         page.wait_for_timeout(3000)
-                page_dates = discover_orders(page.content())
+                html = page.content()
+                page_dates = discover_orders(html)
                 if not page_dates:
                     break  # past the last page of this bucket
                 new_ids = [oid for oid in page_dates if oid not in dates]
@@ -264,6 +267,18 @@ class AmazonApiClient:
                 "Amazon order history is empty and still showing a sign-in prompt; the session is "
                 "logged out. Not running the agent -- it cannot fix an auth failure."
             )
+        # STILL EMPTY, AND NOT LOGGED OUT. An empty card selector is what an account with no orders
+        # looks like, so it is not evidence of anything; only the page's CONTAINER decides. Rendered
+        # container + no cards = nothing to record. No container = the markup changed: fail loudly.
+        if not dates:
+            if history_rendered(html):
+                log.info("Amazon [%s]: order history rendered with no orders — nothing to record.",
+                         self.profile.label)
+                diagnostics.note("amazon", "order history rendered with 0 orders (legitimate)")
+                return {}
+            raise AmazonApiError(
+                "The order-history page rendered without its orders container "
+                "(select[name='timeFilter'] / #time-filter) — shape changed?")
 
         log.info("Amazon [%s]: discovered %d order(s) across paginated history.",
                  self.profile.label, len(dates))

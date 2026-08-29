@@ -76,7 +76,13 @@ _EARN_LINE_SELECTOR = ".pmts-payments-instrument-supplemental-box-paystationpaym
 #: Every selector this parser depends on, by name — audited by the failure dossier against the
 #: captured page (see scrapers/amazon_mapping.SELECTORS for the rationale). Business discovery is
 #: link-scoped rather than card-scoped, which is the one entry that differs from consumer Amazon.
+#: What proves the Business order-history page RENDERED, orders or not. Both captured pages
+#: (.amazon_business_capture/order_history_*.html) carry the time-filter select and the page's own
+#: anti-CSRF token input. An empty account renders these with no order links — a legitimate zero.
+HISTORY_RENDERED_SELECTOR = "select[name='timeFilter'], #ab-your-orders-anticsrf-token"
+
 SELECTORS: dict[str, str] = {
+    "history_container": HISTORY_RENDERED_SELECTOR,
     "history_order_link": "a[href*='order-details?orderID=']",
     "any_link": "a[href]",
     "details_root": "#orderDetails",
@@ -266,6 +272,12 @@ def _format_address(text: str) -> str:
 
 
 # --- discovery (STEP 1) -------------------------------------------------------------------------
+def history_rendered(order_history_html: str) -> bool:
+    """Did the order-history page render its container at all? See amazon_mapping.history_rendered."""
+    soup = BeautifulSoup(order_history_html or "", "html.parser")
+    return soup.select_one(HISTORY_RENDERED_SELECTOR) is not None
+
+
 def discover_orders(order_history_html: str) -> dict[str, str]:
     """{order_id: order_date(YYYY-MM-DD or '')} for every REAL order on a business order-history page
     (or a paginated fragment).
