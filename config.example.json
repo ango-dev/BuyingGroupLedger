@@ -3,12 +3,8 @@
   "//2": "EVERY setting lives here — nothing is environment-only any more, including the container schedule and the *_FORCE_AGENT hooks. .env is now purely the OVERRIDE layer, and is where dev/one-off values belong: COSTCO_FORCE_AGENT=true python main.py costco, or a host-specific RUN_INTERVAL_HOURS, without touching the config everything else shares.",
 
   "browser_use": {
-    "// api_key": "BROWSER_USE_API_KEY — required. The cloud browser every scraper runs in.",
+    "// api_key": "BROWSER_USE_API_KEY — required. The cloud browser every scraper runs in (CDP reads, receipt capture, the Costco token grab) — NOT just the agent.",
     "api_key": "",
-    "// llm": "BROWSER_USE_LLM — the agent-fallback model. v4 is BYOK-only and its model list is stale, so verify a new name with a cheap run before trusting it.",
-    "llm": "gpt-5.6-luna",
-    "// max_cost_usd": "BROWSER_USE_MAX_COST_USD — per-run circuit breaker; stops a run spiralling on retries.",
-    "max_cost_usd": 0.5,
     "// agent_fallback_enabled": "AGENT_FALLBACK_ENABLED — may a deterministic-path failure fall back to the PAID agent? Off: the failure writes a dossier to logs/failures/ (traceback, page HTML, screenshot, selector audit), alerts with its path, and that retailer records nothing this run. Fix the selector from the dossier; the next run retries. A login failure never runs the agent either way.",
     "agent_fallback_enabled": false
   },
