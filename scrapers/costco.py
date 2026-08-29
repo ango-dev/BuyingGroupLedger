@@ -9,6 +9,7 @@ from scrapers.base import (
     LoggedOutError,
     ScrapeUnavailableError,
 )
+from scrapers import costco_signin
 from scrapers.costco_mapping import ORDER_DETAILS_URL, build_order_items
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,10 @@ class CostcoScraper(BaseRetailerScraper):
     # The UUID is Costco's web-app client id (same for every account), so the agent can jump straight
     # to an order and the link is derivable from the order number alone.
     order_details_url = ORDER_DETAILS_URL
+
+    # The data path has no browser, so the only page a Costco dossier can ever capture is the B2C
+    # sign-in screen the token grab drives (scripts/costco_token -> costco_signin). Audit that.
+    diagnostic_selectors = costco_signin.SELECTORS
 
     # PRIMARY PATH: Costco's private GraphQL API (deterministic, no browser, no agent) — see
     # scrape() -> _scrape_via_api. FALLBACK: if the API errors (auth dead, schema changed, network),

@@ -257,8 +257,9 @@ class TestSelectorLiteralsAreDeclared:
         assert AmazonScraper.diagnostic_selectors["pt_tracking_number"] == ".pt-delivery-card-trackingId"
         assert "history_order_link" in AmazonBusinessScraper.diagnostic_selectors
         assert BestBuyScraper.diagnostic_selectors["flight_orders_key"].startswith("text:")
-        # Costco has no browser path, so nothing to audit — and that is deliberate.
-        assert CostcoScraper.diagnostic_selectors == {}
+        # Costco's data path has no browser; the token grab's sign-in screen is the one page it
+        # can capture, so those are the selectors it declares.
+        assert CostcoScraper.diagnostic_selectors["signin_email"] == "#signInName"
 
 
 class TestSettingsAndDocs:

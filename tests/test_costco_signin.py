@@ -439,3 +439,32 @@ class TestASiteBlockIsNotAnAccountLock:
         for text in ("Access Denied", "Request unsuccessful. Incapsula incident ID",
                      "We have detected unusual traffic"):
             assert "SITE BLOCKED" in self._verdict(text=text)[0], text
+
+
+class TestAFailureReachesTheDossier:
+    """`deterministic_login` REPORTS failure instead of raising, so `CdpBrowser.__exit__` sees a clean
+    exit and captures nothing. The sign-in page must reach the dossier some other way -- and outside a dossier the same call must stay a silent no-op."""
+
+    def test_a_failed_sign_in_snapshots_the_page_into_an_open_dossier(self, tmp_path):
+        import diagnostics
+
+        page = FakePage(present={signin.PASSWORD_SELECTOR})  # no email field: "never appeared"
+        with diagnostics.collecting("costco", "p", root=tmp_path, selectors=signin.SELECTORS) as d:
+            outcome = signin.deterministic_login(page, _auth())
+
+        assert outcome.ok is False
+        assert len(d.snapshots) == 1
+        assert d.snapshots[0]["label"].startswith("Costco sign-in: the email field never appeared")
+        assert d.problems and "never appeared" in d.problems[0]
+
+    def test_a_failed_sign_in_outside_a_dossier_is_still_just_a_report(self):
+        import diagnostics
+
+        assert diagnostics.current() is None
+        outcome = signin.deterministic_login(FakePage(present={signin.PASSWORD_SELECTOR}), _auth())
+        assert outcome.ok is False
+
+    def test_every_selector_the_module_uses_is_declared_for_the_audit(self):
+        used = {signin.EMAIL_SELECTOR, signin.PASSWORD_SELECTOR, signin.SUBMIT_SELECTOR,
+                signin.KEEP_SIGNED_IN_SELECTOR, *signin.ALTERNATIVE_FLOW_SELECTORS}
+        assert used == set(signin.SELECTORS.values())

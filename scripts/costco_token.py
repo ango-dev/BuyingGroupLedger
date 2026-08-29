@@ -41,6 +41,8 @@ import logging
 import sys
 from pathlib import Path
 
+import diagnostics
+
 from config.loader import STATE_FILE
 from scrapers.costco_api import DEFAULT_WAREHOUSES, load_costco_auth, save_costco_auth
 
@@ -310,6 +312,7 @@ def _grab_refresh_token(label: str) -> str | None:
                     log.warning("Costco [%s]: still logged out on the fresh-browser pass — the "
                                 "sign-in did not persist, so there is no session to redeem against.",
                                 label)
+                    diagnostics.snapshot(page, "Costco token grab: pass 2 landed logged out")
                 if logged_out and sign_in:
                     auth = (profile.auth or {}).get("costco")
                     if auth is None:
@@ -318,6 +321,9 @@ def _grab_refresh_token(label: str) -> str | None:
                             "auth block, so it cannot sign itself in. Add auth['costco'] "
                             "(method/username/password) to config.json, or log in by hand with "
                             "`python -m scripts.create_profile`.", label)
+                        diagnostics.snapshot(page, "Costco token grab: logged out, no auth block")
+                        diagnostics.problem("Costco token grab: the profile is logged out and has no "
+                                            "auth['costco'] block to sign itself in with")
                     else:
                         log.info("Costco [%s]: browser session logged out; attempting deterministic "
                                  "self-login before grabbing a token.", label)
@@ -327,9 +333,13 @@ def _grab_refresh_token(label: str) -> str | None:
                         else:
                             log.warning("Costco [%s]: deterministic self-login did not succeed. %s",
                                         label, outcome.reason or "")
-            except Exception:  # noqa: BLE001 -- a failed recovery must not replace the real diagnosis
+            except Exception as exc:  # noqa: BLE001 -- a failed recovery must not replace the real diagnosis
                 log.warning("Costco [%s]: self-login attempt errored; continuing with the grab.",
                             label, exc_info=True)
+                # Swallowed here on purpose, which is exactly why CdpBrowser.__exit__ would never see
+                # it: capture the page now or the dossier for this run has no page at all.
+                diagnostics.snapshot(page, f"Costco token grab: self-login raised {type(exc).__name__}")
+                diagnostics.problem(f"Costco token grab: self-login raised {type(exc).__name__}: {exc}")
             if captured.get("rt"):
                 # The login's own exchange already handed us a token; no need to go hunting.
                 return captured["rt"]

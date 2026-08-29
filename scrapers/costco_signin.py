@@ -60,6 +60,8 @@ import logging
 import re
 from typing import NamedTuple
 
+import diagnostics
+
 log = logging.getLogger(__name__)
 
 #: Matched against the FINAL url. `receipts/sources.py` already uses the same markers to refuse
@@ -80,6 +82,21 @@ ALTERNATIVE_FLOW_SELECTORS = (
     "#NoknokExchangeSelection",                  # passkey; no WebAuthn in the cloud browser
     "#PasswordResetUsingEmailAddressExchange",   # starts a real password reset
 )
+
+#: Every selector this module depends on, named for the failure dossier's selector audit. Costco's
+#: data path has no browser, so this sign-in screen is the ONLY page a Costco dossier can capture --
+#: and until 2026-08-29 it declared nothing, so a captured sign-in page audited zero selectors.
+#: The alternative-flow controls are listed too: the audit reporting them PRESENT is what tells a
+#: reader the page is still the one this module was written against.
+SELECTORS = {
+    "signin_email": EMAIL_SELECTOR,
+    "signin_password": PASSWORD_SELECTOR,
+    "signin_submit": SUBMIT_SELECTOR,
+    "signin_keep_signed_in": KEEP_SIGNED_IN_SELECTOR,
+    "signin_alt_passcode": ALTERNATIVE_FLOW_SELECTORS[0],
+    "signin_alt_passkey": ALTERNATIVE_FLOW_SELECTORS[1],
+    "signin_alt_password_reset": ALTERNATIVE_FLOW_SELECTORS[2],
+}
 
 #: B2C ships its whole error vocabulary in the DOM and reveals items conditionally, so this text is
 #: present on a HEALTHY page. Left in the evidence it makes every failure report "cookies are
@@ -256,6 +273,11 @@ def _classify_signin_failure(info: dict) -> tuple[str, str]:
 
 def _log_diagnostics(page, what_failed: str) -> tuple[str, str]:
     """Say WHY sign-in stalled. A bare failure costs the recovery and explains nothing."""
+    # Into the failure dossier, if one is open (no-op otherwise). `deterministic_login` REPORTS a
+    # failure rather than raising, so `CdpBrowser.__exit__` sees a clean exit and captures nothing --
+    # this is the only place the sign-in page reaches the dossier's page capture + selector audit.
+    diagnostics.snapshot(page, f"Costco sign-in: {what_failed}")
+    diagnostics.problem(f"Costco sign-in failed: {what_failed}")
     try:
         info = page.evaluate(_DIAGNOSTIC_JS)
     except Exception:  # noqa: BLE001 — diagnostics must never mask the original failure
