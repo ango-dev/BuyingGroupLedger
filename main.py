@@ -49,6 +49,7 @@ from scrapers.amazon import AmazonScraper  # noqa: E402
 from scrapers.amazon_business import AmazonBusinessScraper  # noqa: E402
 from scrapers.base import (  # noqa: E402
     BaseRetailerScraper,
+    DeterministicPathError,
     LoggedOutError,
     ScrapeUnavailableError,
 )
@@ -149,6 +150,12 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
         # this means the retailer was unreachable and the account is fine. The scraper has already
         # alerted with the real diagnosis.
         log.warning("%s could not be reached (%s); alert sent, skipping.", label, exc)
+        return
+    except DeterministicPathError as exc:
+        # The page/API changed shape and the agent fallback is off. The scraper already wrote the
+        # failure dossier and alerted with its path; the fix is a code change, not a re-login.
+        log.warning("%s deterministic path failed (%s); dossier written, alert sent, skipping.",
+                    label, exc)
         return
     except Exception:
         log.exception("Scrape failed for %s", label)

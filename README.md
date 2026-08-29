@@ -8,9 +8,12 @@ shipment insurance, and reads payouts back — unattended, on a schedule.
 **The design problem is cost against reliability.** A browser-driving LLM agent can read any retailer's
 order page, but it bills real money on every run. A hand-written scraper is free but breaks *silently*
 when a page changes — and a silently missed order is missed reimbursement, which is a worse outcome
-than an expensive one. So every retailer has a **deterministic, agent-free primary path** and falls
-back to the LLM agent automatically, with an alert, when that path fails. Normal runs cost
-approximately nothing; a site change degrades cost instead of losing data.
+than an expensive one. So every retailer has a **deterministic, agent-free primary path**, and when
+that path fails it **fails loudly with a failure dossier** — the traceback, the page HTML and a
+screenshot at the moment of failure, and an audit of every selector the parser depends on, written
+to `logs/failures/` and pointed at by the alert. Normal runs cost nothing; a site change costs one
+missed run and a selector fix, made from the dossier rather than guessed. The LLM agent still exists
+as an opt-in fallback (`AGENT_FALLBACK_ENABLED`), off by default.
 
 The second theme is that **the failures worth engineering against here are silent**. Nothing throws
 when a scraper reads page 1 of a paginated order history and misses the rest, or when a re-check
@@ -28,7 +31,8 @@ The parts worth reading if you're here to look at the engineering rather than to
 
 | Idea | Where | Why it exists |
 |---|---|---|
-| Deterministic primary, agent fallback | `scrapers/<retailer>{,_api,_mapping}.py` | Cost is a per-run tax; silent data loss is unbounded. Only the fallback costs money, and it fires loudly. |
+| Deterministic primary, loud failure | `scrapers/<retailer>{,_api,_mapping}.py` | Cost is a per-run tax; silent data loss is unbounded. A normal run spends nothing, and a failure records nothing rather than something wrong — and says so. |
+| The failure dossier replaces the agent | `diagnostics/dossier.py`, `CdpBrowser.__exit__` | A paid agent run hid *what* broke. The dossier captures the page at the failure and audits every declared selector against it, so the fix is a code change made from evidence, not a retry that costs money. The agent is opt-in (`AGENT_FALLBACK_ENABLED`), off by default. |
 | The schema is a wire format | `models/order.py` `FIELDNAMES`, `sheets/ledger_sync.py` `HEADER` | Rows are written *positionally*. Reordering columns without migrating scrambles every historical row with no error, so a test pins the pairing and the sync refuses to write a mismatched header. |
 | Idempotent upsert, blanks never overwrite | `ledger_sync.py` `_merge_row`, `_collapse_records` | Re-checks return partial data. A blank field must never erase a known-good value, and two paths reporting the same row in one sync must collapse rather than clobber. |
 | Reconcile on tracking number first | `ledger_sync.py` `sync_csv_to_sheet` | The deterministic path and the agent legitimately disagree about shipment *numbering*. Tracking number is an identity both read identically, so it beats the synthetic key. |
@@ -63,8 +67,9 @@ flowchart TD
     E --> G[deterministic path: discovery + order details]
     F --> G
     G -->|success| K[write CSV]
-    G -->|ANY failure| Z[alert + Browser-Use agent fallback]
-    Z --> K
+    G -->|ANY failure| Z[failure dossier + alert; nothing recorded this run]
+    Z -.->|only if AGENT_FALLBACK_ENABLED| Y[Browser-Use agent]
+    Y --> K
     K --> L[Upsert into Google Sheet]
     L --> M[post tracking to buying groups, read payouts back]
 ```
@@ -87,17 +92,34 @@ Browser-Use bills mostly by **input tokens** — every agent step ships the whol
 cost is step-count × per-step page context. That makes the agent the expensive component, and is the
 reason the deterministic paths exist: a normal run now spends no tokens at all.
 
-The agent is kept for the two things it's genuinely better at:
+**The agent is off by default** (`AGENT_FALLBACK_ENABLED=false`, since 2026-08-29). Once every
+retailer's deterministic path had been live-validated, the agent fallback had become a per-failure
+tax that *hid what broke*: a layout change produced a paid run and a row, not a fix. Now a
+deterministic-path failure produces a **failure dossier** instead:
 
-- **Fallback.** Any failure in a deterministic path — a layout change, a logged-out session, an API
-  outage — alerts and defers to the agent instead of recording nothing. Cost degrades; data doesn't.
-- **Structure, when a page changes shape.** The agent sees how many shipments an order has, which is
-  exactly what changes when an order splits at ship time.
+```
+logs/failures/<retailer>_<profile>_<timestamp>/
+  report.md       exception + traceback, a timeline of what the path was doing, and a SELECTOR
+                  AUDIT: every selector the parser depends on, how many matches it got on the
+                  captured page, and a sample of the text — a 0 where there used to be a hit is
+                  the fix
+  page_N.html     the DOM at the moment of failure (secrets + common PII patterns redacted)
+  page_N.png      what it looked like
+  response_N.txt  the API request/response, for the no-browser paths (Costco GraphQL)
+```
 
-When it does run, it's one call per profile covering both jobs — scan for new orders (JOB 1) and
-re-check open ones (JOB 2) — so more open orders add *steps*, not extra runs. Pinning the exact click
-path through Best Buy's sign-in flow (instead of letting the agent screenshot its way to the password
-field) took a representative run from 3.35M to 932K tokens and $0.128 to $0.053, 54 steps to 34.
+The alert names the dossier path. Hand the directory to a coding agent with the retailer's
+`_mapping.py` / `_api.py`; the captured HTML becomes the test fixture that proves the fix offline.
+Nothing is recorded for that retailer that run, and the next scheduled run retries. A scrape that
+*succeeds* but could not read part of a page (a tracking page whose selectors stopped matching, an
+order-details page that failed to load) also leaves a dossier and alerts, because those used to be
+silent. Login failures never ran the agent and still don't; their alerts now point at a dossier too.
+
+Set `AGENT_FALLBACK_ENABLED=true` (or a retailer's `*_FORCE_AGENT` hook, which is an explicit request
+to spend) to restore the old behaviour: the dossier is still written, then the agent runs — one call
+per profile covering both jobs, scan for new orders (JOB 1) and re-check open ones (JOB 2). Pinning
+the exact click path through Best Buy's sign-in flow (instead of letting the agent screenshot its way
+to the password field) took a representative run from 3.35M to 932K tokens and $0.128 to $0.053.
 
 **A shipment's lifecycle:**
 
@@ -420,6 +442,7 @@ fails closed on a typo rather than turning itself on.
 | `BROWSER_USE_API_KEY` | `browser_use.api_key` |
 | `BROWSER_USE_LLM` | `browser_use.llm` |
 | `BROWSER_USE_MAX_COST_USD` | `browser_use.max_cost_usd` |
+| `AGENT_FALLBACK_ENABLED` † | `browser_use.agent_fallback_enabled` |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | `google.service_account_file` |
 | `GOOGLE_SHEET_ID` | `google.sheet_id` |
 | `GOOGLE_SHEET_WORKSHEET_NAME` | `google.worksheet_name` |
@@ -632,14 +655,14 @@ emits the same results machine-readably, `--compare` included.
 > logged-in cookie, discovers order ids from the purchase-history page's embedded data, and reads each
 > order's detail from Best Buy's own `/profile/ss/api/v1/orders/<id>` endpoint via an in-page fetch —
 > tracking numbers, per-item cost, card, and native shipment grouping all come structured. If that path
-> fails (login, page shape, network) it falls back to the Browser-Use agent automatically (and alerts).
+> fails (login, page shape, network) it writes a failure dossier and alerts (see "Cost model").
 > **Costco is similar**: it reads orders from Costco's
 > private GraphQL API using a stored refresh token — no browser and no agent — and tracks **online
 > shipped orders only** (in-warehouse pickups and Same-Day/Instacart grocery are skipped). If that API
-> ever fails, Costco falls back to the agent automatically (and alerts). See "Costco API setup" below.
+> ever fails, the dossier holds the failing request/response. See "Costco API setup" below.
 > **Amazon and Amazon Business** also have a deterministic primary path (no order JSON exists, so a CDP
 > browser parses the order-details HTML and reads each shipment's tracking number off Amazon's own
-> package-tracking page), with the Browser-Use agent as the automatic fallback. Amazon Business is a
+> package-tracking page), with the same dossier-on-failure behaviour. Amazon Business is a
 > separate scraper (`retailer_key` `amazon-business`) that shares Amazon's tracking page but has its own
 > order-history discovery + pagination; keep the two Amazon accounts on separate profiles.
 

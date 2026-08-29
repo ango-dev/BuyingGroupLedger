@@ -13,16 +13,18 @@ WHY THIS EXISTS. Every check here corresponds to a real failure mode where the r
 and quietly does the wrong thing, so no exception ever surfaces:
 
 - **A missing deterministic-path import.** `scrape()` on Amazon / Amazon Business / Best Buy wraps
-  `_scrape_via_api` in a catch-all that degrades to the Browser-Use agent. An `ImportError` is
-  caught by that catch-all, so a dependency missing from the image doesn't crash anything — it just
-  moves three retailers onto the PAID agent path, forever, at roughly $0.01-0.10 per retailer per
-  run. `playwright` was exactly this: used by scrapers/cdp.py, installed in the dev venv by
-  accident, and absent from requirements.txt.
+  `_scrape_via_api` in a catch-all. An `ImportError` is caught by that catch-all, so a dependency
+  missing from the image doesn't crash anything — with the agent fallback OFF (the default since
+  2026-08-29) it fails those retailers on EVERY run, each time writing a failure dossier and alerting
+  that a "selector" broke, which sends whoever reads it hunting through page HTML for a problem that
+  is really a missing package; with it ON it moves them onto the PAID agent path, forever, at
+  roughly $0.01-0.10 per retailer per run. `playwright` was exactly this: used by scrapers/cdp.py,
+  installed in the dev venv by accident, and absent from requirements.txt.
 - **A bind mount whose host file is missing.** Docker creates an empty DIRECTORY at that path. The
   loaders test `is_file()`, so an optional config silently reads as "not configured" — every address
   tags `Unclassified` and every card falls back to DEFAULT_CASHBACK_RATE, quietly misstating profit.
-- **A missing Costco refresh token.** Costco alerts and falls back to the agent, which works, so the
-  only symptom is a recurring bill.
+- **A missing Costco refresh token.** Self-healing now (see check_costco_tokens), but a profile
+  with no `auth["costco"]` block to heal from alerts and skips on every run.
 
 The rule this file encodes: on an unattended host, "still works but costs money" is a failure.
 """
@@ -50,8 +52,9 @@ class Result:
     detail: str
 
 
-# Modules that make up the deterministic (agent-free) paths, and what falls back to the paid agent
-# if the import breaks. Imported for real — a stale transitive dependency shows up here.
+# Modules that make up the deterministic (agent-free) paths, and which retailers fail every run (or,
+# with the agent fallback on, bill for it) if the import breaks. Imported for real — a stale
+# transitive dependency shows up here.
 DETERMINISTIC_IMPORTS = {
     "scrapers.cdp": "Amazon, Amazon Business and Best Buy (the CDP browser client)",
     "scrapers.amazon_api": "Amazon",
@@ -74,8 +77,8 @@ def check_deterministic_imports() -> list[Result]:
         except Exception as exc:  # noqa: BLE001 — any import problem has the same consequence
             out.append(Result(
                 FAIL, f"import {module}",
-                f"{type(exc).__name__}: {exc} — {covers} would fall back to the PAID Browser-Use "
-                f"agent on every run, without raising.",
+                f"{type(exc).__name__}: {exc} — {covers} would fail on every run (or, with "
+                f"AGENT_FALLBACK_ENABLED, fall back to the PAID Browser-Use agent), without raising.",
             ))
         else:
             out.append(Result(OK, f"import {module}", covers))

@@ -70,8 +70,12 @@ class CostcoScraper(BaseRetailerScraper):
         which costs money — only runs when the API path genuinely can't. The agent path is the base
         class's scrape(), which drives task_prompt() below.
         """
+        with self._collecting() as dossier:
+            return self._scrape_with_dossier(dossier)
+
+    def _scrape_with_dossier(self, dossier):
         try:
-            return self._scrape_via_api()
+            items = self._scrape_via_api()
         except ApiLoginError as exc:
             # FIRST, TRY TO FIX IT OURSELVES. A dead refresh token is the one auth failure that is
             # recoverable without a human: the Browser-Use profile is still logged into Costco, so
@@ -105,7 +109,8 @@ class CostcoScraper(BaseRetailerScraper):
                 f"  python -m scripts.create_profile --label {self.profile.label}\n"
                 f"then either re-run, or grab a token directly:\n"
                 f"  python -m scripts.costco_token --label {self.profile.label} --grab\n\n"
-                f"The agent was deliberately not run — an auth failure is not something it can fix.",
+                f"The agent was deliberately not run — an auth failure is not something it can fix."
+                + self._dossier_line(dossier, exc),
             )
             raise LoggedOutError(f"Costco:{self.profile.label}") from exc
         except Exception as exc:  # noqa: BLE001 — a NON-auth failure (schema/network) degrades to the agent
@@ -128,20 +133,20 @@ class CostcoScraper(BaseRetailerScraper):
                     f"connection out. The agent was deliberately not run because it egresses through "
                     f"that same proxy, so it would fail identically while costing a paid session.\n\n"
                     f"Usually transient — the next scheduled run picks the orders up. If it repeats, "
-                    f"check the proxy is alive and that its IP is still allowlisted.",
+                    f"check the proxy is alive and that its IP is still allowlisted."
+                    + self._dossier_line(dossier, exc),
                 )
                 raise ScrapeUnavailableError(
                     f"Costco:{self.profile.label} proxy unreachable"
                 ) from exc
-            log.warning("Costco [%s]: API path failed (%s); falling back to the agent.",
-                        self.profile.label, reason, exc_info=True)
-            alert(
-                f"Costco [{self.profile.label}]: API path failed — using agent fallback",
-                f"The Costco GraphQL path could not run, so this run used the Browser-Use agent "
-                f"instead.\n\nReason: {reason}\n\nIf this persists, re-authorize the API with "
-                f"`python -m scripts.costco_token --label {self.profile.label} ...`.",
+            return self._on_deterministic_failure(
+                exc, dossier, force_agent=settings.costco_force_agent,
+                hint="The dossier holds the GraphQL request/response that failed. If the API schema "
+                     "changed, update scrapers/costco_api.py's queries; if auth is the problem, "
+                     f"re-authorize with `python -m scripts.costco_token --label {self.profile.label} ...`.",
             )
-            return super().scrape()
+        self._report_soft_problems(dossier)
+        return items
 
     def _refresh_token_via_browser(self) -> bool:
         """Capture a fresh Costco refresh token over CDP and save it. True if one was stored.

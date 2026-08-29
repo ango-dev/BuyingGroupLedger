@@ -3,6 +3,7 @@ import logging
 from browser_use_sdk import BrowserUse as BrowserUseV2
 from playwright.sync_api import sync_playwright
 
+import diagnostics
 from models.profile import ProfileConfig
 
 log = logging.getLogger(__name__)
@@ -96,6 +97,12 @@ class CdpBrowser:
             raise
 
     def __exit__(self, *exc):
+        # Leaving on an exception: capture the page for the failure dossier BEFORE the browser goes
+        # away. This is the one place every browser-driven path passes through on its way out, so
+        # doing it here means no API client can forget. No-op when no dossier is open (scripts,
+        # tests) and when the exception is a KeyboardInterrupt (exc[0] is set but nothing to debug).
+        if exc and exc[0] is not None and issubclass(exc[0], Exception) and self.page is not None:
+            diagnostics.snapshot(self.page, f"at failure ({exc[0].__name__})")
         try:
             if self._browser is not None:
                 self._browser.close()

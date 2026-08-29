@@ -3,12 +3,15 @@ import logging
 from alerts.notifier import alert
 from config.settings import settings
 from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
+from scrapers.bestbuy_api import DIAGNOSTIC_SELECTORS
 
 log = logging.getLogger(__name__)
 
 class BestBuyScraper(BaseRetailerScraper):
     retailer_name = "Best Buy"
     retailer_key = "bestbuy"
+    # Audited against the captured page by the failure dossier (see BaseRetailerScraper).
+    diagnostic_selectors = DIAGNOSTIC_SELECTORS
     # Purchase history is always here; order details live at
     # https://www.bestbuy.com/profile/ss/orders/order-details/<order-id>/view
     order_history_url = "https://www.bestbuy.com/purchasehistory/purchases"
@@ -27,31 +30,31 @@ class BestBuyScraper(BaseRetailerScraper):
         A successful API call that finds no orders returns [] (not an error), so the agent — which
         costs money — only runs when the API path genuinely can't.
         """
-        try:
-            return self._scrape_via_api()
-        except ApiLoginError as exc:
-            # Login failure is NOT a DOM change the agent can fix — do NOT run the (paid) agent; alert
-            # and skip so the user re-logs in the profile.
-            log.warning("Best Buy [%s]: API login failed (%s); NOT running the agent.",
-                        self.profile.label, exc)
-            alert(
-                f"Best Buy [{self.profile.label}]: session logged out — API login failed, agent NOT run",
-                f"The Best Buy deterministic path could not sign in ({exc}). Re-login the profile "
-                f"(scripts/create_profile). The agent was deliberately not run — a login failure is not "
-                f"something the agent can fix.",
-            )
-            raise LoggedOutError(f"Best Buy:{self.profile.label}") from exc
-        except Exception as exc:  # noqa: BLE001 — a NON-login failure (page shape) degrades to the agent
-            reason = f"{type(exc).__name__}: {exc}"
-            log.warning("Best Buy [%s]: API path failed (%s); falling back to the agent.",
-                        self.profile.label, reason, exc_info=True)
-            alert(
-                f"Best Buy [{self.profile.label}]: API path failed — using agent fallback",
-                f"The Best Buy deterministic path could not run, so this run used the Browser-Use "
-                f"agent instead.\n\nReason: {reason}\n\nIf this persists, check the sign-in flow / "
-                f"page shape (scripts/bestbuy_capture.py re-captures it).",
-            )
-            return super().scrape()
+        with self._collecting() as dossier:
+            try:
+                items = self._scrape_via_api()
+            except ApiLoginError as exc:
+                # Login failure is NOT a DOM change the agent can fix — do NOT run the (paid) agent;
+                # alert and skip so the user re-logs in the profile.
+                log.warning("Best Buy [%s]: API login failed (%s); NOT running the agent.",
+                            self.profile.label, exc)
+                alert(
+                    f"Best Buy [{self.profile.label}]: session logged out — API login failed, "
+                    f"agent NOT run",
+                    f"The Best Buy deterministic path could not sign in ({exc}). Re-login the profile "
+                    f"(scripts/create_profile). The agent was deliberately not run — a login failure "
+                    f"is not something the agent can fix."
+                    + self._dossier_line(dossier, exc),
+                )
+                raise LoggedOutError(f"Best Buy:{self.profile.label}") from exc
+            except Exception as exc:  # noqa: BLE001 — a NON-login failure (page shape)
+                return self._on_deterministic_failure(
+                    exc, dossier, force_agent=settings.bestbuy_force_agent,
+                    hint="If this persists, check the sign-in flow / page shape "
+                         "(scripts/bestbuy_capture.py re-captures it).",
+                )
+            self._report_soft_problems(dossier)
+            return items
 
     def _scrape_via_api(self):
         from scrapers.bestbuy_api import BestBuyApiClient

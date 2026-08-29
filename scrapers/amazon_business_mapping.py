@@ -72,6 +72,26 @@ _RECEIVED_COUNT_RE = re.compile(r"(\d+)\s*/\s*(\d+)\s+items?\s+marked as receive
 # `#orderDetails` region, so Business orders were silently losing the bonus percent.
 _EXTRA_PCT_RE = re.compile(r"extra\s+(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
 _EARN_LINE_SELECTOR = ".pmts-payments-instrument-supplemental-box-paystationpaymentmethod"
+
+#: Every selector this parser depends on, by name — audited by the failure dossier against the
+#: captured page (see scrapers/amazon_mapping.SELECTORS for the rationale). Business discovery is
+#: link-scoped rather than card-scoped, which is the one entry that differs from consumer Amazon.
+SELECTORS: dict[str, str] = {
+    "history_order_link": "a[href*='order-details?orderID=']",
+    "any_link": "a[href]",
+    "details_root": "#orderDetails",
+    "order_id": "[data-component='orderId']",
+    "order_date": "[data-component='orderDate']",
+    "order_summary": "[data-component='orderSummary']",
+    "shipping_address": "[data-component='shippingAddress']",
+    "shipment_status": "[data-component='shipmentStatus']",
+    "purchased_items": "[data-component='purchasedItems']",
+    "shipment_connections": "[data-component='shipmentConnections']",
+    "item_title": "[data-component='itemTitle']",
+    "item_quantity": ".od-item-view-qty",
+    "item_unit_price": "[data-component='unitPrice']",
+    "card_earn_line": _EARN_LINE_SELECTOR,
+}
 # Order-summary line that only renders when a gift card actually paid part of the order. Twin of the
 # consumer rule in scrapers/amazon_mapping.py — kept duplicated because this module is deliberately a
 # standalone copy of the Amazon trio.

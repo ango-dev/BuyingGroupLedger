@@ -2,6 +2,7 @@ import logging
 
 from alerts.notifier import alert
 from config.settings import settings
+from scrapers import amazon_business_mapping
 from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
 
 log = logging.getLogger(__name__)
@@ -32,32 +33,30 @@ class AmazonBusinessScraper(BaseRetailerScraper):
         A successful run that finds no orders returns [] (not an error), so the agent — which costs
         money — only runs when the deterministic path genuinely can't.
         """
-        try:
-            return self._scrape_via_api()
-        except ApiLoginError as exc:
-            # Login failure is NOT a DOM change the agent can fix (Amazon login has OTP/2FA) — do NOT
-            # run the (paid) agent; alert and skip so the user re-logs in the profile.
-            log.warning("Amazon Business [%s]: session logged out (%s); NOT running the agent.",
-                        self.profile.label, exc)
-            alert(
-                f"Amazon Business [{self.profile.label}]: session logged out — agent NOT run",
-                f"The Amazon Business deterministic path found a logged-out session ({exc}). Re-login the "
-                f"profile (scripts/create_profile). The agent was deliberately not run — a login failure "
-                f"is not something the agent can fix.",
-            )
-            raise LoggedOutError(f"Amazon Business:{self.profile.label}") from exc
-        except Exception as exc:  # noqa: BLE001 — a NON-login failure (page shape) degrades to the agent
-            reason = f"{type(exc).__name__}: {exc}"
-            log.warning("Amazon Business [%s]: deterministic path failed (%s); falling back to the agent.",
-                        self.profile.label, reason, exc_info=True)
-            alert(
-                f"Amazon Business [{self.profile.label}]: deterministic path failed — using agent fallback",
-                f"The Amazon Business deterministic path could not run, so this run used the Browser-Use "
-                f"agent instead.\n\nReason: {reason}\n\nIf this persists, re-capture the page shape "
-                f"(scripts/amazon_capture.py --out .amazon_business_capture) or check whether the session "
-                f"is logged out.",
-            )
-            return super().scrape()
+        with self._collecting() as dossier:
+            try:
+                items = self._scrape_via_api()
+            except ApiLoginError as exc:
+                # Login failure is NOT a DOM change the agent can fix (Amazon login has OTP/2FA) — do
+                # NOT run the (paid) agent; alert and skip so the user re-logs in the profile.
+                log.warning("Amazon Business [%s]: session logged out (%s); NOT running the agent.",
+                            self.profile.label, exc)
+                alert(
+                    f"Amazon Business [{self.profile.label}]: session logged out — agent NOT run",
+                    f"The Amazon Business deterministic path found a logged-out session ({exc}). "
+                    f"Re-login the profile (scripts/create_profile). The agent was deliberately not "
+                    f"run — a login failure is not something the agent can fix."
+                    + self._dossier_line(dossier, exc),
+                )
+                raise LoggedOutError(f"Amazon Business:{self.profile.label}") from exc
+            except Exception as exc:  # noqa: BLE001 — a NON-login failure (page shape)
+                return self._on_deterministic_failure(
+                    exc, dossier, force_agent=settings.amazon_business_force_agent,
+                    hint="If this persists, re-capture the page shape (scripts/amazon_capture.py "
+                         "--out .amazon_business_capture) or check whether the session is logged out.",
+                )
+            self._report_soft_problems(dossier)
+            return items
 
     def _scrape_via_api(self):
         from scrapers.amazon_business_api import AmazonBusinessApiClient
@@ -91,6 +90,20 @@ class AmazonBusinessScraper(BaseRetailerScraper):
     promise_selector = "h1.pt-promise-main-slot"
     delivery_card_selector = ".pt-delivery-card-wrapper"
     tracking_number_selector = ".pt-delivery-card-trackingId"  # text reads "Tracking ID: <number>"
+
+    # Audited against the captured page by the failure dossier (see BaseRetailerScraper).
+    diagnostic_selectors = {
+        **amazon_business_mapping.SELECTORS,
+        "pt_promise_headline": promise_selector,
+        "pt_delivery_card": delivery_card_selector,
+        "pt_tracking_number": tracking_number_selector,
+        "history_next_page": "li.a-last:not(.a-disabled) a",
+        "signin_email": "#ap_email",
+        "signin_password": "#ap_password",
+        "signin_claim": "#ap-claim",
+        "signin_submit": "#signInSubmit",
+        "signin_link": "a[href*='/ap/signin']",
+    }
 
     def _read_tracking_number(self, page) -> str:
         """The carrier number from the delivery card, or "" if that element isn't present.

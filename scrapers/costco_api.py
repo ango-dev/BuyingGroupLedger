@@ -21,12 +21,14 @@ just pasting it into QUERY_ORDER_DETAILS.
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
 import jwt
 from curl_cffi import requests as curl_requests
 
+import diagnostics
 from config.loader import load_state, save_state
 from scrapers.base import ApiLoginError
 
@@ -170,6 +172,12 @@ class CostcoApiError(Exception):
     """The GraphQL API returned an error or an unexpected shape."""
 
 
+def _operation_name(query: str) -> str:
+    """'getOnlineOrders' / 'getOrderDetails' from the query text, for labelling a dossier entry."""
+    m = re.search(r"\b(getOnlineOrders|getOrderDetails|\w+)\s*\(", query or "")
+    return m.group(1) if m else "query"
+
+
 def _is_token_expired(id_token: str, buffer_seconds: int = 120) -> bool:
     try:
         payload = jwt.decode(id_token, options={"verify_signature": False})
@@ -217,14 +225,21 @@ class CostcoApiClient:
             timeout=30,
         )
         if not resp.ok:
+            diagnostics.record_response("MSAL refresh-token exchange", resp.status_code, resp.text,
+                                        request={"url": TOKEN_ENDPOINT, "grant_type": "refresh_token"})
             raise CostcoAuthError(
                 f"Refresh-token exchange failed (HTTP {resp.status_code}). Re-run "
                 f"scripts.costco_token for profile '{self.profile_label}'. Body: {resp.text[:300]}"
             )
-        return resp.json()
+        result = resp.json()
+        # Whatever tokens came back must never be written into a dossier.
+        diagnostics.add_secrets(result.get("id_token"), result.get("refresh_token"),
+                                result.get("access_token"))
+        return result
 
     def _bearer_token(self) -> str:
         refresh_token = self._auth.get("refresh_token")
+        diagnostics.add_secrets(refresh_token, self._auth.get("id_token"))
         if not refresh_token:
             raise CostcoAuthError(
                 f"No Costco refresh token for profile '{self.profile_label}'. Run "
@@ -276,14 +291,21 @@ class CostcoApiClient:
                 log.info("Costco GraphQL 401; forcing token refresh and retrying.")
                 self._auth.pop("id_token", None)
                 continue
+            op = _operation_name(query)
+            request = {"operation": op, "variables": variables, "query": query}
             if not resp.ok:
+                diagnostics.record_response(f"GraphQL {op}", resp.status_code, resp.text, request)
                 raise CostcoApiError(f"GraphQL HTTP {resp.status_code}: {resp.text[:300]}")
             payload = resp.json()
             if payload.get("errors"):
+                diagnostics.record_response(f"GraphQL {op} (errors)", resp.status_code, payload, request)
                 raise CostcoApiError(f"GraphQL errors: {json.dumps(payload['errors'])[:300]}")
             data = payload.get("data")
             if not isinstance(data, dict):
+                diagnostics.record_response(f"GraphQL {op} (bad shape)", resp.status_code, payload,
+                                            request)
                 raise CostcoApiError(f"Unexpected GraphQL response shape: {json.dumps(payload)[:300]}")
+            diagnostics.note("costco", f"GraphQL {op} ok (keys: {', '.join(sorted(data))})")
             return data
         raise CostcoAuthError("Authentication failed after a token refresh retry.")
 

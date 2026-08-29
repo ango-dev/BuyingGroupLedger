@@ -8,7 +8,9 @@
     "// llm": "BROWSER_USE_LLM — the agent-fallback model. v4 is BYOK-only and its model list is stale, so verify a new name with a cheap run before trusting it.",
     "llm": "gpt-5.6-luna",
     "// max_cost_usd": "BROWSER_USE_MAX_COST_USD — per-run circuit breaker; stops a run spiralling on retries.",
-    "max_cost_usd": 0.5
+    "max_cost_usd": 0.5,
+    "// agent_fallback_enabled": "AGENT_FALLBACK_ENABLED — may a deterministic-path failure fall back to the PAID agent? Off: the failure writes a dossier to logs/failures/ (traceback, page HTML, screenshot, selector audit), alerts with its path, and that retailer records nothing this run. Fix the selector from the dossier; the next run retries. A login failure never runs the agent either way.",
+    "agent_fallback_enabled": false
   },
 
   "google": {

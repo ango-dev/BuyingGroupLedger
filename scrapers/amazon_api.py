@@ -24,6 +24,7 @@ back to the Browser-Use agent (which detects logged-out, alerts, and skips) — 
 import logging
 from datetime import date
 
+import diagnostics
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
 from scrapers.amazon_mapping import RETAILER, build_order_items, discover_orders, parse_shipment_targets
@@ -131,6 +132,8 @@ class AmazonApiClient:
 
             log.info("Amazon [%s]: %d order(s) in window, fetching %d order-details page(s).",
                      self.profile.label, len(dates), len(to_fetch))
+            diagnostics.note("amazon", f"{len(dates)} order(s) discovered; fetching {len(to_fetch)} "
+                                       f"order-details page(s)")
             if not to_fetch:
                 return []
 
@@ -141,9 +144,13 @@ class AmazonApiClient:
                     page.goto(ORDER_DETAILS_URL.format(oid), wait_until="domcontentloaded", timeout=60000)
                     page.wait_for_timeout(3000)
                     details_html[oid] = page.content()
-                except Exception:
+                except Exception as exc:
                     log.warning("Amazon [%s]: failed to load order-details for %s (skipped).",
                                 self.profile.label, oid, exc_info=True)
+                    # Skipped = silently missing from the ledger; make the run end with a dossier.
+                    diagnostics.snapshot(page, f"order-details load failed for {oid}")
+                    diagnostics.problem(f"order {oid}: order-details page failed to load "
+                                        f"({type(exc).__name__}: {exc}) — its rows were NOT built")
 
             # TRACKING NUMBERS: visit each non-terminal shipment's pt page and read the number.
             tracking_by_order = self._read_tracking_numbers(page, details_html)
@@ -282,7 +289,18 @@ class AmazonApiClient:
                     log.warning("Amazon [%s]: tracking read failed for %s / %s.",
                                 self.profile.label, oid, target["shipment"], exc_info=True)
                     info = None
-                if info and info.get("tracking_number"):
+                if info is None:
+                    # The reader could not recognise the page (promise headline missing) or found
+                    # the shipped-card but no number: a stale selector. This used to route the order
+                    # to the agent; now it is a dossier problem, because a blank number never
+                    # overwrites a recorded one but a shipped order would otherwise sit at 'ordered'
+                    # with no signal at all.
+                    diagnostics.snapshot(page, f"tracking page unreadable: {oid} / {target['shipment']}")
+                    diagnostics.problem(
+                        f"order {oid} / shipment {target['shipment']}: the package-tracking page could "
+                        f"not be read (selectors did not match) — tracking number NOT recorded")
+                    continue
+                if info.get("tracking_number"):
                     result.setdefault(oid, {})[target["shipment"]] = info["tracking_number"]
                     log.info("Amazon [%s]: read tracking %s for %s / %s.",
                              self.profile.label, info["tracking_number"], oid, target["shipment"])

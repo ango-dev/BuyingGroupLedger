@@ -73,6 +73,7 @@ ENV_TO_CONFIG = {
     "COSTCO_FORCE_AGENT": "dev.force_agent.costco",
     "BROWSER_USE_LLM": "browser_use.llm",
     "BROWSER_USE_MAX_COST_USD": "browser_use.max_cost_usd",
+    "AGENT_FALLBACK_ENABLED": "browser_use.agent_fallback_enabled",
     "LOOKBACK_DAYS": "scraping.lookback_days",
     "DEFAULT_CASHBACK_RATE": "scraping.default_cashback_rate",
     "AMAZON_PROMO_CASHBACK_ENABLED": "scraping.amazon_promo_cashback_enabled",
@@ -203,6 +204,14 @@ class Settings:
     # Per-run cost circuit breaker (v4's max_cost_usd) — stops a run that's spiraling on retries.
     browser_use_max_cost_usd: float = _get_float(
         "BROWSER_USE_MAX_COST_USD", 0.50)
+    # Whether a deterministic-path failure may fall back to the PAID Browser-Use agent. OFF by
+    # default since 2026-08-29: every retailer's deterministic path is live-validated, so the agent
+    # had become a per-failure tax that hid WHAT broke. With this off, a failure writes a failure
+    # dossier (logs/failures/<retailer>_<profile>_<ts>/ — traceback, page HTML, screenshot, selector
+    # audit), alerts with its path, and records nothing for that retailer this run; the next run
+    # retries. The `*_FORCE_AGENT` hooks still run the agent regardless, since setting one is an
+    # explicit request to spend on it. A login failure never runs the agent either way.
+    agent_fallback_enabled: bool = _get_bool("AGENT_FALLBACK_ENABLED", False)
 
     # How many CALENDAR days back to include, counting today as 0. Default 1 = "today and
     # yesterday". Retailers expose only an order date (no time), and the agent gets confused

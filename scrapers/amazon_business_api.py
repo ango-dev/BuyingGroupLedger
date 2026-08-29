@@ -33,6 +33,7 @@ spend money rediscovering the logout. `ApiLoginError` is what carries that disti
 
 import logging
 
+import diagnostics
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
 from scrapers.amazon_business_mapping import RETAILER, build_order_items, discover_orders, parse_shipment_targets
@@ -111,6 +112,8 @@ class AmazonBusinessApiClient:
 
             log.info("Amazon Business [%s]: %d order(s) in window, fetching %d order-details page(s).",
                      self.profile.label, len(dates), len(to_fetch))
+            diagnostics.note("amazon-business", f"{len(dates)} order(s) discovered; fetching "
+                                                f"{len(to_fetch)} order-details page(s)")
             if not to_fetch:
                 return []
 
@@ -121,7 +124,10 @@ class AmazonBusinessApiClient:
                     page.goto(ORDER_DETAILS_URL.format(oid), wait_until="domcontentloaded", timeout=60000)
                     page.wait_for_timeout(3000)
                     details_html[oid] = page.content()
-                except Exception:
+                except Exception as exc:
+                    diagnostics.snapshot(page, f"order-details load failed for {oid}")
+                    diagnostics.problem(f"order {oid}: order-details page failed to load "
+                                        f"({type(exc).__name__}: {exc}) — its rows were NOT built")
                     log.warning("Amazon Business [%s]: failed to load order-details for %s (skipped).",
                                 self.profile.label, oid, exc_info=True)
 
@@ -302,7 +308,15 @@ class AmazonBusinessApiClient:
                     log.warning("Amazon Business [%s]: tracking read failed for %s / %s.",
                                 self.profile.label, oid, target["shipment"], exc_info=True)
                     info = None
-                if info and info.get("tracking_number"):
+                if info is None:
+                    # Unrecognised tracking page / stale selector — see amazon_api for why this is a
+                    # dossier problem rather than a silent blank.
+                    diagnostics.snapshot(page, f"tracking page unreadable: {oid} / {target['shipment']}")
+                    diagnostics.problem(
+                        f"order {oid} / shipment {target['shipment']}: the package-tracking page could "
+                        f"not be read (selectors did not match) — tracking number NOT recorded")
+                    continue
+                if info.get("tracking_number"):
                     result.setdefault(oid, {})[target["shipment"]] = info["tracking_number"]
                     log.info("Amazon Business [%s]: read tracking %s for %s / %s.",
                              self.profile.label, info["tracking_number"], oid, target["shipment"])

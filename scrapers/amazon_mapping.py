@@ -50,6 +50,26 @@ _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
 # read — the base rate is cards.json's job.
 _EXTRA_PCT_RE = re.compile(r"extra\s+(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
 _EARN_LINE_SELECTOR = ".pmts-payments-instrument-supplemental-box-paystationpaymentmethod"
+
+#: Every selector this parser depends on, by name — the failure dossier's selector audit runs these
+#: against the captured page so a report can say WHICH one stopped matching. The parser itself keeps
+#: using its literals below; tests/test_diagnostics.py asserts each of those literals is listed here.
+SELECTORS: dict[str, str] = {
+    "history_order_card": ".order-card, .js-order-card",
+    "any_link": "a[href]",
+    "details_root": "#orderDetails",
+    "order_id": "[data-component='orderId']",
+    "order_date": "[data-component='orderDate']",
+    "order_summary": "[data-component='orderSummary']",
+    "shipping_address": "[data-component='shippingAddress']",
+    "shipment_status": "[data-component='shipmentStatus']",
+    "purchased_items": "[data-component='purchasedItems']",
+    "shipment_connections": "[data-component='shipmentConnections']",
+    "item_title": "[data-component='itemTitle']",
+    "item_quantity": ".od-item-view-qty",
+    "item_unit_price": "[data-component='unitPrice']",
+    "card_earn_line": _EARN_LINE_SELECTOR,
+}
 # Order-summary line that only renders when a gift card actually paid part of the order.
 _GIFT_CARD_RE = re.compile(r"Gift Card Amount:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 # What the order is actually worth — the ceiling its shipment cards may not exceed.

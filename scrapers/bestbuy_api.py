@@ -33,6 +33,7 @@ import logging
 import re
 from typing import NamedTuple
 
+import diagnostics
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
 from scrapers.totp import TotpError, seconds_remaining, totp
@@ -495,6 +496,24 @@ TWO_STEP_MARKER = "twostepverification"
 TWO_STEP_CODE_INPUT = "#verificationCode"
 TWO_STEP_TRUST_CHECKBOX = "#cia-trust-me"
 
+#: Every page marker / selector the Best Buy path depends on, audited by the failure dossier against
+#: the captured page. `text:` entries are substrings — the order list is Next.js flight data inside
+#: <script> chunks, not elements, so a CSS selector cannot see it.
+DIAGNOSTIC_SELECTORS: dict[str, str] = {
+    "flight_chunk": "text:self.__next_f.push([1,",
+    "flight_orders_key": 'text:"purchaseHistoryOrdersExperience"',
+    "flight_order_id": "text:BBY01-",
+    "signin_form": ".cia-signin",
+    "signin_email_field": "#fld-e",
+    "signin_prefilled_email": ".prefilled-value, .cia-signin__username",
+    "signin_continue_button": "button.cia-form__controls__submit",
+    "signin_password_radio": "#password-radio",
+    "signin_password_field": "input[type=password]",
+    "two_step_code_input": TWO_STEP_CODE_INPUT,
+    "two_step_trust_checkbox": TWO_STEP_TRUST_CHECKBOX,
+    "survey_overlay": "#survey_window",
+}
+
 #: How much life a code must have LEFT before it is worth submitting.
 #:
 #: 3 seconds was the original value and it was too small — it assumed submission is instant. It is
@@ -781,6 +800,7 @@ class BestBuyApiClient:
 
             if not dates:
                 raise BestBuyApiError("No orders found in the purchase-history page (shape changed?).")
+            diagnostics.note("bestbuy", f"discovered {len(dates)} order(s) in the purchase-history flight data")
 
             # Fetch details for: orders in the date window (new) + still-open orders (re-check),
             # never terminal ones. A blank discovered date can't be filtered out, so fetch it and let
@@ -809,6 +829,14 @@ class BestBuyApiClient:
                 else:
                     log.warning("Best Buy [%s]: detail fetch for %s returned status=%s (skipped).",
                                 self.profile.label, oid, res.get("status"))
+                    # A skipped order is a silently-missing order. Keep the response and flag it so
+                    # the run ends with a dossier + alert even though it otherwise succeeded.
+                    diagnostics.record_response(f"ss-api order {oid}", res.get("status"),
+                                                res.get("body"), request={"path": path})
+                    diagnostics.problem(
+                        f"order {oid}: ss-api detail fetch returned status {res.get('status')} — "
+                        f"row(s) for this order were NOT built this run")
+            diagnostics.note("bestbuy", f"{len(payloads)} of {len(to_fetch)} ss-api detail fetch(es) ok")
 
         # Keep only in-window or still-open orders (using the authoritative order.created date).
         kept = []
