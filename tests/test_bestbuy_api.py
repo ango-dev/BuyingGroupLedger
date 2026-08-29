@@ -184,6 +184,24 @@ class TestEmptyDiscoveryIsNotAlwaysAShapeChange:
         client.fetch_order_payloads("2026-08-01", {"BBY01-809900000006"}, set())
         assert page.goto_count >= 2, "must re-load and re-parse after signing in, not reuse the empty read"
 
+    def test_an_account_with_no_orders_is_not_a_shape_change(self, monkeypatch):
+        """profile-charlie (2026-08-29) has never ordered from Best Buy. The page rendered its order-
+        list component with nothing in it, and every run raised "shape changed?" — a paid agent
+        session, and now a dossier, to rediscover an empty list. The component's key in the flight
+        data is the tell: present + empty is a legitimate zero, not a broken selector."""
+        empty = {"purchaseHistoryOrdersExperience": {"openOrders": [],
+                                                     "closedOrdersAndTransactions": {"entries": []}}}
+        page = _FakeHistoryPage(html=_flight_html("2:", json.dumps(empty)), signin_selectors=())
+        client = _client_with_page(page, monkeypatch)
+        monkeypatch.setattr(bestbuy_api, "_looks_logged_out", lambda p: False)
+
+        assert client.fetch_order_payloads("2026-08-01", set(), set()) == []
+
+    def test_history_rendered_needs_the_component_key(self):
+        assert bestbuy_api._history_rendered(_flight_html("2:", '{"purchaseHistoryOrdersExperience":{}}'))
+        assert not bestbuy_api._history_rendered("<html>new markup</html>")
+        assert not bestbuy_api._history_rendered("")
+
     def test_the_affordance_probe_ignores_a_dead_selector_engine(self):
         """A locator hiccup must not be read as 'no sign-in CTA' and send a logout to the agent."""
         class _Exploding:

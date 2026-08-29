@@ -125,6 +125,19 @@ def _reassemble_flight(html: str) -> str:
     return "".join(parts)
 
 
+_HISTORY_KEY = '"purchaseHistoryOrdersExperience"'
+
+
+def _history_rendered(html: str) -> bool:
+    """Did the page render its order-list component at all?
+
+    True when the reassembled flight data carries the `purchaseHistoryOrdersExperience` key — the
+    same key discovery reads orders out of. Paired with an empty discovery it means "rendered, and
+    genuinely empty", which is the one case that must NOT be reported as a broken selector.
+    """
+    return _HISTORY_KEY in _reassemble_flight(html or "")
+
+
 def _order_ids_and_dates(html: str) -> dict[str, str]:
     """Bare order id (BBY01-<digits>, group suffix stripped) -> order date (YYYY-MM-DD) for every
     order in the purchase-history flight data. Date is best-effort ('' if not found)."""
@@ -799,6 +812,17 @@ class BestBuyApiClient:
                     )
 
             if not dates:
+                # AN ACCOUNT WITH NO ORDERS IS NOT A SHAPE CHANGE. profile-charlie (2026-08-29) has
+                # never ordered from Best Buy: the page rendered its order-list component with
+                # nothing in it, and this raised "shape changed?" every run — which used to buy a
+                # paid agent session to rediscover an empty list, and would now write a dossier
+                # blaming a selector. The order-list component's key in the flight data is the
+                # tell: present + empty means the page is fine and there is nothing to record.
+                if _history_rendered(page.content()):
+                    log.info("Best Buy [%s]: purchase history rendered with no orders — nothing "
+                             "to record.", self.profile.label)
+                    diagnostics.note("bestbuy", "purchase history rendered with 0 orders (legitimate)")
+                    return []
                 raise BestBuyApiError("No orders found in the purchase-history page (shape changed?).")
             diagnostics.note("bestbuy", f"discovered {len(dates)} order(s) in the purchase-history flight data")
 
