@@ -300,3 +300,87 @@ class TestSnapshotFromHtml:
 
     def test_outside_a_dossier_it_is_a_no_op(self):
         diagnostics.snapshot_html("<html></html>", "l")
+
+
+class TestDossierUpload:
+    """The alert should carry a link, not a path on a host you then SSH into. Best-effort only."""
+
+    class _Store:
+        def __init__(self, fail=False):
+            self.puts: list[tuple[str, int, str]] = []
+            self.fail = fail
+
+        def is_configured(self):
+            return True
+
+        def put(self, key, body, ext):
+            if self.fail:
+                raise RuntimeError("bucket unreachable")
+            self.puts.append((key, len(body), ext))
+            return f"https://par/{key}"
+
+    def _written(self, tmp_path):
+        with diagnostics.collecting("amazon", "bravo", root=tmp_path, selectors={"t": "div"}) as d:
+            diagnostics.snapshot(_FakePage(), "at failure")
+            diagnostics.record_response("graphql", 500, "body")
+        d.write(RuntimeError("shape"))
+        return d
+
+    def _wire(self, monkeypatch, store, enabled=True):
+        from config.settings import settings
+        from receipts import store as real_store
+        object.__setattr__(settings, "dossier_upload_enabled", enabled)  # frozen dataclass; default is True
+        monkeypatch.setattr(real_store, "is_configured", store.is_configured)
+        monkeypatch.setattr(real_store, "put", store.put)
+
+    def test_pages_go_first_and_the_report_links_to_them(self, tmp_path, monkeypatch):
+        store = self._Store()
+        self._wire(monkeypatch, store)
+        d = self._written(tmp_path)
+
+        link = d.upload()
+
+        keys = [k for k, _, _ in store.puts]
+        assert link == f"https://par/failures/{d.path.name}/report.md"
+        assert keys[-1].endswith("/report.md") and all(k.startswith(f"failures/{d.path.name}/") for k in keys)
+        assert any(k.endswith("/page_1.html") for k in keys) and any(k.endswith("/page_1.png") for k in keys)
+        assert any(k.endswith("/response_1.txt") for k in keys)
+        report = (d.path / "report.md").read_text(encoding="utf-8")
+        assert "## Hosted copies" in report and f"https://par/failures/{d.path.name}/page_1.html" in report
+        assert [e for _, _, e in store.puts if e == ".md"] == [".md"]
+
+    def test_disabled_or_unconfigured_uploads_nothing(self, tmp_path, monkeypatch):
+        store = self._Store()
+        self._wire(monkeypatch, store, enabled=False)
+        d = self._written(tmp_path)
+        assert d.upload() == "" and store.puts == []
+
+        store2 = self._Store()
+        self._wire(monkeypatch, store2, enabled=True)
+        from receipts import store as real_store
+        monkeypatch.setattr(real_store, "is_configured", lambda: False)
+        assert d.upload() == "" and store2.puts == []
+
+    def test_a_storage_failure_never_raises_and_leaves_the_local_copy(self, tmp_path, monkeypatch):
+        self._wire(monkeypatch, self._Store(fail=True))
+        d = self._written(tmp_path)
+        assert d.upload() == ""
+        assert (d.path / "report.md").exists()
+
+    def test_the_alert_line_prefers_the_link_and_keeps_the_local_path(self, tmp_path, monkeypatch):
+        from scrapers.base import BaseRetailerScraper
+        store = self._Store()
+        self._wire(monkeypatch, store)
+        with diagnostics.collecting("amazon", "bravo", root=tmp_path) as d:
+            pass
+        line = BaseRetailerScraper._dossier_line(d, RuntimeError("x"))
+        assert line.startswith("\n\nFailure dossier: https://par/failures/")
+        assert "(local copy:" in line
+
+    def test_the_alert_line_falls_back_to_the_path(self, tmp_path, monkeypatch):
+        from scrapers.base import BaseRetailerScraper
+        self._wire(monkeypatch, self._Store(fail=True))
+        with diagnostics.collecting("amazon", "bravo", root=tmp_path) as d:
+            pass
+        line = BaseRetailerScraper._dossier_line(d, RuntimeError("x"))
+        assert line == f"\n\nFailure dossier: {d.path}"

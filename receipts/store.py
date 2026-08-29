@@ -34,6 +34,9 @@ import threading
 from config.settings import settings
 from receipts.sources import CONTENT_TYPES
 
+# Receipts are PDF/PNG; failure dossiers (diagnostics/dossier.py) share this store and add three.
+_CONTENT_TYPES = {**CONTENT_TYPES, "md": "text/markdown", "html": "text/html", "txt": "text/plain"}
+
 log = logging.getLogger(__name__)
 
 _client = None
@@ -199,11 +202,11 @@ def put(key: str, body: bytes, ext: str) -> str:
             Bucket=settings.oci_bucket,
             Key=key,
             Body=body,
-            ContentType=CONTENT_TYPES.get(ext.lstrip("."), "application/octet-stream"),
+            ContentType=_CONTENT_TYPES.get(ext.lstrip("."), "application/octet-stream"),
         )
     except Exception as exc:  # noqa: BLE001
         raise ReceiptStoreError(f"Could not upload {key!r} to {settings.oci_bucket!r}: {exc}") from exc
-    log.info("Stored receipt %s (%d bytes)", key, len(body))
+    log.info("Stored %s (%d bytes)", key, len(body))
     return link_for(key)
 
 

@@ -31,7 +31,7 @@ next to it, so this is the only thing to read.
 > `scripts/container_settings.py` on start — and still lets an exported variable win.
 
 <details>
-<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (38 of them)</summary>
+<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (39 of them)</summary>
 
 The list is generated from `ENV_TO_CONFIG` in [config/settings.py](../config/settings.py), which is the
 single place a name is mapped, and `tests/test_config_loader.py` fails if this table drifts from it.
@@ -68,6 +68,7 @@ fails closed on a typo rather than turning itself on.
 | `RECEIPT_CAPTURE_ENABLED` † | `receipts.capture_enabled` |
 | `OCI_BUCKET` | `receipts.oci.bucket` |
 | `OCI_PAR_URL_PREFIX` | `receipts.oci.par_url_prefix` |
+| `DOSSIER_UPLOAD_ENABLED` † | `receipts.dossier_upload_enabled` |
 | `OCI_S3_ACCESS_KEY_ID` | `receipts.oci.s3_access_key_id` |
 | `OCI_S3_ENDPOINT_URL` | `receipts.oci.s3_endpoint_url` |
 | `OCI_S3_REGION` | `receipts.oci.s3_region` |

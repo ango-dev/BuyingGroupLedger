@@ -101,6 +101,7 @@ ENV_TO_CONFIG = {
     "OCI_S3_ACCESS_KEY_ID": "receipts.oci.s3_access_key_id",
     "OCI_S3_SECRET_ACCESS_KEY": "receipts.oci.s3_secret_access_key",
     "OCI_PAR_URL_PREFIX": "receipts.oci.par_url_prefix",
+    "DOSSIER_UPLOAD_ENABLED": "receipts.dossier_upload_enabled",
 }
 
 
@@ -320,6 +321,12 @@ class Settings:
     # receipt carries your name, delivery address, card last 4 and order totals.
     oci_par_url_prefix: str = field(
         default=_get_str("OCI_PAR_URL_PREFIX"), repr=False)
+    # Failure dossiers ride the same bucket under `failures/`, so the alert can carry a link instead
+    # of a path on a host you then have to SSH into. Same PII class as the receipts already there (a
+    # page DOM can hold names and addresses), so the same rule: private bucket, PAR without listing.
+    # Turn it OFF if an alert channel is shared with people who should not see order pages. Inert
+    # whenever the receipt bucket is unconfigured; a failed upload falls back to the local path.
+    dossier_upload_enabled: bool = _get_bool("DOSSIER_UPLOAD_ENABLED", True)
 
     # --- dev / ops hooks -------------------------------------------------------------------------
     # Force a retailer down its AGENT fallback instead of its deterministic path, to exercise the

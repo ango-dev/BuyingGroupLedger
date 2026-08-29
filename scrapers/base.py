@@ -124,6 +124,9 @@ class BaseRetailerScraper(abc.ABC):
         except Exception:  # noqa: BLE001 — the dossier must never turn into the failure
             log.exception("Failed to write the failure dossier.")
             return "\n\n(The failure dossier could not be written; see logs/run.log.)"
+        link = dossier.upload()
+        if link:
+            return f"\n\nFailure dossier: {link}\n(local copy: {path})"
         return f"\n\nFailure dossier: {path}"
 
     def _on_deterministic_failure(self, exc: Exception, dossier, *, force_agent: bool = False,

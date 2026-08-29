@@ -62,6 +62,8 @@
   "receipts": {
     "// capture_enabled": "RECEIPT_CAPTURE_ENABLED — the off switch that keeps working credentials in place. `oci.bucket` is the real master switch: blank means capture is completely inert.",
     "capture_enabled": true,
+    "// dossier_upload_enabled": "DOSSIER_UPLOAD_ENABLED — also upload each failure dossier (report + page HTML/PNG) under failures/ in the same bucket, so the alert carries a link instead of a path on the host. Same PII class as receipts. Set a 30-day lifecycle rule on the failures/ prefix.",
+    "dossier_upload_enabled": true,
     "oci": {
       "// ": "Uploads go through OCI's S3 COMPATIBILITY API, so these are an OCI 'customer secret key' (access-key/secret pair), NOT the API signing key.",
       "bucket": "",

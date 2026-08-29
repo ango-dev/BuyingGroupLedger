@@ -234,6 +234,48 @@ class FailureDossier:
         self._prune()
         return directory
 
+    #: Object-key prefix for uploaded dossiers. Put a lifecycle rule on it (30 days) in the bucket.
+    UPLOAD_PREFIX = "failures"
+
+    def upload(self) -> str:
+        """Copy the written dossier to the receipt bucket and return the report's link, or "".
+
+        Best-effort and never raising: the dossier is an aid, so a storage problem degrades to the
+        local path the caller already has. Pages and responses go first so the report can carry
+        absolute links to them — a PAR serves the report as a plain file, where relative links are
+        dead — and the same "Hosted copies" section is appended to the local report.md.
+        """
+        try:
+            from config.settings import settings
+            from receipts import store
+        except Exception:  # noqa: BLE001
+            return ""
+        if not settings.dossier_upload_enabled or not store.is_configured():
+            return ""
+        directory = self.path or self._dir_path()
+        prefix = f"{self.UPLOAD_PREFIX}/{directory.name}"
+        try:
+            hosted: list[tuple[str, str]] = []
+            for file in sorted(directory.iterdir()):
+                if file.name == "report.md" or not file.is_file():
+                    continue
+                link = store.put(f"{prefix}/{file.name}", file.read_bytes(), file.suffix)
+                if link:
+                    hosted.append((file.name, link))
+            report = directory / "report.md"
+            text = report.read_text(encoding="utf-8") if report.exists() else self.render()
+            if hosted:
+                text += "\n## Hosted copies\n\n" + "".join(f"- `{n}`: {l}\n" for n, l in hosted)
+                report.write_text(text, encoding="utf-8")
+            link = store.put(f"{prefix}/report.md", text.encode("utf-8"), ".md")
+            if link:
+                log.info("Uploaded failure dossier to %s", link)
+            return link
+        except Exception:  # noqa: BLE001 — never let the upload become the failure
+            log.warning("Failure dossier upload failed; the local copy at %s stands.", directory,
+                        exc_info=True)
+            return ""
+
     def _prune(self) -> None:
         try:
             dirs = sorted((p for p in self.root.iterdir() if p.is_dir()), key=lambda p: p.name)

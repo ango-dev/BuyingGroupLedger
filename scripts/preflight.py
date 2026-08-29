@@ -386,6 +386,12 @@ def check_receipt_capture() -> list[Result]:
         )]
 
     out = [Result(OK, "receipt capture", f"bucket {settings.oci_bucket!r} via the S3 compat endpoint")]
+    if settings.dossier_upload_enabled:
+        out.append(Result(OK, "dossier upload", "failure dossiers are also uploaded under failures/ so "
+                          "the alert carries a link (set a 30-day lifecycle rule on that prefix)"))
+    else:
+        out.append(Result(WARN, "dossier upload", "DISABLED (DOSSIER_UPLOAD_ENABLED) — alerts name a "
+                          "path on this host only."))
     try:
         importlib.import_module("boto3")
     except Exception as exc:  # noqa: BLE001

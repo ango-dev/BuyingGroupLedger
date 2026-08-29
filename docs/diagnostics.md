@@ -45,6 +45,16 @@ alerts point at a dossier as well, including a Costco sign-in that fails inside 
 Dossiers are **redacted** (configured secrets, emails, phones, card-digit phrases) but can still hold
 names and addresses. They live under `logs/` (gitignored) and keep the newest 40. Do not commit one.
 
+**The alert carries a link, not just a path.** When the receipt bucket is configured, each dossier is
+also uploaded under `failures/<retailer>_<profile>_<timestamp>/` in the same bucket — pages and
+responses first, then `report.md` with a "Hosted copies" section linking to them — and the alert
+reads `Failure dossier: <PAR link to report.md>` with the local path underneath. One paste hands a
+coding agent the report, and the report hands it the page. Same PII class as the receipts already
+in that bucket, so the same rules apply: private bucket, PAR without object listing, and **set a
+30-day lifecycle rule on the `failures/` prefix** so it does not accumulate. `DOSSIER_UPLOAD_ENABLED=false`
+turns it off (do that if an alert channel is shared with people who should not see order pages).
+The upload is best-effort: if storage fails, the alert falls back to the local path.
+
 The paid Browser-Use agent still exists behind `AGENT_FALLBACK_ENABLED` (default `false`) and a
 per-retailer `*_FORCE_AGENT` hook. With it on, the dossier is still written and *then* the agent runs.
 Since 2026-08-29 the answer to a broken selector is a fix made from the dossier, not a paid run.
