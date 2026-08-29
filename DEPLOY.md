@@ -497,6 +497,6 @@ things are the MOD IP allowlist (step 2) and the scheduler itself.
 | MOD calls rejected with a valid token | This host's IP isn't allowlisted (step 2), or your ISP rotated it. |
 | Container `(unhealthy)` but logs look fine | No run has completed within two intervals. Check the run lock: `cat logs/.run.lock` — it self-expires after 3h. |
 | Runs skipped with "another run appears to be in progress" | A stale lock from a killed run. It clears itself after 3h, or `rm logs/.run.lock`. |
-| Costco alerts "API auth failed — agent NOT run" every run | Dead refresh token AND the automatic re-grab failed (the profile's own Costco session is logged out). Re-login per the README's "Costco API setup". |
+| Costco alerts "API auth failed — agent NOT run" every run | Dead refresh token AND the automatic re-grab failed (the profile's own Costco session is logged out). Re-login per docs/retailers.md, "Costco". |
 | Alerts never arrive | Outbound SMTP (587) blocked by the host network. Test with `python -m alerts.notifier`. |
 | Wrong dates on rows | The host clock. `timedatectl` — every date in the ledger comes from the host, and `Order Date` is part of the upsert key. |

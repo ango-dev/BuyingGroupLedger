@@ -297,7 +297,7 @@ class TestStateIsSeparate:
 
 
 class TestTheReadmeTableStaysHonest:
-    """README.md publishes every variable name and the config key it overrides.
+    """docs/configuration.md publishes every variable name and the config key it overrides.
 
     A published name is a promise: DEPLOY.md, docker-compose.yml and people's own shell aliases use
     these, so one that quietly stops being read — or a new setting that never gets documented — is
@@ -309,14 +309,14 @@ class TestTheReadmeTableStaysHonest:
     def _readme() -> str:
         from pathlib import Path
 
-        return (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+        return (Path(__file__).resolve().parents[1] / "docs" / "configuration.md").read_text(encoding="utf-8")
 
     @staticmethod
     def _booleans() -> set[str]:
         """The variables settings.py actually reads with _get_bool — it records them itself.
 
         Derived, not listed, so a boolean added later cannot pass by being forgotten here as well as
-        in the README, which would defeat the point of the check.
+        in the docs, which would defeat the point of the check.
         """
         from config.settings import BOOLEAN_SETTINGS
 
