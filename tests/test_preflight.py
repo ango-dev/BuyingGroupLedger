@@ -200,6 +200,9 @@ class TestCostcoTokens:
     def test_missing_token_is_a_failure_naming_the_fix(self, tmp_path, monkeypatch):
         class _Profile:
             label = "profile-alpha"
+            # A real ProfileConfig always has an auth dict; check_costco_tokens reads it to decide
+            # whether a missing token can bootstrap itself. Empty = no credentials = genuinely stuck.
+            auth: dict = {}
 
         monkeypatch.setattr("config.profiles.load_profiles_for_retailer", lambda key: [_Profile()])
 
@@ -208,7 +211,12 @@ class TestCostcoTokens:
 
         assert result.level == FAIL
         assert "scripts.costco_token" in result.detail
-        assert "PAID agent" in result.detail
+        # This used to assert the message said "PAID agent". That claim was FALSE: costco.py catches
+        # ApiLoginError explicitly, logs "NOT running the agent", and raises LoggedOutError -- an
+        # auth failure never reaches the agent. The test was pinning the wrong behaviour in place,
+        # so it now pins the real consequence instead.
+        assert "SKIPS" in result.detail
+        assert "auth['costco']" in result.detail, "the bootstrap route must be offered as a fix too"
 
     def test_a_present_but_unwritable_token_dir_fails(self, tmp_path, monkeypatch):
         """docker-compose mounted ./.costco as :ro.
@@ -219,6 +227,9 @@ class TestCostcoTokens:
         """
         class _Profile:
             label = "profile-alpha"
+            # A real ProfileConfig always has an auth dict; check_costco_tokens reads it to decide
+            # whether a missing token can bootstrap itself. Empty = no credentials = genuinely stuck.
+            auth: dict = {}
 
         monkeypatch.setattr("config.profiles.load_profiles_for_retailer", lambda key: [_Profile()])
         _store_token(tmp_path, monkeypatch)
@@ -243,6 +254,9 @@ class TestCostcoTokens:
     def test_a_writable_token_dir_passes(self, tmp_path, monkeypatch):
         class _Profile:
             label = "profile-alpha"
+            # A real ProfileConfig always has an auth dict; check_costco_tokens reads it to decide
+            # whether a missing token can bootstrap itself. Empty = no credentials = genuinely stuck.
+            auth: dict = {}
 
         monkeypatch.setattr("config.profiles.load_profiles_for_retailer", lambda key: [_Profile()])
         _store_token(tmp_path, monkeypatch)
@@ -605,3 +619,64 @@ class TestProfiles:
         import main
 
         assert set(preflight.KNOWN_RETAILER_KEYS) == set(main.SCRAPERS)
+
+
+class TestCostcoTokenBootstrapIsNotAMisconfiguration:
+    """A missing Costco refresh token used to be a FAIL saying "Costco falls back to the PAID agent
+    every run". Both halves were wrong.
+
+    Wrong #1: since the bootstrap landed, a profile with `auth['costco']` captures its own token on
+    the first run (`costco.py:_refresh_token_via_browser`). "No token yet" is a state, not a
+    misconfiguration, and reporting it as FAIL trains people to ignore preflight — the one outcome
+    worse than not having the check.
+
+    Wrong #2: an auth failure NEVER reaches the paid agent. `costco.py` catches `ApiLoginError`
+    explicitly and alerts + skips, because "an auth failure is not something it can fix".
+    """
+
+    @staticmethod
+    def _profile(with_auth):
+        from models.profile import ProfileConfig, RetailerAuth
+
+        auth = ({"costco": RetailerAuth(method="password", username="u@e.com", password="pw")}
+                if with_auth else {})
+        return ProfileConfig(label="profile-bravo", profile_id="pid",
+                             retailers=["costco"], auth=auth)
+
+    def _run(self, monkeypatch, tmp_path, with_auth):
+        import json as _json
+
+        from config import loader
+
+        state = tmp_path / ".state.json"
+        monkeypatch.setattr(loader, "STATE_FILE", state)
+        state.write_text(_json.dumps({"costco": {}}), encoding="utf-8")  # no token for this profile
+        loader.reload_config()
+        monkeypatch.setattr("config.profiles.load_profiles_for_retailer",
+                            lambda key: [self._profile(with_auth)])
+        return preflight.check_costco_tokens()
+
+    def test_no_token_but_credentials_is_OK_because_it_bootstraps_itself(self, monkeypatch, tmp_path):
+        results = self._run(monkeypatch, tmp_path, with_auth=True)
+
+        assert [r.level for r in results] == [OK]
+        assert "bootstrap" in results[0].detail or "captures one" in results[0].detail
+
+    def test_no_token_and_no_credentials_still_FAILS(self, monkeypatch, tmp_path):
+        """Nothing can recover this one, so it genuinely needs a human."""
+        results = self._run(monkeypatch, tmp_path, with_auth=False)
+
+        assert [r.level for r in results] == [FAIL]
+        assert "auth['costco']" in results[0].detail, "both fixes must be offered"
+        assert "costco_token" in results[0].detail
+
+    def test_no_costco_message_claims_the_paid_agent_runs_on_an_auth_failure(self, monkeypatch,
+                                                                            tmp_path):
+        """costco.py raises LoggedOutError and logs "NOT running the agent". Any preflight text
+        saying otherwise sends the reader looking for a cost that does not exist."""
+        for with_auth in (True, False):
+            for result in self._run(monkeypatch, tmp_path, with_auth=with_auth):
+                lowered = result.detail.lower()
+                if "paid agent" in lowered:
+                    assert "never run" in lowered, (
+                        f"message implies the agent runs for an auth failure: {result.detail}")

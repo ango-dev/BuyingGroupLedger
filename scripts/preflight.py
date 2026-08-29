@@ -198,7 +198,18 @@ def check_config_files(root: Path = ROOT) -> list[Result]:
 
 
 def check_costco_tokens(root: Path = ROOT) -> list[Result]:
-    """Costco's API path needs a stored refresh token per profile, or it silently uses the agent."""
+    """Costco's API path needs a refresh token per profile — but a MISSING one is now self-healing.
+
+    Since 2026-08-29 a profile that has `auth["costco"]` bootstraps its own token on the first run:
+    `costco_api` raises `CostcoAuthError`, `costco.py` answers it with `_refresh_token_via_browser`,
+    which signs in and captures one. So "no token yet" is a state, not a misconfiguration, and
+    reporting it as a FAIL trains people to ignore this check — the one outcome worse than not
+    having it.
+
+    The old wording also claimed a missing token "silently uses the agent". It does not, and never
+    did: an auth failure raises `ApiLoginError`, which `costco.py` deliberately does NOT hand to the
+    paid agent ("an auth failure is not something it can fix"). It alerts and SKIPS.
+    """
     try:
         from config.profiles import load_profiles_for_retailer
         profiles = load_profiles_for_retailer("costco")
@@ -228,20 +239,33 @@ def check_costco_tokens(root: Path = ROOT) -> list[Result]:
             except OSError as exc:
                 out.append(Result(
                     FAIL, f"costco token [{profile.label}]",
-                    f"present but its directory is NOT WRITABLE ({exc.strerror}). Costco rotates "
-                    f"its refresh token and must save the new one, so this degrades Costco to the "
-                    f"PAID agent every run and discards the rotation. In Docker, drop the `:ro` "
-                    f"from the ./.state.json volume in docker-compose.yml.",
+                    f"present but its directory is NOT WRITABLE ({exc.strerror}). Costco ROTATES "
+                    f"its refresh token on every use and must save the new one; discarding it "
+                    f"strands the stored copy, so the next run cannot authenticate and alerts "
+                    f"and SKIPS Costco (the paid agent is never run for an auth failure). In "
+                    f"Docker, drop the `:ro` from the ./.state.json volume in docker-compose.yml.",
                 ))
             else:
                 out.append(Result(OK, f"costco token [{profile.label}]", "present and writable"))
         else:
-            out.append(Result(
-                FAIL, f"costco token [{profile.label}]",
-                f"no token stored in {token} — Costco falls back to the PAID agent every run. Fix "
-                f"with `python -m scripts.costco_token --label {profile.label} --token "
-                f"'<REFRESH_TOKEN>'`, and check the ./.state.json volume is mounted in a container.",
-            ))
+            auth = (profile.auth or {}).get("costco")
+            if auth is not None and auth.username and auth.password:
+                out.append(Result(
+                    OK, f"costco token [{profile.label}]",
+                    "no token stored YET, and none is needed by hand: auth['costco'] is configured, "
+                    "so the first run signs in over the browser and captures one "
+                    "(costco.py:_refresh_token_via_browser). Costs one cloud browser, once.",
+                ))
+            else:
+                out.append(Result(
+                    FAIL, f"costco token [{profile.label}]",
+                    f"no token stored in {token} AND no auth['costco'] to sign in with, so Costco "
+                    f"cannot authenticate at all: every run alerts and SKIPS it (the paid agent is "
+                    f"never run for an auth failure). Fix EITHER by adding auth['costco'] "
+                    f"(method/username/password) and letting a run bootstrap the token, OR by hand "
+                    f"with `python -m scripts.costco_token --label {profile.label} --token "
+                    f"'<REFRESH_TOKEN>'`. In a container, also check ./.state.json is mounted.",
+                ))
     return out
 
 
