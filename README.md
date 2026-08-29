@@ -17,7 +17,7 @@ when a scraper reads page 1 of a paginated order history and misses the rest, or
 overwrites a good tracking number with a blank. Most of the work below is invariants, idempotency and
 auditing aimed squarely at that class of bug — see **[Design notes](#design-notes)**.
 
-> **Status:** running in production against real accounts. `pytest` runs 1407 offline tests that need
+> **Status:** running in production against real accounts. `pytest` runs 1412 offline tests that need
 > no credentials and no network.
 
 ---

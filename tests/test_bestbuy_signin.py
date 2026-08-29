@@ -198,7 +198,10 @@ class TestFailedRequestReporting:
         with caplog.at_level(logging.WARNING, logger=bestbuy_api.__name__):
             bestbuy_api._log_signin_diagnostics(page, "stayed logged out", failed)
 
-        assert "none auth-critical" in caplog.text
+        # Wording changed when tunnel failures started being called out; the INTENT is unchanged —
+        # an incidental failure must not be presented as an auth-critical one.
+        assert "none on an auth-critical host" in caplog.text
+        assert "auth-critical request(s) FAILED" not in caplog.text
 
     def test_a_page_without_event_support_still_works(self):
         class NoEvents(FakePage):
@@ -534,3 +537,58 @@ class TestTwoStepVerification:
 
     def test_a_missing_code_field_declines(self):
         assert bestbuy_api._answer_two_step(self._Page(has_field=False), self._auth()) is False
+
+
+class TestFailedToFetchIsTransportNotAMystery:
+    """The SAME failure produced two different verdicts on consecutive runs: ANTI-BOT/TRANSPORT when an auth-critical request happened to be captured, then
+    UNKNOWN — "the sign-in DOM may have changed" — on the next run with the SAME 'Failed to fetch'
+    on the page.
+
+    The DOM had not changed; only our luck in catching the request had. "Failed to fetch" is Best
+    Buy's OWN copy for its auth XHR dying, so it is direct evidence of a transport failure on its
+    own — and reading the page's own words is the principle the whole classifier is built on. An
+    UNKNOWN here is actively harmful: it sends someone hunting a selector change that never happened.
+    """
+
+    @staticmethod
+    def _verdict(errors=(), critical=(), text=""):
+        info = {"errors": list(errors), "title": "", "text": text,
+                "url": "https://www.bestbuy.com/identity/signin/options"}
+        return bestbuy_api._classify_signin_failure(info, list(critical))
+
+    def test_failed_to_fetch_alone_reads_as_transport(self):
+        verdict, _ = self._verdict(errors=["Failed to fetch"])
+
+        assert "ANTI-BOT / TRANSPORT" in verdict
+        assert "UNKNOWN" not in verdict
+
+    def test_it_still_reads_as_transport_when_the_request_WAS_captured(self):
+        """Both routes must reach the same verdict, or the diagnosis depends on luck."""
+        verdict, _ = self._verdict(
+            errors=["Failed to fetch"],
+            critical=[{"url": "https://www.bestbuy.com/gateway/graphql",
+                       "error": "net::ERR_HTTP2_PROTOCOL_ERROR"}])
+
+        assert "ANTI-BOT / TRANSPORT" in verdict
+
+    def test_the_action_warns_off_the_two_already_falsified_fixes(self):
+        """Off-proxy retry and proxy rotation were both built, tested and falsified.
+        The action must say so, or the next person pays for that experiment again."""
+        _, action = self._verdict(errors=["Failed to fetch"])
+
+        assert "falsified" in action.lower()
+        assert "rotation" in action.lower()
+
+    def test_a_real_credential_error_still_wins_over_a_fetch_failure(self):
+        """A page can carry both; the banner naming the password is the more specific evidence."""
+        verdict, _ = self._verdict(errors=["Failed to fetch",
+                                           "The password you've entered is incorrect."])
+
+        assert "BAD CREDENTIAL" in verdict
+
+    def test_a_genuinely_blank_page_is_still_an_honest_UNKNOWN(self):
+        """The fix must not swallow every failure into 'transport' — an empty page is still unknown,
+        and an honest UNKNOWN beats a confident wrong verdict."""
+        verdict, _ = self._verdict()
+
+        assert "UNKNOWN" in verdict

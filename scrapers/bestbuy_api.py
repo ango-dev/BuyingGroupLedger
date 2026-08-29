@@ -390,10 +390,19 @@ def _classify_signin_failure(info: dict, critical: list) -> tuple[str, str]:
     if re.search(r"captcha|unusual activity|are you a human", haystack, re.I):
         return ("CAPTCHA / BOT CHALLENGE",
                 "Back off; do not retry in a loop. The agent fallback cannot solve it either.")
-    if critical:
+    # "Failed to fetch" is Best Buy's OWN copy for its auth XHR dying, so it is direct evidence of a
+    # transport failure whether or not we happened to capture the failed request. Observed live
+    # 2026-08-29: the same profile produced ANTI-BOT/TRANSPORT on one run (auth-critical request
+    # captured) and UNKNOWN — "the sign-in DOM may have changed" — on the next, with the SAME
+    # 'Failed to fetch' on the page. The DOM had not changed; only our luck in catching the request
+    # had. Reading the page's own words fixes that, and is the principle this whole function is
+    # built on.
+    if critical or re.search(r"failed to fetch", haystack, re.I):
         return ("ANTI-BOT / TRANSPORT — auth requests died at the network layer",
                 "Not a page-shape problem, so the agent cannot fix it. Back off and retry later; see "
-                "reference-isp-proxy-breaks-post.")
+                "reference-isp-proxy-breaks-post. Note the off-proxy retry and proxy rotation are "
+                "both already FALSIFIED for this failure — the rejection travels with "
+                "the browser, not the egress IP, so do not spend on either.")
     return ("UNKNOWN — no error text on the page and no auth-critical request failures",
             "Inspect the saved page state below; the sign-in DOM may have changed.")
 
@@ -461,8 +470,16 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
             "it either: %s", len(critical), critical[:6],
         )
     else:
-        log.warning("Best Buy sign-in: %d request(s) failed (none auth-critical): %s",
-                    len(failed_requests), failed_requests[:6])
+        # "none auth-critical" alone reads as reassurance — but a PILE of tunnel/connection failures
+        # means the egress itself is struggling, which is context for the verdict rather than noise.
+        tunnel = [f for f in failed_requests
+                  if "TUNNEL" in str(f.get("error", "")).upper()
+                  or "ERR_CONNECTION" in str(f.get("error", "")).upper()]
+        log.warning("Best Buy sign-in: %d request(s) failed, none on an auth-critical host%s: %s",
+                    len(failed_requests),
+                    (f" — but {len(tunnel)} of them are tunnel/connection errors, so the egress "
+                     f"itself looks degraded rather than the page" if len(tunnel) >= 3 else ""),
+                    failed_requests[:6])
     return verdict, action
 
 
