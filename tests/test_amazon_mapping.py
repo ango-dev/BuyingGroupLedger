@@ -661,3 +661,25 @@ def test_a_kept_gift_card_row_is_tagged_as_deliberately_unrouted():
     assert len(kept) == 1 and dropped == 0
     assert kept[0].buying_group == GIFT_CARD
     assert is_deliberately_unrouted(kept[0].buying_group)
+
+
+# --- an order page with NO item titles is a shape change, not "no orders" ------------------------
+class TestZeroItemTitlesIsAShapeChange:
+    """with `itemTitle` renamed, three order-details pages parsed to zero rows and the
+    run logged 'nothing new in the lookback window' — no dossier, no alert. An order always lists its
+    items, so zero title elements can only mean the selector stopped matching."""
+
+    def test_a_page_without_item_titles_raises(self):
+        from scrapers.amazon_mapping import OrderPageShapeError
+        html = _details("111-1234567-1234567", "August 1, 2026", [_shipment("111-1234567-1234567", 1, "Delivered August 3", [
+            '<div class="a-fixed-left-grid"><div data-component="itemTitleRENAMED">Widget</div></div>'])])
+        with pytest.raises(OrderPageShapeError, match="no item titles"):
+            build_order_items(html)
+
+    def test_an_all_digital_order_still_has_titles_and_simply_yields_nothing(self):
+        html = _details("111-2234567-1234567", "August 1, 2026", [_shipment("111-2234567-1234567", 1, "Digital order", [
+            _item("Amazon.com eGift Card", "$50.00")])])
+        assert build_order_items(html) == []
+
+    def test_a_page_that_is_not_an_order_at_all_is_still_an_empty_result(self):
+        assert build_order_items("<html><body>Sign in</body></html>") == []

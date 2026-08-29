@@ -8,6 +8,7 @@ difference is DISCOVERY — business order cards are `a-box`/`a-box-group` with 
 row, NOT consumer's `.order-card` — so the order-history builder here reflects that.
 """
 
+import pytest
 from scrapers.amazon_business_mapping import (
     build_order_items,
     discover_orders,
@@ -660,3 +661,14 @@ def test_the_real_block_picks_the_track_link_over_its_siblings():
     url = parse_shipment_targets(html)[0]["tracking_url"]
 
     assert "progress-tracker/package?" in url and "cancel" not in url
+
+
+def test_a_page_without_item_titles_raises_on_business_too():
+    from scrapers.amazon_mapping import OrderPageShapeError
+    from scrapers.amazon_business_mapping import build_order_items as build_ab
+    html = ('<html><body><div id="orderDetails"><div data-component="orderDate">August 1, 2026</div>'
+            '<div data-component="orderId">Order # 111-9234567-1234567</div>'
+            '<div data-component="shipments"><div data-component="shipmentStatus">Delivered</div></div>'
+            '</div></body></html>')
+    with pytest.raises(OrderPageShapeError, match="no item titles"):
+        build_ab(html)

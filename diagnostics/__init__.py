@@ -8,7 +8,7 @@ audit of every selector the retailer's parser depends on (how many matches, what
 exactly what a coding agent needs to fix the selector, and it costs nothing.
 
 Public surface (see dossier.py): `collecting(...)` opens a dossier for a scrape; `current()`,
-`note()`, `snapshot()`, `record_response()`, `problem()` and `add_secrets()` write into whichever
+`note()`, `snapshot()`, `snapshot_html()`, `record_response()`, `problem()` and `add_secrets()` write into whichever
 dossier is open and are no-ops when none is — so the API clients and mapping code can call them
 unconditionally.
 """
@@ -22,4 +22,5 @@ from diagnostics.dossier import (  # noqa: F401
     problem,
     record_response,
     snapshot,
+    snapshot_html,
 )

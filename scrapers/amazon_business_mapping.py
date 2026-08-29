@@ -45,6 +45,7 @@ import re
 from bs4 import BeautifulSoup
 
 from config.warehouses import GIFT_CARD
+from scrapers.amazon_mapping import OrderPageShapeError
 from models.order import OrderItem, shipment_label
 
 log = logging.getLogger(__name__)
@@ -603,6 +604,15 @@ def build_order_items(
     order_id = _order_id(region, order_details_html or "")
     if not order_id:
         return []
+    if not region.select(SELECTORS["item_title"]):
+        # An order ALWAYS lists its items — even a fully cancelled or all-digital one. Zero title
+        # elements means the selector no longer matches, and returning [] here is exactly the silent
+        # failure the dossier exists for
+        # ledger row(s) ... nothing new in the lookback window" and no alert at all.
+        raise OrderPageShapeError(
+            f"order {order_id}: order-details page has no item titles "
+            f"({SELECTORS['item_title']} matched nothing) — shape changed?"
+        )
 
     date_el = region.select_one("[data-component='orderDate']")
     order_date = _parse_full_date(date_el.get_text(" ", strip=True) if date_el else "")

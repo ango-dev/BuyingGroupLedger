@@ -38,6 +38,7 @@ from config.cards import boosted_last4s, load_cards
 from config.settings import settings
 from scrapers.amazon_business_mapping import (RETAILER, build_order_items, discover_orders,
                                               history_rendered, parse_shipment_targets)
+from scrapers.amazon_mapping import OrderPageShapeError
 from scrapers.amazon_signin import deterministic_login, looks_logged_out
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
@@ -142,12 +143,20 @@ class AmazonBusinessApiClient:
         keep_digital = boosted_last4s(RETAILER, load_cards())
         rows = []
         for oid, html in details_html.items():
-            rows.extend(build_order_items(
+            try:
+                built = build_order_items(
                 html, self.profile.label, known_open_ids=frozenset(open_ids),
                 tracking_by_shipment=tracking_by_order.get(oid), today=today,
                 net_gift_cards=settings.amazon_gift_card_netting_enabled,
                 keep_digital_last4s=keep_digital,
-            ))
+                )
+            except OrderPageShapeError as exc:
+                # The browser is already closed, so attach the document that failed to parse — the
+                # selector audit runs against it and names the selector that stopped matching.
+                diagnostics.snapshot_html(html, f"order-details for {oid}: {exc}",
+                                          url=ORDER_DETAILS_URL.format(oid))
+                raise AmazonBusinessApiError(str(exc)) from exc
+            rows.extend(built)
 
         # Final keep filter using the authoritative per-order date already parsed into the rows.
         kept = []

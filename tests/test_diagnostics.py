@@ -282,3 +282,21 @@ class TestSettingsAndDocs:
         monkeypatch.setattr(main, "alert", lambda subject, body: alerts.append(subject))
         main.run_scrape(scraper)
         assert alerts == [], "the scraper already alerted with the dossier path; main must not repeat it"
+
+
+class TestSnapshotFromHtml:
+    """The Amazon parsers run after the browser has closed; a shape failure there attaches the document."""
+
+    def test_html_is_written_and_audited_without_a_page(self, tmp_path):
+        html = "<html><head><title>Your Order</title></head><body><div data-component='x'>t</div></body></html>"
+        with diagnostics.collecting("amazon", "p", root=tmp_path, selectors={"item_title": "[data-component='itemTitle']", "x": "[data-component='x']"}) as d:
+            diagnostics.snapshot_html(html, "order-details for 111-1: no item titles", url="https://www.amazon.com/gp/css/order-details?orderID=111-1")
+        snap = d.snapshots[0]
+        assert snap["html_file"] == "page_1.html" and snap["png_file"] == ""
+        assert snap["title"] == "Your Order"
+        assert {r["name"]: r["count"] for r in snap["audit"]} == {"item_title": 0, "x": 1}
+        report = d.write(RuntimeError("x"))
+        assert "item_title" in (report / "report.md").read_text(encoding="utf-8")
+
+    def test_outside_a_dossier_it_is_a_no_op(self):
+        diagnostics.snapshot_html("<html></html>", "l")

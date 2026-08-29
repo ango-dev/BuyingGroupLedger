@@ -181,6 +181,31 @@ class FailureDossier:
         self.snapshots.append(snap)
         self.note("snapshot", f"#{n} {label} — {snap['url'] or '(no url)'}")
 
+    def snapshot_html(self, html: str, label: str, url: str = "") -> None:
+        """Like snapshot(), for HTML already in hand — the Amazon parsers run AFTER the browser has
+        closed, so a shape failure there has no live page to capture, only the document it parsed."""
+        n = len(self.snapshots) + 1
+        snap: dict = {"n": n, "label": label, "at": self._stamp(), "url": redact(url, self.secrets),
+                      "title": "", "html_file": "", "png_file": "", "audit": [], "errors": []}
+        html = html or ""
+        m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        if m:
+            snap["title"] = redact(" ".join(m.group(1).split()), self.secrets)
+        if html:
+            try:
+                target = self._dir_path() / f"page_{n}.html"
+                target.write_text(redact(html, self.secrets)[:_HTML_LIMIT], encoding="utf-8")
+                snap["html_file"] = target.name
+            except Exception as exc:  # noqa: BLE001
+                snap["errors"].append(f"write html: {exc}")
+            snap["audit"] = [
+                {**row, "sample": redact(row.get("sample", ""), self.secrets)}
+                for row in audit_selectors(html, self.selectors)
+            ]
+        snap["errors"].append("screenshot: none — captured from HTML after the browser closed")
+        self.snapshots.append(snap)
+        self.note("snapshot", f"#{n} {label} — {snap['url'] or '(no url)'}")
+
     def record_response(self, label: str, status, body, request=None) -> None:
         """Keep an API request/response pair (Costco GraphQL, Best Buy ss-api) that came back wrong."""
         n = len(self.responses) + 1
@@ -346,6 +371,15 @@ def snapshot(page, label: str) -> None:
             d.snapshot(page, label)
         except Exception:  # noqa: BLE001 — never let diagnostics mask the real failure
             log.debug("Dossier snapshot failed.", exc_info=True)
+
+
+def snapshot_html(html: str, label: str, url: str = "") -> None:
+    d = _current.get()
+    if d is not None:
+        try:
+            d.snapshot_html(html, label, url)
+        except Exception:  # noqa: BLE001
+            log.debug("Dossier html snapshot failed.", exc_info=True)
 
 
 def record_response(label: str, status, body, request=None) -> None:
