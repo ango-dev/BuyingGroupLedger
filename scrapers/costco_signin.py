@@ -233,10 +233,13 @@ def _classify_signin_failure(info: dict) -> tuple[str, str]:
     if re.search(r"temporarily unavailable|access denied|request unsuccessful|reference #\s*\d|"
                  r"unusual (traffic|activity)|bot detection", haystack, re.I):
         return ("SITE BLOCKED OR UNAVAILABLE — Costco served an error page, not a sign-in form",
-                "This is about the IP, not the account: Costco is blocking or rate-limiting this "
-                "profile's proxy, or the site is down. Check the profile's `proxy` in config.json — "
-                "another profile on a different proxy may sign in fine, which is itself the tell. "
-                "Do NOT retry in a loop and do NOT touch the account; back off and try later.")
+                "This is the SITE or the IP, never the account, so do NOT touch the account and do "
+                "NOT retry in a loop. Two causes, and one check separates them in seconds: open "
+                "costco.com in an ordinary browser. If it is also broken there, costco.com is simply "
+                "down — wait. If it loads fine, Costco is blocking this profile's proxy, so change "
+                "or rotate the `proxy` in config.json. NOTE the GraphQL data path is unaffected by a "
+                "www.costco.com outage (different host, no browser), so scraping keeps working; only "
+                "token bootstrap and receipt capture need the site.")
     # Account-specific wording only, so a site error can never land here again.
     if re.search(r"account (is |has been )?(locked|disabled|suspended)|"
                  r"too many (failed )?(sign[- ]?in |login )?attempts", haystack, re.I):
