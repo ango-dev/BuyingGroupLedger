@@ -986,3 +986,139 @@ class TestCogsInputsComplete:
         assert "no payout yet" not in result.summary
         assert any("gift-card row(s) carry cost with no payout, as designed" in d
                    for d in result.details) or "gift-card" in result.summary
+
+
+# --------------------------------------------------------------------------------------------------
+# the design notes "smaller" items -- 2026-08-29
+# --------------------------------------------------------------------------------------------------
+
+
+class TestImpossibleDates:
+    """The regex only tests the SHAPE. A date that does not exist must not pass as ISO text."""
+
+    def test_an_impossible_order_date_fails(self):
+        sheet = build(row_cells(2, **{"Order Date": Cell("2026-13-45")}))
+        result = result_for(sheet, "dates_are_iso_text")
+        assert result.status == "FAIL"
+        assert "not a real calendar date" in result.details[0]
+
+    def test_a_non_leap_february_29_fails(self):
+        sheet = build(row_cells(2, **{"Order Date": Cell("2026-02-29")}))
+        assert result_for(sheet, "dates_are_iso_text").status == "FAIL"
+
+    def test_a_real_leap_day_passes(self):
+        sheet = build(row_cells(2, **{"Order Date": Cell("2028-02-29")}))
+        assert result_for(sheet, "dates_are_iso_text").status == "PASS"
+
+    def test_an_impossible_date_outside_order_date_is_only_a_warning(self):
+        sheet = build(row_cells(2, **{"Delivery Date": Cell("2026-00-10")}))
+        assert result_for(sheet, "dates_are_iso_text").status == "WARN"
+
+
+class TestSnapshotPath:
+    """A snapshot is the whole sheet, PII included, so a bare name must not land in the CWD."""
+
+    def test_a_bare_filename_lands_under_data(self):
+        assert audit_sheet._snapshot_path("before.json") == audit_sheet.SNAPSHOT_DIR / "before.json"
+
+    def test_a_relative_directory_is_honoured(self):
+        from pathlib import Path
+        assert audit_sheet._snapshot_path("out/x.json") == Path("out/x.json")
+
+    def test_an_absolute_path_is_honoured(self, tmp_path):
+        target = tmp_path / "x.json"
+        assert audit_sheet._snapshot_path(str(target)) == target
+
+    def test_data_is_gitignored(self):
+        from pathlib import Path
+        ignored = Path(__file__).resolve().parents[1] / ".gitignore"
+        lines = [line.strip() for line in ignored.read_text(encoding="utf-8").splitlines()]
+        assert "data/" in lines
+
+
+class TestShipmentNumbersContiguous:
+    def _order(self, *shipments):
+        rows = [
+            row_cells(n, **{"Order ID": Cell("BBY01-1"), "Shipment": Cell(s),
+                            "Tracking Number": Cell(f"1Z{n}")})
+            for n, s in enumerate(shipments, start=2)
+        ]
+        return build(*rows)
+
+    def test_one_through_n_passes(self):
+        assert result_for(self._order(1, 2), "shipment_numbers_contiguous").status == "PASS"
+
+    def test_a_gap_warns_and_names_the_missing_number(self):
+        result = result_for(self._order(1, 3), "shipment_numbers_contiguous")
+        assert result.status == "WARN"
+        assert "2 missing" in result.details[0]
+
+    def test_a_lone_second_box_warns(self):
+        assert result_for(self._order(2), "shipment_numbers_contiguous").status == "WARN"
+
+    def test_blank_and_label_shipments_are_ignored(self):
+        assert result_for(self._order(1, "", "Box B"), "shipment_numbers_contiguous").status == "PASS"
+
+    def test_two_orders_are_numbered_independently(self):
+        sheet = build(
+            row_cells(2, **{"Order ID": Cell("A"), "Shipment": Cell(1)}),
+            row_cells(3, **{"Order ID": Cell("B"), "Shipment": Cell(1)}),
+            row_cells(4, **{"Order ID": Cell("B"), "Shipment": Cell(2)}),
+        )
+        assert result_for(sheet, "shipment_numbers_contiguous").status == "PASS"
+
+
+class TestFormulaLocale:
+    """Sheets re-serialises formulas in the spreadsheet's locale; that must not read as 'stale'."""
+
+    def test_a_semicolon_locale_still_matches(self):
+        european = _profit_formula(2).replace(",", "; ")
+        assert european != _profit_formula(2)
+        sheet = build(row_cells(2, **{"Total Profit": Cell("", formula=european)}))
+        assert result_for(sheet, "profit_formula_literal").status == "PASS"
+
+    def test_a_respaced_cogs_formula_still_matches(self):
+        respaced = _cogs_formula(2).replace("(", "( ").replace(")", " )")
+        sheet = build(row_cells(2, **{"COGS": Cell(798.0, formula=respaced)}))
+        assert result_for(sheet, "cogs_formula_literal").status == "PASS"
+
+    def test_a_changed_column_letter_is_still_caught_after_canonicalising(self):
+        stale = _profit_formula(2).replace(f'{_COL["payout_amount"]}2', "X2").replace(",", ";")
+        sheet = build(row_cells(2, **{"Total Profit": Cell("", formula=stale)}))
+        assert result_for(sheet, "profit_formula_literal").status == "FAIL"
+
+
+class TestProfitValueMatchesInputs:
+    """The number itself, recomputed in Python from the same cells the formula reads."""
+
+    def _row(self, profit, payout=900.0, cogs=798.0, insurance=7.4, status="paid"):
+        return row_cells(2, **{
+            "Status": Cell(status),
+            "Payout Amount": Cell(payout, fmt="currency"),
+            "COGS": Cell(cogs, fmt="currency", formula=_cogs_formula(2)),
+            "Insurance": Cell(insurance, fmt="currency"),
+            "Total Profit": Cell(profit, formula=_profit_formula(2)),
+        })
+
+    def test_a_consistent_row_passes(self):
+        assert result_for(build(self._row(94.6)), "profit_value_matches_inputs").status == "PASS"
+
+    def test_a_blank_insurance_counts_as_zero(self):
+        sheet = build(self._row(102.0, insurance=""))
+        assert result_for(sheet, "profit_value_matches_inputs").status == "PASS"
+
+    def test_a_disagreeing_number_fails_and_shows_the_arithmetic(self):
+        result = result_for(build(self._row(50.0)), "profit_value_matches_inputs")
+        assert result.status == "FAIL"
+        assert "900.00 - 798.00 - 7.40 = 94.60" in result.details[0]
+
+    def test_rows_without_a_payout_or_cancelled_are_skipped(self):
+        no_payout = build(self._row(50.0, payout=""))
+        cancelled = build(self._row(50.0, status="cancelled"))
+        assert result_for(no_payout, "profit_value_matches_inputs").status == "PASS"
+        assert result_for(cancelled, "profit_value_matches_inputs").status == "PASS"
+
+    def test_a_blank_profit_is_left_to_the_payout_pairing_check(self):
+        sheet = build(self._row(""))
+        assert result_for(sheet, "profit_value_matches_inputs").status == "PASS"
+        assert result_for(sheet, "profit_blank_despite_payout").status != "PASS"

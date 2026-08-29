@@ -7,7 +7,7 @@ audit itself was thrown away each time. This is that ritual as a runnable artifa
 
     python -m scripts.audit_sheet                        # audit the live sheet
     python -m scripts.audit_sheet --expect-rows 23       # ... and assert the row count
-    python -m scripts.audit_sheet --save-snapshot before.json
+    python -m scripts.audit_sheet --save-snapshot before.json   # lands in data/ (gitignored: it holds PII)
     python -m scripts.audit_sheet --from-snapshot before.json   # re-audit offline, zero API calls
     python -m scripts.audit_sheet --json                 # machine-readable, for before/after diffs
 
@@ -33,10 +33,12 @@ That comparison is `check_key_is_format_independent`, the single most valuable c
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from models.order import FIELDNAMES, STATUSES, TERMINAL_STATUSES, normalize_shipment
@@ -58,6 +60,30 @@ READONLY_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 _SHEETS_EPOCH = date(1899, 12, 30)
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _is_real_date(text: str) -> bool:
+    """Does an ISO-shaped string name a day that exists? The regex only tests the shape."""
+    try:
+        date.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
+
+
+# Where a bare `--save-snapshot NAME` lands. A snapshot is the whole sheet -- delivery addresses and
+# card last-4s included -- so it must not default to the CWD, where it is one `git add .` away from
+# a commit. `data/` is gitignored. An explicit directory in the argument is always honoured.
+SNAPSHOT_DIR = Path("data")
+
+
+def _snapshot_path(arg: str) -> Path:
+    """Resolve a snapshot argument: a bare filename goes under SNAPSHOT_DIR, anything with a
+    directory component (relative or absolute) is used exactly as given."""
+    path = Path(arg)
+    if path.parent == Path("."):
+        return SNAPSHOT_DIR / path
+    return path
 
 # Columns that must hold plain ISO text, not a date serial. Order Date is the dangerous one: it's in
 # the primary upsert key AND the name-agnostic fallback key (ledger_sync.py:273, :297).
@@ -565,6 +591,19 @@ def _formula_coverage(sheet: Sheet, opts: Options, column: str, name: str) -> Re
                   _truncate(missing, opts.max_detail))
 
 
+def _canonical_formula(text: str) -> str:
+    """A formula as Sheets might re-serialise it, reduced to what actually matters: the cells it reads.
+
+    Sheets rewrites a formula in the spreadsheet's LOCALE -- a European locale separates arguments
+    with `;` -- and may re-space it. Neither changes which cells it points at, which is the only thing
+    the literal check exists to catch (a stale formula after a reorder). Without this, changing the
+    spreadsheet locale would fail every row at once and bury a real stale formula in the noise.
+    Whitespace and case inside string literals are collapsed too; the builder's own literals are
+    lower-case single words, so nothing is lost.
+    """
+    return re.sub(r"\s+", "", str(text)).replace(";", ",").upper()
+
+
 def _formula_literal(sheet: Sheet, opts: Options, column: str, builder, name: str) -> Result:
     """Nothing else in the repo can catch a STALE formula after a column reorder.
 
@@ -580,7 +619,7 @@ def _formula_literal(sheet: Sheet, opts: Options, column: str, builder, name: st
             continue  # the coverage check owns that failure
         total += 1
         expected = builder(row_number)
-        if value != expected:
+        if _canonical_formula(value) != _canonical_formula(expected):
             wrong.append(
                 f"row {row_number}:\n"
                 f"      is:        {value}\n"
@@ -684,6 +723,81 @@ def check_shipment_is_int(sheet: Sheet, opts: Options) -> Result:
     if not offenders:
         return Result("shipment_is_int", "PASS", summary or "no rows")
     return Result("shipment_is_int", "FAIL", summary, _truncate(offenders, opts.max_detail))
+
+
+@check("shipment_numbers_contiguous")
+def check_shipment_numbers_contiguous(sheet: Sheet, opts: Options) -> Result:
+    """Every producer numbers an order's boxes 1..N, so a gap means a row went missing or an order was
+    renumbered (the Costco unshipped-then-split caveat, the design notes). Neither breaks the upsert key,
+    so this is WARN -- something to look at, not a corrupted sheet. Non-numeric labels and blank
+    cells are legal (see shipment_is_int) and are left out of the arithmetic.
+    """
+    by_order: dict[tuple, set[int]] = {}
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        stored = sheet.cell(sheet.grids.unformatted, row_number, "Shipment")
+        text = str(stored).strip()
+        if not text or isinstance(stored, bool) or not text.isdigit():
+            continue
+        order_id = str(sheet.cell(sheet.grids.formatted, row_number, "Order ID")).strip()
+        order_date = str(sheet.cell(sheet.grids.formatted, row_number, "Order Date")).strip()
+        by_order.setdefault((order_id, order_date), set()).add(int(text))
+
+    offenders = []
+    for (order_id, _), numbers in by_order.items():
+        expected = set(range(1, max(numbers) + 1))
+        missing = sorted(expected - numbers)
+        if missing:
+            offenders.append(
+                f"order {order_id}: shipments {sorted(numbers)} -- "
+                f"{', '.join(str(n) for n in missing)} missing"
+            )
+    if not offenders:
+        return Result("shipment_numbers_contiguous", "PASS",
+                      f"{len(by_order)} order(s) numbered 1..N without gaps")
+    return Result(
+        "shipment_numbers_contiguous", "WARN",
+        f"{len(offenders)} order(s) have a gap in their shipment numbers -- a lost row or a renumbered split",
+        _truncate(offenders, opts.max_detail),
+    )
+
+
+@check("profit_value_matches_inputs")
+def check_profit_value_matches_inputs(sheet: Sheet, opts: Options) -> Result:
+    """Recompute Total Profit = Payout Amount - COGS - Insurance in Python and compare to the cell.
+
+    The literal check compares formula TEXT, and text can be right while the number is wrong (a
+    formula that survives a reorder syntactically but reads a neighbouring column) or wrong while the
+    number is right (a locale re-serialisation). This is the number itself, from the same unformatted
+    cells the formula reads. Rows without a payout, and cancelled rows, are skipped: the formula
+    deliberately renders "" there, and profit_blank_despite_payout owns the blank-with-payout case.
+    """
+    wrong, checked = [], 0
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
+        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount"))
+        if status == "cancelled" or payout is None:
+            continue
+        shown = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Total Profit"))
+        if shown is None:
+            continue  # profit_blank_despite_payout reports that
+        cogs = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "COGS")) or 0.0
+        insurance = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Insurance")) or 0.0
+        expected = payout - cogs - insurance
+        checked += 1
+        if abs(float(shown) - expected) > 0.005:
+            wrong.append(
+                f"row {row_number}: Total Profit is {float(shown):.2f}, but "
+                f"{payout:.2f} - {cogs:.2f} - {insurance:.2f} = {expected:.2f}"
+            )
+    if not wrong:
+        return Result("profit_value_matches_inputs", "PASS",
+                      f"{checked} paid-out row(s) recomputed from their own cells")
+    return Result(
+        "profit_value_matches_inputs", "FAIL",
+        f"{len(wrong)}/{checked} Total Profit value(s) disagree with Payout - COGS - Insurance -- "
+        "the formula reads the wrong cells",
+        _truncate(wrong, opts.max_detail),
+    )
 
 
 @check("quantity_is_int")
@@ -796,8 +910,13 @@ def check_dates_are_iso_text(sheet: Sheet, opts: Options) -> Result:
                 continue
             checked += 1
             if isinstance(stored, str) and _ISO_DATE.match(stored.strip()):
-                continue
-            if isinstance(stored, (int, float)) and not isinstance(stored, bool):
+                if _is_real_date(stored.strip()):
+                    continue
+                # Shape-correct but impossible: "2026-13-45" passes the regex, and every consumer
+                # that parses the column properly (a Tax Summary SUMIFS, `since` trimming) would
+                # choke on it or drop the row. The regex is the fast path, not the definition.
+                message = f"row {row_number}, {name}: {stored!r} is not a real calendar date"
+            elif isinstance(stored, (int, float)) and not isinstance(stored, bool):
                 as_day = _SHEETS_EPOCH + timedelta(days=int(stored))
                 message = f"row {row_number}, {name}: date SERIAL {stored!r} (= {as_day.isoformat()}) -- the column is formatted as a Date"
             else:
@@ -1641,16 +1760,17 @@ def main() -> None:
     parser.add_argument("--strict", action="store_true", help="treat warnings as failures in the exit code")
     parser.add_argument("--expect-rows", type=int, default=None, help="fail unless the sheet has exactly N data rows")
     parser.add_argument("-v", "--verbose", action="store_true", help="show detail lines for passing checks too")
-    parser.add_argument("--save-snapshot", metavar="PATH", help="also write the raw grids to a local JSON file")
-    parser.add_argument("--from-snapshot", metavar="PATH", help="audit a saved snapshot offline (no credentials, no API calls)")
-    parser.add_argument("--compare", metavar="PATH", help="also report what changed vs an earlier --save-snapshot (added/removed/changed rows)")
+    parser.add_argument("--save-snapshot", metavar="PATH", help="also write the raw grids to a local JSON file (a bare name lands under data/, which is gitignored)")
+    parser.add_argument("--from-snapshot", metavar="PATH", help="audit a saved snapshot offline (no credentials, no API calls; bare names resolve under data/)")
+    parser.add_argument("--compare", metavar="PATH", help="also report what changed vs an earlier --save-snapshot (added/removed/changed rows; bare names resolve under data/)")
     parser.add_argument("--stale-days", type=int, default=3, help="warn when an OPEN row hasn't been re-scraped in this many days (default 3)")
     args = parser.parse_args()
 
     if args.from_snapshot:
-        with open(args.from_snapshot, encoding="utf-8") as f:
+        from_path = _snapshot_path(args.from_snapshot)
+        with open(from_path, encoding="utf-8") as f:
             grids = Grids.from_snapshot(json.load(f))
-        grids.meta["source"] = f"snapshot {args.from_snapshot}"
+        grids.meta["source"] = f"snapshot {from_path}"
     else:
         worksheet, title = open_worksheet_readonly()
         grids = read_grids(worksheet, title)
@@ -1660,16 +1780,21 @@ def main() -> None:
         raise SystemExit(2)
 
     if args.save_snapshot:
-        with open(args.save_snapshot, "w", encoding="utf-8") as f:
+        save_path = _snapshot_path(args.save_snapshot)
+        os.makedirs(save_path.parent, exist_ok=True)
+        with open(save_path, "w", encoding="utf-8") as f:
             json.dump(grids.to_snapshot(), f, indent=2, default=str)
+        print(f"Snapshot written to {save_path} (holds addresses and card digits -- do not commit).",
+              file=sys.stderr)
 
     sheet = Sheet(grids)
     opts = Options(expect_rows=args.expect_rows, strict=args.strict, stale_days=args.stale_days)
     results = run_checks(sheet, opts)
 
     diff = None
-    if args.compare:
-        with open(args.compare, encoding="utf-8") as f:
+    compare_path = _snapshot_path(args.compare) if args.compare else None
+    if compare_path is not None:
+        with open(compare_path, encoding="utf-8") as f:
             baseline = Grids.from_snapshot(json.load(f))
         diff = diff_snapshots(baseline, grids)
 
@@ -1678,7 +1803,7 @@ def main() -> None:
     else:
         print(render_text(results, grids.meta, args.verbose))
         if diff is not None:
-            print(render_diff(diff, args.compare, opts.max_detail))
+            print(render_diff(diff, str(compare_path), opts.max_detail))
     raise SystemExit(exit_code(results, args.strict))
 
 

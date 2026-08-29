@@ -633,7 +633,9 @@ a deleted column, a cashback rate outside 0–1, merged cells (they blank their 
 stuck open forever or the scheduler silently not running. Tune that last one with `--stale-days`.
 
 Two flags make it free to iterate on: `--save-snapshot FILE` dumps the raw sheet, and
-`--from-snapshot FILE` re-audits that dump offline with no credentials and no API calls. `--json`
+`--from-snapshot FILE` re-audits that dump offline with no credentials and no API calls. A bare
+filename lands under `data/` (gitignored) for all three snapshot flags, because a snapshot holds
+delivery addresses and card digits; give a path with a directory to put it elsewhere. `--json`
 emits the same results machine-readably, `--compare` included.
 
 ---
