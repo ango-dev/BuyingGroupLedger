@@ -397,6 +397,11 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
             log.warning("Amazon sign-in: the page says: %s", info["errors"])
         log.warning("Amazon sign-in: %s. Page state: %s", what_failed,
                     {k: v for k, v in info.items() if k != "text"})
+        # `text` is normally omitted to keep scheduled-run logs readable, but an UNKNOWN verdict
+        # means every OTHER signal came back empty -- so the page's own copy is the only evidence
+        # left, and dropping it is what made a live failure on 2026-08-29 undiagnosable from the log.
+        if verdict.startswith("UNKNOWN") and info.get("text"):
+            log.warning("Amazon sign-in: the page reads: %r", info["text"][:300])
 
     if failed_requests:
         if critical:
@@ -593,6 +598,30 @@ def _answer_otp(page, auth, auth_key: str = "amazon") -> bool:
     return not _on_otp(page)
 
 
+def _wait_for_known_screen(page, timeout_ms: int = 15000, poll_ms: int = 1000) -> bool:
+    """Poll until one of the screens this login can answer appears. True if one did.
+
+    A page that has not finished rendering is NOT a page with no options, and telling them apart
+    matters: without this, `deterministic_login` read the DOM once, found no email box, no password
+    box, no OTP field and no switcher, and gave up instantly. Live that produced
+    "no sign-in step left to take" on a `/ap/signin` URL whose title was still the generic
+    "Amazon.com" — the form simply had not rendered yet.
+
+    This is the same mistake `costco_signin.resolve_session_state` was written for two days earlier:
+    judging a page on its first frame. Waiting costs seconds on a run that is already signing in;
+    giving up early costs the whole run and reports a shape change that never happened.
+    """
+    waited = 0
+    while waited < timeout_ms:
+        if (on_account_switcher(page) or _on_otp(page)
+                or _visible(page, PASSWORD_SELECTORS) or _visible(page, EMAIL_SELECTORS)):
+            log.info("Amazon sign-in: a known screen appeared after %.0fs of waiting.", waited / 1000)
+            return True
+        page.wait_for_timeout(poll_ms)
+        waited += poll_ms
+    return False
+
+
 def deterministic_login(page, auth, auth_key: str = "amazon") -> LoginOutcome:
     """Sign an Amazon account back in, agent-free, from a page already sitting on the auth flow.
 
@@ -625,7 +654,8 @@ def deterministic_login(page, auth, auth_key: str = "amazon") -> LoginOutcome:
     # but a step that repeats means it did not take, and re-submitting a password in a loop is how an
     # account gets locked. `seen` is what turns "keep going until signed in" into a bounded walk.
     seen: set[str] = set()
-    for _ in range(len(_SCREENS) + 1):
+    waited_for_screen = False
+    for _ in range(len(_SCREENS) + 2):
         if not looks_logged_out(page) and not on_account_switcher(page):
             return LoginOutcome(True)
 
@@ -675,6 +705,12 @@ def deterministic_login(page, auth, auth_key: str = "amazon") -> LoginOutcome:
             _settle(page)
             continue
 
+        # Nothing matched. Before concluding the markup changed, give the page a chance to finish
+        # rendering -- ONCE, tracked by the flag so this can never become a spin.
+        if not waited_for_screen:
+            waited_for_screen = True
+            if _wait_for_known_screen(page):
+                continue
         return _fail("no sign-in step left to take and the session is still logged out")
 
     return _fail("the sign-in flow did not settle within the expected number of screens")

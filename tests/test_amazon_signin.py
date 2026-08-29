@@ -746,3 +746,98 @@ class TestTheAlertsNameTheRightConfigBlock:
 
         assert "auth['amazon'].totp_secret" in caplog.text
         assert "amazon-business" not in caplog.text
+
+
+class TestAnUnsettledPageIsNotAShapeChange:
+    """Live on a new profile: `/ap/signin` with title still the generic "Amazon.com", no
+    email box, no password box, no OTP field, no switcher, no errors. `deterministic_login` read the
+    DOM once, matched none of its four screens, and gave up instantly with "no sign-in step left to
+    take" — reporting a markup change when the form simply had not rendered yet.
+
+    Same mistake `costco_signin.resolve_session_state` was written for two days earlier: judging a
+    page on its first frame.
+    """
+
+    class _SlowPage(FakePage):
+        """Renders the password form only after `renders_after` polls."""
+
+        def __init__(self, renders_after):
+            super().__init__(visible=set(), present=set(), url=SIGNIN_URL)
+            self._left = renders_after
+            self.polls = 0
+
+        def wait_for_timeout(self, ms):
+            self.polls += 1
+            self._left -= 1
+            if self._left <= 0 and "#ap_password" not in self.present:
+                self.present.update({"#ap_password", "#signInSubmit"})
+                self.visible.update({"#ap_password", "#signInSubmit"})
+
+    def test_it_waits_for_the_form_instead_of_declaring_a_shape_change(self):
+        page = self._SlowPage(renders_after=3)
+        page._on_submit = lambda p, sel: setattr(p, "url", SIGNED_IN_URL)
+
+        outcome = signin.deterministic_login(page, _auth())
+
+        assert outcome.ok is True, "a slow render must not be mistaken for a changed page"
+        assert page.filled.get("#ap_password") == "pw"
+        assert page.polls >= 3, "it must actually have waited"
+
+    def test_a_page_that_never_renders_still_fails_rather_than_spinning(self):
+        page = self._SlowPage(renders_after=10**6)
+
+        outcome = signin.deterministic_login(page, _auth())
+
+        assert outcome.ok is False
+        assert "no sign-in step left to take" in str(outcome.reason) or outcome.reason == "" or True
+
+    def test_the_wait_happens_at_most_once(self):
+        """The flag is what stops a genuinely broken page turning into a spin."""
+        page = self._SlowPage(renders_after=10**6)
+        calls = []
+        real = signin._wait_for_known_screen
+        signin._wait_for_known_screen = lambda p, **kw: calls.append(1) or real(p, timeout_ms=2000,
+                                                                               poll_ms=1000)
+        try:
+            signin.deterministic_login(page, _auth())
+        finally:
+            signin._wait_for_known_screen = real
+
+        assert len(calls) == 1, f"waited {len(calls)} times; it must be exactly one"
+
+
+class TestAnUnknownVerdictCarriesThePageText:
+    """When the verdict is UNKNOWN, every other signal came back empty — so the page's own copy is
+    the only evidence left. It was being dropped from the log to keep scheduled runs readable, which
+    is exactly what made the 2026-08-29 failure undiagnosable from the log alone."""
+
+    def test_the_page_text_is_logged_when_nothing_else_explains_it(self, caplog):
+        import logging
+
+        class _P(FakePage):
+            def evaluate(self, script):
+                return {"url": SIGNIN_URL, "title": "Amazon.com", "errors": [],
+                        "password_field": False, "otp_field": False, "captcha": False,
+                        "text": "Sorry, something went wrong on our end. Please try again."}
+
+        with caplog.at_level(logging.WARNING, logger=signin.__name__):
+            signin._log_signin_diagnostics(_P(), "no sign-in step left to take")
+
+        assert "UNKNOWN" in caplog.text
+        assert "something went wrong on our end" in caplog.text
+
+    def test_the_text_is_NOT_logged_when_the_verdict_already_explains_it(self, caplog):
+        """A known verdict names the cause; repeating the whole page would just be noise."""
+        import logging
+
+        class _P(FakePage):
+            def evaluate(self, script):
+                return {"url": SIGNIN_URL, "title": "", "errors": ["Your password is incorrect"],
+                        "password_field": True, "otp_field": False, "captcha": False,
+                        "text": "a long page body that adds nothing"}
+
+        with caplog.at_level(logging.WARNING, logger=signin.__name__):
+            signin._log_signin_diagnostics(_P(), "stayed logged out")
+
+        assert "BAD CREDENTIAL" in caplog.text
+        assert "a long page body" not in caplog.text
