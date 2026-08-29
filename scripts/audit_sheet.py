@@ -800,6 +800,41 @@ def check_profit_value_matches_inputs(sheet: Sheet, opts: Options) -> Result:
     )
 
 
+@check("order_level_cells_agree")
+def check_order_level_cells_agree(sheet: Sheet, opts: Options) -> Result:
+    """Retailer, Profile and Order Date are ORDER-level facts: every row of one order must agree.
+
+    Nothing else looks at these values across rows, and a disagreement is how an order goes wrongly
+    terminal: load_order_state scopes by Profile + Retailer, so a row whose Profile or Retailer differs
+    from its siblings is invisible to that run -- and if the rows it CAN see are all delivered, the
+    order is classed terminal with a real open shipment frozen. A differing Order Date
+    is a different upsert key, so the row can never be updated by a re-check either.
+    """
+    fields = ("Retailer", "Profile", "Order Date")
+    by_order: dict[str, dict[str, dict[str, list[int]]]] = {}
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        order_id = str(sheet.cell(sheet.grids.formatted, row_number, "Order ID")).strip()
+        seen = by_order.setdefault(order_id, {f: {} for f in fields})
+        for f in fields:
+            value = str(sheet.cell(sheet.grids.formatted, row_number, f)).strip()
+            seen[f].setdefault(value, []).append(row_number)
+
+    offenders = []
+    for order_id, seen in by_order.items():
+        for f in fields:
+            if len(seen[f]) > 1:
+                variants = ", ".join(f"{v!r} rows {rows}" for v, rows in seen[f].items())
+                offenders.append(f"order {order_id}: {f} differs -- {variants}")
+    if not offenders:
+        return Result("order_level_cells_agree", "PASS",
+                      f"{len(by_order)} order(s): one Retailer / Profile / Order Date each")
+    return Result(
+        "order_level_cells_agree", "FAIL",
+        f"{len(offenders)} order-level disagreement(s) -- the odd row is invisible to its own run",
+        _truncate(offenders, opts.max_detail),
+    )
+
+
 @check("quantity_is_int")
 def check_quantity_is_int(sheet: Sheet, opts: Options) -> Result:
     """Quantity has to be checked HERE, because numeric_columns_are_numeric deliberately skips it.

@@ -1122,3 +1122,38 @@ class TestProfitValueMatchesInputs:
         sheet = build(self._row(""))
         assert result_for(sheet, "profit_value_matches_inputs").status == "PASS"
         assert result_for(sheet, "profit_blank_despite_payout").status != "PASS"
+
+
+class TestOrderLevelCellsAgree:
+    """Retailer / Profile / Order Date are per-ORDER facts; a row that disagrees is invisible to its run."""
+
+    def _order(self, **second_row):
+        return build(
+            row_cells(2, **{"Order ID": Cell("A1"), "Shipment": Cell(1), "Tracking Number": Cell("1Z1")}),
+            row_cells(3, **{"Order ID": Cell("A1"), "Shipment": Cell(2), "Tracking Number": Cell("1Z2"),
+                            **second_row}),
+        )
+
+    def test_a_consistent_order_passes(self):
+        assert result_for(self._order(), "order_level_cells_agree").status == "PASS"
+
+    def test_a_differing_profile_fails_and_names_both_rows(self):
+        result = result_for(self._order(Profile=Cell("profile-bravo")), "order_level_cells_agree")
+        assert result.status == "FAIL"
+        assert "Profile differs" in result.details[0]
+        assert "rows [2]" in result.details[0] and "rows [3]" in result.details[0]
+
+    def test_a_differing_retailer_or_order_date_fails(self):
+        assert result_for(self._order(Retailer=Cell("Amazon")), "order_level_cells_agree").status == "FAIL"
+        assert result_for(self._order(**{"Order Date": Cell("2026-08-07")}), "order_level_cells_agree").status == "FAIL"
+
+    def test_edge_whitespace_alone_is_left_to_the_whitespace_check(self):
+        """Stripped before comparing: 'p ' vs 'p' is key_cells_have_no_edge_whitespace's finding."""
+        assert result_for(self._order(Profile=Cell("profile-alpha ")), "order_level_cells_agree").status == "PASS"
+
+    def test_different_orders_are_independent(self):
+        sheet = build(
+            row_cells(2, **{"Order ID": Cell("A1"), "Profile": Cell("profile-alpha")}),
+            row_cells(3, **{"Order ID": Cell("B2"), "Profile": Cell("profile-bravo")}),
+        )
+        assert result_for(sheet, "order_level_cells_agree").status == "PASS"

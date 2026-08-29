@@ -178,6 +178,23 @@ etc.) — they're never resold, so they never hit the ledger.
   row, so charging it per row would bill a 3-row order for shipping three times over and make the
   column's sum wrong. Pro-rata makes the column sum to exactly one shipping charge per order.
 
+## Year-end tax report
+
+```bash
+python -m scripts.tax_report              # asks for the year
+python -m scripts.tax_report 2026 --no-rows
+python -m scripts.tax_report 2026 --from-snapshot before.json   # offline, from an audit snapshot
+```
+
+Read-only (it goes through the audit's read-only scope). **Two dates drive the year, on a cash
+basis:** receipts are Payout Amounts whose *Payout Date* falls in the year; COGS and insurance are
+taken from rows whose *Order Date* does, cancelled rows excluded. A December order paid in January is
+therefore a cost in one year and income in the next, and the report's "straddling" block says how
+much money sits on each side of the boundary — the number a preparer asks about. Insurance is
+reported as its own line (a Schedule C expense), never inside COGS; cashback is shown separately so
+the netting is visible. Breakdowns by retailer and by buying group, plus the order list; `--json`
+for anything else.
+
 **A cancelled order carries no money.** Cost, Shipping, Insurance, Payout and both formula columns
 are emptied on any row whose Status is `cancelled` — the order was refunded, so leaving the scraped
 cost there makes it look like a real purchase to anything summing the column, and at year end that is

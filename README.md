@@ -33,7 +33,7 @@ This page is the overview. Each topic has its own page under [`docs/`](docs/):
 |---|---|
 | [Architecture](docs/architecture.md) | The run loop, the four deterministic paths, the cost model, a shipment's lifecycle |
 | [Retailers](docs/retailers.md) | Running a scrape; how each retailer's path works; Costco token setup |
-| [Data model](docs/data-model.md) | The 28 columns, the upsert key, column order as a migration, profit accounting (COGS, cashback, gift cards, pro-rata shipping) |
+| [Data model](docs/data-model.md) | The 28 columns, the upsert key, column order as a migration, profit accounting (COGS, cashback, gift cards, pro-rata shipping), the year-end tax report |
 | [Configuration](docs/configuration.md) | `config.json`, the environment override layer and every variable, warehouse jigs, card cashback rates |
 | [Profiles and sign-in](docs/profiles-and-auth.md) | Creating a cloud-browser profile, auto-auth with an authenticator app, where secrets go |
 | [Buying groups](docs/buying-groups.md) | Posting tracking to BFMR and MaxOutDeals, insurance filing, payouts and `paid`/`return` |
@@ -127,6 +127,7 @@ Free things worth running often:
 .venv/bin/python -m scripts.preflight               # offline config check
 .venv/bin/python -m scripts.audit_sheet             # read-only audit of the live sheet
 .venv/bin/python -m sync_tracking                   # DRY RUN of the buying-group sync
+.venv/bin/python -m scripts.tax_report 2026         # read-only cash-basis year report
 ```
 
 ---
@@ -156,6 +157,7 @@ buying_groups/          provider contract + BFMR + MaxOutDeals adapters + Buying
 receipts/               receipt URL/key rules, OCI store (S3 compat), capture orchestration
 scripts/preflight.py    offline check for silent misconfiguration
 scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
+scripts/tax_report.py   read-only cash-basis tax report for one year (two dates: payout vs order)
 scripts/                create_profile, costco_token, sort_ledger, reorder_sheet, apply_sheet_formats,
                         backfill_receipts, receipt_verify, receipt_probe, bg_probe, install_cron, ...
 tests/                  offline pytest suite (no credentials/network needed)
