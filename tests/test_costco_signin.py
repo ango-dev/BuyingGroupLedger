@@ -317,3 +317,125 @@ class TestTheRealGrabIsWiredTheSameWay:
         assert "_one_pass(sign_in=True)" in src, "pass 1 must sign in"
         assert "_one_pass(sign_in=False)" in src, "pass 2 must NOT sign in again"
         assert src.index("_one_pass(sign_in=True)") < src.index("_one_pass(sign_in=False)")
+
+
+class TestResolveSessionState:
+    """`looks_logged_out` infers "signed in" from the ABSENCE of a sign-in page, and absence is not
+    evidence. a profile with no Costco session landed on a bare
+    `https://www.costco.com/myaccount` — no B2C redirect yet, no `#signInName`, near-empty storage —
+    so it read as SIGNED IN, the self-login never fired, and the token grab swept an anonymous
+    browser and gave up. A fourth landing state, after 13 runs that had only ever shown three.
+    """
+
+    class _Page:
+        """A page whose URL settles after a given number of polls, as the real SPA does."""
+
+        def __init__(self, urls):
+            self._urls = list(urls)
+            self.url = self._urls.pop(0)
+            self.waits = 0
+
+        def locator(self, selector):
+            class _L:
+                def count(self):
+                    return 0
+
+            return _L()
+
+        def wait_for_timeout(self, ms):
+            self.waits += 1
+            if self._urls:
+                self.url = self._urls.pop(0)
+
+    SIGNED_IN = "https://www.costco.com/myaccount/#/app/4900eb1f/ordersandpurchases"
+    BARE = "https://www.costco.com/myaccount"
+
+    def test_the_spa_route_is_the_only_thing_that_means_signed_in(self):
+        page = self._Page([self.SIGNED_IN])
+
+        assert signin.resolve_session_state(page) is False
+
+    def test_a_b2c_url_means_logged_out_immediately(self):
+        page = self._Page([SIGNIN_URL])
+
+        assert signin.resolve_session_state(page) is True
+        assert page.waits == 0, "a settled verdict must not wait"
+
+    def test_a_bare_myaccount_that_never_routes_is_treated_as_LOGGED_OUT(self):
+        """THE regression. This exact URL read as signed-in and cost the whole recovery."""
+        page = self._Page([self.BARE])
+
+        assert signin.resolve_session_state(page, timeout_ms=3000, poll_ms=1000) is True
+
+    def test_it_waits_for_a_slow_spa_rather_than_judging_the_first_frame(self):
+        """The page legitimately starts bare and routes a moment later; judging immediately would
+        sign in unnecessarily on every single run."""
+        page = self._Page([self.BARE, self.BARE, self.SIGNED_IN])
+
+        assert signin.resolve_session_state(page, timeout_ms=10000, poll_ms=1000) is False
+        assert page.waits >= 2, "it must actually have waited for the route to appear"
+
+    def test_it_waits_for_a_slow_redirect_to_b2c_too(self):
+        page = self._Page([self.BARE, SIGNIN_URL])
+
+        assert signin.resolve_session_state(page, timeout_ms=10000, poll_ms=1000) is True
+
+    def test_an_unresolved_page_biases_to_logged_out_and_says_so(self, caplog):
+        """Asymmetric costs: a wrong "logged out" costs one sign-in with credentials we already
+        hold; a wrong "signed in" costs the entire recovery."""
+        import logging
+
+        page = self._Page([self.BARE])
+
+        with caplog.at_level(logging.WARNING, logger=signin.__name__):
+            assert signin.resolve_session_state(page, timeout_ms=2000, poll_ms=1000) is True
+
+        assert "treating it as logged out" in caplog.text
+
+    def test_the_one_shot_check_is_still_available_and_unchanged(self):
+        """`looks_logged_out` stays for callers that only need the cheap 'is this the sign-in page?'
+        answer; it is simply not enough to ACT on."""
+        assert signin.looks_logged_out(self._Page([SIGNIN_URL])) is True
+        assert signin.looks_logged_out(self._Page([self.SIGNED_IN])) is False
+
+
+class TestASiteBlockIsNotAnAccountLock:
+    """Costco serves "Costco.com Temporarily Unavailable" — an Akamai block/outage page — to an IP it
+    does not like. That is about the PROXY, not the account.
+
+    The ACCOUNT LOCKED branch used to match a bare `temporarily (unavailable|disabled)`, so a blocked
+    proxy was reported as "ACCOUNT LOCKED — too many attempts" and told the operator to go clear a
+    lock that did not exist. Observed live on a new profile whose proxy Costco was
+    blocking. Wrong, alarming, and it points the fix at the wrong system entirely.
+    """
+
+    @staticmethod
+    def _verdict(title="", errors=(), text=""):
+        return signin._classify_signin_failure(
+            {"errors": list(errors), "title": title, "text": text,
+             "otp_field": False, "captcha": False})
+
+    def test_costcos_block_page_is_named_as_a_SITE_problem(self):
+        verdict, action = self._verdict(title="Costco.com Temporarily Unavailable")
+
+        assert "SITE BLOCKED" in verdict
+        assert "ACCOUNT LOCKED" not in verdict
+        assert "proxy" in action, "the action must point at the IP, not the account"
+        assert "do NOT touch the account" in action.lower() or "not touch the account" in action.lower()
+
+    def test_a_real_account_lock_still_reads_as_one(self):
+        assert "ACCOUNT LOCKED" in self._verdict(errors=["Your account has been locked"])[0]
+        assert "ACCOUNT LOCKED" in self._verdict(text="too many failed sign-in attempts")[0]
+
+    def test_the_site_block_is_checked_BEFORE_the_lock(self):
+        """Order matters: a page could plausibly contain both phrasings, and the site-level
+        explanation is the one that is actionable."""
+        verdict, _ = self._verdict(title="Costco.com Temporarily Unavailable",
+                                   text="too many attempts")
+
+        assert "SITE BLOCKED" in verdict
+
+    def test_other_akamai_block_wordings_are_covered_too(self):
+        for text in ("Access Denied", "Request unsuccessful. Incapsula incident ID",
+                     "We have detected unusual traffic"):
+            assert "SITE BLOCKED" in self._verdict(text=text)[0], text

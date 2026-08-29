@@ -296,7 +296,10 @@ def _grab_refresh_token(label: str) -> str | None:
                 # what we concluded. Without this line a skipped self-login is indistinguishable from a
                 # session that was genuinely still warm -- which is exactly the ambiguity that cost a
                 # paid run to diagnose on 2026-08-25.
-                logged_out = costco_signin.looks_logged_out(page)
+                # resolve_session_state, NOT looks_logged_out: the latter infers 'signed in'
+                # from the absence of a sign-in page, and a profile with no Costco session
+                # can land on a bare /myaccount that trips neither check.
+                logged_out = costco_signin.resolve_session_state(page)
                 log.info("Costco [%s]: pass %d landed on %s (logged_out=%s).", label,
                          1 if sign_in else 2, (page.url or "")[:110], logged_out)
                 if logged_out and not sign_in:

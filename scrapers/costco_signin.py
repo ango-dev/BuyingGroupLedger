@@ -94,8 +94,19 @@ class LoginOutcome(NamedTuple):
     reason: str = ""
 
 
+#: The account SPA routes into `#/app/<uuid>/...` once it has a session. That hash route is the only
+#: POSITIVE evidence of being signed in — see `resolve_session_state` for why the absence of a
+#: sign-in page is not evidence of anything.
+SIGNED_IN_ROUTE_MARKER = "/myaccount/#/"
+
+
 def looks_logged_out(page) -> bool:
-    """Is this page Costco's B2C sign-in rather than a signed-in costco.com page?"""
+    """Is this page Costco's B2C sign-in rather than a signed-in costco.com page?
+
+    A cheap, ONE-SHOT check that only ever answers "yes, definitely the sign-in page". It cannot
+    answer "yes, definitely signed in" — see `resolve_session_state`, which is what callers that need
+    to ACT on the answer should use.
+    """
     url = (page.url or "").lower()
     if any(marker in url for marker in SIGNIN_MARKERS):
         return True
@@ -103,6 +114,46 @@ def looks_logged_out(page) -> bool:
         return page.locator(EMAIL_SELECTOR).count() > 0
     except Exception:  # noqa: BLE001
         return False
+
+
+def resolve_session_state(page, timeout_ms: int = 20000, poll_ms: int = 1000) -> bool:
+    """Wait for the account page to settle, and return True if it is LOGGED OUT.
+
+    WHY THIS EXISTS, because `looks_logged_out` looked sufficient and was not. It infers "signed in"
+    from the ABSENCE of a sign-in page, and absence is not evidence. Live a profile with
+    no Costco session at all landed on a bare `https://www.costco.com/myaccount` — no B2C redirect
+    yet, no `#signInName`, and near-empty storage — so it read as SIGNED IN, the self-login never
+    fired, and the token grab swept an anonymous browser and gave up. A fourth landing state nobody
+    had seen: across 13 earlier runs the page had only ever settled on the signed-in SPA route
+    (`/myaccount/#/app/<uuid>/…`, 7x), the B2C sign-in (5x), or a mid-auth `#state=` fragment (1x).
+
+    So this waits for one of the two SETTLED states and requires POSITIVE evidence either way:
+    the SPA hash route means signed in; a B2C URL or the email field means signed out.
+
+    **An unresolved page is treated as LOGGED OUT**, deliberately. The costs are asymmetric at every
+    call site that uses this: a wrong "logged out" costs one sign-in attempt with credentials we
+    already hold, while a wrong "signed in" costs the entire recovery — which is precisely the
+    failure this was written for.
+    """
+    waited = 0
+    while True:
+        url = (page.url or "").lower()
+        if any(marker in url for marker in SIGNIN_MARKERS):
+            return True
+        try:
+            if page.locator(EMAIL_SELECTOR).count() > 0:
+                return True
+        except Exception:  # noqa: BLE001 — a selector hiccup must not decide the verdict
+            pass
+        if SIGNED_IN_ROUTE_MARKER in url:
+            return False
+        if waited >= timeout_ms:
+            log.warning("Costco: %s never settled into a signed-in route or a sign-in page after "
+                        "%.0fs — treating it as logged out, which costs one sign-in rather than the "
+                        "whole recovery.", (page.url or "")[:90], timeout_ms / 1000)
+            return True
+        page.wait_for_timeout(poll_ms)
+        waited += poll_ms
 
 
 def _keep_signed_in(page) -> bool:
@@ -173,7 +224,22 @@ def _classify_signin_failure(info: dict) -> tuple[str, str]:
         return ("BAD CREDENTIAL — Costco rejected the email or password",
                 "Update auth['costco'].username / .password in config.json, and stop retrying: "
                 "repeated failures risk locking the membership account.")
-    if re.search(r"locked|too many attempts|temporarily (unavailable|disabled)", haystack, re.I):
+    # SITE-LEVEL BLOCK FIRST, and the order is the whole point. Costco serves
+    # "Costco.com Temporarily Unavailable" (an Akamai block/outage page) to an IP it does not like,
+    # and that page has nothing to do with the account. This branch used to be folded into the one
+    # below via a bare `temporarily (unavailable|disabled)`, so a blocked PROXY was reported as
+    # "ACCOUNT LOCKED — too many attempts" and told the operator to go clear a lock that did not
+    # exist — observed live on a new profile whose proxy Costco was blocking.
+    if re.search(r"temporarily unavailable|access denied|request unsuccessful|reference #\s*\d|"
+                 r"unusual (traffic|activity)|bot detection", haystack, re.I):
+        return ("SITE BLOCKED OR UNAVAILABLE — Costco served an error page, not a sign-in form",
+                "This is about the IP, not the account: Costco is blocking or rate-limiting this "
+                "profile's proxy, or the site is down. Check the profile's `proxy` in config.json — "
+                "another profile on a different proxy may sign in fine, which is itself the tell. "
+                "Do NOT retry in a loop and do NOT touch the account; back off and try later.")
+    # Account-specific wording only, so a site error can never land here again.
+    if re.search(r"account (is |has been )?(locked|disabled|suspended)|"
+                 r"too many (failed )?(sign[- ]?in |login )?attempts", haystack, re.I):
         return ("ACCOUNT LOCKED — too many attempts",
                 "Stop automated sign-ins and clear it with Costco before retrying.")
     if info.get("captcha"):
