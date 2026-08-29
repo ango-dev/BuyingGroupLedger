@@ -1301,7 +1301,11 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
     for row in existing[1:]:
         if len(row) <= max(idx.values()):
             continue
-        if profile_label is not None and row[idx["Profile"]] != profile_label:
+        # .strip() on BOTH scoping columns. Retailer below was always stripped; Profile was not,
+        # so one invisible trailing space in a Profile cell hid that row from its own run -- and
+        # if the rows still visible were all delivered, the order was classed terminal with a real
+        # open shipment frozen.
+        if profile_label is not None and str(row[idx["Profile"]]).strip() != profile_label:
             continue
         if (
             retailer is not None

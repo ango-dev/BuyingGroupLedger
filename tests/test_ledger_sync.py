@@ -958,6 +958,24 @@ class TestLoadOrderState:
         assert state["delivered_ids"] == ["A1"]
         assert state["open_orders"] == []
 
+    def test_profile_with_edge_whitespace_still_scopes_to_its_run(self, sheet):
+        """the design notes: Profile was compared UNSTRIPPED while Retailer was stripped. One invisible
+        trailing space in a Profile cell hid that row from its own run -- and if the rows still
+        visible were all delivered, the order was classed terminal with a real open shipment frozen."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
+                status="delivered", tracking_number="1Z1", profile_label="p1"),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="2",
+                status="shipped", tracking_number="1Z2", profile_label="p1 "),
+        ]
+
+        state = load_order_state("p1")
+
+        assert state["delivered_ids"] == []
+        assert [o["order_id"] for o in state["open_orders"]] == ["A1"]
+        assert state["open_orders"][0]["status"] == "shipped"
+
     def test_a_hand_entered_terminal_status_takes_the_order_out_of_the_recheck_list(self, sheet):
         """THE POINT OF "paid"/"return" BEING TERMINAL. These are hand-entered only, so nothing will
         ever correct them: if such a row stayed open it would be re-read on every run forever, and
