@@ -499,3 +499,109 @@ class TestSelfLogin:
         # already reports the real problem.
         results = preflight.check_self_login()
         assert [r.level for r in results] == [WARN] and "skipped" in results[0].detail
+
+
+class TestProfiles:
+    """A profile can be configured and still never run, three different ways, and none of them is
+    visible where anyone looks. This came from a real incident: a new profile was added and the live
+    server "did not recognise it at all" — no error, no alert, nothing in the log.
+    """
+
+    @staticmethod
+    def _profile(label="profile-new", profile_id="pid", retailers=("amazon",)):
+        from models.profile import ProfileConfig
+
+        return ProfileConfig(label=label, profile_id=profile_id, retailers=list(retailers))
+
+    def _run(self, monkeypatch, *profiles):
+        monkeypatch.setattr("config.profiles.load_profiles", lambda: list(profiles))
+        return preflight.check_profiles()
+
+    def _named(self, results, label):
+        return next(r for r in results if r.name == f"profile [{label}]")
+
+    def test_a_valid_profile_passes(self, monkeypatch):
+        results = self._run(monkeypatch, self._profile())
+
+        assert self._named(results, "profile-new").level == OK
+
+    def test_a_blank_profile_id_warns_and_names_create_profile(self, monkeypatch):
+        """main.py skips it for EVERY retailer it lists, with one buried log.warning."""
+        results = self._run(monkeypatch, self._profile(profile_id=""))
+
+        result = self._named(results, "profile-new")
+        assert result.level == WARN
+        assert "create_profile" in result.detail
+        assert "records nothing" in result.detail
+
+    def test_an_unknown_retailer_key_FAILS(self, monkeypatch):
+        results = self._run(monkeypatch, self._profile(retailers=["amazon_business"]))
+
+        result = self._named(results, "profile-new")
+        assert result.level == FAIL
+        assert "amazon_business" in result.detail, "the offending key must be named"
+        assert "amazon-business" in result.detail, "and the valid ones offered"
+
+    def test_a_typo_is_caught_even_when_ANOTHER_profile_covers_that_retailer(self, monkeypatch):
+        """THE reason this check exists. `load_profiles_for_retailer` is an exact-match filter and
+        main.py only warns when NO profile matches a retailer — so a working profile masks the typo
+        completely and there is no signal anywhere. This is the fully silent case."""
+        good = self._profile(label="profile-old", retailers=["amazon"])
+        typo = self._profile(label="profile-new", retailers=["Amazon"])
+
+        results = self._run(monkeypatch, good, typo)
+
+        assert self._named(results, "profile-old").level == OK
+        assert self._named(results, "profile-new").level == FAIL
+
+    def test_an_empty_retailer_list_warns(self, monkeypatch):
+        results = self._run(monkeypatch, self._profile(retailers=[]))
+
+        assert self._named(results, "profile-new").level == WARN
+
+    def test_coverage_counts_only_USABLE_profiles(self, monkeypatch):
+        """A profile with no id cannot scrape, so it must not be counted as covering anything —
+        otherwise the coverage line reassures you about a retailer nothing will read."""
+        results = self._run(monkeypatch,
+                            self._profile(label="a", retailers=["amazon"]),
+                            self._profile(label="b", retailers=["amazon"], profile_id=""))
+
+        coverage = next(r for r in results if r.name == "profile coverage")
+        assert "amazon=1" in coverage.detail
+
+    def test_a_retailer_with_no_usable_profile_is_called_out(self, monkeypatch):
+        """The cheapest way to notice a config that never reached this host."""
+        results = self._run(monkeypatch, self._profile(retailers=["amazon"]))
+
+        coverage = next(r for r in results if r.name == "profile coverage")
+        assert coverage.level == WARN
+        assert "NOTHING is scraped" in coverage.detail
+        assert "costco" in coverage.detail
+
+    def test_the_two_amazon_accounts_on_one_profile_FAIL_rather_than_raise(self, monkeypatch):
+        """config/profiles.py raises for this. Preflight must report it in the same format as every
+        other check instead of dying on a traceback while trying to report."""
+        def boom():
+            raise ValueError("Profile 'x' lists conflicting retailers ['amazon', 'amazon-business']")
+
+        monkeypatch.setattr("config.profiles.load_profiles", boom)
+        results = preflight.check_profiles()
+
+        assert [r.level for r in results] == [FAIL]
+        assert "conflicting retailers" in results[0].detail
+
+    def test_a_broken_config_degrades_to_one_warning(self, monkeypatch):
+        def boom():
+            raise RuntimeError("config.json is malformed")
+
+        monkeypatch.setattr("config.profiles.load_profiles", boom)
+        results = preflight.check_profiles()
+
+        assert [r.level for r in results] == [WARN] and "skipped" in results[0].detail
+
+    def test_known_keys_match_the_real_scraper_registry(self):
+        """Duplicated from main.SCRAPERS because importing main opens logs/run.log at import time.
+        Pinned so the two cannot drift — the same pattern receipts/sources.py uses."""
+        import main
+
+        assert set(preflight.KNOWN_RETAILER_KEYS) == set(main.SCRAPERS)

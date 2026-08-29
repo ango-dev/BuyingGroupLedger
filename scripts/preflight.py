@@ -534,12 +534,94 @@ def check_self_login() -> list[Result]:
     return out
 
 
+#: Every retailer key `main.SCRAPERS` knows. Duplicated here rather than imported, because importing
+#: `main` configures logging and opens logs/run.log as a side effect of the import -- unacceptable in
+#: a check that runs on every container start. `tests/test_preflight.py` asserts this matches
+#: `main.SCRAPERS` exactly, the same way `receipts/sources.py` pins its duplicated constants.
+KNOWN_RETAILER_KEYS = ("amazon", "amazon-business", "bestbuy", "costco")
+
+#: One profile must never hold both Amazon accounts -- see config/profiles.py, which RAISES on it.
+_MUTUALLY_EXCLUSIVE = frozenset({"amazon", "amazon-business"})
+
+
+def check_profiles() -> list[Result]:
+    """Profiles that are configured but can never actually run.
+
+    THREE WAYS A PROFILE SILENTLY DOES NOTHING, and none of them is visible where you would look:
+
+    - **A blank `profile_id`.** `main.py` skips it for every retailer it lists, with one
+      `log.warning` buried in a scheduled run's log.
+    - **A misspelled retailer key** (`Amazon`, `amazon_business`, `best-buy`).
+      `load_profiles_for_retailer` is an EXACT-match filter, and `main.py` only warns when NO profile
+      matches a retailer -- so an existing profile masks the typo completely and nothing is logged at
+      all. That is why this one is a FAIL: it has no other signal anywhere.
+    - **An empty `retailers` list.** Selected for nothing, ever.
+
+    The per-retailer coverage line exists for the fourth case, which is not a broken profile at all:
+    a config that never reached the host. "amazon: 1 usable profile" when you added a second account
+    is the cheapest possible way to notice, and `config.json` is gitignored so it does NOT travel
+    with a `git pull`.
+    """
+    try:
+        from config.profiles import load_profiles
+        profiles = load_profiles()
+    except ValueError as exc:
+        # config/profiles.py raises this for the amazon + amazon-business conflict. Report it as a
+        # check rather than letting preflight die on a traceback -- a config error should be told to
+        # the operator in the same format as everything else.
+        return [Result(FAIL, "profiles", f"config.json is rejected: {exc}")]
+    except Exception as exc:  # noqa: BLE001 -- a broken config is already reported by check_config_files
+        return [Result(WARN, "profiles", f"could not read profiles ({exc}); skipped.")]
+
+    out: list[Result] = []
+    for profile in profiles:
+        name = f"profile [{profile.label}]"
+        unknown = [r for r in profile.retailers if r not in KNOWN_RETAILER_KEYS]
+        if unknown:
+            out.append(Result(
+                FAIL, name,
+                f"unknown retailer key(s) {unknown} — this profile is NEVER selected for them and "
+                f"nothing says so at run time (the filter is an exact match, and another profile "
+                f"covering the same retailer hides it). Valid keys: {list(KNOWN_RETAILER_KEYS)}.",
+            ))
+        elif not profile.retailers:
+            out.append(Result(
+                WARN, name,
+                "no retailers listed, so this profile is never selected for anything. Add the "
+                f"retailer key(s) it is logged into: {list(KNOWN_RETAILER_KEYS)}.",
+            ))
+        elif not profile.profile_id:
+            out.append(Result(
+                WARN, name,
+                f"no profile_id, so it is SKIPPED for every retailer it lists ({profile.retailers}) "
+                f"and records nothing. Fix with `python -m scripts.create_profile --label "
+                f"{profile.label}` — adding the entry by hand is not enough.",
+            ))
+        else:
+            out.append(Result(OK, name, f"id set; covers {profile.retailers}"))
+
+    # Coverage, so a config that never reached this host is visible as a NUMBER rather than inferred.
+    usable = [p for p in profiles if p.profile_id]
+    covered = {
+        key: sum(1 for p in usable if key in p.retailers) for key in KNOWN_RETAILER_KEYS
+    }
+    summary = ", ".join(f"{key}={count}" for key, count in covered.items())
+    uncovered = [key for key, count in covered.items() if not count]
+    out.append(Result(
+        WARN if uncovered else OK, "profile coverage",
+        f"usable profiles per retailer: {summary}"
+        + (f" — NOTHING is scraped for {uncovered}" if uncovered else ""),
+    ))
+    return out
+
+
 def run_checks() -> list[Result]:
     results: list[Result] = []
     results += check_deterministic_imports()
     results += check_config_files()
     results += check_env()
     results += check_costco_tokens()
+    results += check_profiles()
     results += check_self_login()
     results += check_money_switches()
     results += check_receipt_capture()
