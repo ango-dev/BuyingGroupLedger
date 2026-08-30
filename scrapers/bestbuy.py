@@ -1,5 +1,7 @@
 import logging
 
+import diagnostics
+
 from alerts.notifier import alert
 from config.settings import settings
 from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
@@ -57,8 +59,8 @@ class BestBuyScraper(BaseRetailerScraper):
             return items
 
     def _scrape_via_api(self):
-        from scrapers.bestbuy_api import BestBuyApiClient
-        from scrapers.bestbuy_mapping import build_order_items
+        from scrapers.bestbuy_api import BestBuyApiClient, BestBuyApiError
+        from scrapers.bestbuy_mapping import PayloadShapeError, build_order_items
 
         # Test/ops hook: force the agent-fallback path (e.g. to validate it) without breaking anything.
         if settings.bestbuy_force_agent:
@@ -71,7 +73,12 @@ class BestBuyScraper(BaseRetailerScraper):
 
         client = BestBuyApiClient(self.profile)
         payloads = client.fetch_order_payloads(since, open_ids, terminal_ids)
-        items = build_order_items(payloads, self.profile.label, known_open_ids=frozenset(open_ids))
+        try:
+            items = build_order_items(payloads, self.profile.label, known_open_ids=frozenset(open_ids))
+        except PayloadShapeError as exc:
+            # The browser is closed by now; attach the payload that failed so the dossier holds it.
+            diagnostics.record_response("ss-api order payload (shape)", 200, exc.payload)
+            raise BestBuyApiError(str(exc)) from exc
         log.info("Best Buy [%s]: built %d ledger row(s) from the ss-api.", self.profile.label, len(items))
         return items
 

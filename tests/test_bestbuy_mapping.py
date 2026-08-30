@@ -131,3 +131,42 @@ def test_every_row_is_well_formed(payloads):
         assert it.order_date and it.order_date[4] == "-"
         assert it.order_url.endswith("/view")
         assert it.retailer == "Best Buy"
+
+
+
+class TestAnUnparseablePayloadIsAShapeChange:
+    """Returning [] for a payload the mapping cannot read looks exactly like 'nothing new' (the
+    silent failure found live on Amazon, 2026-08-29). It must raise instead, carrying the payload."""
+
+    def _first(self, payloads):
+        import copy
+        return copy.deepcopy(payloads[0])
+
+    def test_a_renamed_items_key_raises(self, payloads):
+        from scrapers.bestbuy_mapping import PayloadShapeError
+        p = self._first(payloads)
+        p["order"]["itemsRENAMED"] = p["order"].pop("items")
+        with pytest.raises(PayloadShapeError, match="no `items`") as info:
+            build_order_items([p])
+        assert info.value.payload is p
+
+    def test_a_renamed_fulfillment_groups_key_raises(self, payloads):
+        from scrapers.bestbuy_mapping import PayloadShapeError
+        p = self._first(payloads)
+        p["order"]["groups"] = {"fulfillmentGroupsRENAMED": p["order"]["groups"]["fulfillmentGroups"]}
+        with pytest.raises(PayloadShapeError, match="fulfillmentGroups"):
+            build_order_items([p])
+
+    def test_a_missing_order_object_or_id_raises(self, payloads):
+        from scrapers.bestbuy_mapping import PayloadShapeError
+        with pytest.raises(PayloadShapeError, match="no `order`"):
+            build_order_items([{"data": {}}])
+        p = self._first(payloads)
+        p["order"].pop("userOrderId")
+        with pytest.raises(PayloadShapeError, match="userOrderId"):
+            build_order_items([p])
+
+    def test_an_empty_fulfillment_group_list_is_not_a_shape_change(self, payloads):
+        p = self._first(payloads)
+        p["order"]["groups"]["fulfillmentGroups"] = []
+        assert build_order_items([p]) == []

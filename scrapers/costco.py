@@ -1,4 +1,6 @@
 import logging
+
+import diagnostics
 from datetime import datetime, timedelta, timezone
 
 from alerts.notifier import alert
@@ -10,7 +12,7 @@ from scrapers.base import (
     ScrapeUnavailableError,
 )
 from scrapers import costco_signin
-from scrapers.costco_mapping import ORDER_DETAILS_URL, build_order_items
+from scrapers.costco_mapping import ORDER_DETAILS_URL, PayloadShapeError, build_order_items
 
 log = logging.getLogger(__name__)
 
@@ -240,7 +242,12 @@ class CostcoScraper(BaseRetailerScraper):
         if not order_numbers:
             return []
         details = client.get_order_details(order_numbers)
-        items = build_order_items(details, self.profile.label, known_open_ids=frozenset(open_ids))
+        try:
+            items = build_order_items(details, self.profile.label, known_open_ids=frozenset(open_ids))
+        except PayloadShapeError as exc:
+            from scrapers.costco_api import CostcoApiError
+            diagnostics.record_response("getOrderDetails order (shape)", 200, exc.payload)
+            raise CostcoApiError(str(exc)) from exc
         log.info("Costco [%s]: built %d ledger row(s) from the API.", self.profile.label, len(items))
         return items
 

@@ -54,6 +54,19 @@ RETAILER = "Costco"
 ORDER_DETAILS_URL = "https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/{}"
 
 
+class PayloadShapeError(ValueError):
+    """A payload that parsed as an order but not as one this mapping understands.
+
+    Returning [] here would be indistinguishable from "nothing new" -- the silent failure the
+    dossier exists for. `payload` rides along so the caller can attach
+    the document that failed to the dossier.
+    """
+
+    def __init__(self, message: str, payload=None):
+        super().__init__(message)
+        self.payload = payload
+
+
 def _order_url(order_id: str) -> str:
     return ORDER_DETAILS_URL.format(order_id) if order_id else ""
 
@@ -172,9 +185,18 @@ def build_order_items(
 
 
 def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[OrderItem]:
+    if not isinstance(detail, dict):
+        raise PayloadShapeError("getOrderDetails returned a non-object order -- shape changed?", detail)
     order_id = str(detail.get("orderNumber") or "").strip()
     if not order_id:
-        return []
+        raise PayloadShapeError("getOrderDetails order has no `orderNumber` -- shape changed?", detail)
+    # Every order ships to at least one address and carries at least one line item -- digital,
+    # membership and fee lines included (they are dropped below, but they are PRESENT). A missing
+    # `shipToAddress` or zero lines across all of them can only mean the query's shape moved.
+    if not isinstance(detail.get("shipToAddress"), list):
+        raise PayloadShapeError(f"order {order_id}: no `shipToAddress` list -- shape changed?", detail)
+    if not any((s or {}).get("orderLineItems") for s in detail["shipToAddress"]):
+        raise PayloadShapeError(f"order {order_id}: no `orderLineItems` on any address -- shape changed?", detail)
     order_date = _date(detail.get("orderPlacedDate"))
     card_last4 = _card_last4(detail.get("orderPayment"))
     # Shipping is ORDER-LEVEL, repeated on every shipment row (same value) — matches the Best Buy

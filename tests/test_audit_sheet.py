@@ -74,6 +74,12 @@ def render(cell: Cell, mode: str):
             return f"{cell.value * 100:g}%"
         if cell.fmt == "currency":
             return f"${cell.value:,.2f}"
+        if cell.fmt == "currency0":   # a 0-decimal currency format: destroys cents on display
+            return f"${cell.value:,.0f}"
+        if cell.fmt == "percent0":    # a 0-decimal percent format: 0.0375 shows as 4%
+            return f"{cell.value * 100:.0f}%"
+        if cell.fmt == "hidden":      # a custom format like ;;; that renders the number as nothing
+            return ""
         if cell.fmt == "date":
             d = _SHEETS_EPOCH + __import__("datetime").timedelta(days=int(cell.value))
             return f"{d.month}/{d.day}/{d.year}"
@@ -1157,3 +1163,28 @@ class TestOrderLevelCellsAgree:
             row_cells(3, **{"Order ID": Cell("B2"), "Profile": Cell("profile-bravo")}),
         )
         assert result_for(sheet, "order_level_cells_agree").status == "PASS"
+
+
+class TestDisplayRoundTripsToStored:
+    """The generic §8 invariant: every numeric cell's display text must read back as its stored value."""
+
+    def test_the_default_formats_all_round_trip(self):
+        assert result_for(build(row_cells(2)), "display_round_trips_to_stored").status == "PASS"
+
+    def test_a_zero_decimal_currency_loses_cents(self):
+        sheet = build(row_cells(2, **{"Total Cost": Cell(1300.45, fmt="currency0")}))
+        r = result_for(sheet, "display_round_trips_to_stored")
+        assert r.status == "FAIL" and "loses precision" in r.details[0] and "Total Cost" in r.details[0]
+
+    def test_a_zero_decimal_percent_rounds_the_rate(self):
+        sheet = build(row_cells(2, **{"Cashback Rate": Cell(0.0375, fmt="percent0")}))
+        assert result_for(sheet, "display_round_trips_to_stored").status == "FAIL"
+
+    def test_a_format_that_hides_the_number_is_the_erase_case(self):
+        sheet = build(row_cells(2, **{"Payout Amount": Cell(631.0, fmt="hidden")}))
+        r = result_for(sheet, "display_round_trips_to_stored")
+        assert r.status == "FAIL" and "DISPLAYS BLANK" in r.details[0] and "erase" in r.details[0]
+
+    def test_blank_and_text_cells_are_left_to_other_checks(self):
+        sheet = build(row_cells(2, **{"Insurance": Cell(""), "Shipping": Cell("n/a")}))
+        assert result_for(sheet, "display_round_trips_to_stored").status == "PASS"

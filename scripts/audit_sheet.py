@@ -47,6 +47,7 @@ from sheets.ledger_sync import (
     _INT_FIELDS,
     _NUMERIC_FIELDS,
     _STATUS_RANK,
+    _coerce,
     _cogs_formula,
     _parse_display_number,
     _profit_formula,
@@ -723,6 +724,51 @@ def check_shipment_is_int(sheet: Sheet, opts: Options) -> Result:
     if not offenders:
         return Result("shipment_is_int", "PASS", summary or "no rows")
     return Result("shipment_is_int", "FAIL", summary, _truncate(offenders, opts.max_detail))
+
+
+@check("display_round_trips_to_stored")
+def check_display_round_trips_to_stored(sheet: Sheet, opts: Options) -> Result:
+    """For every numeric cell: does the DISPLAYED text read back as the STORED number?
+
+    The generic form of the §8 invariant, which key_is_format_independent applies only to the four
+    key columns. In the other numeric columns the same disagreement corrupts MONEY instead of
+    identity: sync_csv_to_sheet reads the sheet FORMATTED (get_all_values), and _merge_row writes a
+    preserved cell straight back -- so a 0-dp currency format turns a stored 1300.45 into 1300 on the
+    next re-check, a 0-dp percent turns 0.0375 into 0.04, and a format that renders a number as BLANK
+    is the worst case: blank-new + blank-old and the hand-typed Payout Amount is ERASED. This check
+    is read-only; it names the cells so the FORMAT gets fixed before a run touches them.
+    """
+    offenders, checked = [], 0
+    for field in sorted(_NUMERIC_FIELDS):
+        column = _HEADER_FOR_FIELD.get(field)
+        if column is None or sheet.col(column) is None:
+            continue
+        for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+            stored = sheet.cell(sheet.grids.unformatted, row_number, column)
+            if isinstance(stored, bool) or not isinstance(stored, (int, float)):
+                continue  # blanks and text are other checks' business (numeric_columns_are_numeric)
+            checked += 1
+            shown = str(sheet.cell(sheet.grids.formatted, row_number, column))
+            if shown.strip() == "":
+                offenders.append(f"row {row_number}, {column}: stores {stored!r} but DISPLAYS BLANK -- "
+                                 "a re-check would erase it")
+                continue
+            back = _coerce(field, shown)
+            if not isinstance(back, (int, float)) or isinstance(back, bool):
+                offenders.append(f"row {row_number}, {column}: displays {shown!r}, which does not read "
+                                 f"back as a number (stored {stored!r})")
+            elif abs(float(back) - float(stored)) > 1e-9:
+                offenders.append(f"row {row_number}, {column}: displays {shown!r} -> reads back as "
+                                 f"{back!r}, but stores {stored!r} -- the format loses precision")
+    if not offenders:
+        return Result("display_round_trips_to_stored", "PASS",
+                      f"{checked} numeric cell(s) read back exactly from their display text")
+    return Result(
+        "display_round_trips_to_stored", "FAIL",
+        f"{len(offenders)} numeric cell(s) would be corrupted on the next re-check -- fix the column "
+        "FORMAT (not the values) before a run touches them",
+        _truncate(offenders, opts.max_detail),
+    )
 
 
 @check("shipment_numbers_contiguous")

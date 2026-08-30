@@ -264,3 +264,30 @@ def test_an_unshipped_package_still_lands_in_the_trailing_bucket(details):
     assert len(rows) == 1, "one shipped carton, so one row"
     assert rows[0].shipment == "1"
     assert rows[0].tracking_number == "1Z999TST0000000002"
+
+
+
+class TestAnUnparseableDetailIsAShapeChange:
+    def _first(self, details):
+        import copy
+        return copy.deepcopy(details[0])
+
+    def test_a_renamed_line_items_key_raises(self, details):
+        from scrapers.costco_mapping import PayloadShapeError, build_order_items
+        d = self._first(details)
+        for shipto in d["shipToAddress"]:
+            shipto["orderLineItemsRENAMED"] = shipto.pop("orderLineItems", [])
+        with pytest.raises(PayloadShapeError, match="orderLineItems") as info:
+            build_order_items([d])
+        assert info.value.payload is d
+
+    def test_a_missing_ship_to_list_or_order_number_raises(self, details):
+        from scrapers.costco_mapping import PayloadShapeError, build_order_items
+        d = self._first(details)
+        d.pop("shipToAddress")
+        with pytest.raises(PayloadShapeError, match="shipToAddress"):
+            build_order_items([d])
+        d = self._first(details)
+        d.pop("orderNumber")
+        with pytest.raises(PayloadShapeError, match="orderNumber"):
+            build_order_items([d])

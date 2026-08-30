@@ -37,6 +37,19 @@ ORDER_DETAILS_URL = "https://www.bestbuy.com/profile/ss/orders/order-details/{}/
 _DIGITAL_FULFILLMENT_TYPES = {"email", "download", "digital", "sms", "edelivery"}
 
 
+class PayloadShapeError(ValueError):
+    """A payload that parsed as an order but not as one this mapping understands.
+
+    Returning [] here would be indistinguishable from "nothing new" -- the silent failure the
+    dossier exists for. `payload` rides along so the caller can attach
+    the document that failed to the dossier.
+    """
+
+    def __init__(self, message: str, payload=None):
+        super().__init__(message)
+        self.payload = payload
+
+
 def _order_url(order_id: str) -> str:
     return ORDER_DETAILS_URL.format(order_id) if order_id else ""
 
@@ -156,10 +169,17 @@ def build_order_items(
 def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[OrderItem]:
     order = payload.get("order") if isinstance(payload, dict) else None
     if not isinstance(order, dict):
-        return []
+        raise PayloadShapeError("ss-api payload has no `order` object -- shape changed?", payload)
     order_id = str(order.get("userOrderId") or "").strip()
     if not order_id:
-        return []
+        raise PayloadShapeError("ss-api order has no `userOrderId` -- shape changed?", payload)
+    # An order ALWAYS lists its items and its fulfillment groups -- even a cancelled or digital-only
+    # one. A missing key can only mean the payload's shape moved; an empty `fulfillmentGroups` list
+    # on a just-placed order is left alone (it simply yields no rows yet).
+    if not order.get("items"):
+        raise PayloadShapeError(f"order {order_id}: ss-api payload lists no `items` -- shape changed?", payload)
+    if not isinstance(order.get("groups"), dict) or "fulfillmentGroups" not in order["groups"]:
+        raise PayloadShapeError(f"order {order_id}: ss-api payload has no `groups.fulfillmentGroups` -- shape changed?", payload)
 
     order_date = _date(order.get("created"))
     card_last4 = _card_last4(order.get("payments"))
