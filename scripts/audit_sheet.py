@@ -931,7 +931,13 @@ def check_order_level_cells_agree(sheet: Sheet, opts: Options) -> Result:
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         order_id = str(sheet.cell(sheet.grids.formatted, row_number, "Order ID")).strip()
         seen = by_order.setdefault(order_id, {f: {} for f in fields})
+        status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
         for f in fields:
+            if f == "Order Date" and status == "return":
+                # A return is its own event on the same order; the ledger has no return-date column,
+                # so a return row carries the date it happened in Order Date (the hand-kept sheets
+                # always did). Retailer and Profile must still agree.
+                continue
             value = str(sheet.cell(sheet.grids.formatted, row_number, f)).strip()
             seen[f].setdefault(value, []).append(row_number)
 
@@ -1458,9 +1464,14 @@ def check_payout_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
             offenders.append(f"order {key[0]} package {key[1]}: {detail}")
     if not offenders:
         return Result("payout_is_cost_weighted", "PASS", f"{checked} multi-row package(s) split pro-rata")
+    # WARN, not FAIL: the sync always splits by cost, but a hand-entered or imported package can carry
+    # the group's REAL per-item payouts (MOD paid $74 on a $59.98 Echo Dot beside 1.005x on the
+    # watches in the same box, 2026-08-30), which this cannot tell from a double-booking. The
+    # tell-tale of a double-booking is every row carrying the SAME full amount -- read the ratios.
     return Result(
-        "payout_is_cost_weighted", "FAIL",
-        f"{len(offenders)} package(s) don't split their payout by cost -- the money may be booked twice",
+        "payout_is_cost_weighted", "WARN",
+        f"{len(offenders)} package(s) don't split their payout by cost -- either real per-item payouts "
+        "(hand-entered / imported) or the money booked twice; compare the rows",
         _truncate(offenders, opts.max_detail),
     )
 
@@ -1629,7 +1640,9 @@ def check_cogs_inputs_complete(sheet: Sheet, opts: Options) -> Result:
             card = sheet.cell(grid, row_number, "Card")
             no_rate.append(f"row {row_number}: order {order_id} (card {card!r}) -- COGS counts the "
                            "full cost because no rate resolved")
-        if payout and not cogs:
+        # `cogs is None`, not `not cogs`: a referral bonus or credit has a real $0 cost, so its
+        # COGS is a genuine 0, and 0 income-with-cost-0 is exactly right at year end.
+        if payout and cogs is None:
             no_cogs.append(f"row {row_number}: order {order_id} paid {payout} with no COGS")
         if cogs and not payout:
             if is_deliberately_unrouted(sheet.cell(grid, row_number, "Buying Group")):

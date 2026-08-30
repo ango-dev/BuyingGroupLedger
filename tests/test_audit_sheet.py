@@ -786,7 +786,7 @@ class TestBuyingGroupPayouts:
                             "Total Cost": Cell(600.0), "Payout Amount": Cell(1000.0)})
         b = row_cells(3, **{"Order ID": Cell("O-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1"),
                             "Total Cost": Cell(400.0), "Payout Amount": Cell(1000.0)})
-        assert result_for(build(a, b), "payout_is_cost_weighted").status == "FAIL"
+        assert result_for(build(a, b), "payout_is_cost_weighted").status == "WARN"  # WARN since 2026-08-30: a real per-item payout looks the same by ratio
 
     def test_a_correctly_split_payout_passes(self):
         a = row_cells(2, **{"Order ID": Cell("O-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1"),
@@ -1304,3 +1304,40 @@ class TestStateVisibility:
     def test_no_scopes_at_all_is_a_skip_not_every_row_invisible(self, monkeypatch):
         self._scopes(monkeypatch, [])
         assert result_for(build(row_cells(2)), "state_visibility").status == "SKIP"
+
+
+
+class TestImportedShapesAreNotFailures:
+    """Three findings from the first real import (2026-08-30) that were audit bugs, not data bugs."""
+
+    def test_a_zero_cost_bonus_with_a_payout_has_cogs_zero_not_missing(self):
+        sheet = build(row_cells(2, **{"Status": Cell("paid"), "Cost Per Item": Cell(0.0), "Total Cost": Cell(0.0),
+                                     "COGS": Cell(0.0, fmt="currency", formula=_cogs_formula(2)),
+                                     "Payout Amount": Cell(250.0, fmt="currency"), "Payout Date": Cell("2026-03-19")}))
+        r = result_for(sheet, "cogs_inputs_complete")
+        assert "with no COGS" not in " ".join(r.details)
+
+    def test_a_return_row_may_carry_its_own_date(self):
+        sheet = build(
+            row_cells(2, **{"Order ID": Cell("A"), "Order Date": Cell("2026-06-04"), "Status": Cell("paid")}),
+            row_cells(3, **{"Order ID": Cell("A"), "Order Date": Cell("2026-06-05"), "Status": Cell("return"),
+                            "Tracking Number": Cell("1Z999AA00000002")}),
+        )
+        assert result_for(sheet, "order_level_cells_agree").status == "PASS"
+
+    def test_a_return_row_must_still_agree_on_retailer(self):
+        sheet = build(
+            row_cells(2, **{"Order ID": Cell("A"), "Status": Cell("paid")}),
+            row_cells(3, **{"Order ID": Cell("A"), "Status": Cell("return"), "Retailer": Cell("Amazon"),
+                            "Tracking Number": Cell("1Z999AA00000002")}),
+        )
+        assert result_for(sheet, "order_level_cells_agree").status == "FAIL"
+
+    def test_an_uneven_package_split_is_a_warning_to_read_not_a_failure(self):
+        sheet = build(
+            row_cells(2, **{"Order ID": Cell("A"), "Tracking Number": Cell("T"), "Total Cost": Cell(59.98),
+                            "Payout Amount": Cell(74.0, fmt="currency")}),
+            row_cells(3, **{"Order ID": Cell("A"), "Tracking Number": Cell("T"), "Total Cost": Cell(597.0),
+                            "Payout Amount": Cell(600.0, fmt="currency"), "Item Name": Cell("Watch")}),
+        )
+        assert result_for(sheet, "payout_is_cost_weighted").status == "WARN"
