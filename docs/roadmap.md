@@ -14,8 +14,6 @@ _Part of the [Buying Group Ledger](../README.md) docs._
 - **Event-driven re-checks from retailer emails.** Ingest Amazon / Best Buy shipped + delivered +
   order-update emails (Gmail API or IMAP) to trigger a targeted re-check of just that order, instead of
   or alongside the multi-hour poll. Faster status, fewer wasted runs.
-- **More retailers: Walmart.** The four current ones each took a network capture first to decide
-  whether the path was JSON or HTML; Walmart would follow the same decision gate.
 
 **Built and live-validated; still accumulating evidence**
 
