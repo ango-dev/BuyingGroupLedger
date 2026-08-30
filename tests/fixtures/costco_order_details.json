@@ -7,7 +7,18 @@
     "orderPayment": [
       {
         "paymentType": "Visa",
-        "cardNumber": "1111"
+        "cardNumber": "1111",
+        "totalCharged": 659.99
+      },
+      {
+        "paymentType": "Wallet Shop Card",
+        "cardNumber": "",
+        "totalCharged": 40.0
+      },
+      {
+        "paymentType": "Coupon",
+        "cardNumber": "49999999999902",
+        "totalCharged": 150.0
       }
     ],
     "shipToAddress": [
@@ -63,11 +74,13 @@
     "orderPayment": [
       {
         "paymentType": "Visa",
-        "cardNumber": "1111"
+        "cardNumber": "1111",
+        "totalCharged": 699.99
       },
       {
         "paymentType": "Coupon",
-        "cardNumber": "49999999999902"
+        "cardNumber": "49999999999902",
+        "totalCharged": 0.0
       }
     ],
     "shipToAddress": [

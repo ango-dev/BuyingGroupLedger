@@ -57,6 +57,24 @@ def test_single_shipment_delivered_order(details):
     assert row.order_url == "https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/1399000006"
 
 
+def test_shop_card_tender_is_the_gift_card_and_coupons_do_not_count(details):
+    """Order 1399000006's tenders are Visa 659.99 + Wallet Shop Card 40.00 + Coupon 150.00 (the
+    live-probed 1399000013 shape; `totalCharged` is the only valid amount field). The Shop Card is
+    the order-level Gift Card; the Coupon must NOT count — Costco books a promo both as a Coupon
+    tender AND as the line `discountAmount` already netted into cost_per_item, so counting it here
+    would net the same money twice. Sales tax stays blank: the schema exposes no tax amount."""
+    row = _rows_for(build_order_items(details, "p"), "1399000006")[0]
+    assert row.gift_card == 40.0
+    assert row.sales_tax is None
+    assert row.cost_per_item == 699.99  # untouched by the shop card
+
+
+def test_no_shop_card_tender_means_blank_not_zero(details):
+    for order in ("1399000004", "1399000005"):
+        for row in _rows_for(build_order_items(details, "p"), order):
+            assert row.gift_card is None, order
+
+
 def test_order_url_is_populated_on_every_row(details):
     """The Order Link column should carry Costco's order-details deep link on every row, derived from
     the order number alone (no extra GraphQL field)."""

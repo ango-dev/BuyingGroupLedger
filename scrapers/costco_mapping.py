@@ -133,6 +133,33 @@ def _card_last4(payments: list) -> str:
     return ""
 
 
+def _gift_card_total(payments: list) -> float | None:
+    """What the order's Costco Shop Card tenders paid, summed; None when no shop-card tender.
+
+    Field names live-probed 2026-08-30 against order 1399000013 (introspection is disabled, so each
+    candidate cost one read — see scripts/costco_order_probe.py): `totalCharged` is the ONLY valid
+    amount field on `orderPayment` (25+ candidates rejected), and the Wallet Shop Card tender showed
+    exactly the $40 the card paid. COUPON TENDERS ARE EXCLUDED on purpose: Costco books a promo both
+    as a Coupon tender AND as the line-level `discountAmount` this mapping already nets into
+    cost_per_item — verified to the cent on that order (coupons 1800.10 == discounts 1800.10) — so
+    counting them here would net the same money twice. The same probe found NO tax amount anywhere
+    in the schema (order / shipTo / line level all rejected), which is why this mapping emits
+    sales_tax blank: gross − discounts + shipping reconciled to the card+shop-card tenders exactly,
+    so Costco charged no tax on the probed order and the API simply doesn't expose a tax field.
+
+    None, not 0, when no shop-card tender exists — a hard 0 would overwrite a hand-typed figure
+    through the merge.
+    """
+    amounts = []
+    for payment in payments or []:
+        ptype = (payment.get("paymentType") or "").strip().lower()
+        if "shop card" in ptype or "gift" in ptype:
+            amount = _num(payment.get("totalCharged"))
+            if amount is not None:
+                amounts.append(amount)
+    return round(sum(amounts), 2) if amounts else None
+
+
 def _format_address(shipto: dict) -> str:
     name = " ".join(
         p.strip() for p in (shipto.get("firstName"), shipto.get("lastName")) if p and p.strip()
@@ -202,6 +229,9 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
     # Shipping is ORDER-LEVEL, repeated on every shipment row (same value) — matches the Best Buy
     # mapping and the agent path, so the API and agent writers agree on this field.
     shipping_total = _num(detail.get("shippingAndHandling"))
+    # Gift card (a Shop Card tender) rides the same order-level contract; the COGS formula subtracts
+    # it. Sales tax is NOT emitted — the schema exposes no tax amount (see _gift_card_total).
+    gift_card_total = _gift_card_total(detail.get("orderPayment"))
 
     # Group physical lines by SKU (itemNumber), preserving first-seen order for stable numbering.
     groups: dict[str, dict] = {}
@@ -302,7 +332,7 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
         for key in order_keys
         for row in _rows_for_group(
             groups[key], order_id, order_date, card_last4, profile_label,
-            shipment_number, unshipped_shipment, shipping_total,
+            shipment_number, unshipped_shipment, shipping_total, gift_card_total,
         )
     ]
 
@@ -315,7 +345,7 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
 
 def _rows_for_group(
     group, order_id, order_date, card_last4, profile_label, shipment_number, unshipped_shipment,
-    shipping_total,
+    shipping_total, gift_card_total=None,
 ) -> list[OrderItem]:
     name = group["description"]
     if group["item_number"]:
@@ -339,6 +369,7 @@ def _rows_for_group(
                 quantity=group["quantity"] or None,
                 cost_per_item=unit_price,
                 shipping=shipping_total,
+                gift_card=gift_card_total,
                 card_last4=card_last4,
                 shipment=shipment_label(unshipped_shipment),
             )
@@ -365,6 +396,7 @@ def _rows_for_group(
                 cost_per_item=unit_price,
                 # Order-level shipping, repeated on every shipment row (matches the agent + Best Buy).
                 shipping=shipping_total,
+                gift_card=gift_card_total,
                 card_last4=card_last4,
                 shipment=shipment_label(shipment_number[package["package_key"]]),
             )

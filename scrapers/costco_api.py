@@ -117,6 +117,7 @@ query getOrderDetails($orderNumbers: [String]) {
         orderPayment {
             paymentType
             cardNumber
+            totalCharged
         }
         shipToAddress: orderShipTos {
             firstName
