@@ -57,7 +57,10 @@ listing **off**, far-future expiry, and paste its URL as given (ending `/o/failu
 `receipts.oci.failures_par_url_prefix` (`OCI_FAILURES_PAR_URL_PREFIX`). Blank = dossiers are not
 uploaded and preflight says so. Two PARs means the two can be revoked independently and the receipt
 PAR stays scoped to receipts. Same PII class as receipts, same rules — private bucket, no listing,
-and **a 30-day lifecycle rule on the `failures/` prefix** so it does not accumulate.
+and **a 30-day lifecycle rule on the `failures/` prefix** so it does not accumulate. The bucket is
+**versioned**, which needs two things: a second rule that deletes *previous object versions* under
+`failures/` (a plain Delete only demotes the current version), and an uploader that never rewrites a
+key — so a dossier uploads once and any key that already exists is linked, not re-put.
 `DOSSIER_UPLOAD_ENABLED=false` turns it off (do that if an alert channel is shared with people who
 should not see order pages). The upload is best-effort: if storage fails, the alert falls back to
 the local path.

@@ -313,6 +313,9 @@ class TestDossierUpload:
         def is_configured(self):
             return True
 
+        def exists(self, key):
+            return key in {k for k, _, _ in self.puts} or key in getattr(self, "preexisting", set())
+
         def put(self, key, body, ext):
             if self.fail:
                 raise RuntimeError("bucket unreachable")
@@ -333,6 +336,7 @@ class TestDossierUpload:
             real_store.settings, dossier_upload_enabled=enabled,
             oci_failures_par_url_prefix="https://par-f/o/failures/"))
         monkeypatch.setattr(real_store, "is_configured", store.is_configured)
+        monkeypatch.setattr(real_store, "exists", store.exists)
         monkeypatch.setattr(real_store, "put", store.put)
 
     def test_pages_go_first_and_the_report_links_to_them(self, tmp_path, monkeypatch):
@@ -351,6 +355,24 @@ class TestDossierUpload:
         assert "## Hosted copies" in report and f"https://par-f/o/failures/{d.path.name}/page_1.html" in report
         assert "par-receipts" not in report
         assert [e for _, _, e in store.puts if e == ".md"] == [".md"]
+
+    def test_the_bucket_is_versioned_so_no_key_is_ever_written_twice(self, tmp_path, monkeypatch):
+        store = self._Store()
+        self._wire(monkeypatch, store)
+        d = self._written(tmp_path)
+        first = d.upload()
+        n = len(store.puts)
+        assert d.upload() == first and len(store.puts) == n, "a second call must not re-upload"
+
+        # A key that already exists in the bucket (say, a retried run) is linked, never rewritten.
+        store2 = self._Store()
+        store2.preexisting = {f"failures/{d.path.name}/page_1.html", f"failures/{d.path.name}/report.md"}
+        self._wire(monkeypatch, store2)
+        d.upload_link = ""
+        link = d.upload()
+        assert link.endswith("/report.md")
+        assert not any(k.endswith("/page_1.html") or k.endswith("/report.md") for k, _, _ in store2.puts)
+        assert any(k.endswith("/page_1.png") for k, _, _ in store2.puts)
 
     def test_disabled_or_unconfigured_uploads_nothing(self, tmp_path, monkeypatch):
         store = self._Store()

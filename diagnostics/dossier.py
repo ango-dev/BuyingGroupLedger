@@ -118,6 +118,7 @@ class FailureDossier:
         self.responses: list[dict] = []
         self._dir: Path | None = None
         self.path: Path | None = None                    # set once write() has run
+        self.upload_link: str = ""
 
     # --- collection -------------------------------------------------------------------------------
     @staticmethod
@@ -253,6 +254,8 @@ class FailureDossier:
         if (not settings.dossier_upload_enabled or not store.is_configured()
                 or not settings.oci_failures_par_url_prefix):
             return ""
+        if self.upload_link:
+            return self.upload_link  # already uploaded this run; never write a key twice
         directory = self.path or self._dir_path()
         prefix = f"{self.UPLOAD_PREFIX}/{directory.name}"
         try:
@@ -261,7 +264,10 @@ class FailureDossier:
                 if file.name == "report.md" or not file.is_file():
                     continue
                 key = f"{prefix}/{file.name}"
-                if store.put(key, file.read_bytes(), file.suffix):
+                # THE BUCKET IS VERSIONED. Overwriting a key makes a new version, and the lifecycle
+                # rule that expires `failures/` would then leave the old version behind forever.
+                # A key is written at most once; an existing one is linked, never rewritten.
+                if store.exists(key) or store.put(key, file.read_bytes(), file.suffix):
                     hosted.append((file.name, store.failure_link_for(key)))
             report = directory / "report.md"
             text = report.read_text(encoding="utf-8") if report.exists() else self.render()
@@ -269,9 +275,11 @@ class FailureDossier:
                 text += "\n## Hosted copies\n\n" + "".join(f"- `{n}`: {l}\n" for n, l in hosted)
                 report.write_text(text, encoding="utf-8")
             key = f"{prefix}/report.md"
-            link = store.failure_link_for(key) if store.put(key, text.encode("utf-8"), ".md") else ""
+            written = store.exists(key) or store.put(key, text.encode("utf-8"), ".md")
+            link = store.failure_link_for(key) if written else ""
             if link:
                 log.info("Uploaded failure dossier to %s", link)
+            self.upload_link = link
             return link
         except Exception:  # noqa: BLE001 — never let the upload become the failure
             log.warning("Failure dossier upload failed; the local copy at %s stands.", directory,
