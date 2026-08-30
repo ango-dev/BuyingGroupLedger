@@ -37,6 +37,11 @@ def send_discord(message: str) -> None:
 
 def alert(subject: str, message: str) -> None:
     """Fire both alert channels independently so one failing doesn't suppress the other."""
+    # The BODY goes to the log too, not just the subject: it carries the failure dossier links and
+    # the classified sign-in verdicts, and an alert that never arrived (email down, webhook
+    # rotated) would otherwise leave no local record of either. run.log is where a reader looks.
+    log.info("ALERT: %s
+%s", subject, message)
     try:
         send_email(subject, message)
     except Exception:
