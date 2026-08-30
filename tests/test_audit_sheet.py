@@ -1279,17 +1279,23 @@ class TestStateVisibility:
         assert r.status == "PASS"
         assert "profile-alpha/Best Buy: 1 terminal, 1 open (1 need a re-read)" in r.summary
 
-    def test_a_row_no_configured_run_can_see_fails(self, monkeypatch):
+    def test_an_open_row_no_configured_run_can_see_fails(self, monkeypatch):
         self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
-        sheet = build(row_cells(2, Profile=Cell("profile-bravo")))  # a Best Buy row under an unconfigured profile
+        sheet = build(row_cells(2, Profile=Cell("profile-bravo"), Status=Cell("shipped")))
         r = result_for(sheet, "state_visibility")
-        assert r.status == "FAIL" and "row 2: Profile 'profile-bravo' / Retailer 'Best Buy'" in r.details[0]
+        assert r.status == "FAIL" and "row 2: Profile 'profile-bravo' / Retailer 'Best Buy' [shipped]" in r.details[0]
+
+    def test_a_terminal_row_outside_every_run_is_only_info(self, monkeypatch):
+        """An imported delivered/paid order never needs a run again -- it must not fail the audit."""
+        self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
+        sheet = build(row_cells(2, Profile=Cell("profile-bravo"), Status=Cell("paid")))
+        assert result_for(sheet, "state_visibility").status == "INFO"
 
     def test_a_hand_entered_retailer_is_info_not_fail(self, monkeypatch):
         self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
         sheet = build(row_cells(2), row_cells(3, Retailer=Cell("Newegg"), Profile=Cell("")))
         r = result_for(sheet, "state_visibility")
-        assert r.status == "INFO" and "1 hand-entered row(s)" in r.summary
+        assert r.status == "INFO" and "1 terminal / hand-entered row(s)" in r.summary
 
     def test_no_config_is_a_skip(self, monkeypatch):
         monkeypatch.setattr(audit_sheet, "_configured_scopes", lambda: (_ for _ in ()).throw(FileNotFoundError("config.json")))

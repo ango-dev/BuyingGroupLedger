@@ -894,8 +894,15 @@ def check_state_visibility(sheet: Sheet, opts: Options) -> Result:
         retailer = str(sheet.cell(grid, row_number, "Retailer")).strip()
         if (profile, retailer) in configured:
             continue
-        where = f"row {row_number}: Profile {profile!r} / Retailer {retailer!r}"
-        (invisible if retailer in scraped else hand_entered).append(where)
+        status = str(sheet.cell(grid, row_number, "Status")).strip().lower()
+        where = f"row {row_number}: Profile {profile!r} / Retailer {retailer!r} [{status}]"
+        # A TERMINAL row never needs a run again -- an imported delivered/paid order under a
+        # profile that does not scrape that retailer is fine (INFO). An OPEN one is the finding:
+        # nothing will ever re-check or close it.
+        if retailer in scraped and status not in TERMINAL_STATUSES:
+            invisible.append(where)
+        else:
+            hand_entered.append(where)
 
     summary = " | ".join(lines) if lines else "no configured profile x retailer"
     if invisible:
@@ -904,7 +911,7 @@ def check_state_visibility(sheet: Sheet, opts: Options) -> Result:
                       "re-checked or closed", _truncate(invisible + [f"scopes: {summary}"], opts.max_detail))
     if hand_entered:
         return Result("state_visibility", "INFO",
-                      f"{summary}; {len(hand_entered)} hand-entered row(s) no scraper covers",
+                      f"{summary}; {len(hand_entered)} terminal / hand-entered row(s) outside every configured run",
                       _truncate(hand_entered, opts.max_detail))
     return Result("state_visibility", "PASS", summary)
 

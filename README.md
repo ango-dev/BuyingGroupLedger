@@ -39,7 +39,7 @@ This page is the overview. Each topic has its own page under [`docs/`](docs/):
 | [Buying groups](docs/buying-groups.md) | Posting tracking to BFMR and MaxOutDeals, insurance filing, payouts and `paid`/`return` |
 | [Receipt capture](docs/receipts.md) | Proof of purchase rendered to PDF in your own OCI bucket |
 | [Diagnostics](docs/diagnostics.md) | Failure dossiers, preflight, the read-only sheet audit, the offline tests |
-| [Importing history](docs/importing-history.md) | Pasting finished orders by hand, and what the audit will and won't catch |
+| [Importing history](docs/importing-history.md) | `import_history.py` (reconciles the source's profit column before writing), and pasting by hand |
 | [Operations](docs/operations.md) | Cron / Task Scheduler, Docker, moving hosts — with [DEPLOY.md](DEPLOY.md) as the server runbook |
 | [Roadmap](docs/roadmap.md) | What's next, what's built but still accumulating evidence |
 
@@ -158,6 +158,7 @@ receipts/               receipt URL/key rules, OCI store (S3 compat), capture or
 scripts/preflight.py    offline check for silent misconfiguration
 scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
 scripts/tax_report.py   read-only cash-basis tax report for one year (two dates: payout vs order)
+scripts/import_history.py  import a foreign spreadsheet of finished orders; reconciles its profit column (dry-run default)
 scripts/                create_profile, costco_token, sort_ledger, reorder_sheet, apply_sheet_formats,
                         backfill_receipts, receipt_verify, receipt_probe, bg_probe, install_cron, ...
 tests/                  offline pytest suite (no credentials/network needed)

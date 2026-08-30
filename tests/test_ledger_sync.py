@@ -1830,3 +1830,68 @@ class TestClassifyOrderStateIsPure:
         state = ls.load_order_state("p1", retailer="Amazon")
         assert seen == {"rows": 2, "profile": "p1", "retailer": "Amazon"}
         assert state["open_orders"] == [] or state["open_orders"][0]["order_id"] == "A1"
+
+
+
+class TestPreservedCellsComeFromStoredValues:
+    """the design notes item 24: a display format must not corrupt a preserved cell on re-check."""
+
+    @staticmethod
+    def _incoming(tmp_path, **extra):
+        return write_csv_file(tmp_path, {"order_id": "A1", "order_date": "2026-08-08", "item_name": "W",
+                                         "shipment": "1", "status": "delivered", "profile_label": "p1",
+                                         "retailer": "Best Buy", "tracking_number": "1Z1", **extra})
+
+    @staticmethod
+    def _lossy(sheet, monkeypatch, shown_row):
+        """The FORMATTED read shows `shown_row` for row 2 while the stored values stay in sheet.rows."""
+        real = sheet.get_all_values
+        monkeypatch.setattr(sheet, "get_all_values", lambda: [real()[0], shown_row] + real()[2:])
+
+    def test_a_hidden_payout_is_kept_not_erased(self, sheet, monkeypatch, tmp_path):
+        stored = row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
+                     status="delivered", tracking_number="1Z1", profile_label="p1")
+        stored[FIELDNAMES.index("payout_amount")] = 631.0
+        sheet.rows = [list(HEADER), stored]
+        shown = [str(c) for c in stored]
+        shown[FIELDNAMES.index("payout_amount")] = ""   # a ;;; number format renders nothing
+        self._lossy(sheet, monkeypatch, shown)
+
+        sync_csv_to_sheet(self._incoming(tmp_path))
+
+        assert sheet.rows[1][FIELDNAMES.index("payout_amount")] == 631.0
+
+    def test_a_zero_decimal_display_keeps_the_cents(self, sheet, monkeypatch, tmp_path):
+        stored = row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
+                     status="delivered", tracking_number="1Z1", profile_label="p1", quantity="1")
+        stored[FIELDNAMES.index("cost_per_item")] = 1300.45
+        stored[FIELDNAMES.index("total_cost")] = 1300.45
+        sheet.rows = [list(HEADER), stored]
+        shown = [str(c) for c in stored]
+        shown[FIELDNAMES.index("cost_per_item")] = "$1,300"
+        shown[FIELDNAMES.index("total_cost")] = "$1,300"
+        self._lossy(sheet, monkeypatch, shown)
+
+        sync_csv_to_sheet(self._incoming(tmp_path))
+
+        assert sheet.rows[1][FIELDNAMES.index("cost_per_item")] == 1300.45
+
+    def test_a_number_stored_as_text_is_left_as_the_display_shows_it(self, sheet, monkeypatch, tmp_path):
+        stored = row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
+                     status="delivered", tracking_number="1Z1", profile_label="p1", payout_amount="$12.50")
+        sheet.rows = [list(HEADER), stored]
+
+        sync_csv_to_sheet(self._incoming(tmp_path))
+
+        assert sheet.rows[1][FIELDNAMES.index("payout_amount")] == 12.5   # _coerce parsed the text, as before
+
+    def test_a_failed_unformatted_read_falls_back_quietly(self, sheet, monkeypatch, tmp_path):
+        monkeypatch.setattr(sheet, "get_values", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("503")))
+        stored = row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
+                     status="shipped", tracking_number="1Z1", profile_label="p1", payout_amount="12.5")
+        sheet.rows = [list(HEADER), stored]
+
+        sync_csv_to_sheet(self._incoming(tmp_path))
+
+        assert sheet.rows[1][FIELDNAMES.index("payout_amount")] == 12.5
+        assert sheet.rows[1][FIELDNAMES.index("status")] == "delivered"

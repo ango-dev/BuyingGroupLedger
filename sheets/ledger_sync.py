@@ -399,6 +399,17 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     # tracking sort, the agent numbers top-to-bottom).
     tracking_hdr_idx = header.index("Tracking Number") if "Tracking Number" in header else None
 
+    # THE PRESERVED CELLS MUST COME FROM THE UNFORMATTED READ. `existing` is the FORMATTED grid --
+    # what a human sees -- and it is the right thing to build the upsert key from (that key must be
+    # display-stable). But _merge_row also carries a matched row's UNTOUCHED cells forward from it,
+    # and a display format can lose information on the way: a 0-decimal currency shows 1300.45 as
+    # "1300", a 0-decimal percent shows 0.0375 as "4%", and a custom format that renders a number as
+    # nothing turns a hand-typed Payout Amount into "" -- which the next re-check then writes back,
+    # erasing it. So numeric and checkbox cells are preserved from the stored VALUES instead; text
+    # and date columns keep coming from the formatted grid (Order Date is in the key). Best-effort:
+    # if the second read fails, preserved cells fall back to the formatted text, as before.
+    raw_grid = _read_unformatted(worksheet)
+
     key_to_existing: dict[tuple, tuple[int, list]] = {}
     shipment_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     tracking_to_existing: dict[tuple, list[tuple[int, list]]] = {}
@@ -601,7 +612,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                     })
                     continue  # leave the existing box's row untouched
 
-        merged = _merge_row(existing_row, sheet_row)
+        merged = _merge_row(_preserve_from_stored(existing_row, raw_grid, row_number), sheet_row)
         # Preserved cells come back as strings from get_all_values(); re-coerce so a kept numeric
         # (e.g. a quantity carried over from a prior run) is written as a number, not text —
         # otherwise Sheets stores it as text and shows a leading-apostrophe '1.
@@ -1075,6 +1086,44 @@ def _blank_to_none(row: list) -> list:
     If that invariant ever changes, this must change with it.
     """
     return [None if (v is None or (isinstance(v, str) and v.strip() == "")) else v for v in row]
+
+
+def _read_unformatted(worksheet) -> list[list]:
+    """The sheet's stored VALUES (real types), or [] if that read is unavailable."""
+    try:
+        from gspread.utils import ValueRenderOption
+        option = ValueRenderOption.unformatted
+    except Exception:  # noqa: BLE001 -- an older gspread: the string form is what the API takes
+        option = "UNFORMATTED_VALUE"
+    try:
+        return worksheet.get_values(value_render_option=option) or []
+    except Exception:  # noqa: BLE001 -- never let a second read stop the sync
+        log.warning("Could not read the sheet unformatted; preserved cells will use display text.",
+                    exc_info=True)
+        return []
+
+
+def _preserve_from_stored(existing_row: list, raw_grid: list[list], row_number: int) -> list:
+    """existing_row (formatted text) with its numeric / checkbox cells swapped for the STORED values.
+
+    Only cells whose stored value is a real number or bool are swapped -- a number stored as text
+    stays text (numeric_columns_are_numeric owns that), and every non-numeric column keeps its
+    formatted text. A missing or short raw row (the read failed, or the API trimmed trailing
+    blanks) leaves the formatted cell in place, so this can only ever add fidelity, never remove it.
+    """
+    if not raw_grid or row_number - 1 >= len(raw_grid):
+        return existing_row
+    raw_row = raw_grid[row_number - 1]
+    out = list(existing_row)
+    for i, field in enumerate(FIELDNAMES):
+        if i >= len(raw_row) or i >= len(out):
+            break
+        raw = raw_row[i]
+        if field in _BOOL_FIELDS and isinstance(raw, bool):
+            out[i] = raw
+        elif field in _NUMERIC_FIELDS and isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            out[i] = raw
+    return out
 
 
 def _merge_row(existing_row: list, new_row: list) -> list:

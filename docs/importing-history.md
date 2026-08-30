@@ -13,6 +13,32 @@ Pasting finished orders straight into the sheet, and what the audit will and won
 > fight you over them.
 
 
+## Importing a spreadsheet with `scripts/import_history.py`
+
+For more than a handful of rows, use the importer instead of pasting. It is **dry-run by default**:
+
+```bash
+python -m scripts.import_history old.csv --rate-add "SUB Rate:SUB" --profile profile-alpha
+python -m scripts.import_history old.csv --apply
+```
+
+It maps the source headers onto the ledger's columns (aliases plus `--map "Src=Target"`), converts
+dates to ISO (refusing a file whose day/month order it cannot prove — `--date-format mdy|dmy`),
+derives Cost Per Item, splits a cell holding several tracking numbers into one row per box, numbers
+shipments per order, reads placeholders such as `Please fill` / `#VALUE!` as blank, and then does the
+one thing pasting cannot: **it recomputes every source row's own profit figure from the mapped
+inputs and refuses the import if any row disagrees by more than a cent.** That is what proves a
+rate mapping (a sign-up-bonus rate that only applies when a flag column is TRUE, hence `--rate-add
+COL:FLAG`) and an insurance sign before a cell is written. It then previews against the live sheet —
+update vs append, orders the scrapers already recorded under other item names (skipped; the scraped
+rows are authoritative), tracking numbers already held under another order — and writes a
+normalised CSV under `data/`. Rows that are not terminal are refused (`--allow-open`); rows with no
+cost are skipped so a later scrape can still fill that order (`--keep-no-cost`); rows with no
+tracking number are accepted with a warning; rows with no order number get a synthetic one
+(`BFMR-IMPORT-<date>`) so a referral bonus still reaches the tax report. `--apply` writes through
+the same upsert every scrape uses and re-sorts; bracket it with `audit_sheet --save-snapshot` /
+`--compare --strict`.
+
 ## Bulk-importing history by hand
 
 Pasting a batch of finished orders straight into the sheet is fine, and in one way safer than routing
