@@ -48,8 +48,9 @@ names and addresses. They live under `logs/` (gitignored) and keep the newest 40
 **The alert carries a link, not just a path.** When the receipt bucket is configured, each dossier is
 also uploaded under `failures/<retailer>_<profile>_<timestamp>/` in the same bucket — pages and
 responses first, then `report.md` with a "Hosted copies" section linking to them — and the alert
-reads `Failure dossier: <link to report.md>` with the local path underneath. One paste hands a
-coding agent the report, and the report hands it the page.
+reads `Failure dossier: <link to report.md>`, then one line per hosted file (`page_1.html`,
+`page_1.png`, `response_1.txt`), then the local path — Object Storage has no folder page to link,
+so the alert itself is the folder. One paste hands a coding agent everything.
 
 The links use **their own PAR**, separate from the receipts one: in the OCI console create a
 Pre-Authenticated Request with Target **Objects with prefix** `failures/`, **Permit object reads**,

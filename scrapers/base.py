@@ -126,7 +126,10 @@ class BaseRetailerScraper(abc.ABC):
             return "\n\n(The failure dossier could not be written; see logs/run.log.)"
         link = dossier.upload()
         if link:
-            return f"\n\nFailure dossier: {link}\n(local copy: {path})"
+            # Every hosted file, not just the report: the reader wants the page HTML and the
+            # screenshot in hand from the alert alone. (Object Storage has no folder page to link.)
+            files = "".join(f"\n  {name}: {url}" for name, url in dossier.hosted)
+            return f"\n\nFailure dossier: {link}{files}\n(local copy: {path})"
         return f"\n\nFailure dossier: {path}"
 
     def _on_deterministic_failure(self, exc: Exception, dossier, *, force_agent: bool = False,

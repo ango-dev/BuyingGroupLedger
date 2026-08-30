@@ -119,6 +119,7 @@ class FailureDossier:
         self._dir: Path | None = None
         self.path: Path | None = None                    # set once write() has run
         self.upload_link: str = ""
+        self.hosted: list[tuple[str, str]] = []  # (file name, link) for every uploaded file
 
     # --- collection -------------------------------------------------------------------------------
     @staticmethod
@@ -280,6 +281,7 @@ class FailureDossier:
             if link:
                 log.info("Uploaded failure dossier to %s", link)
             self.upload_link = link
+            self.hosted = hosted
             return link
         except Exception:  # noqa: BLE001 — never let the upload become the failure
             log.warning("Failure dossier upload failed; the local copy at %s stands.", directory,

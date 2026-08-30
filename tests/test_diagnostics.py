@@ -402,6 +402,16 @@ class TestDossierUpload:
         assert line.startswith("\n\nFailure dossier: https://par-f/o/failures/")
         assert "(local copy:" in line
 
+    def test_the_alert_line_lists_every_hosted_file(self, tmp_path, monkeypatch):
+        from scrapers.base import BaseRetailerScraper
+        self._wire(monkeypatch, self._Store())
+        d = self._written(tmp_path)
+        line = BaseRetailerScraper._dossier_line(d, RuntimeError("x"))
+        assert f"\n  page_1.html: https://par-f/o/failures/{d.path.name}/page_1.html" in line
+        assert f"\n  page_1.png: https://par-f/o/failures/{d.path.name}/page_1.png" in line
+        assert f"\n  response_1.txt: https://par-f/o/failures/{d.path.name}/response_1.txt" in line
+        assert line.rstrip().endswith(f"(local copy: {d.path})")
+
     def test_the_alert_line_falls_back_to_the_path(self, tmp_path, monkeypatch):
         from scrapers.base import BaseRetailerScraper
         self._wire(monkeypatch, self._Store(fail=True))
