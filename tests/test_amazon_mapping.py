@@ -48,7 +48,7 @@ def _shipment(order_id: str, index: int, status_text: str, items: list[str],
 
 def _details(order_id: str, order_date: str, shipments: list[str], card: str = "1234",
              shipping: str = "$0.00", address: str = "Test Buyer\n123 Main St\nSampletown, CA 90000",
-             earn: str = "", gift_card: str = "", subtotal: str = "") -> str:
+             earn: str = "", gift_card: str = "", subtotal: str = "", tax: str = "$0.00") -> str:
     # Amazon prints the paying card's earn line under the payment method, in its own pmts-* <li>.
     earn_html = (
         '<ul class="pmts-payments-instrument-list">'
@@ -57,6 +57,9 @@ def _details(order_id: str, order_date: str, shipments: list[str], card: str = "
     ) if earn else ""
     # The "Gift Card Amount" line only renders when a gift card actually paid part of the order.
     gift_html = f"Gift Card Amount: -{gift_card}\n" if gift_card else ""
+    # The tax line renders on every real summary (usually $0.00); pass tax="" to model a summary
+    # that failed to parse it, which must come back None rather than a hard 0.
+    tax_html = f"Estimated tax to be collected: {tax}\n" if tax else ""
     # Real pages always carry a subtotal; tests that don't care omit it so the reconciliation guard
     # (which only fires when the cards are worth MORE than the order) stays out of the way.
     subtotal_line = f"Item(s) Subtotal: {subtotal}\n" if subtotal else ""
@@ -67,7 +70,7 @@ def _details(order_id: str, order_date: str, shipments: list[str], card: str = "
         f'<div data-component="shippingAddress">{address}</div>'
         f'<div>Payment method Visa ending in {card}{earn_html}</div>'
         f'<div data-component="orderSummary">{subtotal_line}Shipping &amp; Handling: {shipping}\n'
-        f"{gift_html}Grand Total: $10.00</div>"
+        f"{tax_html}{gift_html}Grand Total: $10.00</div>"
         f'<div data-component="shipments">{"".join(shipments)}</div>'
         "</div>"
         # A recommendations carousel OUTSIDE #orderDetails must be ignored.
@@ -325,66 +328,64 @@ def test_promo_outside_order_details_is_ignored():
     assert build_order_items(html)[0]._promo_cashback_rate is None
 
 
-# --- gift-card netting ---------------------------------------------------------------------------
-# A gift card earns 0% cashback, so the recorded cost is scaled down to what the CARD actually paid;
-# the sheet's Cashback = (Total Cost + Shipping) * rate then charges the promo to card spend only.
-def test_gift_card_reduces_cost_to_what_the_card_paid():
+# --- gift card + sales tax ----------------------------------------------------------------------
+# A gift card earns 0% cashback. The mapping used to scale the cost basis down to card spend and
+# throw the amount away; the netting now lives in the sheet's COGS formula, so
+# the mapping emits the GROSS cost plus the order-level Gift Card / Sales Tax amounts on every row
+# (prorated cost-weighted at sync, exactly like shipping). test_profit_formula proves the algebra
+# matches the old scaling to the cent.
+def test_gift_card_is_emitted_and_cost_stays_gross():
     rows = build_order_items(_one_item_order(gift_card="$40.00"))
-    assert rows[0].cost_per_item == 60.00
-    assert rows[0].total_cost == 60.00
+    assert rows[0].cost_per_item == 100.00
+    assert rows[0].total_cost == 100.00
+    assert rows[0].gift_card == 40.00
 
 
-def test_gift_card_larger_than_the_basis_floors_cost_at_zero():
-    """The real …2175042-8952239 case: a $14.04 gift card against a $12.85 order (the rest covered
-    $1.19 of tax, which this ledger does not record). Cost must floor at 0, never go negative."""
+def test_a_gift_card_covering_the_grand_total_is_emitted_in_full():
+    """The real …2175042-8952239 case: a $14.04 gift card against a $12.85 order carrying $1.19 of
+    tax. The old scaling had to CAP the reduction at the pre-tax basis; with Sales Tax recorded the
+    formula computes (12.85 - 14.04 + 1.19) * (1 - rate) = 0 exactly, no cap needed."""
     html = _details(OID, "August 11, 2026",
                     [_shipment(OID, 0, "Delivered August 12", [_item("Gummies", "$12.85", qty=1)])],
-                    gift_card="$14.04")
+                    gift_card="$14.04", tax="$1.19")
     rows = build_order_items(html)
-    assert rows[0].cost_per_item == 0.00
-    assert rows[0].total_cost == 0.00
+    assert rows[0].total_cost == 12.85
+    assert rows[0].gift_card == 14.04
+    assert rows[0].sales_tax == 1.19
 
 
-def test_gift_card_scales_shipping_too():
-    html = _details(OID, "August 12, 2026",
-                    [_shipment(OID, 0, "Delivered August 13", [_item("Thing", "$100.00", qty=1)])],
-                    shipping="$10.00", gift_card="$55.00")
-    rows = build_order_items(html)
-    # basis 110 - 55 = 55 left, so everything halves and the row still sums to card spend.
-    assert rows[0].cost_per_item == 50.00
-    assert rows[0].shipping == 5.00
-    assert rows[0].total_cost + rows[0].shipping == 55.00
-
-
-def test_gift_card_prorates_across_shipments_by_cost():
+def test_gift_card_and_tax_are_order_level_on_every_row():
+    # The same contract as shipping: every row carries the order TOTAL; ledger_sync prorates.
     html = _details(OID, "August 12, 2026", [
         _shipment(OID, 0, "Delivered August 13", [_item("Big", "$60.00", qty=1)], shipment_id="S1"),
         _shipment(OID, 1, "Delivered August 14", [_item("Small", "$40.00", qty=1)], shipment_id="S2"),
-    ], gift_card="$50.00")
+    ], gift_card="$50.00", tax="$8.00")
     rows = build_order_items(html)
-    assert [r.total_cost for r in rows] == [30.00, 20.00]
-    assert sum(r.total_cost for r in rows) == 50.00  # == basis 100 - gift card 50
+    assert [r.total_cost for r in rows] == [60.00, 40.00]
+    assert [r.gift_card for r in rows] == [50.00, 50.00]
+    assert [r.sales_tax for r in rows] == [8.00, 8.00]
 
 
-def test_gift_card_respects_quantity():
-    html = _details(OID, "August 12, 2026",
-                    [_shipment(OID, 0, "Delivered August 13", [_item("Thing", "$50.00", qty=2)])],
-                    gift_card="$25.00")
-    rows = build_order_items(html)
-    assert rows[0].cost_per_item == 37.50  # 100 basis, 75 left, halved per unit -> 37.50
-    assert rows[0].total_cost == 75.00
+def test_a_zero_tax_line_is_a_real_zero_and_a_missing_one_is_blank():
+    # $0.00 on the page is a fact (the resale certificate at work); a summary with no tax line at
+    # all parses to None so a blank never overwrites a figure typed on the sheet.
+    assert build_order_items(_one_item_order())[0].sales_tax == 0.0
+    assert build_order_items(_one_item_order(tax=""))[0].sales_tax is None
 
 
-def test_no_gift_card_line_leaves_cost_untouched():
+def test_no_gift_card_line_means_blank_not_zero():
     rows = build_order_items(_one_item_order())
     assert rows[0].cost_per_item == 100.00
     assert rows[0].total_cost == 100.00
+    assert rows[0].gift_card is None
 
 
 def test_netting_can_be_switched_off():
+    # Toggle off -> the amount is simply not emitted, so COGS uses the full sticker cost.
     rows = build_order_items(_one_item_order(gift_card="$40.00"), net_gift_cards=False)
     assert rows[0].cost_per_item == 100.00
     assert rows[0].total_cost == 100.00
+    assert rows[0].gift_card is None
 
 
 def test_summary_lines_are_read_when_label_and_amount_are_separate_elements():
@@ -393,7 +394,8 @@ def test_summary_lines_are_read_when_label_and_amount_are_separate_elements():
     shapes must parse. Same for the earn line's real pmts-* markup."""
     from bs4 import BeautifulSoup
 
-    from scrapers.amazon_mapping import _gift_card_amount, _order_region, _promo_cashback_rate
+    from scrapers.amazon_mapping import (_gift_card_amount, _order_region, _promo_cashback_rate,
+                                         _sales_tax_amount)
 
     html = (
         '<div id="orderDetails"><div data-component="orderSummary">'
@@ -409,6 +411,7 @@ def test_summary_lines_are_read_when_label_and_amount_are_separate_elements():
     region = _order_region(BeautifulSoup(html, "html.parser"))
 
     assert _gift_card_amount(region.select_one("[data-component='orderSummary']")) == 14.04
+    assert _sales_tax_amount(region.select_one("[data-component='orderSummary']")) == 1.19
     assert _promo_cashback_rate(region) == 0.01
 
 
@@ -464,13 +467,15 @@ def test_an_unresolvable_duplicate_is_marked_rather_than_guessed():
     assert rows[0].total_cost is None, "no cost is better than a wrong cost"
 
 
-def test_gift_card_netting_sees_the_corrected_basis():
-    """Netting divides by the cost basis, so a duplicated card would make the reduction too gentle."""
+def test_gift_card_rides_the_collapsed_row_with_its_gross_cost():
+    """The sync's proration divides by the Total Cost basis, so the duplicated card still has to be
+    collapsed before the row leaves here — the survivor carries the gross cost and the gc amount."""
     html = _two_cards("$100.00", price="$100.00", qty=1, gift_card="$40.00")
     rows = build_order_items(html, tracking_by_shipment={"1": "T1", "2": "T2"})
 
     assert len(rows) == 1
-    assert rows[0].total_cost == 60.0, "100 - 40, not the 80 an inflated 200 basis would give"
+    assert rows[0].total_cost == 100.0, "gross, not netted — the COGS formula subtracts the gc"
+    assert rows[0].gift_card == 40.0
 
 
 # --- digital lines must never reach the ledger ----------------------------------------------------

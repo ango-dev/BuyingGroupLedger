@@ -79,6 +79,8 @@ SELECTORS: dict[str, str] = {
 }
 # Order-summary line that only renders when a gift card actually paid part of the order.
 _GIFT_CARD_RE = re.compile(r"Gift Card Amount:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
+# The tax line renders on every order summary, usually as $0.00 (the resale certificate).
+_TAX_RE = re.compile(r"Estimated tax to be collected:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 # What the order is actually worth — the ceiling its shipment cards may not exceed.
 _SUBTOTAL_RE = re.compile(r"Item\(s\) Subtotal:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 
@@ -426,6 +428,19 @@ def _gift_card_amount(summary_el) -> float | None:
     return abs(amount) if amount is not None else None
 
 
+def _sales_tax_amount(summary_el) -> float | None:
+    """"Estimated tax to be collected: $1.19" from the order summary; None when the line is absent.
+
+    None, not 0: an absent line means the summary didn't parse (or a layout we haven't seen), and
+    emitting a hard 0 would overwrite a figure typed on the sheet through _merge_row. A real tax-free
+    order shows the line with $0.00, which IS emitted as 0.0.
+    """
+    if summary_el is None:
+        return None
+    m = _TAX_RE.search(summary_el.get_text("\n", strip=True))
+    return _num(m.group(1)) if m else None
+
+
 def _order_subtotal(summary_el) -> float | None:
     """The order summary's "Item(s) Subtotal" — what the order is actually worth."""
     if summary_el is None:
@@ -510,41 +525,6 @@ def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
     return survivors
 
 
-def _net_gift_card(rows: list[OrderItem], gift_card: float | None) -> None:
-    """Scale an order's cost basis down to what the CARD actually paid. Mutates rows in place.
-
-    A gift card earns 0% cashback, so the recorded cost — and the cashback it drives — must come from
-    the card-paid portion only. The sheet computes cashback as (Total Cost + Shipping) * rate, so
-    shrinking the basis is all it takes: no second rate, no extra column, no formula change.
-
-    The reduction is CAPPED at the pre-tax item+shipping basis. Amazon applies a gift card to the tax
-    too (a real case: a $14.04 gift card against a $12.85 order carrying $1.19 tax), and this ledger
-    records no tax anywhere, so the excess is dropped rather than pushing cost negative. That keeps the
-    pre-tax convention every other row already follows — a $100 order with $8 tax records $100 even
-    though the card was charged $108.
-
-    Scaling by cost IS cost-weighted proration, the same rule ledger_sync._reprorate_shipping uses to
-    spread an order-level amount across rows. total_cost is recomputed by hand because the model's
-    _compute_total_cost validator only runs at construction, not on assignment.
-    """
-    if not gift_card or gift_card <= 0 or not rows:
-        return
-    items_total = sum(r.total_cost or 0.0 for r in rows)
-    # shipping is the ORDER-level total repeated on every row, so any row carries it.
-    ship = rows[0].shipping or 0.0
-    basis = items_total + ship
-    if basis <= 0:
-        return
-    factor = max(0.0, basis - gift_card) / basis
-    for r in rows:
-        if r.cost_per_item is not None:
-            r.cost_per_item = round(r.cost_per_item * factor, 2)
-            if r.quantity is not None:
-                r.total_cost = round(r.quantity * r.cost_per_item, 2)
-        if r.shipping is not None:
-            r.shipping = round(r.shipping * factor, 2)
-
-
 def build_order_items(
     order_details_html: str,
     profile_label: str = "",
@@ -588,6 +568,14 @@ def build_order_items(
         st = summary_el.get_text("\n", strip=True)
         sm = re.search(r"Shipping\s*&\s*Handling:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", st, re.IGNORECASE)
         shipping = _num(sm.group(1)) if sm else None
+    # Both ORDER-LEVEL like shipping: repeated on every row, prorated cost-weighted at sync, and
+    # netted by the COGS formula (gift card subtracted — a tender the card never spent, so it earns
+    # no cashback; tax added). This replaced _net_gift_card's silent cost-scaling (2026-08-30):
+    # same algebra, but Total Cost now stays the GROSS number the order page shows and the amount is
+    # visible on the sheet. The toggle keeps its old name and meaning — netting off means the
+    # gift-card amount is simply not emitted, so COGS uses the full sticker cost.
+    gift_card = (_gift_card_amount(summary_el) if net_gift_cards else None)
+    sales_tax = _sales_tax_amount(summary_el)
 
     addr_el = region.select_one("[data-component='shippingAddress']")
     delivery_address = _format_address(addr_el.get_text("\n", strip=True)) if addr_el else ""
@@ -641,8 +629,8 @@ def build_order_items(
             item_status = "paid" if kept_gift_card else status
             # ...and tag it as DELIBERATELY unrouted. It is a real cost funding inventory, but it will
             # never be submitted to a buying group and will never be paid out on its own — the income
-            # arrives through the order the balance pays for, whose cost `_net_gift_card` reduces by
-            # this amount. Left blank it would instead read as an ordinary order still awaiting
+            # arrives through the order the balance pays for, whose COGS drops by this amount via its
+            # Gift Card cell. Left blank it would instead read as an ordinary order still awaiting
             # payment, which is what audit_sheet's cogs_inputs_complete counts as a year-boundary
             # straddle. config.warehouses.tag_and_filter_personal preserves this tag.
             item_group = GIFT_CARD if kept_gift_card else ""
@@ -675,6 +663,8 @@ def build_order_items(
                     quantity=None if cancelled else (quantity or 1),
                     cost_per_item=cost_per_item,
                     shipping=shipping,
+                    gift_card=gift_card,
+                    sales_tax=sales_tax,
                     card_last4=card_last4,
                     shipment=shipment,
                 )
@@ -685,11 +675,9 @@ def build_order_items(
     if rows and all(r.status == "cancelled" for r in rows) and order_id not in (known_open_ids or set()):
         return []
 
-    # Before netting: the gift-card reduction divides by this same basis, so it must
-    # not see a basis inflated by a duplicated shipment card.
+    # A duplicated shipment card inflates the Total Cost basis the sync's cost-weighted proration
+    # (and the COGS netting that reads it) divides over, so the collapse still has to run.
     rows = _reconcile_against_subtotal(rows, _order_subtotal(summary_el), order_id)
-    if net_gift_cards:
-        _net_gift_card(rows, _gift_card_amount(summary_el))
     # Rides to config.cards.tag_cards, which folds it into cashback_rate (see OrderItem).
     promo = _promo_cashback_rate(region)
     for row in rows:

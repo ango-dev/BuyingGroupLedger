@@ -382,10 +382,10 @@ def test_no_date_in_status_leaves_delivery_date_blank():
     assert build_order_items(html, today="2026-08-11")[0].delivery_date == ""
 
 
-# --- gift-card netting ---------------------------------------------------------------------------
-# Business shares the consumer rule: a gift card earns 0% cashback, so cost is scaled down to what the
-# CARD actually paid. (The consumer path ALSO reads a promo cashback rate; Business deliberately does
-# not — test_business_never_reads_a_promo_rate pins that.)
+# --- gift card + sales tax ----------------------------------------------------------------------
+# Business shares the consumer rule: the mapping emits the GROSS cost plus the order-level Gift
+# Card / Sales Tax amounts on every row; the COGS formula nets them. The
+# builder's summary always carries "Estimated tax to be collected: $0.87", the real Business shape.
 BIZ_OID = "111-2223334-5556667"
 
 
@@ -396,38 +396,38 @@ def _one_item_order(**kwargs) -> str:
                     **kwargs)
 
 
-def test_gift_card_reduces_cost_to_what_the_card_paid():
+def test_gift_card_is_emitted_and_cost_stays_gross():
     rows = build_order_items(_one_item_order(gift_card="$40.00"))
-    assert rows[0].cost_per_item == 60.00
-    assert rows[0].total_cost == 60.00
+    assert rows[0].cost_per_item == 100.00
+    assert rows[0].total_cost == 100.00
+    assert rows[0].gift_card == 40.00
 
 
-def test_gift_card_larger_than_the_basis_floors_cost_at_zero():
-    html = _details(BIZ_OID, "August 11, 2026",
-                    [_shipment(BIZ_OID, 0, "Delivered August 12", [_item("Gummies", "$12.85", qty=1)])],
-                    gift_card="$14.04")
-    rows = build_order_items(html)
-    assert rows[0].cost_per_item == 0.00
-    assert rows[0].total_cost == 0.00
+def test_the_business_tax_line_is_read():
+    assert build_order_items(_one_item_order())[0].sales_tax == 0.87
 
 
-def test_gift_card_prorates_across_shipments_by_cost():
+def test_gift_card_and_tax_are_order_level_on_every_row():
     html = _details(BIZ_OID, "August 12, 2026", [
         _shipment(BIZ_OID, 0, "Delivered August 13", [_item("Big", "$60.00", qty=1)], shipment_id="S1"),
         _shipment(BIZ_OID, 1, "Delivered August 14", [_item("Small", "$40.00", qty=1)], shipment_id="S2"),
     ], gift_card="$50.00")
     rows = build_order_items(html)
-    assert [r.total_cost for r in rows] == [30.00, 20.00]
+    assert [r.total_cost for r in rows] == [60.00, 40.00]
+    assert [r.gift_card for r in rows] == [50.00, 50.00]
+    assert [r.sales_tax for r in rows] == [0.87, 0.87]
 
 
-def test_no_gift_card_line_leaves_cost_untouched():
+def test_no_gift_card_line_means_blank_not_zero():
     rows = build_order_items(_one_item_order())
     assert rows[0].cost_per_item == 100.00
+    assert rows[0].gift_card is None
 
 
 def test_netting_can_be_switched_off():
     rows = build_order_items(_one_item_order(gift_card="$40.00"), net_gift_cards=False)
     assert rows[0].cost_per_item == 100.00
+    assert rows[0].gift_card is None
 
 
 def test_business_reads_the_promo_rate_off_the_earn_line():

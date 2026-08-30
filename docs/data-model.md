@@ -120,10 +120,17 @@ etc.) — they're never resold, so they never hit the ledger.
   extra 1% back"), that extra is **added** to the card's configured rate for that order, so the single
   Cashback Rate cell carries the true total (`AMAZON_PROMO_CASHBACK_ENABLED=false` turns it off).
 - **Gift cards earn no cashback**, so when one pays part of an Amazon or Amazon Business order the
-  recorded cost is scaled down to what the *card* actually paid — Total Cost, Shipping and the cashback
-  they drive all reflect card spend only, which raises reported profit by the gift-card amount. The
-  reduction is capped at the pre-tax basis (Amazon applies gift cards to tax too, which this ledger
-  doesn't track). `AMAZON_GIFT_CARD_NETTING_ENABLED=false` records the full sticker cost instead.
+  amount lands in the **Gift Card** column (each row gets its cost-weighted share of the order
+  total, like Shipping) and the COGS formula subtracts it — the cost basis and the cashback it
+  drives reflect card spend only, which raises reported profit by the gift-card amount. Total Cost
+  stays the gross number the order page shows. (Until 2026-08-30 the mappings instead scaled the
+  cost down invisibly; the formula computes the identical number, with the amount now on the
+  sheet.) `AMAZON_GIFT_CARD_NETTING_ENABLED=false` leaves the Gift Card cell blank, so COGS uses
+  the full sticker cost.
+- **Sales Tax** is its own column, read from the order summary's "Estimated tax to be collected"
+  line and prorated the same way. It is usually $0.00 (the resale certificate), but a hand-kept
+  order that paid tax records its true cost: the COGS formula adds it inside the cashback netting,
+  since the card is charged tax and earns cashback on it.
 
   **The accounting rule this implies:** a cost is recorded ONCE, where the money actually left your
   pocket. So if you *bought* the gift card, add its purchase as its own row and the two reconcile —
@@ -155,9 +162,13 @@ etc.) — they're never resold, so they never hit the ledger.
 - **COGS** and **Total Profit** are **live Google Sheets formulas**, not scraped numbers:
 
   ```
-  COGS         = (Total Cost + Shipping) × (1 − Cashback Rate)
+  COGS         = (Total Cost − Return Qty × Cost Per Item − Gift Card + Shipping + Sales Tax)
+                 × (1 − Cashback Rate)
   Total Profit = Payout Amount − COGS − Insurance
   ```
+
+  Blank cells count as 0, so a row with no return, no gift card and no recorded tax is simply
+  `(Total Cost + Shipping) × (1 − Cashback Rate)`.
 
   **COGS exists for end-of-year tax**, and the split is where the tax form wants it. Cashback is
   netted into *cost* rather than counted as income, because a card reward earned on a purchase is a
@@ -173,10 +184,11 @@ etc.) — they're never resold, so they never hit the ledger.
   re-scraped, so it would stay stale forever. The cell reads blank (not `0`) until Payout Amount is
   filled, so un-paid-out rows don't drag a column sum down with fake losses.
 
-  **Shipping is allocated pro-rata across an order's rows** (`Shipping × this row's Total Cost ÷ the
-  order's Total Cost`). Every retailer reports one *order-level* shipping total and repeats it on every
-  row, so charging it per row would bill a 3-row order for shipping three times over and make the
-  column's sum wrong. Pro-rata makes the column sum to exactly one shipping charge per order.
+  **Shipping, Gift Card and Sales Tax are allocated pro-rata across an order's rows** (`the order
+  total × this row's Total Cost ÷ the order's Total Cost`). Every retailer reports these as one
+  *order-level* figure and repeats it on every row, so charging it per row would bill a 3-row order
+  three times over and make the column's sum wrong. Pro-rata makes each column sum to exactly one
+  charge per order.
 
 ## Year-end tax report
 
@@ -197,8 +209,8 @@ for anything else.
 
 **A partial return is one hand edit on the original row, never a second negative row**. Quantity and Total Cost keep the GROSS bought numbers the scraper wrote; you
 type **Return Qty** (and **Return Date**), and the COGS formula nets the returned units out of the
-cost basis itself -- `(Total Cost − Return Qty × Cost Per Item + Shipping) × (1 − Cashback Rate)` --
-so Total Profit follows with no other edits. The payout nets itself for BFMR (its reported amount is
+cost basis itself (see the formula above under Profit accounting), so Total Profit follows with no
+other edits. The payout nets itself for BFMR (its reported amount is
 already net of clawbacks, allocated per order); a MOD return's payout is hand-entered, since MOD has
 no return signal. A FULLY returned order keeps status `return` (Return Qty = Quantity nets its COGS
 to zero). The `return_columns_consistent` audit check guards the pair, and the single netted row
