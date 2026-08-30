@@ -5,13 +5,21 @@
       "created": "2026-08-10T10:44:24-05:00",
       "price": {
         "orderTotal": 2099.93,
-        "shippingTotal": 0.0
+        "shippingTotal": 0.0,
+        "totalSalesTax": 8.25
       },
       "payments": [
         {
           "type": "creditCard",
           "creditCardType": "AMEX",
-          "creditCardNumber": "XXXXXXXXXXXX4321"
+          "creditCardNumber": "XXXXXXXXXXXX4321",
+          "totalNetAmount": 2059.93
+        },
+        {
+          "type": "giftCard",
+          "creditCardType": "GIFT CARD",
+          "creditCardNumber": "",
+          "totalNetAmount": 40.0
         }
       ],
       "user": {
@@ -328,13 +336,15 @@
       "created": "2026-08-10T14:27:15-05:00",
       "price": {
         "orderTotal": 1599.96,
-        "shippingTotal": 0.0
+        "shippingTotal": 0.0,
+        "totalSalesTax": 0.0
       },
       "payments": [
         {
           "type": "creditCard",
           "creditCardType": "AMEX",
-          "creditCardNumber": "XXXXXXXXXXXX4321"
+          "creditCardNumber": "XXXXXXXXXXXX4321",
+          "totalNetAmount": 1599.96
         }
       ],
       "user": {

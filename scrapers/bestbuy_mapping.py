@@ -76,17 +76,36 @@ def _date(value) -> str:
     return ""
 
 
+def _is_gift_tender(payment: dict) -> bool:
+    ptype = (payment.get("type") or "").strip().lower()
+    ctype = (payment.get("creditCardType") or "").strip().lower()
+    return "gift" in ptype or "gift" in ctype
+
+
 def _card_last4(payments: list) -> str:
     """Last 4 of the real payment card. Skip gift cards / non-card tenders (no reusable last-4)."""
     for payment in payments or []:
-        ptype = (payment.get("type") or "").strip().lower()
-        ctype = (payment.get("creditCardType") or "").strip().lower()
-        if "gift" in ptype or "gift" in ctype:
+        if _is_gift_tender(payment):
             continue
         number = (payment.get("creditCardNumber") or "").strip()
         if number:
             return number[-4:]
     return ""
+
+
+def _gift_card_total(payments: list) -> float | None:
+    """What the order's gift-card tenders paid, summed; None when no gift tender exists.
+
+    `totalNetAmount` is the one amount field every captured tender reports as its net paid figure —
+    an in-flight order's credit tender shows `amount`/`chargedAmount` 0 with `totalNetAmount` at the
+    full charge, a completed one shows all three, and a refund goes negative there. (All five
+    on-disk captures agree; a live gift-tender confirmation is still pending — the user holds a
+    known gift-card BBY order for it.) None, not 0, when no gift tender exists: a hard 0 would
+    overwrite a figure typed on the sheet through the merge.
+    """
+    amounts = [_num(p.get("totalNetAmount")) for p in payments or [] if _is_gift_tender(p)]
+    amounts = [a for a in amounts if a is not None]
+    return round(sum(amounts), 2) if amounts else None
 
 
 def _format_address(address: dict | None) -> str:
@@ -184,6 +203,11 @@ def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[
     order_date = _date(order.get("created"))
     card_last4 = _card_last4(order.get("payments"))
     shipping_total = _num((order.get("price") or {}).get("shippingTotal"))
+    # Both ORDER-LEVEL like shipping: repeated on every row, prorated at sync, netted by the COGS
+    # formula (gift card subtracted, tax added). `totalSalesTax` sits beside shippingTotal in
+    # `order.price` on every capture; absent (None) leaves the sheet cell alone, 0.0 is a real zero.
+    sales_tax_total = _num((order.get("price") or {}).get("totalSalesTax"))
+    gift_card_total = _gift_card_total(order.get("payments"))
     addr_by_id = _addresses_by_id(order)
     items_by_id = {it.get("id"): it for it in order.get("items") or [] if it.get("id")}
 
@@ -243,6 +267,8 @@ def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[
                     # Shipping is order-level; repeat it on EVERY shipment row (same value), matching
                     # the agent path's convention so the two writers agree on this field.
                     shipping=shipping_total,
+                    gift_card=gift_card_total,
+                    sales_tax=sales_tax_total,
                     card_last4=card_last4,
                     shipment=shipment,
                 )
