@@ -670,9 +670,13 @@ def build_order_items(
                 _is_gift_card_line(status_text, item_name)
                 and (_is_digital_shipment(status_text) or _is_digital_item(item_name))
             )
-            # A kept gift card completes the moment the balance lands: mark it terminal so
-            # the order closes instead of sitting in the open list being re-read forever.
-            item_status = "delivered" if kept_gift_card else status
+            # A kept gift card completes the moment the balance lands: mark it `paid` with a real
+            # $0 payout, $0 insurance and the order date as its payout date. No
+            # buying group is ever involved -- the income arrives through the order the balance
+            # funds -- so "delivered, awaiting payout" was the wrong reading: it kept the row in the
+            # unpaid straddle and the tax report's "not yet paid out" line forever. `paid` is
+            # terminal, so the order also closes instead of being re-read every run.
+            item_status = "paid" if kept_gift_card else status
             # ...and tag it as DELIBERATELY unrouted. It is a real cost funding inventory, but it will
             # never be submitted to a buying group and will never be paid out on its own — the income
             # arrives through the order the balance pays for, whose cost `_net_gift_card` reduces by
@@ -696,6 +700,9 @@ def build_order_items(
                     order_date=order_date,
                     status=item_status,
                     buying_group=item_group,
+                    insurance=0.0 if kept_gift_card else None,
+                    payout_amount=0.0 if kept_gift_card else None,
+                    payout_date=order_date if kept_gift_card else "",
                     order_url=f"{_BASE}/gp/css/order-details?orderID={order_id}",
                     tracking_number=tracking_number,
                     tracking_url=tracking_url,

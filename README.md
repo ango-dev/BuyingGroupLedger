@@ -159,6 +159,8 @@ scripts/preflight.py    offline check for silent misconfiguration
 scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
 scripts/tax_report.py   read-only cash-basis tax report for one year (two dates: payout vs order)
 scripts/import_history.py  import a foreign spreadsheet of finished orders; reconciles its profit column (dry-run default)
+scripts/backfill_tracking.py  fill blank tracking numbers from BFMR by order number (dry-run default)
+scripts/restore_cells.py   put specific cells back from a plan file, guarded by the expected current value
 scripts/                create_profile, costco_token, sort_ledger, reorder_sheet, apply_sheet_formats,
                         backfill_receipts, receipt_verify, receipt_probe, bg_probe, install_cron, ...
 tests/                  offline pytest suite (no credentials/network needed)

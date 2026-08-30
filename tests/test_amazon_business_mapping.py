@@ -560,14 +560,14 @@ def _gift_card_order(status_text, item, card="0315"):
                     card=card)
 
 
-def test_a_reload_on_a_reselling_card_is_kept_and_marked_delivered():
+def test_a_reload_on_a_reselling_card_is_kept_and_marked_paid():
     html = _gift_card_order("Applied Gift Card balance is added to your account.",
                             "Amazon Gift Card Balance Reload")
     rows = build_order_items(html, keep_digital_last4s=BOOSTED)
 
     assert len(rows) == 1
     assert rows[0].total_cost == 40.35
-    assert rows[0].status == "delivered", "terminal, or the order sits open being re-read forever"
+    assert rows[0].status == "paid", "paid with a $0 payout: terminal, and never awaiting a buying group"
 
 
 def test_the_same_reload_on_any_other_card_is_still_skipped():
@@ -582,7 +582,7 @@ def test_an_ordinary_gift_card_purchase_is_kept_on_a_reselling_card():
     rows = build_order_items(html, keep_digital_last4s=BOOSTED)
 
     assert len(rows) == 1
-    assert rows[0].status == "delivered"
+    assert rows[0].status == "paid"
 
 
 def test_an_ordinary_gift_card_purchase_on_a_personal_card_is_skipped():
@@ -672,3 +672,14 @@ def test_a_page_without_item_titles_raises_on_business_too():
             '</div></body></html>')
     with pytest.raises(OrderPageShapeError, match="no item titles"):
         build_ab(html)
+
+
+def test_a_kept_gift_card_is_paid_with_a_zero_payout_dated_on_the_order():
+    """User rule 2026-08-30: no buying group is ever involved, so the payout side is a real $0."""
+    html = _details("111-1234567-1234567", "August 1, 2026",
+                    [_shipment("111-1234567-1234567", 1, "Applied Gift Card balance is added to your account",
+                               [_item("Amazon.com eGift Card", "$500.00")], track=False)], card="0315")
+    rows = build_order_items(html, keep_digital_last4s=frozenset({"0315"}))
+    assert len(rows) == 1
+    r = rows[0]
+    assert r.status == "paid" and r.payout_amount == 0.0 and r.insurance == 0.0 and r.payout_date == "2026-08-01"

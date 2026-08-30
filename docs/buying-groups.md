@@ -82,6 +82,13 @@ python -m sync_tracking --apply --limit 1     # one package per group, for the f
 python -m sync_tracking --void 1Z999...       # undo a BFMR insurance filing
 ```
 
+**Old orders with no tracking number** (Amazon stops showing them) can be filled from BFMR by order
+number: `python -m scripts.backfill_tracking` (dry run; `--apply` writes), then
+`python -m sync_tracking --apply --payouts-only --group BFMR`. MOD's report carries no retailer order
+number, so MOD rows cannot be joined that way. **`--payouts-only`** reads payouts back and ticks what a
+group already holds without submitting anything — the mode to use when the ledger carries orders from
+buying-group accounts other than the connected ones.
+
 **Routing is the Buying Group column**, which is already derived from the delivery address (see
 "Warehouse / jig config"). A row goes to exactly one group. `Personal` orders never reach the sheet,
 and `Unclassified` rows are **skipped and counted** rather than posted to a guess — an unconfigured
