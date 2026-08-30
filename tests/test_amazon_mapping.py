@@ -694,3 +694,4 @@ def test_a_kept_gift_card_is_paid_with_a_zero_payout_dated_on_the_order():
     assert len(rows) == 1
     r = rows[0]
     assert r.status == "paid" and r.payout_amount == 0.0 and r.insurance == 0.0 and r.payout_date == "2026-08-01"
+    assert r.delivery_date == "2026-08-01", "a gift card is delivered the day it is bought"

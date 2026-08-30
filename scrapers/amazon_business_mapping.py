@@ -703,10 +703,11 @@ def build_order_items(
                     insurance=0.0 if kept_gift_card else None,
                     payout_amount=0.0 if kept_gift_card else None,
                     payout_date=order_date if kept_gift_card else "",
+                    # ...and "delivered" the day it was bought: the balance lands at once.
+                    delivery_date=order_date if kept_gift_card else delivery_date,
                     order_url=f"{_BASE}/gp/css/order-details?orderID={order_id}",
                     tracking_number=tracking_number,
                     tracking_url=tracking_url,
-                    delivery_date=delivery_date,
                     delivery_address=delivery_address,
                     item_name=item_name,
                     quantity=None if cancelled else (quantity or 1),
