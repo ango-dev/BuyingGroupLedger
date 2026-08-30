@@ -261,7 +261,8 @@ docker ps                                                 # STATUS should read (
 
 `docker ps` showing "Up 3 weeks" proves supercronic is alive, **not** that it ever ran anything. The
 healthcheck closes that gap: every completed run stamps `logs/.last_run`, and the container goes
-unhealthy once that's older than two intervals.
+unhealthy once that's older than two intervals — and sends the same email/Discord alert as
+everything else, once per outage, with an all-clear when a run completes again (2026-08-30).
 
 ---
 
@@ -321,7 +322,8 @@ docker compose run --rm --entrypoint python ledger -m alerts.notifier
 ```
 
 **The healthcheck notices silence.** The failure nobody catches is the scheduler quietly not running:
-no error, no log line, nothing to alert on. `docker ps` reporting `(unhealthy)` is that signal.
+no error, no log line, nothing to alert on. `docker ps` reporting `(unhealthy)` is that signal —
+and since 2026-08-30 the healthcheck also sends it as an alert, so you no longer have to be looking.
 
 ```bash
 docker inspect --format '{{.State.Health.Status}}' buying-group-ledger
