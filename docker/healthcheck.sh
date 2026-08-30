@@ -18,6 +18,45 @@ GRACE=$(( HOURS * 2 * 3600 ))
 
 now=$(date +%s)
 
+# THE UNHEALTHY STATE USED TO NOTIFY NOBODY. It showed in `docker ps` / `docker inspect` -- which
+# nobody is watching at 3am -- while the ledger went stale. So the check now sends the alert itself,
+# through the same channels as everything else, ONCE per episode: a marker records that this
+# outage has been announced, and its removal on recovery sends the all-clear. Best-effort: the
+# alert must never change the verdict, and a failed send is retried at the next 15-minute check.
+MARKER="${UNHEALTHY_MARKER:-/app/logs/.unhealthy_alerted}"
+NOTIFY="${NOTIFY_CMD:-python -m alerts.notifier}"
+
+unhealthy() {  # $1 = reason
+    echo "$1"
+    if [ ! -f "$MARKER" ]; then
+        body="$1. The container is up but no run has completed in time: check 'docker compose logs --tail=200', 'cat logs/.last_run', and the run lock (logs/.run.lock). This alert is sent once; an all-clear follows when a run completes."
+        if (cd /app 2>/dev/null || true; $NOTIFY "Ledger container UNHEALTHY -- scheduler is not producing runs" "$body" >/dev/null 2>&1); then
+            date -u +%FT%TZ > "$MARKER"
+        fi
+    fi
+    exit 1
+}
+
+healthy() {  # $1 = reason
+    echo "$1"
+    if [ ! -f "$MARKER" ]; then
+        if (cd /app 2>/dev/null || true; $NOTIFY "Ledger container UNHEALTHY -- scheduler is not producing runs"                 "$1. The container is up but no run has completed in time: check \`docker compose logs --tail=200\`, \`cat logs/.last_run\`, and the run lock (logs/.run.lock). This alert is sent once; an all-clear follows when a run completes."                 >/dev/null 2>&1); then
+            date -u +%FT%TZ > "$MARKER"
+        fi
+    fi
+    exit 1
+}
+
+healthy() {  # $1 = status line
+    echo "$1"
+    if [ -f "$MARKER" ]; then
+        since="$(cat "$MARKER" 2>/dev/null || echo unknown)"
+        ($NOTIFY "Ledger container healthy again" "$1 (unhealthy since ${since})." >/dev/null 2>&1) || true
+        rm -f "$MARKER"
+    fi
+    exit 0
+}
+
 if [ ! -f "$STAMP" ]; then
     # No run has COMPLETED yet. Right after a deploy that is simply normal — RUN_ON_START is false
     # by default, so the first run waits for the next cron slot, up to a full interval away. Judge
@@ -26,21 +65,16 @@ if [ ! -f "$STAMP" ]; then
     if [ -f "$STARTED" ]; then
         waiting=$(( now - $(date -r "$STARTED" +%s) ))
         if [ "$waiting" -le "$GRACE" ]; then
-            echo "no run yet, but only up $(( waiting / 60 ))m (first run due within ${HOURS}h)"
-            exit 0
+            healthy "no run yet, but only up $(( waiting / 60 ))m (first run due within ${HOURS}h)"
         fi
-        echo "up $(( waiting / 3600 ))h and NO run has completed; expected one every ${HOURS}h"
-        exit 1
+        unhealthy "up $(( waiting / 3600 ))h and NO run has completed; expected one every ${HOURS}h"
     fi
-    echo "no run has completed yet (${STAMP} absent)"
-    exit 1
+    unhealthy "no run has completed yet (${STAMP} absent)"
 fi
 
 age=$(( now - $(date -r "$STAMP" +%s) ))
 if [ "$age" -gt "$GRACE" ]; then
-    echo "last run was $(( age / 3600 ))h ago; expected one every ${HOURS}h"
-    exit 1
+    unhealthy "last run was $(( age / 3600 ))h ago; expected one every ${HOURS}h"
 fi
 
-echo "last run $(( age / 60 ))m ago (interval ${HOURS}h)"
-exit 0
+healthy "last run $(( age / 60 ))m ago (interval ${HOURS}h)"

@@ -91,7 +91,9 @@ build so a wrong-architecture image fails loudly at build time rather than crash
 - **A heartbeat + healthcheck.** `docker ps` reporting "Up 3 weeks" proves the scheduler process is
   alive, not that it ever ran anything — a wedged lock or a failing job leaves the container happily
   "Up" while the ledger goes stale. Every completed run stamps `logs/.last_run`, and the container
-  reports `(unhealthy)` once that's older than two intervals.
+  reports `(unhealthy)` once that's older than two intervals — and **sends an alert** (email +
+  Discord, once per outage, with an all-clear when a run completes again), so a dead scheduler no
+  longer depends on someone looking at `docker ps`.
 
 Container logs are capped (10 MB × 5) rather than left to Docker's unbounded default, which otherwise
 fills a small disk months later.

@@ -53,5 +53,12 @@ def alert(subject: str, message: str) -> None:
 
 
 if __name__ == "__main__":
+    import sys
+
     logging.basicConfig(level=logging.INFO)
-    alert("BuyingGroupLedger test alert", "If you see this by email and/or Discord, notifier.py is working.")
+    if len(sys.argv) >= 3:
+        # `python -m alerts.notifier "<subject>" "<body>"` -- for shell callers such as
+        # docker/healthcheck.sh, so a dead scheduler reaches the same channels as everything else.
+        alert(sys.argv[1], " ".join(sys.argv[2:]))
+    else:
+        alert("BuyingGroupLedger test alert", "If you see this by email and/or Discord, notifier.py is working.")
