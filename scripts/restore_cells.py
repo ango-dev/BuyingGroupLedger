@@ -4,6 +4,10 @@
     python -m scripts.restore_cells data/restore_plan.json --apply    # write it
 
 The plan is a JSON list of entries `[row_number, column_name, value, current_value, note...]` --
+an entry whose column is `__delete_row__` DELETES that row instead (value is ignored; the guard is
+that the row's Order ID still equals `current_value`); deletions run LAST, bottom-up, so the cell
+writes and the other row numbers in the plan stay valid. Sheets shifts the rows below up and
+re-anchors the relative formulas itself. --
 the shape `audit_sheet`'s before/after comparison can produce (row, column, the value from the
 BEFORE snapshot, the value there now). Each write is a single cell by A1 address, RAW (no formula
 parsing, no locale interpretation), and only happens if the cell STILL holds `current_value`: a cell
@@ -55,10 +59,19 @@ def main(argv=None) -> int:
     worksheet = _get_worksheet()
     current_grid = worksheet.get_values(value_render_option="UNFORMATTED_VALUE")
 
-    todo, skipped = [], []
+    todo, skipped, deletions = [], [], []
     for entry in plan:
         row, column, value, expected_now = entry[0], entry[1], entry[2], entry[3]
         note = " ".join(str(x) for x in entry[4:])
+        if column == "__delete_row__":
+            oid_idx = HEADER.index("Order ID")
+            live_row = current_grid[row - 1] if row - 1 < len(current_grid) else []
+            live_oid = str(live_row[oid_idx] if oid_idx < len(live_row) else "").strip()
+            if live_oid == str(expected_now).strip():
+                deletions.append((row, live_oid, note))
+            else:
+                skipped.append(f"  row {row} DELETE: holds order {live_oid!r}, not {expected_now!r} -- left alone")
+            continue
         if column not in col:
             print(f"  ?? unknown column {column!r} -- skipped", file=sys.stderr)
             continue
@@ -75,15 +88,26 @@ def main(argv=None) -> int:
 
     for row, column, value, live, note in todo:
         print(f"  {col[column]}{row} {column:<14} {live!r:<12} -> {value!r:<12} {note}")
+    for row, oid, note in sorted(deletions, reverse=True):
+        print(f"  DELETE row {row} (order {oid}) {note}")
     for line in skipped:
         print(line)
-    print(f"\n{len(todo)} cell(s) to write, {len(skipped)} skipped")
+    print(f"\n{len(todo)} cell(s) to write, {len(deletions)} row(s) to delete, {len(skipped)} skipped")
     if not args.apply:
         print("DRY RUN -- nothing written. Re-run with --apply.")
         return 0
+    # A real sheet has a FIXED grid and a write past it 400s ("exceeds grid limits") -- grow it
+    # first when the plan touches an appended column the grid does not have yet.
+    widest = max((HEADER.index(column) + 1 for _r, column, _v, _l, _n in todo), default=0)
+    current_cols = getattr(worksheet, "col_count", widest)
+    if widest > current_cols:
+        worksheet.add_cols(widest - current_cols)
+        print(f"Grew the grid by {widest - current_cols} column(s) to fit {widest}.")
     for row, column, value, _live, _note in todo:
         worksheet.update(range_name=f"{col[column]}{row}", values=[[value]], value_input_option="RAW")
-    print(f"Wrote {len(todo)} cell(s).")
+    for row, _oid, _note in sorted(deletions, reverse=True):
+        worksheet.delete_rows(row)
+    print(f"Wrote {len(todo)} cell(s), deleted {len(deletions)} row(s).")
     return 0
 
 

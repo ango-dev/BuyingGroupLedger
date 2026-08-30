@@ -107,6 +107,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         {
           "by_group":            {group_key: [TrackingSubmission, ...]},
           "rows_by_tracking":    {tracking_number: [row_number, ...]},
+          "order_of_row":        {row_number: order_id},   # so a payout scoped to an order lands only there
           "costs_by_row":        {row_number: float},   # for pro-rata payout allocation
           "status_by_row":       {row_number: str},     # so a payout can never DOWNGRADE a status
           "insurance_by_row":    {row_number: str},     # so an inferred 0 can't clobber a typed one
@@ -135,6 +136,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
 
     by_group: dict[str, list[TrackingSubmission]] = {}
     rows_by_tracking: dict[str, list[int]] = {}
+    order_of_row: dict[int, str] = {}
     costs_by_row: dict[int, float] = {}
     status_by_row: dict[int, str] = {}
     insurance_by_row: dict[int, str] = {}
@@ -222,6 +224,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         insurance_by_row[row_number] = cell(INSURANCE_COL)
         submitted_by_row[row_number] = _is_ticked(cell(SUBMITTED_COL))
         rows_by_tracking.setdefault(tracking, []).append(row_number)
+        order_of_row[row_number] = order_id
 
         # SETTLED = paid, with money actually recorded. Such a package needs no further SUBMITTING:
         # being paid for it is proof the group holds the number, which is far stronger evidence than
@@ -253,6 +256,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     return {
         "by_group": by_group,
         "rows_by_tracking": rows_by_tracking,
+        "order_of_row": order_of_row,
         "costs_by_row": costs_by_row,
         "status_by_row": status_by_row,
         "insurance_by_row": insurance_by_row,
@@ -274,6 +278,7 @@ def allocate_payouts(
     costs_by_row: dict[int, float],
     status_by_row: dict[int, str] | None = None,
     insurance_by_row: dict[int, str] | None = None,
+    order_of_row: dict[int, str] | None = None,
 ) -> dict[int, dict]:
     """Spread each package's payout across the ledger rows that make up that package.
 
@@ -282,6 +287,16 @@ def allocate_payouts(
     sum. Each row instead takes its share of the package's `Total Cost` — the same pro-rata rule
     ledger_sync._profit_formula already applies to order-level shipping, and for the same reason.
 
+    ONE TRACKING NUMBER CAN COVER TWO ORDERS WITH DIFFERENT OUTCOMES. BFMR held
+    TBA999000000005 as order 111-2281555 `paid` ($2,392) AND order 111-8231919 `returned` — and a
+    tracking-only bucket merged them, walking the paid order's row to `return` and writing it the
+    NETTED amount, again on every later run. So a record that NAMES its order (BFMR's deal rows do)
+    lands in a per-order sub-bucket allocated only to that order's rows. Records without an order id
+    (every MOD record; BFMR's insurance FEE rows) stay tracking-level: MOD's report has no order
+    column, and insurance is a per-package charge shared by every row of the package. An order the
+    sheet does not know under this tracking number folds back into the tracking-level remainder
+    rather than being dropped.
+
     Rows whose costs are all zero (or missing) split the payout evenly rather than dividing by zero;
     that only happens for rows the scraper never priced, and an even split is at least defensible.
 
@@ -289,67 +304,95 @@ def allocate_payouts(
     """
     status_by_row = status_by_row or {}
     insurance_by_row = insurance_by_row or {}
+    order_of_row = order_of_row or {}
     totals: dict[str, dict] = {}
     for record in records:
         bucket = totals.setdefault(
             record.tracking_number,
-            {"amount": None, "insurance": None, "date": "", "status": ""},
+            {"amount": None, "insurance": None, "date": "", "status": "", "orders": {}},
         )
+        target = bucket
+        if record.order_id:
+            target = bucket["orders"].setdefault(
+                record.order_id, {"amount": None, "date": "", "status": ""})
         if record.payout_amount is not None:
-            bucket["amount"] = (bucket["amount"] or 0.0) + record.payout_amount
+            target["amount"] = (target["amount"] or 0.0) + record.payout_amount
         if record.insurance is not None:
             bucket["insurance"] = (bucket["insurance"] or 0.0) + record.insurance
-        if record.payout_date and not bucket["date"]:
-            bucket["date"] = record.payout_date
-        if _status_rank(record.status) > _status_rank(bucket["status"]):
-            bucket["status"] = record.status
+        if record.payout_date and not target["date"]:
+            target["date"] = record.payout_date
+        if _status_rank(record.status) > _status_rank(target["status"]):
+            target["status"] = record.status
 
     writes: dict[int, dict] = {}
     for tracking, bucket in totals.items():
         row_numbers = rows_by_tracking.get(tracking) or []
         if not row_numbers:
             continue
-        costs = [costs_by_row.get(n, 0.0) for n in row_numbers]
-        total_cost = sum(costs)
-        for row_number, cost in zip(row_numbers, costs):
-            share = (cost / total_cost) if total_cost else (1 / len(row_numbers))
-            cells: dict = {PAYOUT_DATE_COL: bucket["date"]}
-            # An UNPAID package gets no Payout Amount at all — not a zero. `_profit_formula` treats a
-            # blank as "not paid out yet" and renders blank, but a literal 0 makes it compute
-            # `0 - Total Cost - ...`, i.e. a large fictitious LOSS on a perfectly healthy order. Same
-            # trap as the insurance cell below, and the reason both track None separately from 0.
-            if bucket["amount"] is not None:
-                cells[PAYOUT_AMOUNT_COL] = round(bucket["amount"] * share, 2)
-            # A group that reports NO insurance figure leaves the cell alone. Writing 0.0 for
-            # "unknown" would be a silent data loss: BFMR's two insurance-read endpoints both 404,
-            # so BFMR always reports None — and a zero written over a premium the user typed by hand
-            # would quietly inflate that row's profit by exactly the amount they paid to insure it.
-            # MOD reports a real 0.0 (it never charges any), which DOES get written.
-            if bucket["insurance"] is not None:
-                cells[INSURANCE_COL] = round(bucket["insurance"] * share, 2)
-            elif bucket["amount"] is not None and not str(
-                insurance_by_row.get(row_number, "")
-            ).strip():
-                # SETTLED, and the group reported no premium at all -> a real zero.
-                #
-                # Only once settled: BFMR posts the premium line before it pays, so a missing one on
-                # an OPEN package may simply not have been posted yet, where a missing one on a paid
-                # package means there was never a charge. And only into a BLANK cell — Insurance was
-                # hand-entered for months, and an inferred 0 written over a figure someone typed
-                # would erase a real cost and overstate that row's profit. A premium the group DOES
-                # report still wins, since that number is authoritative.
-                cells[INSURANCE_COL] = 0.0
-            # STATUS ONLY EVER MOVES FORWARD. A group's report is a snapshot, so a stale or partial
-            # read must not walk a row backwards — and the case that matters is a MOD return, which
-            # has no API signal at all and is therefore typed onto the sheet by hand. MOD keeps
-            # reporting that package as received (= "paid") forever, so without this guard every
-            # single run would overwrite the human's "return" and the reversal would vanish.
-            if _status_rank(bucket["status"]) > _status_rank(status_by_row.get(row_number, "")):
-                cells[STATUS_COL] = bucket["status"]
-            # A package the group knows about but has nothing to say about yet contributes no cells;
-            # recording it would only queue a pointless formula re-stamp.
-            if any(v not in ("", None) for v in cells.values()):
-                writes[row_number] = cells
+
+        # Per-order groups where the record named one, and a tracking-level remainder for the rest.
+        groups: list[tuple[list[int], dict]] = []
+        claimed: set[int] = set()
+        fallback = {"amount": bucket["amount"], "date": bucket["date"], "status": bucket["status"]}
+        for oid, sub in bucket["orders"].items():
+            scoped = [n for n in row_numbers if order_of_row.get(n) == oid]
+            if scoped:
+                groups.append((scoped, sub))
+                claimed.update(scoped)
+            else:
+                if sub["amount"] is not None:
+                    fallback["amount"] = (fallback["amount"] or 0.0) + sub["amount"]
+                if sub["date"] and not fallback["date"]:
+                    fallback["date"] = sub["date"]
+                if _status_rank(sub["status"]) > _status_rank(fallback["status"]):
+                    fallback["status"] = sub["status"]
+        rest = [n for n in row_numbers if n not in claimed]
+        if rest:
+            groups.append((rest, fallback))
+
+        # Insurance is PER PACKAGE (the fee row names no order), shared across every row of it.
+        package_costs = {n: costs_by_row.get(n, 0.0) for n in row_numbers}
+        package_total = sum(package_costs.values())
+
+        for group_rows, sub in groups:
+            costs = [costs_by_row.get(n, 0.0) for n in group_rows]
+            total_cost = sum(costs)
+            for row_number, cost in zip(group_rows, costs):
+                share = (cost / total_cost) if total_cost else (1 / len(group_rows))
+                insurance_share = ((package_costs[row_number] / package_total)
+                                   if package_total else (1 / len(row_numbers)))
+                cells: dict = {}
+                if sub["date"]:
+                    cells[PAYOUT_DATE_COL] = sub["date"]
+                # An UNPAID package gets no Payout Amount at all — not a zero. `_profit_formula`
+                # treats a blank as "not paid out yet" and renders blank, but a literal 0 makes it
+                # compute `0 - Total Cost - ...`, a large fictitious LOSS on a healthy order. Same
+                # trap as the insurance cell below; both track None separately from 0.
+                if sub["amount"] is not None:
+                    cells[PAYOUT_AMOUNT_COL] = round(sub["amount"] * share, 2)
+                # A group that reports NO insurance figure leaves the cell alone. Writing 0.0 for
+                # "unknown" would be silent data loss: BFMR's insurance-read endpoints both 404, so
+                # BFMR always reports None — and a zero over a premium typed by hand would inflate
+                # that row's profit by the amount paid to insure it. MOD reports a real 0.0 (it
+                # never charges any), which DOES get written.
+                if bucket["insurance"] is not None:
+                    cells[INSURANCE_COL] = round(bucket["insurance"] * insurance_share, 2)
+                elif sub["amount"] is not None and not str(
+                    insurance_by_row.get(row_number, "")
+                ).strip():
+                    # SETTLED, and the group reported no premium at all -> a real zero. Only once
+                    # settled (BFMR posts the premium before it pays), and only into a BLANK cell —
+                    # Insurance was hand-entered for months, and an inferred 0 over a typed figure
+                    # would erase a real cost. A premium the group DOES report still wins.
+                    cells[INSURANCE_COL] = 0.0
+                # STATUS ONLY EVER MOVES FORWARD. A group's report is a snapshot, so a stale or
+                # partial read must not walk a row backwards — the case that matters is a MOD
+                # return, typed by hand, which MOD's endless "received" reports must not undo.
+                if _status_rank(sub["status"]) > _status_rank(status_by_row.get(row_number, "")):
+                    cells[STATUS_COL] = sub["status"]
+                # A package the group knows but has nothing to say about contributes no cells.
+                if any(v not in ("", None) for v in cells.values()):
+                    writes[row_number] = cells
     return writes
 
 
@@ -578,7 +621,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
     payouts = client.fetch_payouts([r.tracking_number for r in rows])
     _merge_writes(all_writes, allocate_payouts(
         payouts, plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
-        plan["insurance_by_row"],
+        plan["insurance_by_row"], plan.get("order_of_row"),
     ))
     log.info("%s: %d payout record(s) read back", group_key, len(payouts))
 

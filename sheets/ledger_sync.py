@@ -62,6 +62,8 @@ HEADER = [
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Last Scraped At",
+    "Return Qty",   # method-2 returns: the units netted OUT of this row -- see models/order.py
+    "Return Date",
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
@@ -76,12 +78,12 @@ HEADER = [
 _NUMERIC_FIELDS = {
     "quantity", "cost_per_item", "shipping", "total_cost",
     "cashback_rate", "insurance", "payout_amount",
-    "shipment",
+    "shipment", "return_quantity",
 }
 
 # Fields that must be a plain int rather than a float when coerced (quantity: "3", not "3.0"; shipment:
 # "2", not "2.0"). Every other numeric field is a currency/rate amount, where a float is correct.
-_INT_FIELDS = {"quantity", "shipment"}
+_INT_FIELDS = {"quantity", "shipment", "return_quantity"}
 
 # Fields stored as a real BOOLEAN, so a Google Sheets checkbox actually ticks.
 #

@@ -743,3 +743,50 @@ class TestPayoutsOnly:
                 "insurance_by_row": {}, "awaiting_by_group": {}, "cancelled_by_group": {}}
         sync_tracking._run_one_group("BFMR", rows, plan, {}, apply=True)
         assert [r.order_id for r in client.submitted_with] == ["B2"] and client.insured_with is not None
+
+
+class TestOrderScopedAllocation:
+    """One tracking number, two orders, two outcomes. The paid order's rows must get the full payout and
+    stay paid; the returned order's rows get the return; nothing is netted across orders."""
+
+    def _writes(self, records, order_of_row=None):
+        from buying_groups.base import PayoutRecord
+        return sync_tracking.allocate_payouts(
+            [PayoutRecord(**r) for r in records],
+            rows_by_tracking={"T1": [4, 5]},
+            costs_by_row={4: 2392.0, 5: 299.0},
+            status_by_row={4: "delivered", 5: "delivered"},
+            order_of_row=order_of_row or {4: "A-PAID", 5: "B-RETURNED"},
+        )
+
+    def test_two_orders_one_tracking_are_scoped_not_netted(self):
+        writes = self._writes([
+            {"tracking_number": "T1", "order_id": "A-PAID", "payout_amount": 2392.0,
+             "payout_date": "2026-06-05", "status": "paid"},
+            {"tracking_number": "T1", "order_id": "B-RETURNED", "status": "return"},
+        ])
+        assert writes[4]["Payout Amount"] == 2392.0 and writes[4]["Status"] == "paid"
+        assert "Payout Amount" not in writes[5] and writes[5]["Status"] == "return"
+
+    def test_a_fee_row_without_an_order_shares_insurance_across_the_whole_package(self):
+        writes = self._writes([
+            {"tracking_number": "T1", "order_id": "A-PAID", "payout_amount": 2392.0, "status": "paid"},
+            {"tracking_number": "T1", "insurance": 10.0},
+        ])
+        assert writes[4]["Insurance"] == round(10.0 * 2392.0 / 2691.0, 2)
+        assert writes[5]["Insurance"] == round(10.0 * 299.0 / 2691.0, 2)
+        assert writes[4]["Payout Amount"] == 2392.0 and "Payout Amount" not in writes[5]
+
+    def test_an_unknown_order_folds_back_to_tracking_level(self):
+        writes = self._writes([
+            {"tracking_number": "T1", "order_id": "SOMEONE-ELSE", "payout_amount": 100.0, "status": "paid"},
+        ], order_of_row={4: "A", 5: "B"})
+        # nobody claims it by order, so it spreads across the package as before
+        assert round(writes[4]["Payout Amount"] + writes[5]["Payout Amount"], 2) == 100.0
+
+    def test_records_without_order_ids_behave_exactly_as_before(self):
+        writes = self._writes([
+            {"tracking_number": "T1", "payout_amount": 269.1, "payout_date": "2026-06-30", "status": "paid"},
+        ])
+        assert writes[4]["Payout Amount"] == round(269.1 * 2392.0 / 2691.0, 2)
+        assert writes[5]["Payout Amount"] == round(269.1 * 299.0 / 2691.0, 2)

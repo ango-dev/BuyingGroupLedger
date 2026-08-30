@@ -88,7 +88,7 @@ def _snapshot_path(arg: str) -> Path:
 
 # Columns that must hold plain ISO text, not a date serial. Order Date is the dangerous one: it's in
 # the primary upsert key AND the name-agnostic fallback key (ledger_sync.py:273, :297).
-_DATE_COLUMNS = ("Order Date", "Delivery Date", "Payout Date")
+_DATE_COLUMNS = ("Order Date", "Delivery Date", "Payout Date", "Return Date")
 
 # Sheets' error values, matched as a WHOLE cell. Never as a "starts with #" prefix: costco_mapping
 # appends "(Item #1847785)" to item names to disambiguate Costco's truncated descriptions, so a prefix

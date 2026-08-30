@@ -164,6 +164,14 @@ FIELDNAMES = [
     "delivery_address",
     "card_last4",
     "last_scraped_at",
+    # --- returns (method 2, user decision 2026-08-30): a PARTIAL return is a correction on the
+    # original row, never a second negative row. Quantity / Total Cost / Payout Amount hold the NET
+    # values (what Amazon's post-return page and the group's netted payout already report), so the
+    # COGS and Total Profit formulas need no changes -- the refunded units simply leave the cost
+    # basis, exactly as the old two-row bookkeeping summed to. These two are the RECORD of what was
+    # netted out: how many units went back, and when. A fully-returned order keeps status `return`.
+    "return_quantity",
+    "return_date",
 ]
 
 
@@ -209,6 +217,9 @@ class OrderItem(BaseModel):
     # Set by receipts.capture.attach_receipts after the rows are built (it needs the order id and
     # date this carries), so every scraper emits it blank and _merge_row preserves an existing link.
     receipt_url: str = ""
+    # Hand-entered (or import-derived) return record; scrapers emit both blank. See FIELDNAMES.
+    return_quantity: int | None = None
+    return_date: str = ""
 
     # TRANSIENT, Amazon only: a per-order promo the order page advertises under the payment method
     # ("... plus an extra 1% back ..."), which config.cards.tag_cards ADDS to the card's own rate when
@@ -220,6 +231,7 @@ class OrderItem(BaseModel):
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
                      "cashback_rate", "insurance", "payout_amount", "cogs", "total_profit",
+                     "return_quantity",
                      mode="before")
     @classmethod
     def _blank_to_none(cls, v):
