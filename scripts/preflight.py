@@ -386,9 +386,13 @@ def check_receipt_capture() -> list[Result]:
         )]
 
     out = [Result(OK, "receipt capture", f"bucket {settings.oci_bucket!r} via the S3 compat endpoint")]
-    if settings.dossier_upload_enabled:
+    if settings.dossier_upload_enabled and settings.oci_failures_par_url_prefix:
         out.append(Result(OK, "dossier upload", "failure dossiers are also uploaded under failures/ so "
                           "the alert carries a link (set a 30-day lifecycle rule on that prefix)"))
+    elif settings.dossier_upload_enabled:
+        out.append(Result(WARN, "dossier upload", "enabled but `receipts.oci.failures_par_url_prefix` is "
+                          "blank -- dossiers are NOT uploaded; alerts name a path on this host only. Create "
+                          "a PAR scoped to the failures/ prefix (reads, no listing) and paste its URL."))
     else:
         out.append(Result(WARN, "dossier upload", "DISABLED (DOSSIER_UPLOAD_ENABLED) — alerts name a "
                           "path on this host only."))

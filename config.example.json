@@ -72,7 +72,9 @@
       "s3_access_key_id": "",
       "s3_secret_access_key": "",
       "// par_url_prefix": "A Pre-Authenticated Request URL made ONCE by hand in the OCI console (Target: Bucket, Permit object reads, listing OFF). TREAT AS A SECRET — anyone holding it can read every receipt, and a receipt carries your name, address, card last 4 and totals.",
-      "par_url_prefix": ""
+      "par_url_prefix": "",
+      "// failures_par_url_prefix": "A SECOND PAR, for failure dossiers: Target 'Objects with prefix' failures/, Permit object reads, listing OFF. Paste the URL as given (ending /o/failures/). Blank = dossiers are not uploaded. Treat as a secret.",
+      "failures_par_url_prefix": ""
     }
   },
 

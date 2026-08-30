@@ -317,7 +317,7 @@ class TestDossierUpload:
             if self.fail:
                 raise RuntimeError("bucket unreachable")
             self.puts.append((key, len(body), ext))
-            return f"https://par/{key}"
+            return f"https://par-receipts/{key}"  # the RECEIPT link; dossiers must not use it
 
     def _written(self, tmp_path):
         with diagnostics.collecting("amazon", "bravo", root=tmp_path, selectors={"t": "div"}) as d:
@@ -327,9 +327,11 @@ class TestDossierUpload:
         return d
 
     def _wire(self, monkeypatch, store, enabled=True):
-        from config.settings import settings
+        import dataclasses
         from receipts import store as real_store
-        object.__setattr__(settings, "dossier_upload_enabled", enabled)  # frozen dataclass; default is True
+        monkeypatch.setattr(real_store, "settings", dataclasses.replace(
+            real_store.settings, dossier_upload_enabled=enabled,
+            oci_failures_par_url_prefix="https://par-f/o/failures/"))
         monkeypatch.setattr(real_store, "is_configured", store.is_configured)
         monkeypatch.setattr(real_store, "put", store.put)
 
@@ -341,12 +343,13 @@ class TestDossierUpload:
         link = d.upload()
 
         keys = [k for k, _, _ in store.puts]
-        assert link == f"https://par/failures/{d.path.name}/report.md"
+        assert link == f"https://par-f/o/failures/{d.path.name}/report.md"
         assert keys[-1].endswith("/report.md") and all(k.startswith(f"failures/{d.path.name}/") for k in keys)
         assert any(k.endswith("/page_1.html") for k in keys) and any(k.endswith("/page_1.png") for k in keys)
         assert any(k.endswith("/response_1.txt") for k in keys)
         report = (d.path / "report.md").read_text(encoding="utf-8")
-        assert "## Hosted copies" in report and f"https://par/failures/{d.path.name}/page_1.html" in report
+        assert "## Hosted copies" in report and f"https://par-f/o/failures/{d.path.name}/page_1.html" in report
+        assert "par-receipts" not in report
         assert [e for _, _, e in store.puts if e == ".md"] == [".md"]
 
     def test_disabled_or_unconfigured_uploads_nothing(self, tmp_path, monkeypatch):
@@ -374,7 +377,7 @@ class TestDossierUpload:
         with diagnostics.collecting("amazon", "bravo", root=tmp_path) as d:
             pass
         line = BaseRetailerScraper._dossier_line(d, RuntimeError("x"))
-        assert line.startswith("\n\nFailure dossier: https://par/failures/")
+        assert line.startswith("\n\nFailure dossier: https://par-f/o/failures/")
         assert "(local copy:" in line
 
     def test_the_alert_line_falls_back_to_the_path(self, tmp_path, monkeypatch):
@@ -384,3 +387,29 @@ class TestDossierUpload:
             pass
         line = BaseRetailerScraper._dossier_line(d, RuntimeError("x"))
         assert line == f"\n\nFailure dossier: {d.path}"
+
+
+class TestFailureLinkJoining:
+    @pytest.fixture(autouse=True)
+    def _mp(self, monkeypatch):
+        self.monkeypatch = monkeypatch
+
+    def _with(self, prefix):
+        import dataclasses
+        from receipts import store
+        self.monkeypatch.setattr(store, "settings", dataclasses.replace(
+            store.settings, oci_failures_par_url_prefix=prefix, dossier_upload_enabled=True))
+        return store.failure_link_for("failures/amazon_x_1/report.md")
+
+    def test_the_console_form_ending_in_the_prefix_is_not_doubled(self):
+        assert self._with("https://h/p/T/n/ns/b/b/o/failures/") == "https://h/p/T/n/ns/b/b/o/failures/amazon_x_1/report.md"
+
+    def test_a_url_trimmed_to_o_gets_the_full_key(self):
+        assert self._with("https://h/p/T/n/ns/b/b/o") == "https://h/p/T/n/ns/b/b/o/failures/amazon_x_1/report.md"
+
+    def test_blank_means_no_link_and_no_upload(self, tmp_path):
+        assert self._with("") == ""
+        with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
+            pass
+        d.write(RuntimeError("x"))
+        assert d.upload() == ""

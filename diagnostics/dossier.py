@@ -246,11 +246,12 @@ class FailureDossier:
         dead — and the same "Hosted copies" section is appended to the local report.md.
         """
         try:
-            from config.settings import settings
             from receipts import store
         except Exception:  # noqa: BLE001
             return ""
-        if not settings.dossier_upload_enabled or not store.is_configured():
+        settings = store.settings  # the store's own binding: what is_configured()/links read
+        if (not settings.dossier_upload_enabled or not store.is_configured()
+                or not settings.oci_failures_par_url_prefix):
             return ""
         directory = self.path or self._dir_path()
         prefix = f"{self.UPLOAD_PREFIX}/{directory.name}"
@@ -259,15 +260,16 @@ class FailureDossier:
             for file in sorted(directory.iterdir()):
                 if file.name == "report.md" or not file.is_file():
                     continue
-                link = store.put(f"{prefix}/{file.name}", file.read_bytes(), file.suffix)
-                if link:
-                    hosted.append((file.name, link))
+                key = f"{prefix}/{file.name}"
+                if store.put(key, file.read_bytes(), file.suffix):
+                    hosted.append((file.name, store.failure_link_for(key)))
             report = directory / "report.md"
             text = report.read_text(encoding="utf-8") if report.exists() else self.render()
             if hosted:
                 text += "\n## Hosted copies\n\n" + "".join(f"- `{n}`: {l}\n" for n, l in hosted)
                 report.write_text(text, encoding="utf-8")
-            link = store.put(f"{prefix}/report.md", text.encode("utf-8"), ".md")
+            key = f"{prefix}/report.md"
+            link = store.failure_link_for(key) if store.put(key, text.encode("utf-8"), ".md") else ""
             if link:
                 log.info("Uploaded failure dossier to %s", link)
             return link

@@ -102,6 +102,7 @@ ENV_TO_CONFIG = {
     "OCI_S3_SECRET_ACCESS_KEY": "receipts.oci.s3_secret_access_key",
     "OCI_PAR_URL_PREFIX": "receipts.oci.par_url_prefix",
     "DOSSIER_UPLOAD_ENABLED": "receipts.dossier_upload_enabled",
+    "OCI_FAILURES_PAR_URL_PREFIX": "receipts.oci.failures_par_url_prefix",
 }
 
 
@@ -327,6 +328,13 @@ class Settings:
     # Turn it OFF if an alert channel is shared with people who should not see order pages. Inert
     # whenever the receipt bucket is unconfigured; a failed upload falls back to the local path.
     dossier_upload_enabled: bool = _get_bool("DOSSIER_UPLOAD_ENABLED", True)
+    # A SEPARATE PAR for the dossiers, scoped to the `failures/` prefix (Target: Objects with prefix
+    # `failures/`, Permit object reads, listing OFF). Kept apart from the receipt PAR on purpose: the
+    # two can be revoked independently, and the receipt PAR stays scoped to receipts. Blank = dossiers
+    # are not uploaded (the alert names the local path). Either the `/o` form or the full
+    # `/o/failures/` form the console hands out is accepted. Treat as a secret, like the other PAR.
+    oci_failures_par_url_prefix: str = field(
+        default=_get_str("OCI_FAILURES_PAR_URL_PREFIX"), repr=False)
 
     # --- dev / ops hooks -------------------------------------------------------------------------
     # Force a retailer down its AGENT fallback instead of its deterministic path, to exercise the

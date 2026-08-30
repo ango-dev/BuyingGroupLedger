@@ -210,6 +210,23 @@ def put(key: str, body: bytes, ext: str) -> str:
     return link_for(key)
 
 
+def failure_link_for(key: str) -> str:
+    """The alert-facing URL for an uploaded failure dossier object, under the dossiers' OWN PAR.
+
+    That PAR is scoped to the `failures/` prefix, and the console hands out its URL already ending
+    in `/o/failures/` -- so the key's leading `failures/` must not be repeated. Both that form and a
+    URL trimmed back to `/o` are accepted. Blank prefix = no link (the dossier is not uploaded).
+    """
+    prefix = settings.oci_failures_par_url_prefix.rstrip("/")
+    if not prefix:
+        return ""
+    key = key.lstrip("/")
+    head = prefix.rsplit("/", 1)[-1]
+    if head != "o" and key.startswith(head + "/"):
+        key = key[len(head) + 1:]
+    return f"{prefix}/{key}"
+
+
 def link_for(key: str) -> str:
     """The sheet-facing URL for a stored object: the PAR prefix joined to the object key.
 
