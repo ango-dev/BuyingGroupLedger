@@ -105,8 +105,14 @@ instead of duplicating them, and `--compare` does that for you:
 .venv/bin/python -m scripts.audit_sheet --compare before.json
 ```
 
-That reports added / removed / changed rows keyed on the upsert key, so a run that appended a
-genuinely new order is immediately distinguishable from one that duplicated an existing row.
+That reports added / removed / changed rows keyed on the upsert key — and **judges** them, as
+`compare_*` results that count toward `--strict` and the exit code: a removed row is a FAIL (nothing
+in the system deletes rows); an appended row that reuses a tracking number an existing row of the same
+order already has is a FAIL (the split-order duplicate); a key cell edited by hand is a FAIL (the row
+is orphaned for future re-checks); a status moving backwards is a FAIL; a scraped cost changing on a
+terminal row is a WARN (no scraper re-reads those); a genuinely new order is INFO `compare_appended`;
+everything else is the normal `compare_updated`. So a cutover or a historical sweep can be gated by
+`--compare before.json --strict` instead of by reading a diff.
 (`Last Scraped At` is ignored — it changes on every touch and would otherwise mark every row as
 changed.) Exit code is `0` when nothing failed, `1` on a failure (or on a warning under `--strict`),
 so it can gate a scheduled run.

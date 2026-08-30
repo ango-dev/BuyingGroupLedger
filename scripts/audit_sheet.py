@@ -1730,17 +1730,32 @@ def diff_snapshots(before: Grids, after: Grids, ignore=_DIFF_IGNORED_COLUMNS) ->
     added = [describe(new, n) for k, n in new_rows.items() if k not in old_rows]
     removed = [describe(old, n) for k, n in old_rows.items() if k not in new_rows]
 
+    def record(sheet: Sheet, row_number: int, key) -> dict:
+        get = lambda c: str(sheet.cell(sheet.grids.formatted, row_number, c)).strip()  # noqa: E731
+        return {"key": key, "row": row_number, "order_id": key[0], "shipment": str(key[3]),
+                "tracking": get("Tracking Number"), "status": get("Status").lower(),
+                "item": get("Item Name"), "retailer": get("Retailer")}
+
+    records = {
+        "added": [record(new, n, k) for k, n in new_rows.items() if k not in old_rows],
+        "removed": [record(old, n, k) for k, n in old_rows.items() if k not in new_rows],
+        "changed": [],   # (record-after, column, was, now, status-before)
+        "kept": [record(new, n, k) for k, n in new_rows.items() if k in old_rows],
+    }
+
     changed, regressed = [], []
     columns = [c for c in new.header if c not in ignore]
     for key, new_row_number in new_rows.items():
         old_row_number = old_rows.get(key)
         if old_row_number is None:
             continue
+        status_was = str(old.cell(old.grids.formatted, old_row_number, "Status")).strip().lower()
         for column in columns:
             was = old.cell(old.grids.formatted, old_row_number, column)
             now = new.cell(new.grids.formatted, new_row_number, column)
             if str(was) != str(now):
                 changed.append(f"{key[0]} ship {key[3]} | {column}: {was!r} -> {now!r}")
+                records["changed"].append((record(new, new_row_number, key), column, str(was), str(now), status_was))
         # STATUS MUST ONLY MOVE FORWARD. sync_tracking drops any write that would walk a row
         # backwards, and calls that guard load-bearing for MOD returns specifically: MOD publishes no
         # return signal, so a return is typed onto the sheet BY HAND while MOD keeps reporting that
@@ -1761,7 +1776,108 @@ def diff_snapshots(before: Grids, after: Grids, ignore=_DIFF_IGNORED_COLUMNS) ->
         "rows_before": len(old_rows),
         "rows_after": len(new_rows),
         "ignored_columns": list(ignore),
+        "_records": records,
     }
+
+
+# Scraped cost columns. A change here on a TERMINAL row cannot have come from a scraper (terminal
+# rows are never re-read), so it is either a hand edit or a writer bug -- worth a look either way.
+# Payout Amount / Payout Date / Insurance / Status / Tracking Submitted are deliberately NOT here:
+# the buying-group sync writes those onto delivered rows every run, and that is the normal case.
+_SCRAPED_MONEY_COLUMNS = ("Quantity", "Cost Per Item", "Total Cost", "Shipping", "Cashback Rate")
+
+
+def classify_diff(diff: dict, opts: Options) -> list[Result]:
+    """Turn a before/after diff into Results, so `--compare` composes with --strict and the exit code.
+
+    A diff has no single right answer -- a new order legitimately appends -- but each KIND of change
+    does: nothing in the system deletes rows, the upsert never rewrites its own key, and a new key
+    that reuses a tracking number already on the sheet is the split-order duplicate the whole upsert
+    design exists to prevent. Before this, all of that printed as prose that gated nothing.
+    """
+    rec = diff.get("_records") or {}
+    added, removed, changed = rec.get("added", []), rec.get("removed", []), rec.get("changed", [])
+    kept = rec.get("kept", [])
+    out: list[Result] = []
+
+    # --- identity changes: a removed key and an added key that are the SAME package -------------
+    # The upsert never rewrites Order ID / Order Date / Item Name / Shipment; only a hand edit does,
+    # and it orphans the row (every future re-check appends beside it). Match on the identity both
+    # paths read identically -- (order, tracking) -- or (order, shipment) when untracked.
+    def identity(r):
+        return (r["order_id"], r["tracking"]) if r["tracking"] else (r["order_id"], "ship", r["shipment"])
+
+    removed_by_id = {}
+    for r in removed:
+        removed_by_id.setdefault(identity(r), []).append(r)
+    renamed, real_added, real_removed = [], [], []
+    for r in added:
+        twins = removed_by_id.get(identity(r))
+        if twins:
+            old = twins.pop(0)
+            renamed.append(f"{r['order_id']} ship {r['shipment']}: key changed -- was {old['item'][:35]!r} "
+                           f"(row {old['row']}), now {r['item'][:35]!r} (row {r['row']})")
+        else:
+            real_added.append(r)
+    for rs in removed_by_id.values():
+        real_removed.extend(rs)
+    if renamed:
+        out.append(Result("compare_identity_changed", "FAIL",
+                          f"{len(renamed)} row(s) had a KEY cell edited -- future re-checks will append beside them",
+                          _truncate(renamed, opts.max_detail)))
+
+    # --- removed rows: nothing in the system deletes ------------------------------------------
+    if real_removed:
+        out.append(Result("compare_rows_removed", "FAIL",
+                          f"{len(real_removed)} row(s) present before are gone -- nothing in the system deletes rows",
+                          _truncate([f"row {r['row']} was {r['retailer']} {r['order_id']} ship {r['shipment']} "
+                                     f"{r['item'][:35]!r}" for r in real_removed], opts.max_detail)))
+
+    # --- appended rows: a real new order, or a duplicate of a row already there? -----------------
+    existing_tracking = {(r["order_id"], r["tracking"]) for r in kept if r["tracking"]}
+    duplicates, fresh = [], []
+    for r in real_added:
+        if r["tracking"] and (r["order_id"], r["tracking"]) in existing_tracking:
+            duplicates.append(f"row {r['row']}: {r['order_id']} ship {r['shipment']} {r['item'][:35]!r} reuses "
+                              f"tracking {r['tracking']} already on the sheet -- a re-keyed duplicate")
+        else:
+            fresh.append(r)
+    if duplicates:
+        out.append(Result("compare_appended_duplicate", "FAIL",
+                          f"{len(duplicates)} appended row(s) reuse a tracking number an existing row of the "
+                          "same order already has -- the split-order duplicate",
+                          _truncate(duplicates, opts.max_detail)))
+    if fresh:
+        orders = {r["order_id"] for r in fresh}
+        out.append(Result("compare_appended", "INFO",
+                          f"{len(fresh)} row(s) appended across {len(orders)} order(s), none sharing a tracking "
+                          "number with an existing row",
+                          _truncate([f"row {r['row']}: {r['retailer']} {r['order_id']} ship {r['shipment']} "
+                                     f"[{r['status']}] {r['item'][:35]!r}" for r in fresh], opts.max_detail)))
+
+    # --- in-place changes ---------------------------------------------------------------------
+    regressed = [f"{r['order_id']} ship {r['shipment']}: {was!r} -> {now!r}"
+                 for r, col, was, now, _ in changed
+                 if col == "Status" and _STATUS_RANK.get(now.lower(), -1) < _STATUS_RANK.get(was.lower(), -1)]
+    if regressed:
+        out.append(Result("compare_status_regressed", "FAIL",
+                          f"{len(regressed)} row(s) moved BACKWARDS in status -- a hand correction was undone",
+                          _truncate(regressed, opts.max_detail)))
+    terminal_money = [f"row {r['row']}: {r['order_id']} ship {r['shipment']} [{before}] {col}: {was!r} -> {now!r}"
+                      for r, col, was, now, before in changed
+                      if col in _SCRAPED_MONEY_COLUMNS and before in TERMINAL_STATUSES]
+    if terminal_money:
+        out.append(Result("compare_terminal_money_changed", "WARN",
+                          f"{len(terminal_money)} scraped cost cell(s) changed on TERMINAL row(s) -- no scraper "
+                          "re-reads those, so this is a hand edit or a writer bug",
+                          _truncate(terminal_money, opts.max_detail)))
+    ordinary = [c for c in changed if not (c[1] == "Status" and _STATUS_RANK.get(c[3].lower(), -1) < _STATUS_RANK.get(c[2].lower(), -1))
+                and not (c[1] in _SCRAPED_MONEY_COLUMNS and c[4] in TERMINAL_STATUSES)]
+    touched = {c[0]["key"] for c in ordinary}
+    out.append(Result("compare_updated", "PASS",
+                      f"{len(ordinary)} cell(s) updated in place across {len(touched)} row(s); "
+                      f"{diff['rows_before']} -> {diff['rows_after']} rows"))
+    return out
 
 
 def render_diff(diff: dict, source: str, max_detail: int) -> str:
@@ -1829,7 +1945,7 @@ def render_json(results: list[Result], meta: dict, strict: bool, diff: dict | No
         ],
     }
     if diff is not None:
-        payload["diff"] = diff
+        payload["diff"] = {k: v for k, v in diff.items() if not k.startswith("_")}
     return json.dumps(payload, indent=2)
 
 
@@ -1878,6 +1994,7 @@ def main() -> None:
         with open(compare_path, encoding="utf-8") as f:
             baseline = Grids.from_snapshot(json.load(f))
         diff = diff_snapshots(baseline, grids)
+        results.extend(classify_diff(diff, opts))  # composes with --strict and the exit code
 
     if args.json:
         print(render_json(results, grids.meta, args.strict, diff))

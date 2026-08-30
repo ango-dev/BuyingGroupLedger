@@ -1188,3 +1188,76 @@ class TestDisplayRoundTripsToStored:
     def test_blank_and_text_cells_are_left_to_other_checks(self):
         sheet = build(row_cells(2, **{"Insurance": Cell(""), "Shipping": Cell("n/a")}))
         assert result_for(sheet, "display_round_trips_to_stored").status == "PASS"
+
+
+class TestCompareEmitsResults:
+    """--compare used to print prose that gated nothing. Each KIND of change now has a verdict."""
+
+    def _classify(self, before, after):
+        diff = audit_sheet.diff_snapshots(grids_for(*before), grids_for(*after))
+        return {r.name: r for r in audit_sheet.classify_diff(diff, Options())}
+
+    def _row(self, n, **kw):
+        base = {"Order ID": Cell(f"O{n}"), "Tracking Number": Cell(f"1Z{n}"), "Shipment": Cell(1)}
+        base.update(kw)
+        return row_cells(n, **base)
+
+    def test_a_removed_row_fails(self):
+        r = self._classify([self._row(2), self._row(3)], [self._row(2)])
+        assert r["compare_rows_removed"].status == "FAIL" and "compare_appended" not in r
+
+    def test_a_new_order_is_an_info_append(self):
+        r = self._classify([self._row(2)], [self._row(2), self._row(3)])
+        assert r["compare_appended"].status == "INFO" and "1 row(s) appended across 1 order(s)" in r["compare_appended"].summary
+        assert r["compare_updated"].status == "PASS"
+
+    def test_a_new_key_reusing_an_existing_tracking_number_is_a_duplicate(self):
+        before = [self._row(2, **{"Order ID": Cell("A"), "Tracking Number": Cell("1ZA")})]
+        after = before + [self._row(3, **{"Order ID": Cell("A"), "Tracking Number": Cell("1ZA"),
+                                          "Item Name": Cell("ASUS Vivobook 15 (re-worded)")})]
+        r = self._classify(before, after)
+        assert r["compare_appended_duplicate"].status == "FAIL"
+        assert "reuses tracking 1ZA" in r["compare_appended_duplicate"].details[0]
+        assert "compare_appended" not in r
+
+    def test_a_hand_edited_item_name_is_an_identity_change_not_a_remove_plus_add(self):
+        before = [self._row(2, **{"Order ID": Cell("A"), "Tracking Number": Cell("1ZA"), "Item Name": Cell("Widget")})]
+        after = [self._row(2, **{"Order ID": Cell("A"), "Tracking Number": Cell("1ZA"), "Item Name": Cell("Widget Pro")})]
+        r = self._classify(before, after)
+        assert r["compare_identity_changed"].status == "FAIL"
+        assert "compare_rows_removed" not in r and "compare_appended" not in r
+
+    def test_a_status_regression_fails(self):
+        before = [self._row(2, Status=Cell("paid"))]
+        after = [self._row(2, Status=Cell("shipped"))]
+        assert self._classify(before, after)["compare_status_regressed"].status == "FAIL"
+
+    def test_a_scraped_cost_changing_on_a_terminal_row_warns(self):
+        before = [self._row(2, Status=Cell("delivered"), **{"Total Cost": Cell(798.0)})]
+        after = [self._row(2, Status=Cell("delivered"), **{"Total Cost": Cell(700.0)})]
+        r = self._classify(before, after)
+        assert r["compare_terminal_money_changed"].status == "WARN"
+
+    def test_a_payout_landing_on_a_delivered_row_is_the_normal_sync(self):
+        before = [self._row(2, Status=Cell("delivered"), **{"Payout Amount": Cell("", fmt="currency")})]
+        after = [self._row(2, Status=Cell("paid"), **{"Payout Amount": Cell(900.0, fmt="currency"), "Payout Date": Cell("2026-08-30")})]
+        r = self._classify(before, after)
+        assert "compare_terminal_money_changed" not in r and "compare_status_regressed" not in r
+        assert r["compare_updated"].status == "PASS" and "3 cell(s) updated" in r["compare_updated"].summary
+
+    def test_a_cost_correction_on_an_open_row_is_an_ordinary_update(self):
+        before = [self._row(2, Status=Cell("ordered"), **{"Total Cost": Cell(798.0)})]
+        after = [self._row(2, Status=Cell("ordered"), **{"Total Cost": Cell(700.0)})]
+        assert "compare_terminal_money_changed" not in self._classify(before, after)
+
+    def test_json_output_hides_the_internal_records(self):
+        import json
+        diff = audit_sheet.diff_snapshots(grids_for(self._row(2)), grids_for(self._row(2)))
+        payload = json.loads(audit_sheet.render_json([], {}, False, diff))
+        assert "_records" not in payload["diff"] and "added" in payload["diff"]
+
+    def test_the_verdicts_reach_the_exit_code(self):
+        before, after = [self._row(2), self._row(3)], [self._row(2)]
+        diff = audit_sheet.diff_snapshots(grids_for(*before), grids_for(*after))
+        results = audit_sheet.classify_diff(diff, Options())
+        assert audit_sheet.exit_code(results, strict=False) == 1
