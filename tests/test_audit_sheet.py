@@ -1261,3 +1261,40 @@ class TestCompareEmitsResults:
         diff = audit_sheet.diff_snapshots(grids_for(*before), grids_for(*after))
         results = audit_sheet.classify_diff(diff, Options())
         assert audit_sheet.exit_code(results, strict=False) == 1
+
+
+class TestStateVisibility:
+    """What each run would see, and the rows no run can see."""
+
+    def _scopes(self, monkeypatch, scopes, scraped=("Best Buy", "Amazon", "Amazon Business", "Costco")):
+        monkeypatch.setattr(audit_sheet, "_configured_scopes", lambda: (scopes, set(scraped)))
+
+    def test_every_row_in_a_configured_scope_passes_with_counts(self, monkeypatch):
+        self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
+        sheet = build(
+            row_cells(2, Status=Cell("delivered")),
+            row_cells(3, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Order ID": Cell("BBY01-2")}),
+        )
+        r = result_for(sheet, "state_visibility")
+        assert r.status == "PASS"
+        assert "profile-alpha/Best Buy: 1 terminal, 1 open (1 need a re-read)" in r.summary
+
+    def test_a_row_no_configured_run_can_see_fails(self, monkeypatch):
+        self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
+        sheet = build(row_cells(2, Profile=Cell("profile-bravo")))  # a Best Buy row under an unconfigured profile
+        r = result_for(sheet, "state_visibility")
+        assert r.status == "FAIL" and "row 2: Profile 'profile-bravo' / Retailer 'Best Buy'" in r.details[0]
+
+    def test_a_hand_entered_retailer_is_info_not_fail(self, monkeypatch):
+        self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
+        sheet = build(row_cells(2), row_cells(3, Retailer=Cell("Newegg"), Profile=Cell("")))
+        r = result_for(sheet, "state_visibility")
+        assert r.status == "INFO" and "1 hand-entered row(s)" in r.summary
+
+    def test_no_config_is_a_skip(self, monkeypatch):
+        monkeypatch.setattr(audit_sheet, "_configured_scopes", lambda: (_ for _ in ()).throw(FileNotFoundError("config.json")))
+        assert result_for(build(row_cells(2)), "state_visibility").status == "SKIP"
+
+    def test_no_scopes_at_all_is_a_skip_not_every_row_invisible(self, monkeypatch):
+        self._scopes(monkeypatch, [])
+        assert result_for(build(row_cells(2)), "state_visibility").status == "SKIP"

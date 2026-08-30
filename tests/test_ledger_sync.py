@@ -1792,3 +1792,41 @@ class TestGiftCardTagIsSticky:
         plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
 
         assert plan["updates"] == [(2, "A1", "W", "", "BFMR")]
+
+
+class TestClassifyOrderStateIsPure:
+    """The classifier is the loop load_order_state used to run inline; it must answer offline."""
+
+    def test_it_takes_a_grid_and_needs_no_sheet(self):
+        from sheets.ledger_sync import classify_order_state
+        grid = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
+                status="delivered", tracking_number="1Z1", profile_label="p1", retailer="Best Buy"),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="2",
+                status="shipped", tracking_number="1Z2", profile_label="p1", retailer="Best Buy"),
+            row(order_id="B2", order_date="2026-08-08", item_name="X", shipment="1",
+                status="ordered", profile_label="p1", retailer="Amazon"),
+        ]
+        bby = classify_order_state(grid, "p1", None, "Best Buy")
+        assert [o["order_id"] for o in bby["open_orders"]] == ["A1"] and bby["delivered_ids"] == []
+        amz = classify_order_state(grid, "p1", None, "Amazon")
+        assert [o["order_id"] for o in amz["open_orders"]] == ["B2"]
+        assert amz["open_orders"][0]["needs_agent"] is True
+        assert classify_order_state(grid, "nobody") == {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
+
+    def test_load_order_state_delegates_to_it(self, sheet, monkeypatch):
+        import sheets.ledger_sync as ls
+        sheet.rows = [list(HEADER), row(order_id="A1", order_date="2026-08-08", item_name="W",
+                                        shipment="1", status="shipped", profile_label="p1")]
+        seen = {}
+        real = ls.classify_order_state
+
+        def spy(existing, profile_label=None, since=None, retailer=None):
+            seen.update(rows=len(existing), profile=profile_label, retailer=retailer)
+            return real(existing, profile_label, since, retailer)
+
+        monkeypatch.setattr(ls, "classify_order_state", spy)
+        state = ls.load_order_state("p1", retailer="Amazon")
+        assert seen == {"rows": 2, "profile": "p1", "retailer": "Amazon"}
+        assert state["open_orders"] == [] or state["open_orders"][0]["order_id"] == "A1"

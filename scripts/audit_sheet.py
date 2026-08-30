@@ -846,6 +846,69 @@ def check_profit_value_matches_inputs(sheet: Sheet, opts: Options) -> Result:
     )
 
 
+def _configured_scopes() -> tuple[list[tuple[str, str]], set[str]]:
+    """(profile label, retailer NAME) for every configured profile x retailer, plus every retailer
+    name a scraper exists for. Isolated so the check can be tested without a config.json."""
+    from config.profiles import load_profiles
+    from main import SCRAPERS
+
+    names = {cls.retailer_key: cls.retailer_name for cls in SCRAPERS.values()}
+    scopes = [(p.label, names[key]) for p in load_profiles() if p.profile_id
+              for key in (p.retailers or []) if key in names]
+    return scopes, set(names.values())
+
+
+@check("state_visibility")
+def check_state_visibility(sheet: Sheet, opts: Options) -> Result:
+    """What each scheduled run would SEE -- and which rows no run can see at all.
+
+    Runs the same pure classifier a scrape starts with (ledger_sync.classify_order_state) once per
+    configured profile x retailer, on the FORMATTED grid a real run reads. Per scope it reports
+    terminal / open / needs-re-check counts -- the last one is the next run's browser bill. Then
+    the finding no other check makes: a row whose (Profile, Retailer) matches no configured scope
+    is invisible to every run forever. For a retailer a scraper exists for that is a FAIL (a typo'd
+    or retired profile label); for one nothing scrapes (a hand-entered Newegg row) it is INFO.
+    """
+    from sheets.ledger_sync import classify_order_state
+
+    try:
+        scopes, scraped = _configured_scopes()
+    except Exception as exc:  # noqa: BLE001 -- no config on this host is a SKIP, not a crash
+        return Result("state_visibility", "SKIP", f"could not load the configured profiles ({exc})")
+
+    if not scopes:
+        return Result("state_visibility", "SKIP",
+                      "no configured profile x retailer on this host -- nothing to compare the rows against")
+    grid = sheet.grids.formatted
+    lines = []
+    for label, name in scopes:
+        st = classify_order_state(grid, label, None, name)
+        need = sum(1 for o in st["open_orders"] if o.get("needs_agent"))
+        lines.append(f"{label}/{name}: {len(st['delivered_ids']) + len(st['cancelled_ids'])} terminal, "
+                     f"{len(st['open_orders'])} open ({need} need a re-read)")
+
+    configured = set(scopes)
+    invisible, hand_entered = [], []
+    for row_number, _ in sheet.ledger_rows(grid):
+        profile = str(sheet.cell(grid, row_number, "Profile")).strip()
+        retailer = str(sheet.cell(grid, row_number, "Retailer")).strip()
+        if (profile, retailer) in configured:
+            continue
+        where = f"row {row_number}: Profile {profile!r} / Retailer {retailer!r}"
+        (invisible if retailer in scraped else hand_entered).append(where)
+
+    summary = " | ".join(lines) if lines else "no configured profile x retailer"
+    if invisible:
+        return Result("state_visibility", "FAIL",
+                      f"{len(invisible)} row(s) visible to NO configured run -- their orders can never be "
+                      "re-checked or closed", _truncate(invisible + [f"scopes: {summary}"], opts.max_detail))
+    if hand_entered:
+        return Result("state_visibility", "INFO",
+                      f"{summary}; {len(hand_entered)} hand-entered row(s) no scraper covers",
+                      _truncate(hand_entered, opts.max_detail))
+    return Result("state_visibility", "PASS", summary)
+
+
 @check("order_level_cells_agree")
 def check_order_level_cells_agree(sheet: Sheet, opts: Options) -> Result:
     """Retailer, Profile and Order Date are ORDER-level facts: every row of one order must agree.

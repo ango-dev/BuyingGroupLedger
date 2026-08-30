@@ -1281,6 +1281,20 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
         )
         return empty
 
+    return classify_order_state(existing, profile_label, since, retailer)
+
+
+def classify_order_state(existing: list[list], profile_label: str | None = None,
+                         since: str | None = None, retailer: str | None = None) -> dict:
+    """The PURE half of load_order_state: sheet grid (header row first) -> order state.
+
+    Split out so it can be asked questions offline -- by tests, and by scripts/audit_sheet's
+    `state_visibility` check, which runs it for every configured profile x retailer and reports
+    what each run would see and, more importantly, which rows NO run can see. The Profile-strip
+    bug lived here for weeks precisely because this loop only ever ran inside a
+    live call and said nothing about what it excluded. Same semantics as before, moved verbatim.
+    """
+    empty: dict = {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
     if not existing or not any(cell.strip() for cell in existing[0]):
         return empty
     header = existing[0]

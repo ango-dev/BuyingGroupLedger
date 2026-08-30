@@ -130,6 +130,12 @@ on its next re-check. A more general check catches the same class of bug for any
 builds each row's key twice — once from the displayed text and once from the stored value — and
 fails if they differ, i.e. if a row's identity depends on how you happen to have formatted it.
 
+**`state_visibility`** runs the same classifier a scrape starts with (`ledger_sync.classify_order_state`)
+once per configured profile × retailer and reports what each run would see — terminal / open /
+needs-a-re-read counts, the last being the next run's browser bill — and then the finding no other
+check makes: rows whose Profile + Retailer match **no configured run** and so can never be re-checked
+or closed (FAIL for a retailer a scraper exists for; INFO for a hand-entered one such as Newegg).
+
 It also checks the things that go wrong *around* the data rather than in it: content outside the
 28-column block (a stray note below the data misplaces the next appended row), `#REF!` errors left by
 a deleted column, a cashback rate outside 0–1, merged cells (they blank their neighbours on read), and
