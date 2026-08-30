@@ -9,7 +9,7 @@ value computed at scrape time would be stale the moment either is entered — an
 terminal, never re-scraped, so it would stay stale forever. Total Profit therefore stays a live
 formula. Shipping doesn't have that problem (it depends only on scraped data, which is only ever
 current as of the last re-scrape anyway), so its cost-weighted split is computed once in Python by
-sheets.ledger_sync._reprorate_shipping and written as a plain number — see that function's docstring
+sheets.ledger_sync._reprorate_order_level and written as a plain number — see that function's docstring
 for why a live SUMIF-based formula (the original design, briefly a separate "Prorated Shipping"
 column) was dropped in favor of this.
 
@@ -41,7 +41,7 @@ class TestFormulaShape:
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
         # here rather than quietly producing wrong money on the sheet.
         assert ledger_sync._cogs_formula(7) == (
-            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-U7*L7+N7)*(1-P7),"")))'
+            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-U7*L7-AE7+N7+AF7)*(1-P7),"")))'
         )
         assert ledger_sync._profit_formula(7) == (
             '=IF(B7="cancelled","",IF(S7="","",IFERROR(S7-Q7-R7,"")))'
@@ -84,6 +84,40 @@ class TestFormulaShape:
             single = (paid - clawed) - netted_cogs - ins
             assert round(single, 9) == round(old_pair, 9), (qty, unit, returned)
 
+    def test_formula_gift_card_netting_equals_the_old_cost_scaling(self):
+        """The regression proof for moving gift-card netting out of the Amazon mappings and into
+        the COGS formula. The old `_net_gift_card` scaled every row's
+        cost basis by `(basis - gc) / basis` and let `(Total Cost + Shipping) * (1 - rate)` do the
+        rest; the formula now subtracts the row's cost-weighted Gift Card share directly. Same
+        number, row by row — scaling by cost IS cost-weighted proration."""
+        for costs, ship_total, gc_total, rate in [
+            ([100.0], 0.0, 40.0, 0.05),               # one row, part-paid by card
+            ([100.0, 300.0], 40.0, 50.0, 0.02),       # multi-row: shares must reconcile per row
+            ([798.0, 202.0], 0.0, 1000.0, 0.135),     # card covers the whole order -> COGS 0
+        ]:
+            basis = sum(costs) + ship_total
+            factor = max(0.0, basis - gc_total) / basis
+            for cost in costs:
+                # Both shares use the Total Cost weight _reprorate_order_level applies. The scaled
+                # shipping share divides out to the same weight (ship_share is itself proportional
+                # to cost), which is exactly why the per-row equivalence is exact, not approximate.
+                weight = cost / sum(costs)
+                ship_share = ship_total * weight
+                gc_share = gc_total * weight
+                old = (cost * factor + ship_share * factor) * (1 - rate)
+                new = (cost - gc_share + ship_share) * (1 - rate)
+                assert round(new, 9) == round(old, 9), (cost, gc_total, rate)
+
+    def test_the_pre_tax_cap_is_obsolete_now_that_tax_is_recorded(self):
+        """The real case the old cap existed for: a $14.04 gift card against a $12.85 order with
+        $1.19 tax. The old scheme capped the reduction at the pre-tax basis so cost floored at 0;
+        with Sales Tax in the COGS basis the same numbers land at exactly 0 with no cap at all —
+        Amazon never lets a gift card exceed the grand total."""
+        cost, tax, gc, rate = 12.85, 1.19, 14.04, 0.03
+        old_capped = max(0.0, (cost - min(gc, cost)) ) * (1 - rate)   # cap: gc floored at pre-tax basis
+        new = (cost - gc + 0.0 + tax) * (1 - rate)
+        assert round(new, 9) == 0.0 == round(old_capped, 9)
+
     def test_a_cancelled_row_reports_no_cost_and_no_profit(self):
         # A cancelled order was refunded, so it must not reach the year-end cost side. Both formulas
         # short-circuit on Status, read through _COL so a reorder can't leave them pointing at the
@@ -106,7 +140,8 @@ class TestFormulaShape:
             assert f"{letter}7" not in profit, f"{name} should not be part of the profit math"
 
         cogs = ledger_sync._cogs_formula(7)
-        for name in ("Total Cost", "Shipping", "Cashback Rate", "Status", "Return Qty", "Cost Per Item"):
+        for name in ("Total Cost", "Shipping", "Cashback Rate", "Status", "Return Qty",
+                     "Cost Per Item", "Gift Card", "Sales Tax"):
             letter = ledger_sync._col_letter(HEADER.index(name))
             assert f"{letter}7" in cogs, f"{name} ({letter}) missing from the COGS formula"
         # Insurance is an EXPENSE, not part of the cost of the goods. Order ID: no SUMIF here —
@@ -147,7 +182,7 @@ class TestFormulaIsWritten:
     def test_written_with_user_entered_so_it_is_a_formula(self, sheet, tmp_path):
         # The data rows are written RAW on purpose (USER_ENTERED would reinterpret a long numeric
         # tracking number into scientific notation). Only this one narrow column may use USER_ENTERED.
-        # (No Shipping figure is sent here, so _reprorate_shipping never fires and never adds a
+        # (No Shipping figure is sent here, so _reprorate_order_level never fires and never adds a
         # competing RAW batch_update call — see TestShippingReproration for that path.)
         sheet.rows = [list(HEADER)]
         path = write_csv_file(
@@ -223,7 +258,7 @@ class TestFormulaIsWritten:
 
 
 class TestShippingReproration:
-    """_reprorate_shipping (sheets/ledger_sync.py) rewrites every row of a touched order's Shipping
+    """_reprorate_order_level (sheets/ledger_sync.py) rewrites every row of a touched order's Shipping
     cell to its own cost-weighted share of the order's raw shipping total — replacing the raw
     order-level number every scraper/agent emits, in place, as a plain number (not a formula)."""
 
@@ -261,7 +296,7 @@ class TestShippingReproration:
         """The classic Best Buy undisclosed-split case: only the NEW box shows up in a given sync
         (the retailer surfaces one rotating tracking number at a time), but the order's ORIGINAL row
         must still be re-split now that a second box is known — not left at its old (now wrong) full
-        total. _reprorate_shipping re-derives from EVERY row of the order currently on the sheet, not
+        total. _reprorate_order_level re-derives from EVERY row of the order currently on the sheet, not
         just the ones this sync's CSV happened to include."""
         sheet.rows = [
             list(HEADER),
@@ -317,6 +352,54 @@ class TestShippingReproration:
         sync_csv_to_sheet(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("shipping")] == 0.0
+
+    def test_gift_card_and_sales_tax_split_by_total_cost_like_shipping(self, sheet, tmp_path):
+        """The two 2026-08-30 columns ride the same order-level contract as Shipping: every row of
+        an order arrives carrying the order TOTAL, and each cell ends up holding that row's
+        cost-weighted share — which is what the COGS formula reads."""
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1",
+                 quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="40.00",
+                 gift_card="50.00", sales_tax="8.00"),
+            dict(order_id="A1", order_date="2026-08-08", item_name="Gadget", shipment="Shipment 2",
+                 quantity="1", cost_per_item="300.00", total_cost="300.00", shipping="40.00",
+                 gift_card="50.00", sales_tax="8.00"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert rows[0][FIELDNAMES.index("gift_card")] == 12.5   # 50 * 100/400
+        assert rows[1][FIELDNAMES.index("gift_card")] == 37.5   # 50 * 300/400
+        assert rows[0][FIELDNAMES.index("sales_tax")] == 2.0    # 8 * 100/400
+        assert rows[1][FIELDNAMES.index("sales_tax")] == 6.0    # 8 * 300/400
+
+    def test_a_sync_reporting_only_some_order_level_fields_leaves_the_others_alone(self, sheet, tmp_path):
+        """Each order-level field skips independently: a re-check that reports shipping but no
+        gift-card figure must not zero out a Gift Card split a previous sync already wrote."""
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="40.00",
+                gift_card="12.5", sales_tax="2.0"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                 quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="40.00"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 1, "the re-check must match the existing row, not append"
+        r = sheet.data_rows()[0]
+        assert r[FIELDNAMES.index("shipping")] == 40.0
+        # Untouched by this sync's reprorate (no figure sent) — carried through the row rewrite as
+        # the number the merge coerces it to, not zeroed and not re-split.
+        assert r[FIELDNAMES.index("gift_card")] == 12.5
+        assert r[FIELDNAMES.index("sales_tax")] == 2.0
 
     def test_reprorate_writes_raw_not_user_entered(self, sheet, tmp_path):
         # Shipping is a plain number, never a formula — USER_ENTERED would risk Sheets reinterpreting

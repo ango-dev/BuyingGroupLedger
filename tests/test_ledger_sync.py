@@ -43,6 +43,10 @@ class FakeWorksheet:
         # grows the sheet first instead of discovering the limit through a failed sync.
         self.row_count = 1000
         self.added_rows = 0
+        # The grid is fixed on the COLUMN side too (writing AC1 on a 28-col sheet 400'd live on
+        # 2026-08-30) — modelled so a test can prove sync grows the grid before the header write.
+        self.col_count = len(ledger_sync.HEADER)
+        self.added_cols = 0
         # Every {"range": ..., "values": ...} dict passed to batch_update, so tests can assert on the
         # Total Profit formulas without them also having to land in self.rows.
         self.batched: list[dict] = []
@@ -65,6 +69,10 @@ class FakeWorksheet:
     def add_rows(self, count):
         self.row_count += count
         self.added_rows += count
+
+    def add_cols(self, count):
+        self.col_count += count
+        self.added_cols += count
 
     def update(self, range_name, values, value_input_option=None):
         # Real gspread writes the whole 2D `values` block starting at the range's top-left cell, so a
@@ -117,7 +125,7 @@ class FakeWorksheet:
     def _batched_formulas(self, field: str) -> dict:
         """{row_number: value} for every cell of the given FIELDNAMES column written via
         batch_update this sync. A single sync can batch-write more than one column now
-        (_reprorate_shipping's Shipping rewrite alongside _write_profit_formulas's Total Profit), so
+        (_reprorate_order_level's Shipping rewrite alongside _write_profit_formulas's Total Profit), so
         this filters by column letter rather than assuming every batched entry is a profit formula."""
         col = ledger_sync._COL[field]
         return {
@@ -520,6 +528,26 @@ class TestSyncUpsert:
 
         assert sheet.rows[0] == HEADER, "header row should be migrated to the full schema"
         assert len(sheet.data_rows()) == 1, "legacy row should match, not duplicate"
+
+    def test_a_narrow_grid_is_grown_before_the_header_is_widened(self, sheet, tmp_path):
+        """A real sheet's grid is FIXED at its column count, and writing a 32-cell header into a
+        30-column grid 400s ("exceeds grid limits") before the migration ever helps. The first sync
+        after a column append must grow the grid first — the column-side twin of _ensure_grid_rows.
+        """
+        legacy_header = list(HEADER[: HEADER.index("Gift Card")])
+        sheet.rows = [legacy_header]
+        sheet.col_count = len(legacy_header)
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                 status="shipped"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.col_count == len(HEADER)
+        assert sheet.added_cols == len(HEADER) - len(legacy_header)
+        assert sheet.rows[0] == HEADER
 
     def test_sheet_without_buying_group_column_is_migrated(self, sheet, tmp_path):
         # A sheet that already has Shipment but predates Buying Group: the column is appended, so the

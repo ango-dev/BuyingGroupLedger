@@ -334,7 +334,7 @@ class OrderItem(BaseModel):
         change if you're tempted. This number is a money-path input, not just a
         display value: it gates and values real BFMR insurance filings (buying_groups/bfmr.py), is
         the `amount` declared to MOD (unrevisable once sent), weights how sync_tracking splits a
-        payout across an order's rows, AND is the weight ledger_sync._reprorate_shipping divides the
+        payout across an order's rows, AND is the weight ledger_sync._reprorate_order_level divides the
         order's shipping total by — so folding that shipping share back in here is circular. The two
         are combined only inside the Total Profit formula, which subtracts Shipping on its own.
         """

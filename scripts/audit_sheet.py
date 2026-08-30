@@ -1294,7 +1294,7 @@ def check_total_cost(sheet: Sheet, opts: Options) -> Result:
 
 @check("shipping_is_cost_weighted")
 def check_shipping_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
-    """_reprorate_shipping (sheets/ledger_sync.py) rewrites each row's Shipping to its own
+    """_reprorate_order_level (sheets/ledger_sync.py) rewrites each row's Shipping to its own
     cost-weighted SHARE of its order's raw shipping total -- so Shipping / Total Cost should be the
     SAME ratio across every row of one order. A row that disagrees was prorated against a different
     raw total than its siblings (stale from before a later box was discovered, or a manual edit), and
@@ -1624,7 +1624,7 @@ def check_unresolved_split_quantity(sheet: Sheet, opts: Options) -> Result:
 
     Left unresolved it is a money bomb, not just an untidy row: with Total Cost blank and a payout
     filled, the profit formula evaluates `payout + (0+0)*rate - 0 - 0 - ins`, so **the entire payout
-    is booked as profit**. The blank Total Cost also drops out of _reprorate_shipping's cost-weighted
+    is booked as profit**. The blank Total Cost also drops out of _reprorate_order_level's cost-weighted
     split (sheets/ledger_sync.py), so that box absorbs none of the order's shipping and its sibling
     row absorbs all of it.
 

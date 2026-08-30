@@ -124,7 +124,8 @@ _COL = {field: _col_letter(i) for i, field in enumerate(FIELDNAMES)}
 def _cogs_formula(row_number: int) -> str:
     """The live COGS (Cost of Goods Sold) formula for one sheet row.
 
-        COGS = (Total Cost - Return Qty x Cost Per Item + Shipping) * (1 - Cashback Rate)
+        COGS = (Total Cost - Return Qty x Cost Per Item - Gift Card + Shipping + Sales Tax)
+               * (1 - Cashback Rate)
 
     RETURNS ARE NETTED HERE, IN THE FORMULA. Quantity and Total Cost stay
     the GROSS bought numbers the scraper wrote -- putting a formula in those cells would freeze to a
@@ -135,6 +136,19 @@ def _cogs_formula(row_number: int) -> str:
     The payout side nets itself for BFMR (its amount_paid is already net of clawbacks, allocated
     per order); a MOD return's payout stays hand-entered, as MOD has no return signal.
 
+    GIFT CARD AND SALES TAX ARE NETTED HERE TOO, for the same reason and
+    with the same blank-is-zero property, so every pre-existing row computes the identical number.
+    A gift card is a tender the card never spent: it leaves the cost basis (the gift-card PURCHASE
+    has its own ledger row -- the record-cost-once rule) and, being inside the parenthesis, earns no
+    cashback. This replaces the old scheme where the Amazon mappings silently scaled Cost Per Item /
+    Total Cost down to the card-paid share and threw the amount away -- algebraically the same COGS,
+    but now Total Cost matches the retailer's page and the amount is visible. Sales tax is a real
+    acquisition cost (usually 0 under the resale certificate, but hand-kept orders pay it) and sits
+    inside the parenthesis because the card is charged tax and earns cashback on it. Both cells
+    hold this row's cost-weighted share (see _reprorate_order_level). No floor/cap is needed: a
+    gift card can cover at most cost+shipping+tax, so COGS bottoms out at 0, never negative -- the
+    old "cap at the pre-tax basis" rule existed only because tax wasn't recorded.
+
     THE CASHBACK IS NETTED INTO COST, not counted as income. Card rewards earned on a purchase are a
     purchase-price adjustment rather than receipts, so this is the characterisation a Schedule C
     wants — and it is why this column exists at all: it is the year-end cost figure, ready to SUMIF.
@@ -143,8 +157,9 @@ def _cogs_formula(row_number: int) -> str:
     of the cost of the goods; folding it in here would overstate COGS and understate expenses, which
     are separate lines on the form. _profit_formula subtracts it separately.
 
-    Shipping is read directly and is already this row's cost-weighted SHARE (see _reprorate_shipping),
-    so there is nothing to divide out — the same reasoning as _profit_formula.
+    Shipping is read directly and is already this row's cost-weighted SHARE (see
+    _reprorate_order_level), so there is nothing to divide out — the same reasoning as
+    _profit_formula.
 
     A CANCELLED ROW REPORTS NOTHING. The order was refunded, so no cost was ever incurred and it
     must not reach the year-end cost side — but the row itself stays for bookkeeping (see
@@ -161,10 +176,12 @@ def _cogs_formula(row_number: int) -> str:
     n = row_number
     cost, ship, rate = _COL["total_cost"], _COL["shipping"], _COL["cashback_rate"]
     ret_qty, unit = _COL["return_quantity"], _COL["cost_per_item"]
+    gift, tax = _COL["gift_card"], _COL["sales_tax"]
     status = _COL["status"]
     return (
         f'=IF({status}{n}="cancelled","",'
-        f'IF({cost}{n}="","",IFERROR(({cost}{n}-{ret_qty}{n}*{unit}{n}+{ship}{n})*(1-{rate}{n}),"")))'
+        f'IF({cost}{n}="","",'
+        f'IFERROR(({cost}{n}-{ret_qty}{n}*{unit}{n}-{gift}{n}+{ship}{n}+{tax}{n})*(1-{rate}{n}),"")))'
     )
 
 
@@ -355,8 +372,22 @@ def _next_shipment_number(order_id, existing, oid_hdr_idx, shipment_hdr_idx,
     return max(nums) + 1
 
 
+def _ensure_grid_cols(worksheet) -> None:
+    """Grow the grid to len(HEADER) columns before anything writes a full-width row.
+
+    A real sheet has a FIXED grid, and a write past it 400s ("exceeds grid limits") — the column
+    twin of the append failure _ensure_grid_rows exists for, and exactly what the first sync after
+    a column append (grid 30 -> 32, 2026-08-30) would hit on an older sheet. Growing is safe and
+    idempotent: new columns arrive empty, existing cells don't move.
+    """
+    current = getattr(worksheet, "col_count", None)
+    if current is not None and current < len(HEADER):
+        worksheet.add_cols(len(HEADER) - current)
+
+
 def sync_csv_to_sheet(csv_path: Path) -> None:
     worksheet = _get_worksheet()
+    _ensure_grid_cols(worksheet)
     existing = worksheet.get_all_values()
     # An empty-but-existing worksheet returns [] or a single blank row like [[]] — both mean
     # "no header yet", so (re)write our header into row 1.
@@ -503,11 +534,11 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     written_rows: list[int] = []  # every row touched this sync -> gets its Total Profit formula
     split_events: list[dict] = []
     skipped_blank = 0
-    # Every order this sync touched, and the raw order-level shipping figure it sent for that order
-    # (every row of one order carries the same number) — fed to _reprorate_shipping after the write
-    # loop, once every row's final position on the sheet is settled.
+    # Every order this sync touched, and the raw order-level figures (shipping / gift card / sales
+    # tax) it sent for that order (every row of one order carries the same number) — fed to
+    # _reprorate_order_level after the write loop, once every row's final position is settled.
     touched_order_ids: set[str] = set()
-    raw_shipping_by_order: dict[str, float] = {}
+    raw_totals_by_order: dict[str, dict[str, float]] = {f: {} for f in _ORDER_LEVEL_FIELDS}
     for record in collapsed:
         # A record with no Order ID can't form a valid upsert key (Order ID + Order Date + Item Name
         # + Shipment), so it never matches an existing row and appends as a permanent orphan/duplicate
@@ -523,10 +554,11 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             )
             continue
         touched_order_ids.add(record["order_id"])
-        if record["order_id"] not in raw_shipping_by_order:
-            raw_ship = _parse_display_number(record.get("shipping", ""))
-            if raw_ship is not None:
-                raw_shipping_by_order[record["order_id"]] = raw_ship
+        for order_level_field in _ORDER_LEVEL_FIELDS:
+            if record["order_id"] not in raw_totals_by_order[order_level_field]:
+                raw_value = _parse_display_number(record.get(order_level_field, ""))
+                if raw_value is not None:
+                    raw_totals_by_order[order_level_field][record["order_id"]] = raw_value
         # Driven off FIELDNAMES (the same list csv_writer writes) rather than a second literal
         # copy, so a new column can't land in one place and not the other. .get() tolerates
         # re-syncing an older CSV written before a column was added — the missing value arrives
@@ -656,7 +688,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         worksheet.update(range_name=f"A{start_row}", values=[_blank_to_none(r) for r in appends])
         written_rows.extend(range(start_row, start_row + len(appends)))
 
-    _reprorate_shipping(worksheet, touched_order_ids, raw_shipping_by_order)
+    _reprorate_order_level(worksheet, touched_order_ids, raw_totals_by_order)
     _clear_cancelled_money(worksheet, cancelled_rows)
     _write_profit_formulas(worksheet, written_rows)
 
@@ -895,7 +927,7 @@ def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
     so _merge_row carries that number forward and the RAW row write would replace the formula with a
     frozen value. Re-stamping the formula last restores it.
 
-    Note this does NOT need to run again after _reprorate_shipping changes a sibling row's Shipping
+    Note this does NOT need to run again after _reprorate_order_level changes a sibling row's Shipping
     value: _profit_formula reads that cell by reference (same-row, no SUMIF), so Sheets recalculates
     Total Profit live the moment Shipping changes — no re-stamp required for rows this call doesn't
     otherwise touch.
@@ -919,34 +951,40 @@ def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
         )
 
 
-def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
-    """Rewrite the Shipping cell of EVERY row belonging to `order_ids` to that row's cost-weighted
-    SHARE of the order's shipping total (weighted by Total Cost), replacing the
-    raw order-level value every scraper/agent emits.
+# The ORDER-LEVEL amounts every mapping emits identically on all of an order's rows, in the field
+# order they were added. Each one's sheet cell holds that row's cost-weighted SHARE of the order
+# total, written by _reprorate_order_level below.
+_ORDER_LEVEL_FIELDS = ("shipping", "gift_card", "sales_tax")
+
+
+def _reprorate_order_level(worksheet, order_ids: set, raw_totals: dict) -> None:
+    """Rewrite the Shipping / Gift Card / Sales Tax cell of EVERY row belonging to `order_ids` to
+    that row's cost-weighted SHARE of the order-level total (weighted by Total Cost), replacing the raw order-level value every scraper/agent emits.
+    `raw_totals` is {field: {order_id: total}} over _ORDER_LEVEL_FIELDS.
 
     Why this is Python at sync time, not a live sheet formula: the only place the true order-level
     total is ever known is the freshly-scraped record itself — every row of an order carries the SAME
-    number (see OrderItem.shipping). Once this function overwrites a row's Shipping cell with its
-    share, that raw total is gone from the sheet; a live formula would need it to live SOMEWHERE else
-    to divide from (that's what a short-lived separate "Prorated Shipping" column existed for, added
-    then reverted the same day — the user wants the split to just BE the Shipping column, not a
-    second one). So it's computed once, here, from the total this sync just read off the CSV, and
-    applied to EVERY row of the order currently on the sheet — not only the rows this sync happened
-    to touch — so a shipment discovered LATER (the order grows a new box on a re-check) re-derives
-    the whole order's split fresh rather than leaving its older siblings stale.
+    number (see OrderItem.shipping). Once this function overwrites a row's cell with its share, that
+    raw total is gone from the sheet; a live formula would need it to live SOMEWHERE else to divide
+    from (that's what a short-lived separate "Prorated Shipping" column existed for, added then
+    reverted the same day — the user wants the split to just BE the column, not a second one). So
+    it's computed once, here, from the total this sync just read off the CSV, and applied to EVERY
+    row of the order currently on the sheet — not only the rows this sync happened to touch — so a
+    shipment discovered LATER (the order grows a new box on a re-check) re-derives the whole order's
+    split fresh rather than leaving its older siblings stale.
 
-    _profit_formula reads Shipping directly (same-row reference, no SUMIF), and Sheets recalculates a
-    formula the instant a cell it references changes — so Total Profit updates for every affected
-    sibling row with no extra re-stamp needed here, even though this function never touches the Total
-    Profit column itself.
+    The formulas read all three columns directly (same-row references, no SUMIF), and Sheets
+    recalculates a formula the instant a cell it references changes — so COGS and Total Profit
+    update for every affected sibling row with no extra re-stamp needed here.
 
     Runs AFTER every update/append this sync has already written, so the fresh read below sees final
-    row positions (including any rows just appended) rather than a stale pre-write snapshot. Skipped
-    entirely for an order this sync touched but sent no shipping figure for (a partial re-check that
-    only refreshes tracking, say) — its rows are left exactly as a previous sync last prorated them.
+    row positions (including any rows just appended) rather than a stale pre-write snapshot. Each
+    FIELD is skipped independently for an order this sync sent no figure for (a partial re-check
+    that only refreshes tracking sends none of them) — those cells are left exactly as a previous
+    sync last prorated them, or blank if nothing ever reported one.
 
-    A failure here is logged, not raised: the scraped row data is already safely written: only the
-    Shipping split may still show the raw order-level number until the next sync repairs it.
+    A failure here is logged, not raised: the scraped row data is already safely written; only the
+    splits may still show the raw order-level number until the next sync repairs it.
     """
     if not order_ids:
         return
@@ -955,10 +993,8 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
     if header != list(HEADER):
         return  # sync_csv_to_sheet already refused to write in this case; nothing to reprorate
     oid_i = header.index("Order ID")
-    ship_i = header.index("Shipping")
     cost_i = header.index("Total Cost")
     status_i = header.index("Status")
-    ship_col = _col_letter(ship_i)
 
     rows_by_order: dict[str, list[int]] = {}
     for row_number, row in enumerate(grid[1:], start=2):
@@ -968,8 +1004,8 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
 
     data = []
     for oid, row_numbers in rows_by_order.items():
-        total = raw_shipping.get(oid)
-        if total is None:
+        totals = {field: raw_totals.get(field, {}).get(oid) for field in _ORDER_LEVEL_FIELDS}
+        if all(t is None for t in totals.values()):
             continue
         costs = {n: _parse_display_number(grid[n - 1][cost_i]) if cost_i < len(grid[n - 1]) else None
                  for n in row_numbers}
@@ -981,8 +1017,11 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
             row_status = grid[n - 1][status_i] if status_i < len(grid[n - 1]) else ""
             if str(row_status).strip().lower() == "cancelled":
                 continue
-            share = round(total * (costs[n] or 0) / cost_sum, 2) if cost_sum else 0.0
-            data.append({"range": f"{ship_col}{n}", "values": [[share]]})
+            weight = (costs[n] or 0) / cost_sum if cost_sum else 0.0
+            for field, total in totals.items():
+                if total is None:
+                    continue
+                data.append({"range": f"{_COL[field]}{n}", "values": [[round(total * weight, 2)]]})
 
     if not data:
         return
@@ -990,8 +1029,9 @@ def _reprorate_shipping(worksheet, order_ids: set, raw_shipping: dict) -> None:
         worksheet.batch_update(data, value_input_option="RAW")
     except Exception:
         log.exception(
-            "Could not reprorate Shipping for %d order(s); the raw order-level total may still be "
-            "sitting on some of their rows until the next sync.", len(rows_by_order),
+            "Could not reprorate the order-level amounts for %d order(s); the raw order-level "
+            "totals may still be sitting on some of their rows until the next sync.",
+            len(rows_by_order),
         )
 
 
