@@ -930,6 +930,13 @@ def check_return_columns_consistent(sheet: Sheet, opts: Options) -> Result:
         ret_date = str(sheet.cell(sheet.grids.formatted, row_number, "Return Date")).strip()
         blank = ret in ("", None)
         if blank and not ret_date:
+            # A row the GROUP walked to `return` with no Return Qty typed yet: the payout side is
+            # already clawed back while COGS still counts every unit, so the row shows a large loss
+            # until the hand edit lands. This is the reminder that edit is owed.
+            if str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower() == "return":
+                checked += 1
+                offenders.append(f"row {row_number}: Status is `return` but Return Qty is blank -- "
+                                 "COGS still counts the returned units; type Return Qty + Return Date")
             continue
         checked += 1
         qty = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Quantity"))

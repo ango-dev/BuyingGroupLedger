@@ -1368,3 +1368,14 @@ class TestReturnColumnsConsistent:
         b = build(row_cells(2, **{"Return Date": Cell("2026-04-30")}))
         assert result_for(a, "return_columns_consistent").status == "FAIL"
         assert result_for(b, "return_columns_consistent").status == "FAIL"
+
+
+    def test_a_group_reported_return_without_a_return_qty_is_the_owed_hand_edit(self):
+        sheet = build(row_cells(2, Status=Cell("return")))
+        r = result_for(sheet, "return_columns_consistent")
+        assert r.status == "FAIL" and "type Return Qty" in r.details[0]
+
+    def test_a_group_reported_return_with_the_qty_typed_passes(self):
+        sheet = build(row_cells(2, **{"Status": Cell("return"), "Quantity": Cell(2),
+                                     "Return Qty": Cell(2), "Return Date": Cell("2026-06-05")}))
+        assert result_for(sheet, "return_columns_consistent").status == "PASS"
