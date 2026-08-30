@@ -365,8 +365,14 @@ def _status_rank(status: str) -> int:
 # --- the orchestrator ---------------------------------------------------------------------------
 
 
-def run(apply: bool = False, limit: int | None = None, only_group: str | None = None) -> dict:
+def run(apply: bool = False, limit: int | None = None, only_group: str | None = None,
+        payouts_only: bool = False) -> dict:
     """One full pass: push tracking numbers, file BFMR insurance, pull payouts back.
+
+    `payouts_only` skips the two WRITES to the groups -- no tracking submitted, no insurance filed --
+    and only reads payouts back and ticks the packages the group already holds. For a ledger that
+    carries orders from buying-group accounts other than the connected ones (imported history):
+    those numbers must never be posted as new packages into these accounts.
 
     Per-group try/except so one provider being down (or unconfigured) never stops the other, and one
     alert per failure — mirroring how main.run_scrape isolates each scraper.
@@ -399,7 +405,7 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
         if limit is not None:
             rows = _first_n_packages(rows, limit)
         try:
-            outcomes[group_key] = _run_one_group(group_key, rows, plan, all_writes, apply)
+            outcomes[group_key] = _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only)
         except BuyingGroupError as exc:
             log.error("%s: %s", group_key, exc)
             _alert(apply, f"{group_key}: buying-group sync failed", str(exc))
@@ -502,7 +508,7 @@ def _alert(apply: bool, subject: str, message: str) -> None:
         log.warning("%s: %s (no alert sent — dry run)", subject, message)
 
 
-def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
+def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool = False) -> dict:
     client = get_client(group_key, dry_run=not apply)
 
     # Keyed on (order_id, tracking_number), not tracking alone: a Best Buy COMBINED BOX puts two
@@ -513,9 +519,12 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
     # by design, so without this every run re-posted every number ever recorded, in a batch that
     # grows with the sheet forever.
     settled = plan.get("settled_keys") or set()
-    fresh = [r for r in rows
-             if (r.order_id, r.tracking_number) not in known
-             and (r.order_id, r.tracking_number) not in settled]
+    fresh = [] if payouts_only else [
+        r for r in rows
+        if (r.order_id, r.tracking_number) not in known
+        and (r.order_id, r.tracking_number) not in settled]
+    if payouts_only:
+        log.info("%s: payouts-only -- nothing submitted, nothing insured", group_key)
     if known:
         log.info("%s: %d package(s) already recorded there", group_key, len(known))
     settled_here = sum(1 for r in rows if (r.order_id, r.tracking_number) in settled)
@@ -554,7 +563,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply) -> dict:
         )
 
     insurance = None
-    if hasattr(client, "file_insurance"):
+    if hasattr(client, "file_insurance") and not payouts_only:
         # Only for shipments the group now has on file — insurance is filed against a known
         # shipment, so a row whose submission just failed must not be insured.
         blocked = {t for t, _ in push.failed} | {t for t, _ in push.needs_manual}
@@ -772,6 +781,8 @@ def main() -> None:
                         help="Only handle the first N packages per group — use for first validation")
     parser.add_argument("--group", choices=sorted(PROVIDERS),
                         help="Only run this buying group")
+    parser.add_argument("--payouts-only", action="store_true",
+                        help="Read payouts back and tick what each group holds; submit NOTHING and file no insurance")
     parser.add_argument("--void", nargs="+", metavar="TRACKING",
                         help="Void a BFMR insurance filing for these tracking numbers and exit")
     args = parser.parse_args()
@@ -782,7 +793,7 @@ def main() -> None:
         print(f"Insurance void: {result.summary()}")
         return
 
-    run(apply=args.apply, limit=args.limit, only_group=args.group)
+    run(apply=args.apply, limit=args.limit, only_group=args.group, payouts_only=args.payouts_only)
     if not args.apply:
         print("\nDry run only — nothing sent, nothing written. Re-run with --apply to act.")
 

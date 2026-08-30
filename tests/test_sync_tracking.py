@@ -673,3 +673,73 @@ class TestGiftCardRowsAreUnroutedOnPurpose:
         plan = plan_tracking_submissions(list(HEADER), [shipped("GC-1", "1Z111", group="Gift Card")])
 
         assert plan["by_group"] == {}
+
+
+class TestPayoutsOnly:
+    """--payouts-only: read payouts and tick what the group holds; submit and insure NOTHING.
+
+    For a ledger carrying orders from buying-group accounts other than the connected ones (imported
+    history, 2026-08-30): posting those numbers as new packages into these accounts would be wrong."""
+
+    class Row:
+        def __init__(self, n, oid, trk):
+            self.row_number, self.order_id, self.tracking_number = n, oid, trk
+
+    class FakeClient:
+        group_key = "BFMR"
+
+        def __init__(self):
+            self.submitted_with, self.insured_with, self.fetched = None, None, None
+
+        def already_submitted(self, rows):
+            return {("A1", "T1")}
+
+        def submit_tracking(self, rows):
+            self.submitted_with = list(rows)
+
+            class R:
+                submitted, failed, needs_manual = [], [], []
+
+                def summary(self):
+                    return "0 submitted"
+            return R()
+
+        def file_insurance(self, rows):
+            self.insured_with = list(rows)
+
+            class I:
+                def summary(self):
+                    return "0 filed"
+            return I()
+
+        def fetch_payouts(self, numbers):
+            self.fetched = list(numbers)
+            return []
+
+    def test_nothing_is_submitted_or_insured_but_payouts_are_read_and_known_rows_ticked(self, monkeypatch):
+        client = self.FakeClient()
+        monkeypatch.setattr(sync_tracking, "get_client", lambda group, dry_run: client)
+        monkeypatch.setattr(sync_tracking, "allocate_payouts", lambda *a, **k: {})
+        ticked = []
+        monkeypatch.setattr(sync_tracking, "_tick_submitted", lambda rows, plan, apply: ticked.extend(rows) or {})
+        rows = [self.Row(4, "A1", "T1"), self.Row(5, "B2", "T2")]
+        plan = {"settled_keys": set(), "rows_by_tracking": {}, "costs_by_row": {}, "status_by_row": {},
+                "insurance_by_row": {}, "awaiting_by_group": {}, "cancelled_by_group": {}}
+
+        sync_tracking._run_one_group("BFMR", rows, plan, {}, apply=True, payouts_only=True)
+
+        assert client.submitted_with == [], "payouts-only must submit nothing"
+        assert client.insured_with is None, "payouts-only must file no insurance"
+        assert client.fetched == ["T1", "T2"], "but it still reads payouts for every row"
+        assert ticked == [4], "and ticks only what the group already holds"
+
+    def test_the_normal_mode_still_submits(self, monkeypatch):
+        client = self.FakeClient()
+        monkeypatch.setattr(sync_tracking, "get_client", lambda group, dry_run: client)
+        monkeypatch.setattr(sync_tracking, "allocate_payouts", lambda *a, **k: {})
+        monkeypatch.setattr(sync_tracking, "_tick_submitted", lambda rows, plan, apply: {})
+        rows = [self.Row(4, "A1", "T1"), self.Row(5, "B2", "T2")]
+        plan = {"settled_keys": set(), "rows_by_tracking": {}, "costs_by_row": {}, "status_by_row": {},
+                "insurance_by_row": {}, "awaiting_by_group": {}, "cancelled_by_group": {}}
+        sync_tracking._run_one_group("BFMR", rows, plan, {}, apply=True)
+        assert [r.order_id for r in client.submitted_with] == ["B2"] and client.insured_with is not None
