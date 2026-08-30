@@ -916,6 +916,40 @@ def check_state_visibility(sheet: Sheet, opts: Options) -> Result:
     return Result("state_visibility", "PASS", summary)
 
 
+@check("return_columns_consistent")
+def check_return_columns_consistent(sheet: Sheet, opts: Options) -> Result:
+    """Return Qty feeds the COGS formula, so a malformed value silently corrupts the cost side.
+
+    Return Qty must be a whole number, at most the row's Quantity (both are GROSS -- the bought
+    count), and paired with an ISO Return Date; a date without a quantity records nothing and is
+    flagged too. Blank both is the normal case for every row that never had a return.
+    """
+    offenders, checked = [], 0
+    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
+        ret = sheet.cell(sheet.grids.unformatted, row_number, "Return Qty")
+        ret_date = str(sheet.cell(sheet.grids.formatted, row_number, "Return Date")).strip()
+        blank = ret in ("", None)
+        if blank and not ret_date:
+            continue
+        checked += 1
+        qty = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Quantity"))
+        if blank and ret_date:
+            offenders.append(f"row {row_number}: Return Date {ret_date!r} but no Return Qty -- nothing was netted")
+            continue
+        number = _parse_display_number(ret)
+        if number is None or number != int(number) or number <= 0:
+            offenders.append(f"row {row_number}: Return Qty {ret!r} is not a positive whole number")
+        elif qty is not None and number > qty:
+            offenders.append(f"row {row_number}: Return Qty {ret!r} exceeds Quantity {qty!r}")
+        if not (_ISO_DATE.match(ret_date) and _is_real_date(ret_date)):
+            offenders.append(f"row {row_number}: Return Qty set but Return Date {ret_date!r} is not an ISO date")
+    if not offenders:
+        return Result("return_columns_consistent", "PASS", f"{checked} row(s) with a return, all consistent")
+    return Result("return_columns_consistent", "FAIL",
+                  f"{len(offenders)} return cell(s) malformed -- the COGS formula is netting the wrong amount",
+                  _truncate(offenders, opts.max_detail))
+
+
 @check("order_level_cells_agree")
 def check_order_level_cells_agree(sheet: Sheet, opts: Options) -> Result:
     """Retailer, Profile and Order Date are ORDER-level facts: every row of one order must agree.

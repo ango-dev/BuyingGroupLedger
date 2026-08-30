@@ -120,7 +120,16 @@ _COL = {field: _col_letter(i) for i, field in enumerate(FIELDNAMES)}
 def _cogs_formula(row_number: int) -> str:
     """The live COGS (Cost of Goods Sold) formula for one sheet row.
 
-        COGS = (Total Cost + Shipping) * (1 - Cashback Rate)
+        COGS = (Total Cost - Return Qty x Cost Per Item + Shipping) * (1 - Cashback Rate)
+
+    RETURNS ARE NETTED HERE, IN THE FORMULA. Quantity and Total Cost stay
+    the GROSS bought numbers the scraper wrote -- putting a formula in those cells would freeze to a
+    number on the next positional row write (the §8 bug class), and the money-path weights read
+    them as values. Recording a partial return is therefore ONE hand edit: type Return Qty (and
+    Return Date); the returned units leave the cost basis right here, and Total Profit follows
+    through the COGS cell. A blank Return Qty multiplies as zero, so untouched rows are unchanged.
+    The payout side nets itself for BFMR (its amount_paid is already net of clawbacks, allocated
+    per order); a MOD return's payout stays hand-entered, as MOD has no return signal.
 
     THE CASHBACK IS NETTED INTO COST, not counted as income. Card rewards earned on a purchase are a
     purchase-price adjustment rather than receipts, so this is the characterisation a Schedule C
@@ -147,10 +156,11 @@ def _cogs_formula(row_number: int) -> str:
     """
     n = row_number
     cost, ship, rate = _COL["total_cost"], _COL["shipping"], _COL["cashback_rate"]
+    ret_qty, unit = _COL["return_quantity"], _COL["cost_per_item"]
     status = _COL["status"]
     return (
         f'=IF({status}{n}="cancelled","",'
-        f'IF({cost}{n}="","",IFERROR(({cost}{n}+{ship}{n})*(1-{rate}{n}),"")))'
+        f'IF({cost}{n}="","",IFERROR(({cost}{n}-{ret_qty}{n}*{unit}{n}+{ship}{n})*(1-{rate}{n}),"")))'
     )
 
 

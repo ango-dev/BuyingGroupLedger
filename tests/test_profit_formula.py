@@ -41,7 +41,7 @@ class TestFormulaShape:
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
         # here rather than quietly producing wrong money on the sheet.
         assert ledger_sync._cogs_formula(7) == (
-            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7+N7)*(1-P7),"")))'
+            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-U7*L7+N7)*(1-P7),"")))'
         )
         assert ledger_sync._profit_formula(7) == (
             '=IF(B7="cancelled","",IF(S7="","",IFERROR(S7-Q7-R7,"")))'
@@ -68,6 +68,22 @@ class TestFormulaShape:
             old = payout + (cost + ship) * rate - cost - ship - ins
             assert round(new, 9) == round(old, 9), (cost, ship, rate, ins, payout)
 
+    def test_a_netted_return_equals_the_old_two_row_bookkeeping(self):
+        """Method 2's regression proof. The old sheets booked a partial return as a second negative
+        row; the COGS formula now nets `Return Qty x Cost Per Item` out of the original row. For the
+        same inputs the single netted row must equal the SUM of the old pair -- the live example is
+        3 iPads at 399.99, one returned: 8.23 either way."""
+        for qty, unit, ship, rate, ins, paid, clawed, returned in [
+            (3, 399.99, 0.0, 0.05, 5.79, 1161.0, 387.0, 1),
+            (8, 299.0, 0.0, 0.135, 0.0, 2392.0, 299.0, 1),
+            (5, 100.0, 10.0, 0.02, 1.5, 505.0, 202.0, 2),
+        ]:
+            cost = qty * unit
+            old_pair = (paid - (cost + ship) * (1 - rate) - ins) + (-clawed + returned * unit * (1 - rate))
+            netted_cogs = (cost - returned * unit + ship) * (1 - rate)
+            single = (paid - clawed) - netted_cogs - ins
+            assert round(single, 9) == round(old_pair, 9), (qty, unit, returned)
+
     def test_a_cancelled_row_reports_no_cost_and_no_profit(self):
         # A cancelled order was refunded, so it must not reach the year-end cost side. Both formulas
         # short-circuit on Status, read through _COL so a reorder can't leave them pointing at the
@@ -90,7 +106,7 @@ class TestFormulaShape:
             assert f"{letter}7" not in profit, f"{name} should not be part of the profit math"
 
         cogs = ledger_sync._cogs_formula(7)
-        for name in ("Total Cost", "Shipping", "Cashback Rate", "Status"):
+        for name in ("Total Cost", "Shipping", "Cashback Rate", "Status", "Return Qty", "Cost Per Item"):
             letter = ledger_sync._col_letter(HEADER.index(name))
             assert f"{letter}7" in cogs, f"{name} ({letter}) missing from the COGS formula"
         # Insurance is an EXPENSE, not part of the cost of the goods. Order ID: no SUMIF here —

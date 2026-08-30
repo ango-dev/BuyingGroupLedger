@@ -1349,3 +1349,22 @@ def test_a_gift_card_row_paid_with_a_zero_payout_is_by_rule():
     sheet = build(row_cells(2, **{"Status": Cell("paid"), "Buying Group": Cell("Gift Card"),
                                  "Payout Amount": Cell(0.0, fmt="currency"), "Payout Date": Cell("2026-07-08")}))
     assert result_for(sheet, "paid_rows_have_a_payout").status == "PASS"
+
+
+class TestReturnColumnsConsistent:
+    def test_no_returns_is_a_quiet_pass(self):
+        assert result_for(build(row_cells(2)), "return_columns_consistent").status == "PASS"
+
+    def test_a_well_formed_return_passes(self):
+        sheet = build(row_cells(2, **{"Quantity": Cell(3), "Return Qty": Cell(1), "Return Date": Cell("2026-04-30")}))
+        assert result_for(sheet, "return_columns_consistent").status == "PASS"
+
+    def test_a_return_qty_above_quantity_fails(self):
+        sheet = build(row_cells(2, **{"Quantity": Cell(3), "Return Qty": Cell(4), "Return Date": Cell("2026-04-30")}))
+        assert result_for(sheet, "return_columns_consistent").status == "FAIL"
+
+    def test_a_return_without_a_date_or_a_date_without_a_qty_fails(self):
+        a = build(row_cells(2, **{"Return Qty": Cell(1)}))
+        b = build(row_cells(2, **{"Return Date": Cell("2026-04-30")}))
+        assert result_for(a, "return_columns_consistent").status == "FAIL"
+        assert result_for(b, "return_columns_consistent").status == "FAIL"

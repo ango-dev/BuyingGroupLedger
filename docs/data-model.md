@@ -195,12 +195,14 @@ reported as its own line (a Schedule C expense), never inside COGS; cashback is 
 the netting is visible. Breakdowns by retailer and by buying group, plus the order list; `--json`
 for anything else.
 
-**A partial return is a correction on the original row, never a second negative row**. Quantity, Total Cost and Payout Amount hold the NET values -- what Amazon's
-post-return order page and the group's netted payout already report -- and two appended columns,
-**Return Qty** and **Return Date**, record what was netted out. The COGS and Total Profit formulas
-need no changes: the refunded units simply leave the cost basis, which sums to exactly what the old
-two-row bookkeeping did. A FULLY returned order keeps status `return` (the group's own outcome). The
-scrapers never write the return columns; they are hand-entered or import-derived.
+**A partial return is one hand edit on the original row, never a second negative row**. Quantity and Total Cost keep the GROSS bought numbers the scraper wrote; you
+type **Return Qty** (and **Return Date**), and the COGS formula nets the returned units out of the
+cost basis itself -- `(Total Cost − Return Qty × Cost Per Item + Shipping) × (1 − Cashback Rate)` --
+so Total Profit follows with no other edits. The payout nets itself for BFMR (its reported amount is
+already net of clawbacks, allocated per order); a MOD return's payout is hand-entered, since MOD has
+no return signal. A FULLY returned order keeps status `return` (Return Qty = Quantity nets its COGS
+to zero). The `return_columns_consistent` audit check guards the pair, and the single netted row
+equals the old two-row bookkeeping to the cent (a pinned test proves the algebra).
 
 **A cancelled order carries no money.** Cost, Shipping, Insurance, Payout and both formula columns
 are emptied on any row whose Status is `cancelled` — the order was refunded, so leaving the scraped
