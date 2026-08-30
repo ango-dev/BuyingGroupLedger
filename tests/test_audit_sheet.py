@@ -157,6 +157,8 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
         "Tracking Submitted": Cell(True),
         "Return Qty": Cell(""),
         "Return Date": Cell(""),
+        "Gift Card": Cell("", fmt="currency"),
+        "Sales Tax": Cell("", fmt="currency"),
         "Receipt Link": Cell(
             "https://objectstorage.us-ashburn-1.oraclecloud.com/p/tok/n/ns/b/bkt/o/"
             f"receipts/bestbuy/2026-08/BBY01-{row_number:09d}.pdf"

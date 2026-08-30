@@ -53,8 +53,8 @@ HEADER = [
     "Insurance",  # a buying-group premium — an EXPENSE, deliberately not part of COGS
     "Payout Amount",
     "Payout Date",
-    # The RECORD of a partial return, kept beside the payout it corrects: Quantity / Total Cost /
-    # Payout Amount already hold the NET values, so no formula reads these two (see models/order.py).
+    # A partial return is ONE hand edit, kept beside the payout it corrects: Quantity / Total Cost
+    # stay GROSS and the COGS formula nets Return Qty x Cost Per Item out (see models/order.py).
     "Return Qty",   # units netted OUT of this row
     "Return Date",
     "Total Profit",  # a live sheet formula, written by _profit_formula: Payout - COGS - Insurance
@@ -66,6 +66,10 @@ HEADER = [
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Last Scraped At",
+    # --- order-level money, appended 2026-08-30; each cell is this row's cost-weighted SHARE of the
+    # order total (prorated exactly like Shipping), and the COGS formula reads both ---
+    "Gift Card",   # tender the card never spent: SUBTRACTED in COGS (earns no cashback either)
+    "Sales Tax",   # real acquisition cost: ADDED in COGS (usually 0 under the resale certificate)
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
@@ -80,7 +84,7 @@ HEADER = [
 _NUMERIC_FIELDS = {
     "quantity", "cost_per_item", "shipping", "total_cost",
     "cashback_rate", "insurance", "payout_amount",
-    "shipment", "return_quantity",
+    "shipment", "return_quantity", "gift_card", "sales_tax",
 }
 
 # Fields that must be a plain int rather than a float when coerced (quantity: "3", not "3.0"; shipment:
@@ -808,6 +812,7 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
 # blank themselves on a cancelled row (see _cogs_formula).
 _CANCELLED_BLANK_FIELDS = (
     "cost_per_item", "total_cost", "shipping", "insurance", "payout_amount", "payout_date",
+    "gift_card", "sales_tax",
 )
 
 

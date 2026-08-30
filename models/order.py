@@ -139,12 +139,11 @@ FIELDNAMES = [
     "insurance",
     "payout_amount",
     "payout_date",
-    # --- returns (method 2, user decision 2026-08-30): a PARTIAL return is a correction on the
-    # original row, never a second negative row. Quantity / Total Cost / Payout Amount hold the NET
-    # values (what Amazon's post-return page and the group's netted payout already report), so the
-    # COGS and Total Profit formulas need no changes -- the refunded units simply leave the cost
-    # basis, exactly as the old two-row bookkeeping summed to. These two are the RECORD of what was
-    # netted out: how many units went back, and when. A fully-returned order keeps status `return`.
+    # --- returns: a PARTIAL return is ONE hand edit on the original
+    # row, never a second negative row. Quantity / Total Cost keep the GROSS bought values the
+    # scraper wrote; the COGS formula reads return_quantity and nets the returned units out of the
+    # cost basis itself (see sheets.ledger_sync._cogs_formula), which sums to exactly what the old
+    # two-row bookkeeping did. A fully-returned order keeps status `return`.
     "return_quantity",
     "return_date",
     # DERIVED IN THE SHEET, not here: sheets.ledger_sync writes a live formula into this cell so the
@@ -172,6 +171,14 @@ FIELDNAMES = [
     "delivery_address",
     "card_last4",
     "last_scraped_at",
+    # --- order-level money, appended like every new column ---
+    # Both are the ORDER-LEVEL total repeated on every row by the mappings (the same contract as
+    # `shipping`); ledger_sync reprorates each into the row's cost-weighted share, and the COGS
+    # formula reads the shares: gift card is SUBTRACTED (a tender the card never spent, so it earns
+    # no cashback and isn't our cost — the gift-card purchase has its own row), sales tax is ADDED
+    # (a real acquisition cost; usually 0 under the resale certificate, but hand-kept orders pay it).
+    "gift_card",
+    "sales_tax",
 ]
 
 
@@ -220,6 +227,10 @@ class OrderItem(BaseModel):
     # Hand-entered (or import-derived) return record; scrapers emit both blank. See FIELDNAMES.
     return_quantity: int | None = None
     return_date: str = ""
+    # ORDER-LEVEL totals repeated on every row, like `shipping`; ledger_sync reprorates both into
+    # per-row cost-weighted shares and the COGS formula nets them. See FIELDNAMES.
+    gift_card: float | None = None
+    sales_tax: float | None = None
 
     # TRANSIENT, Amazon only: a per-order promo the order page advertises under the payment method
     # ("... plus an extra 1% back ..."), which config.cards.tag_cards ADDS to the card's own rate when
@@ -231,7 +242,7 @@ class OrderItem(BaseModel):
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
                      "cashback_rate", "insurance", "payout_amount", "cogs", "total_profit",
-                     "return_quantity",
+                     "return_quantity", "gift_card", "sales_tax",
                      mode="before")
     @classmethod
     def _blank_to_none(cls, v):
