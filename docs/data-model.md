@@ -17,7 +17,7 @@ rarely-scanned reference/audit columns parked at the end:
 `Order Date · Status · Retailer · Item Name · Shipment · Quantity ·
 Order ID · Tracking Number · Tracking Submitted · Delivery Date · Buying Group ·
 Cost Per Item · Total Cost · Shipping · Card · Cashback Rate · COGS ·
-Insurance · Payout Amount · Payout Date · Total Profit ·
+Insurance · Payout Amount · Payout Date · Return Qty · Return Date · Total Profit ·
 Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Last Scraped At`
 
 > **Changing the column order is a MIGRATION, not an edit**, and it takes two steps.

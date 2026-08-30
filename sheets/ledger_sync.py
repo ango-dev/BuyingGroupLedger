@@ -53,6 +53,10 @@ HEADER = [
     "Insurance",  # a buying-group premium — an EXPENSE, deliberately not part of COGS
     "Payout Amount",
     "Payout Date",
+    # The RECORD of a partial return, kept beside the payout it corrects: Quantity / Total Cost /
+    # Payout Amount already hold the NET values, so no formula reads these two (see models/order.py).
+    "Return Qty",   # units netted OUT of this row
+    "Return Date",
     "Total Profit",  # a live sheet formula, written by _profit_formula: Payout - COGS - Insurance
     # --- reference / audit ---
     "Profile",  # which browser profile scraped it — never read while reconciling
@@ -62,8 +66,6 @@ HEADER = [
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Last Scraped At",
-    "Return Qty",   # method-2 returns: the units netted OUT of this row -- see models/order.py
-    "Return Date",
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is

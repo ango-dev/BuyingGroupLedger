@@ -139,6 +139,14 @@ FIELDNAMES = [
     "insurance",
     "payout_amount",
     "payout_date",
+    # --- returns (method 2, user decision 2026-08-30): a PARTIAL return is a correction on the
+    # original row, never a second negative row. Quantity / Total Cost / Payout Amount hold the NET
+    # values (what Amazon's post-return page and the group's netted payout already report), so the
+    # COGS and Total Profit formulas need no changes -- the refunded units simply leave the cost
+    # basis, exactly as the old two-row bookkeeping summed to. These two are the RECORD of what was
+    # netted out: how many units went back, and when. A fully-returned order keeps status `return`.
+    "return_quantity",
+    "return_date",
     # DERIVED IN THE SHEET, not here: sheets.ledger_sync writes a live formula into this cell so the
     # number updates the moment insurance/payout are typed in — a Python-computed value would go
     # stale, and a delivered row is never re-scraped to refresh it. Kept in FIELDNAMES (emitted blank)
@@ -164,14 +172,6 @@ FIELDNAMES = [
     "delivery_address",
     "card_last4",
     "last_scraped_at",
-    # --- returns (method 2, user decision 2026-08-30): a PARTIAL return is a correction on the
-    # original row, never a second negative row. Quantity / Total Cost / Payout Amount hold the NET
-    # values (what Amazon's post-return page and the group's netted payout already report), so the
-    # COGS and Total Profit formulas need no changes -- the refunded units simply leave the cost
-    # basis, exactly as the old two-row bookkeeping summed to. These two are the RECORD of what was
-    # netted out: how many units went back, and when. A fully-returned order keeps status `return`.
-    "return_quantity",
-    "return_date",
 ]
 
 
