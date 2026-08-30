@@ -71,6 +71,24 @@ class TestTheTwoDates:
                                      "Cashback Rate": Cell(0.1, fmt="percent")}))
         assert build_report(sheet, 2026)["totals"]["cogs"] == 99.0
 
+    def test_the_recomputation_mirrors_the_full_sheet_formula(self):
+        """The Python fallback must net returns, gift cards and tax exactly as the sheet's COGS
+        formula does — it predated all three and silently overstated cost on such rows. A returned
+        + gift-carded + taxed row with a blank COGS cell: (100 − 1×25 − 30 + 10 + 5) × 0.9 = 54."""
+        sheet = build(row_cells(2, **{
+            "Order Date": Cell("2026-05-05"), "COGS": Cell(""),
+            "Total Cost": Cell(100.0), "Cost Per Item": Cell(25.0), "Quantity": Cell(4),
+            "Return Qty": Cell(1), "Return Date": Cell("2026-06-01"),
+            "Gift Card": Cell(30.0), "Sales Tax": Cell(5.0), "Shipping": Cell(10.0),
+            "Cashback Rate": Cell(0.1, fmt="percent")}))
+        totals = build_report(sheet, 2026)["totals"]
+        assert totals["cogs"] == 54.0
+        assert totals["returns"] == 25.0
+        assert totals["gift_card"] == 30.0
+        assert totals["sales_tax"] == 5.0
+        # cashback = basis − cogs off the SAME netted basis, not the stale (cost + shipping) one.
+        assert totals["cashback"] == 6.0
+
 
 class TestRendering:
     def test_text_names_the_basis_and_the_numbers(self):

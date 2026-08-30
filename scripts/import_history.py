@@ -75,6 +75,8 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "cashback_rate": ("cashback", "cashbackrate", "rate", "rebate", "cashbackpct"),
     "buying_group": ("buyinggroup", "group", "bg"),
     "insurance": ("insurance", "premium", "insurancefee", "fee"),
+    "gift_card": ("giftcard", "giftcardamount", "gc", "giftcards"),
+    "sales_tax": ("salestax", "tax", "taxes", "estimatedtax", "salestaxes"),
     "payout_date": ("payoutdate", "paiddate", "datepaid", "paid"),
     "payout_amount": ("payoutamount", "payout", "paidamount", "reimbursement", "received"),
     "delivery_address": ("deliveryaddress", "address", "shipto"),
@@ -302,6 +304,10 @@ def normalise(raw_rows: list[dict], mapping: dict[str, str], *, date_order: str,
         r.fields["total_cost"] = total
         r.fields["cost_per_item"] = round(total / r.fields["quantity"], 2) if total is not None else unit
         r.fields["shipping"] = money(get("shipping")) or 0.0
+        # ORDER-LEVEL like shipping (sync prorates); blank stays None so nothing is overwritten.
+        gc = money(get("gift_card"))
+        r.fields["gift_card"] = abs(gc) if gc is not None else None
+        r.fields["sales_tax"] = money(get("sales_tax"))
         ins = money(get("insurance"))
         r.fields["insurance"] = abs(ins) if ins is not None else None
         r.fields["payout_amount"] = money(get("payout_amount"))
@@ -343,7 +349,9 @@ def reconcile(rows: list[Row]) -> list[str]:
         if r.source_profit is None or r["payout_amount"] is None or r["total_cost"] is None:
             continue
         rate = r["cashback_rate"] or 0.0
-        expected = r["payout_amount"] - (r["total_cost"] + (r["shipping"] or 0.0)) * (1 - rate) - (r["insurance"] or 0.0)
+        basis = (r["total_cost"] - (r["gift_card"] or 0.0) + (r["shipping"] or 0.0)
+                 + (r["sales_tax"] or 0.0))
+        expected = r["payout_amount"] - basis * (1 - rate) - (r["insurance"] or 0.0)
         if abs(expected - r.source_profit) > 0.011:
             bad.append(f"row {r.n} {r['order_id']}: source profit {r.source_profit:.2f}, recomputed "
                        f"{expected:.2f} (payout {r['payout_amount']:.2f} - cost {r['total_cost']:.2f} x (1 - "
@@ -373,6 +381,8 @@ def explode(rows: list[Row]) -> list[OrderItem]:
                 retailer=r["retailer"], profile_label=r["profile_label"], order_id=r["order_id"],
                 order_date=r["order_date"], status=r["status"], item_name=r["item_name"],
                 quantity=qty, cost_per_item=r["cost_per_item"], shipping=0.0,
+                # ORDER-LEVEL: the full figure on every split row; the sync prorates by Total Cost.
+                gift_card=r["gift_card"], sales_tax=r["sales_tax"],
                 tracking_number=tracking, delivery_date=r["delivery_date"],
                 card_last4=r["card_last4"], card_name=r["card_name"], cashback_rate=r["cashback_rate"],
                 insurance=None if r["insurance"] is None else round(r["insurance"] * share, 2),

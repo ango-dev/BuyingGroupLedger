@@ -65,7 +65,8 @@ def _money(value) -> float:
 
 
 def _blank_bucket() -> dict:
-    return {"rows": 0, "orders": set(), "gross_cost": 0.0, "shipping": 0.0, "cashback": 0.0,
+    return {"rows": 0, "orders": set(), "gross_cost": 0.0, "shipping": 0.0, "returns": 0.0,
+            "gift_card": 0.0, "sales_tax": 0.0, "cashback": 0.0,
             "cogs": 0.0, "insurance": 0.0, "payouts": 0.0, "payout_rows": 0}
 
 
@@ -98,15 +99,24 @@ def build_report(sheet: Sheet, year: int) -> dict:
             total_cost = _money(cell("Total Cost"))
             shipping = _money(cell("Shipping"))
             rate = _money(cell("Cashback Rate"))
+            # The cost basis, mirroring the sheet's own COGS formula term for term (Total Cost and
+            # Quantity are GROSS; returns/gift card/tax are netted here, not in the stored cells).
+            returns = _money(cell("Return Qty")) * _money(cell("Cost Per Item"))
+            gift_card = _money(cell("Gift Card"))
+            sales_tax = _money(cell("Sales Tax"))
+            basis = total_cost - returns - gift_card + shipping + sales_tax
             cogs_cell = _parse_display_number(cell("COGS"))
-            cogs = float(cogs_cell) if cogs_cell is not None else (total_cost + shipping) * (1 - rate)
-            cashback = (total_cost + shipping) - cogs
+            cogs = float(cogs_cell) if cogs_cell is not None else basis * (1 - rate)
+            cashback = basis - cogs
             insurance = _money(cell("Insurance"))
             for bucket in (total, by_retailer[retailer], by_group[group]):
                 bucket["rows"] += 1
                 bucket["orders"].add(order_id)
                 bucket["gross_cost"] += total_cost
                 bucket["shipping"] += shipping
+                bucket["returns"] += returns
+                bucket["gift_card"] += gift_card
+                bucket["sales_tax"] += sales_tax
                 bucket["cashback"] += cashback
                 bucket["cogs"] += cogs
                 bucket["insurance"] += insurance
@@ -174,6 +184,9 @@ def render_text(report: dict, *, list_rows: bool = True) -> str:
         f"  Receipts (payouts dated {report['year']})        {_fmt(t['payouts']):>14}   {t['payout_rows']} row(s)",
         f"  COGS (orders dated {report['year']})             {_fmt(-t['cogs']):>14}   {t['rows']} row(s), {t['orders']} order(s)",
         f"      gross cost + shipping                  {_fmt(t['gross_cost'] + t['shipping']):>14}",
+        *([f"      less returned units                    {_fmt(-t['returns']):>14}"] if t["returns"] else []),
+        *([f"      less gift-card tenders                 {_fmt(-t['gift_card']):>14}"] if t["gift_card"] else []),
+        *([f"      plus sales tax                         {_fmt(t['sales_tax']):>14}"] if t["sales_tax"] else []),
         f"      less cashback netted into cost         {_fmt(-t['cashback']):>14}",
         f"  Insurance (Schedule C expense)            {_fmt(-t['insurance']):>14}",
         f"  {'-' * 56}",
