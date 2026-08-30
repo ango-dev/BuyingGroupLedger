@@ -1484,6 +1484,8 @@ def check_paid_rows_have_a_payout(sheet: Sheet, opts: Options) -> Result:
     Amount is filled. A paid row with no amount is therefore permanently missing from the P&L, which
     is the one number this ledger exists to produce, with nothing to announce it.
     """
+    from config.warehouses import is_deliberately_unrouted
+
     zeros, blanks = [], []
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
@@ -1493,6 +1495,10 @@ def check_paid_rows_have_a_payout(sheet: Sheet, opts: Options) -> Result:
         order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
         if payout is None:
             blanks.append(f"row {row_number}: order {order_id} is paid but has no Payout Amount")
+        # A gift-card row is `paid` with a REAL $0 payout by rule: no buying
+        # group is ever involved, the income arrives through the order the card funds.
+        if is_deliberately_unrouted(sheet.cell(sheet.grids.formatted, row_number, "Buying Group")):
+            continue
         elif payout == 0:
             # A ZERO is the worse case, and an earlier version of this check missed it by testing only
             # for blank. Blank makes Total Profit render blank; a literal 0 makes it compute

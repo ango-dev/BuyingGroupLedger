@@ -1341,3 +1341,9 @@ class TestImportedShapesAreNotFailures:
                             "Payout Amount": Cell(600.0, fmt="currency"), "Item Name": Cell("Watch")}),
         )
         assert result_for(sheet, "payout_is_cost_weighted").status == "WARN"
+
+
+def test_a_gift_card_row_paid_with_a_zero_payout_is_by_rule():
+    sheet = build(row_cells(2, **{"Status": Cell("paid"), "Buying Group": Cell("Gift Card"),
+                                 "Payout Amount": Cell(0.0, fmt="currency"), "Payout Date": Cell("2026-07-08")}))
+    assert result_for(sheet, "paid_rows_have_a_payout").status == "PASS"
