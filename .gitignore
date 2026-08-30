@@ -30,3 +30,10 @@ venv/
 
 # Claude Code personal permission allowlist (machine-local, not project config)
 .claude/settings.local.json
+
+# Portable Claude Code session store — holds full transcripts (real PII). Never commit.
+.claude/
+.vscode/
+PORTABLE.md
+setup-portable.cmd
+setup-portable.ps1
