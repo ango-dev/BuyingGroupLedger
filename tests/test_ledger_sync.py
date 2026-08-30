@@ -1895,3 +1895,47 @@ class TestPreservedCellsComeFromStoredValues:
 
         assert sheet.rows[1][FIELDNAMES.index("payout_amount")] == 12.5
         assert sheet.rows[1][FIELDNAMES.index("status")] == "delivered"
+
+
+
+class TestTerminalOrdersAreSkippedAcrossProfiles:
+    """rows imported under profile-alpha were invisible to profile-bravo's sweep,
+    which re-fetched the orders and overwrote reconciled costs. An order id is unique per retailer,
+    so a terminal order under ANY profile is a skip for every profile of that retailer."""
+
+    def test_another_profiles_terminal_order_is_in_the_skip_list(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-06-01", item_name="W", shipment="1",
+                status="paid", tracking_number="1Z1", profile_label="profile-alpha", retailer="Amazon"),
+        ]
+        state = load_order_state("profile-bravo", retailer="Amazon")
+        assert state["delivered_ids"] == ["A1"] and state["open_orders"] == []
+
+    def test_another_profiles_open_order_is_neither_rechecked_nor_skipped(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-06-01", item_name="W", shipment="1",
+                status="shipped", tracking_number="1Z1", profile_label="profile-alpha", retailer="Amazon"),
+        ]
+        state = load_order_state("profile-bravo", retailer="Amazon")
+        assert state == {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
+
+    def test_a_different_retailer_is_still_out_of_scope(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-06-01", item_name="W", shipment="1",
+                status="paid", tracking_number="1Z1", profile_label="profile-alpha", retailer="Best Buy"),
+        ]
+        assert load_order_state("profile-bravo", retailer="Amazon")["delivered_ids"] == []
+
+    def test_own_open_orders_are_unchanged(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-06-01", item_name="W", shipment="1",
+                status="shipped", tracking_number="1Z1", profile_label="profile-bravo", retailer="Amazon"),
+            row(order_id="B2", order_date="2026-06-01", item_name="X", shipment="1",
+                status="delivered", profile_label="profile-alpha", retailer="Amazon"),
+        ]
+        state = load_order_state("profile-bravo", retailer="Amazon")
+        assert [o["order_id"] for o in state["open_orders"]] == ["A1"] and state["delivered_ids"] == ["B2"]

@@ -1368,8 +1368,15 @@ def classify_order_state(existing: list[list], profile_label: str | None = None,
         # so one invisible trailing space in a Profile cell hid that row from its own run -- and
         # if the rows still visible were all delivered, the order was classed terminal with a real
         # open shipment frozen.
-        if profile_label is not None and str(row[idx["Profile"]]).strip() != profile_label:
-            continue
+        #
+        # ROWS OF ANOTHER PROFILE ARE NOT DROPPED -- they are kept and marked foreign, so that a
+        # TERMINAL order recorded under any profile of this retailer still lands in the skip list.
+        # An order id is unique per retailer, so "profile-alpha already has this delivered" is a
+        # reason for profile-bravo not to fetch it. 58 imported rows stamped
+        # profile-alpha were invisible to profile-bravo's 180-day sweep, which re-read the orders
+        # and overwrote reconciled costs and rates. OPEN orders stay profile-scoped: another
+        # profile's open order is not ours to re-check.
+        foreign = profile_label is not None and str(row[idx["Profile"]]).strip() != profile_label
         if (
             retailer is not None
             and retailer_idx is not None
@@ -1381,8 +1388,9 @@ def classify_order_state(existing: list[list], profile_label: str | None = None,
         if not oid:
             continue
         o = orders.setdefault(
-            oid, {"order_id": oid, "order_date": "", "order_url": "", "_groups": {}}
+            oid, {"order_id": oid, "order_date": "", "order_url": "", "_groups": {}, "_mine": False}
         )
+        o["_mine"] = o["_mine"] or not foreign
         o["order_date"] = o["order_date"] or row[idx["Order Date"]].strip()
         o["order_url"] = o["order_url"] or row[idx["Order Link"]].strip()
 
@@ -1412,6 +1420,7 @@ def classify_order_state(existing: list[list], profile_label: str | None = None,
         for s in o.pop("_groups").values():
             s["status"] = _rollup_status(s.pop("_statuses"))
             shipments.append(s)
+        mine = o.pop("_mine")
 
         in_window = since is None or not o["order_date"] or o["order_date"] >= since
 
@@ -1425,6 +1434,8 @@ def classify_order_state(existing: list[list], profile_label: str | None = None,
             if in_window:
                 delivered_ids.append(oid)
             continue
+        if not mine:
+            continue  # another profile's OPEN order: not ours to re-check, and not ours to skip
 
         o["shipments"] = shipments
         o["status"] = _rollup_status([s["status"] for s in shipments])
