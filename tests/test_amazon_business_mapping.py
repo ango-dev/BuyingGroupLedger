@@ -418,10 +418,11 @@ def test_gift_card_and_tax_are_order_level_on_every_row():
     assert [r.sales_tax for r in rows] == [0.87, 0.87]
 
 
-def test_no_gift_card_line_means_blank_not_zero():
+def test_no_gift_card_line_is_a_detected_zero():
+    # A parsed summary without the line is "checked, none" -- a real 0.0.
     rows = build_order_items(_one_item_order())
     assert rows[0].cost_per_item == 100.00
-    assert rows[0].gift_card is None
+    assert rows[0].gift_card == 0.0
 
 
 def test_netting_can_be_switched_off():

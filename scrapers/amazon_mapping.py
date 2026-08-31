@@ -420,25 +420,29 @@ def _promo_cashback_rate(region) -> float | None:
 
 
 def _gift_card_amount(summary_el) -> float | None:
-    """"Gift Card Amount: -$14.04" from the order summary, as a POSITIVE number; None when absent."""
+    """"Gift Card Amount: -$14.04" from the order summary, as a POSITIVE number.
+
+    A parsed summary WITHOUT the line is a real 0.0, not a blank — the line only renders when a gift card
+    actually paid part of the order, so its absence from a summary we did parse IS the detection.
+    None only when there is no summary at all (the page didn't parse; a blank never overwrites).
+    """
     if summary_el is None:
         return None
     m = _GIFT_CARD_RE.search(summary_el.get_text("\n", strip=True))
-    amount = _num(m.group(1)) if m else None
-    return abs(amount) if amount is not None else None
+    return abs(_num(m.group(1)) or 0.0) if m else 0.0
 
 
 def _sales_tax_amount(summary_el) -> float | None:
-    """"Estimated tax to be collected: $1.19" from the order summary; None when the line is absent.
+    """"Estimated tax to be collected: $1.19" from the order summary.
 
-    None, not 0: an absent line means the summary didn't parse (or a layout we haven't seen), and
-    emitting a hard 0 would overwrite a figure typed on the sheet through _merge_row. A real tax-free
-    order shows the line with $0.00, which IS emitted as 0.0.
+    Same 0-vs-None rule as _gift_card_amount: a parsed summary without the tax line reads as a real
+    $0.00, and only a missing summary comes back None so a blank never
+    overwrites a figure on the sheet.
     """
     if summary_el is None:
         return None
     m = _TAX_RE.search(summary_el.get_text("\n", strip=True))
-    return _num(m.group(1)) if m else None
+    return (_num(m.group(1)) or 0.0) if m else 0.0
 
 
 def _order_subtotal(summary_el) -> float | None:

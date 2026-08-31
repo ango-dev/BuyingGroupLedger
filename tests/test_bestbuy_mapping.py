@@ -59,19 +59,27 @@ def test_gift_card_and_sales_tax_are_order_level(payloads):
     assert row.total_cost == 2099.93  # gross -- the gift card does not scale the cost
 
 
-def test_no_gift_tender_means_blank_and_zero_tax_is_real(payloads):
-    # Order 1 has only the AMEX tender (totalNetAmount 1599.96) and a real $0.00 tax line: the
-    # gift-card cell stays blank (a hard 0 would overwrite a hand-typed figure), the tax is 0.0.
+def test_no_gift_tender_is_a_detected_zero_and_zero_tax_is_real(payloads):
+    # Order 1 has only the AMEX tender (totalNetAmount 1599.96) and a real $0.00 tax line: tenders
+    # present without a gift one IS the "no gift card" detection -> a real 0.0.
     row = _rows_for(build_order_items(payloads, "p"), "BBY01-809900000006")[0]
-    assert row.gift_card is None
+    assert row.gift_card == 0.0
     assert row.sales_tax == 0.0
 
 
-def test_a_payload_without_the_new_price_keys_emits_blanks(payloads):
-    # Orders captured before totalSalesTax was read: absent keys must come back None, not 0.
+def test_a_payload_without_the_new_price_keys_emits_blank_tax(payloads):
+    # An order captured before totalSalesTax was read: the absent KEY comes back None, not 0 (a
+    # shape we can't see through). Its credit tender still proves "no gift card" -> 0.0.
     row = _rows_for(build_order_items(payloads, "p"), "BBY01-809900000002")[0]
     assert row.sales_tax is None
-    assert row.gift_card is None
+    assert row.gift_card == 0.0
+
+
+def test_an_empty_payments_list_leaves_gift_card_blank():
+    from scrapers.bestbuy_mapping import _gift_card_total
+
+    assert _gift_card_total([]) is None
+    assert _gift_card_total(None) is None
 
 
 def test_digital_lines_are_dropped(payloads):

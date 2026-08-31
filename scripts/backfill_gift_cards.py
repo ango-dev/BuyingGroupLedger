@@ -9,11 +9,12 @@ WHY. The Gift Card / Sales Tax columns landed 2026-08-30, and terminal rows are 
 so an order part-paid with an Amazon gift card BEFORE then never gets its cell filled. This
 re-reads each order's details page and fills the blanks.
 
-ONLY ORDERS THAT USED A GIFT CARD GET WRITES: an order whose summary shows no
-`Gift Card Amount` line is reported and left completely alone — not even its tax is written, so the
-sweep cannot disturb rows the user has reconciled by hand. For a gift-card order, Sales Tax is
-filled too (into a blank cell only): the COGS formula reads both terms, and writing the gift card
-without the tax it also covered would understate that order's cost.
+A DETECTED ZERO IS A VALUE: an
+order whose parsed summary shows no `Gift Card Amount` line gets real 0.00s in its blank Gift Card
+cells — "checked, none" instead of "unknown" — plus the page's Sales Tax. Only an order whose
+summary could not be parsed at all is left alone, so a 0 never stands in for ignorance. Sales Tax
+is filled for gift-card orders too (blank cells only): the COGS formula reads both terms, and
+writing the gift card without the tax it covered would understate that order's cost.
 
 LEGACY-NETTED ROWS ARE CONVERTED, not skipped. Before the columns existed the mappings scaled Total Cost down to
 the card-paid share and threw the amount away; the page's own subtotal tells that shape apart from
@@ -102,9 +103,23 @@ def plan_order_writes(rows: list[dict], gift_card: float | None, sales_tax: floa
     {"n": row, "field": ledger field, "value": ..., "expect": current-value-or-None} — "expect" is
     set for a conversion's cost cells, which must still hold the netted number at write time.
     """
-    if not gift_card:
-        return [], "no gift card on this order -- left alone"
+    if gift_card is None:
+        return [], "no parsed summary for this order -- left alone"
     cost_sum = sum(r["cost"] for r in rows)
+
+    # A detected 0 IS a value now: fill the blanks with real zeros (and the
+    # page's tax) so the column reads "checked, none" instead of "unknown". No legacy/shape checks
+    # apply — nothing was ever netted out of a no-gift-card order.
+    if not gift_card:
+        writes = []
+        for r in rows:
+            weight = (r["cost"] / cost_sum) if cost_sum else (1 / len(rows))
+            if r["gc_blank"]:
+                writes.append({"n": r["n"], "field": "gift_card", "value": 0.0, "expect": None})
+            if sales_tax is not None and r["tax_blank"]:
+                writes.append({"n": r["n"], "field": "sales_tax",
+                               "value": round(sales_tax * weight, 2), "expect": None})
+        return writes, f"no gift card -> 0.00 filled (tax {sales_tax if sales_tax is not None else 'unknown'})"
 
     legacy = subtotal is not None and abs(cost_sum - (subtotal - gift_card)) <= 0.02
     if subtotal is not None and not legacy and abs(cost_sum - subtotal) > 0.02:
@@ -215,8 +230,8 @@ def main(argv=None) -> int:
         summaries = fetch_summaries(retailer, profile, sorted(orders))
         for oid, (gift_card, sales_tax, subtotal) in sorted(summaries.items()):
             writes, note = plan_order_writes(orders[oid], gift_card, sales_tax, subtotal)
+            no_gift_card += "no gift card" in note
             if not writes:
-                no_gift_card += "no gift card" in note
                 print(f"  -- {oid}: {note}")
                 continue
             print(f"  {oid}: {note}")
@@ -225,7 +240,7 @@ def main(argv=None) -> int:
                 all_writes.append(w)
                 print(f"    {col_of[w['field']]}{w['n']}  <- {w['value']:>10.2f}")
 
-    print(f"\n{len(all_writes)} cell(s) to write; {no_gift_card} order(s) had no gift card and were left alone.")
+    print(f"\n{len(all_writes)} cell(s) to write; {no_gift_card} order(s) had no gift card (zeros filled).")
     if not args.apply:
         print("DRY RUN -- nothing written. Re-run with --apply.")
         return 0

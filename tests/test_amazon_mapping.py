@@ -366,18 +366,25 @@ def test_gift_card_and_tax_are_order_level_on_every_row():
     assert [r.sales_tax for r in rows] == [8.00, 8.00]
 
 
-def test_a_zero_tax_line_is_a_real_zero_and_a_missing_one_is_blank():
-    # $0.00 on the page is a fact (the resale certificate at work); a summary with no tax line at
-    # all parses to None so a blank never overwrites a figure typed on the sheet.
-    assert build_order_items(_one_item_order())[0].sales_tax == 0.0
-    assert build_order_items(_one_item_order(tax=""))[0].sales_tax is None
+def test_a_parsed_summary_without_the_lines_is_a_real_zero():
+    """A detected 0 is a VALUE: a summary we parsed that shows no tax line and
+    no gift-card line fills both cells with 0.00 -- "checked, none", not "unknown". Only a missing
+    summary altogether stays None so a blank never overwrites the sheet."""
+    from scrapers.amazon_mapping import _gift_card_amount, _sales_tax_amount
+
+    rows = build_order_items(_one_item_order(tax=""))
+    assert rows[0].sales_tax == 0.0
+    assert rows[0].gift_card == 0.0
+    assert _sales_tax_amount(None) is None
+    assert _gift_card_amount(None) is None
 
 
-def test_no_gift_card_line_means_blank_not_zero():
+def test_no_gift_card_line_is_a_detected_zero():
     rows = build_order_items(_one_item_order())
     assert rows[0].cost_per_item == 100.00
     assert rows[0].total_cost == 100.00
-    assert rows[0].gift_card is None
+    assert rows[0].gift_card == 0.0
+    assert rows[0].sales_tax == 0.0  # the builder's default $0.00 tax line
 
 
 def test_netting_can_be_switched_off():

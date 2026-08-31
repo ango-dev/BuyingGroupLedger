@@ -435,12 +435,16 @@ def _promo_cashback_rate(region) -> float | None:
 
 
 def _gift_card_amount(summary_el) -> float | None:
-    """"Gift Card Amount: -$14.04" from the order summary, as a POSITIVE number; None when absent."""
+    """"Gift Card Amount: -$14.04" from the order summary, as a POSITIVE number.
+
+    A parsed summary WITHOUT the line is a real 0.0, not a blank — the line only
+    renders when a gift card paid part of the order, so its absence from a parsed summary IS the
+    detection. None only when there is no summary at all. Twin of amazon_mapping._gift_card_amount.
+    """
     if summary_el is None:
         return None
     m = _GIFT_CARD_RE.search(summary_el.get_text("\n", strip=True))
-    amount = _num(m.group(1)) if m else None
-    return abs(amount) if amount is not None else None
+    return abs(_num(m.group(1)) or 0.0) if m else 0.0
 
 
 def _is_gift_card_line(status_text: str, item_name: str) -> bool:
@@ -468,16 +472,16 @@ def _skip_digital(status_text: str, item_name: str, card_last4: str,
         return False
     return not (_is_gift_card_line(status_text, item_name) and card_last4 in keep_last4s)
 def _sales_tax_amount(summary_el) -> float | None:
-    """"Estimated tax to be collected: $0.87" from the order summary; None when the line is absent.
+    """"Estimated tax to be collected: $0.87" from the order summary.
 
-    None, not 0: an absent line means the summary didn't parse, and emitting a hard 0 would
-    overwrite a figure typed on the sheet through _merge_row. A real tax-free order shows the line
-    with $0.00, which IS emitted as 0.0. Twin of scrapers/amazon_mapping._sales_tax_amount.
+    Same 0-vs-None rule as _gift_card_amount: a parsed summary without the tax
+    line reads as a real $0.00; only a missing summary comes back None so a blank never overwrites
+    a figure on the sheet. Twin of scrapers/amazon_mapping._sales_tax_amount.
     """
     if summary_el is None:
         return None
     m = _TAX_RE.search(summary_el.get_text("\n", strip=True))
-    return _num(m.group(1)) if m else None
+    return (_num(m.group(1)) or 0.0) if m else 0.0
 
 
 def _order_subtotal(summary_el) -> float | None:

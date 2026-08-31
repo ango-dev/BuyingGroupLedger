@@ -62,17 +62,77 @@ def test_shop_card_tender_is_the_gift_card_and_coupons_do_not_count(details):
     live-probed 1399000013 shape; `totalCharged` is the only valid amount field). The Shop Card is
     the order-level Gift Card; the Coupon must NOT count — Costco books a promo both as a Coupon
     tender AND as the line `discountAmount` already netted into cost_per_item, so counting it here
-    would net the same money twice. Sales tax stays blank: the schema exposes no tax amount."""
+    would net the same money twice. Sales tax stays blank HERE because this trimmed fixture's
+    tenders don't reconcile with its lines, and the derivation refuses to guess (see below)."""
     row = _rows_for(build_order_items(details, "p"), "1399000006")[0]
     assert row.gift_card == 40.0
     assert row.sales_tax is None
     assert row.cost_per_item == 699.99  # untouched by the shop card
 
 
-def test_no_shop_card_tender_means_blank_not_zero(details):
+def test_no_shop_card_tender_is_a_detected_zero(details):
+    # Tenders present without a shop card IS the "no gift card" detection.
     for order in ("1399000004", "1399000005"):
         for row in _rows_for(build_order_items(details, "p"), order):
-            assert row.gift_card is None, order
+            assert row.gift_card == 0.0, order
+
+
+class TestDerivedSalesTax:
+    """The schema exposes no tax amount, so tax is DERIVED from the money equation
+    `paid tenders = gross - discounts + shipping + tax` (coupon tenders excluded -- they duplicate
+    the line discountAmount). The probe order 1399000013 reconciled this to exactly $0."""
+
+    def _detail(self, payments, lines, shipping=0.0):
+        return {"orderPayment": payments, "shippingAndHandling": shipping,
+                "shipToAddress": [{"orderLineItems": lines}]}
+
+    def test_the_probed_order_derives_to_zero(self):
+        from scrapers.costco_mapping import _sales_tax_total
+
+        detail = self._detail(
+            [{"paymentType": "Visa", "totalCharged": 5419.88},
+             {"paymentType": "Wallet Shop Card", "totalCharged": 40.0},
+             {"paymentType": "Coupon", "totalCharged": 1800.10}],
+            [{"price": 999.99, "quantity": 2, "discountAmount": 800.0},
+             {"price": 699.99, "quantity": 2, "discountAmount": 0.0},
+             {"price": 1149.99, "quantity": 2, "discountAmount": 600.0},
+             {"price": 0.01, "quantity": 5, "discountAmount": 0.05},
+             {"price": 749.99, "quantity": 2, "discountAmount": 400.0},
+             {"price": 0.01, "quantity": 5, "discountAmount": 0.05}],
+            shipping=59.96,
+        )
+        assert _sales_tax_total(detail) == 0.0
+
+    def test_a_positive_residual_is_real_tax(self):
+        from scrapers.costco_mapping import _sales_tax_total
+
+        detail = self._detail([{"paymentType": "Visa", "totalCharged": 108.0}],
+                              [{"price": 100.0, "quantity": 1, "discountAmount": 0.0}])
+        assert _sales_tax_total(detail) == 8.0
+
+    def test_a_negative_residual_refuses_rather_than_guesses(self):
+        # A refund shrinking totalCharged (or a cancelled line still in the gross) breaks the
+        # equation -- blank beats a number derived from broken inputs.
+        from scrapers.costco_mapping import _sales_tax_total
+
+        detail = self._detail([{"paymentType": "Visa", "totalCharged": 50.0}],
+                              [{"price": 100.0, "quantity": 1, "discountAmount": 0.0}])
+        assert _sales_tax_total(detail) is None
+
+    def test_a_tender_with_no_readable_amount_refuses(self):
+        from scrapers.costco_mapping import _sales_tax_total
+
+        detail = self._detail([{"paymentType": "Visa"}],
+                              [{"price": 100.0, "quantity": 1, "discountAmount": 0.0}])
+        assert _sales_tax_total(detail) is None
+
+    def test_coupon_tenders_never_count_toward_the_gift_card(self):
+        from scrapers.costco_mapping import _gift_card_total
+
+        payments = [{"paymentType": "Visa", "totalCharged": 100.0},
+                    {"paymentType": "Wallet Shop Card", "totalCharged": 40.0},
+                    {"paymentType": "Coupon", "totalCharged": 150.0}]
+        assert _gift_card_total(payments) == 40.0
 
 
 def test_order_url_is_populated_on_every_row(details):

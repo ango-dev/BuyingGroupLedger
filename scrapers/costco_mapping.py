@@ -147,17 +147,54 @@ def _gift_card_total(payments: list) -> float | None:
     sales_tax blank: gross − discounts + shipping reconciled to the card+shop-card tenders exactly,
     so Costco charged no tax on the probed order and the API simply doesn't expose a tax field.
 
-    None, not 0, when no shop-card tender exists — a hard 0 would overwrite a hand-typed figure
-    through the merge.
+    A tender list WITHOUT a shop-card tender is a real 0.0. None only when the payments list itself is missing —
+    a shape we've never seen, and a blank never overwrites the sheet.
     """
+    if not payments:
+        return None
     amounts = []
-    for payment in payments or []:
+    for payment in payments:
         ptype = (payment.get("paymentType") or "").strip().lower()
         if "shop card" in ptype or "gift" in ptype:
             amount = _num(payment.get("totalCharged"))
             if amount is not None:
                 amounts.append(amount)
-    return round(sum(amounts), 2) if amounts else None
+    return round(sum(amounts), 2) if amounts else 0.0
+
+
+def _sales_tax_total(detail: dict) -> float | None:
+    """DERIVED sales tax: what the paying tenders charged beyond the merchandise itself.
+
+    The schema exposes no tax amount anywhere (25+ candidates rejected, 2026-08-30 probe), but the
+    money still has to balance:  paid tenders  =  gross lines − discounts + shipping + TAX.  Coupon
+    tenders are excluded from the paid side because they duplicate the line `discountAmount`
+    already on the merchandise side (verified to the cent on order 1399000013, which this equation
+    reconciles to exactly $0 of tax — the resale certificate at work).
+
+    REFUSES rather than guesses: a NEGATIVE residual beyond a cent means the equation doesn't hold
+    for this order (a refund shrinking `totalCharged`, a cancelled line still in the gross) — None,
+    so the cell stays blank instead of holding a number derived from broken inputs. A residual of
+    0 (or a real positive tax) is the detection the user wants filled (2026-08-30).
+    """
+    payments = detail.get("orderPayment") or []
+    lines = [li for st in detail.get("shipToAddress") or [] for li in st.get("orderLineItems") or []]
+    if not payments or not lines:
+        return None
+    paid = 0.0
+    for payment in payments:
+        if "coupon" in (payment.get("paymentType") or "").strip().lower():
+            continue
+        amount = _num(payment.get("totalCharged"))
+        if amount is None:
+            return None  # a tender with no readable amount breaks the equation; don't derive
+        paid += amount
+    gross = sum((_num(li.get("price")) or 0.0) * (_num(li.get("quantity")) or 0) for li in lines)
+    discounts = sum(_num(li.get("discountAmount")) or 0.0 for li in lines)
+    shipping = _num(detail.get("shippingAndHandling")) or 0.0
+    residual = round(paid - (gross - discounts + shipping), 2)
+    if residual < -0.02:
+        return None
+    return max(residual, 0.0)
 
 
 def _format_address(shipto: dict) -> str:
@@ -229,9 +266,10 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
     # Shipping is ORDER-LEVEL, repeated on every shipment row (same value) — matches the Best Buy
     # mapping and the agent path, so the API and agent writers agree on this field.
     shipping_total = _num(detail.get("shippingAndHandling"))
-    # Gift card (a Shop Card tender) rides the same order-level contract; the COGS formula subtracts
-    # it. Sales tax is NOT emitted — the schema exposes no tax amount (see _gift_card_total).
+    # Gift card (a Shop Card tender) and the DERIVED sales tax ride the same order-level contract;
+    # the COGS formula subtracts one and adds the other. See _gift_card_total / _sales_tax_total.
     gift_card_total = _gift_card_total(detail.get("orderPayment"))
+    sales_tax_total = _sales_tax_total(detail)
 
     # Group physical lines by SKU (itemNumber), preserving first-seen order for stable numbering.
     groups: dict[str, dict] = {}
@@ -332,7 +370,7 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
         for key in order_keys
         for row in _rows_for_group(
             groups[key], order_id, order_date, card_last4, profile_label,
-            shipment_number, unshipped_shipment, shipping_total, gift_card_total,
+            shipment_number, unshipped_shipment, shipping_total, gift_card_total, sales_tax_total,
         )
     ]
 
@@ -345,7 +383,7 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
 
 def _rows_for_group(
     group, order_id, order_date, card_last4, profile_label, shipment_number, unshipped_shipment,
-    shipping_total, gift_card_total=None,
+    shipping_total, gift_card_total=None, sales_tax_total=None,
 ) -> list[OrderItem]:
     name = group["description"]
     if group["item_number"]:
@@ -370,6 +408,7 @@ def _rows_for_group(
                 cost_per_item=unit_price,
                 shipping=shipping_total,
                 gift_card=gift_card_total,
+                sales_tax=sales_tax_total,
                 card_last4=card_last4,
                 shipment=shipment_label(unshipped_shipment),
             )
@@ -397,6 +436,7 @@ def _rows_for_group(
                 # Order-level shipping, repeated on every shipment row (matches the agent + Best Buy).
                 shipping=shipping_total,
                 gift_card=gift_card_total,
+                sales_tax=sales_tax_total,
                 card_last4=card_last4,
                 shipment=shipment_label(shipment_number[package["package_key"]]),
             )

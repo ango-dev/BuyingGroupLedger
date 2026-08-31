@@ -64,9 +64,19 @@ def test_retailer_and_order_filters():
 
 
 # --- plan_order_writes ---------------------------------------------------------------------------
-def test_no_gift_card_means_no_writes_at_all():
+def test_an_unparsed_summary_means_no_writes_at_all():
     writes, note = plan_order_writes([prow(2, 100.0)], None, 5.0, 100.0)
-    assert writes == [] and "no gift card" in note
+    assert writes == [] and "no parsed summary" in note
+
+
+def test_a_detected_no_gift_card_fills_real_zeros():
+    # A detected 0 is a VALUE: "checked, none" beats "unknown".
+    writes, note = plan_order_writes([prow(2, 60.0), prow(3, 40.0)], 0.0, 5.0, 100.0)
+    assert "no gift card" in note
+    assert [(w["n"], w["field"], w["value"]) for w in writes] == [
+        (2, "gift_card", 0.0), (2, "sales_tax", 3.0),
+        (3, "gift_card", 0.0), (3, "sales_tax", 2.0),
+    ]
 
 
 def test_a_gross_row_gets_its_shares_only():

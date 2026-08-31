@@ -94,18 +94,23 @@ def _card_last4(payments: list) -> str:
 
 
 def _gift_card_total(payments: list) -> float | None:
-    """What the order's gift-card tenders paid, summed; None when no gift tender exists.
+    """What the order's gift-card tenders paid, summed.
 
     `totalNetAmount` is the one amount field every captured tender reports as its net paid figure —
     an in-flight order's credit tender shows `amount`/`chargedAmount` 0 with `totalNetAmount` at the
     full charge, a completed one shows all three, and a refund goes negative there. (All five
     on-disk captures agree; a live gift-tender confirmation is still pending — the user holds a
-    known gift-card BBY order for it.) None, not 0, when no gift tender exists: a hard 0 would
-    overwrite a figure typed on the sheet through the merge.
+    known gift-card BBY order for it.)
+
+    A tender list WITHOUT a gift tender is a real 0.0 — every order carries its tenders, so their presence without a
+    gift one IS the detection. None only when the payments list itself is missing/empty (a shape
+    we've never seen; a blank never overwrites the sheet).
     """
-    amounts = [_num(p.get("totalNetAmount")) for p in payments or [] if _is_gift_tender(p)]
+    if not payments:
+        return None
+    amounts = [_num(p.get("totalNetAmount")) for p in payments if _is_gift_tender(p)]
     amounts = [a for a in amounts if a is not None]
-    return round(sum(amounts), 2) if amounts else None
+    return round(sum(amounts), 2) if amounts else 0.0
 
 
 def _format_address(address: dict | None) -> str:
