@@ -170,8 +170,7 @@ failures that matter on an unattended host are the ones that **keep working whil
 thing**, and so never raise:
 
 - **a deterministic-path import that broke** — `scrape()` catches `ImportError`, so a missing
-  dependency fails that retailer on every run with a failure dossier blaming a "selector" (or, with
-  `AGENT_FALLBACK_ENABLED`, degrades to the paid agent and just bills you forever);
+  dependency fails that retailer on every run with a failure dossier blaming a "selector";
 - **a bind mount whose host file is missing** — Docker creates an empty *directory* there, and the
   config loaders correctly read that as "not configured";
 - **a missing Costco refresh token** — self-heals from `auth.costco` creds; without those, alerts and
@@ -494,7 +493,6 @@ things are the MOD IP allowlist (step 2) and the scheduler itself.
 | `exec /usr/local/bin/entrypoint.sh: no such file` | CRLF line endings. `.gitattributes` forces LF on `*.sh`, `Dockerfile` and YAML; clone rather than copying files over from Windows by hand. |
 | Every retailer alerts "deterministic path failed — NOT recorded" on every run | A deterministic-path import is broken (the dossier's traceback will say `ImportError`). Run preflight — this is exactly what it's for. |
 | One retailer alerts "deterministic path failed — NOT recorded" | The page or API changed shape. Open the dossier the alert names (`logs/failures/…/report.md`): the selector audit says which selector stopped matching, `page_N.html` is the DOM to fix it against. Fix on the main PC, push, redeploy. |
-| Every retailer runs the agent; costs jump | `AGENT_FALLBACK_ENABLED=true` is set AND a deterministic-path import is broken. Run preflight. |
 | Buying Group column is all `Unclassified` | `config.json` has no `warehouses` section, or no jig matched the delivery address. Preflight distinguishes these. |
 | MOD calls rejected with a valid token | This host's IP isn't allowlisted (step 2), or your ISP rotated it. |
 | Container `(unhealthy)` but logs look fine | No run has completed within two intervals. Check the run lock: `cat logs/.run.lock` — it self-expires after 3h. |

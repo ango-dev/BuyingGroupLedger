@@ -242,8 +242,7 @@ def _status_from_text(status_text: str) -> str:
     # its wording. "5/5 items marked as received" is terminal; a PARTIAL receipt ("3/5") is not — the
     # rest of the order is still outstanding, so it stays open and keeps being tracked. Without this
     # the card fell through to `ordered`, leaving a long-since-received order permanently open: it
-    # never rolls up, and while open with no tracking number it is `needs_agent`, so the PAID agent
-    # re-reads it on every scheduled run.
+    # never rolls up, so every scheduled run re-reads it for nothing.
     received = _RECEIVED_COUNT_RE.search(status_text)
     if received:
         return "delivered" if int(received.group(1)) == int(received.group(2)) else "ordered"

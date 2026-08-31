@@ -75,14 +75,13 @@ the live lifecycle the scrapers maintain; the other four are **terminal** — th
 future runs. `paid` and `return` come from the **buying group**, not the retailer (see [Buying groups](buying-groups.md)): BFMR reports both, MOD confirms `paid` by listing a package as received but has no
 return signal, so a MOD return is typed in by hand. A status only ever moves forward, so that
 hand-typed `return` survives every later run. Anything outside this vocabulary keeps the order **open forever**, so it
-gets re-read on every run indefinitely — which on an agent retailer is a recurring cost on an order
-that is already finished. `audit_sheet`'s `column_shape` fails an unknown status for exactly that
+gets re-read on every run indefinitely — wasted work on an order that is already finished. `audit_sheet`'s `column_shape` fails an unknown status for exactly that
 reason.
 
 ## How rows are built
 
-**Total Cost is per row** = `Quantity × Cost Per Item` for that shipment line (computed in code, not
-trusted from the agent), so the column sums to the order total. A `cancelled` order is only ever
+**Total Cost is per row** = `Quantity × Cost Per Item` for that shipment line (computed in code,
+never trusted from a page), so the column sums to the order total. A `cancelled` order is only ever
 recorded via a re-check (an order first seen as `ordered` that the order page later shows cancelled);
 brand-new already-cancelled orders are ignored at discovery.
 
@@ -98,9 +97,9 @@ shipments are added as new rows. Best Buy uses the same scheme deliberately: the
 upsert key, so a label that varies between runs (the page's own wording isn't guaranteed to be stable,
 or present) would append a duplicate row instead of updating the existing one.
 
-**Re-check routing.** Both retailers re-check open orders through the **agent**, which re-reads the whole
-order-details page and reports every shipment. Amazon can add a shipment (with its own later delivery
-date) after an order already looks shipped, so a cached single-page poll would silently miss it.
+**Re-check routing.** Open orders are re-checked by re-reading the whole order-details page, which
+reports every shipment. Amazon can add a shipment (with its own later delivery date) after an order
+already looks shipped, so a cached single-page poll would silently miss it.
 
 **Digital items are skipped** on every retailer (gift cards, eBooks, memberships, redemption codes,
 etc.) — they're never resold, so they never hit the ledger.

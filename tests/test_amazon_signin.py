@@ -401,28 +401,6 @@ class TestSigninFailureVerdict:
             assert action and len(action) > 20, "a verdict without a next step is not actionable"
 
 
-class TestTheSeedNeverReachesTheAgent:
-    """A one-time code is derivable only from the seed, so handing the seed to an LLM and its cloud
-    run history trades a 30-second secret for a permanent one. Browser-Use v4 has no secret-injection
-    channel, so anything the agent is told IS in the prompt."""
-
-    def test_neither_the_password_nor_the_seed_appears_in_the_agent_prompt(self):
-        from models.profile import ProfileConfig
-        from scrapers.amazon_business import AmazonBusinessScraper
-
-        profile = ProfileConfig(label="profile-alpha", profile_id="x",
-                                retailers=["amazon-business"],
-                                auth={"amazon-business": _auth()})
-        prompt = AmazonBusinessScraper(profile).task_prompt([], [])
-
-        assert "pw" not in prompt.split(), "the password must not reach the task prompt"
-        assert SECRET not in prompt, "the TOTP SEED is a permanent key — never give it to the agent"
-        assert "do not attempt to log in" in prompt.lower(), (
-            "the agent must still be told not to try signing in: it cannot pass 2FA without the "
-            "seed, and it must not burn steps discovering that"
-        )
-
-
 class TestTheAccountSwitcher:
     """Amazon answers a logged-out order-history request with "Switch accounts" some of the time —
     no email box, no password box, one tile per remembered account (confirmed live).

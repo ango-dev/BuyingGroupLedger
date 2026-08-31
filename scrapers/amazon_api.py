@@ -16,9 +16,9 @@ Three reads, one logged-in session:
      scraper's already-validated `read_tracking_page` (`.pt-delivery-card-trackingId`), then rebuild
      the rows so the `_shipped_requires_tracking` invariant can promote them to `shipped`.
 
-Unlike Best Buy, Amazon sessions are long-lived, so there is NO deterministic re-login here: Amazon
-login has OTP/2FA. If the session has lapsed we raise `AmazonApiError`, and scrapers/amazon.py falls
-back to the Browser-Use agent (which detects logged-out, alerts, and skips) — never an auto-login.
+Amazon sessions are long-lived, but when one lapses `_sign_in_here` heals it deterministically
+(password + authenticator code, scrapers/amazon_signin.py); a sign-in that cannot succeed raises
+`ApiLoginError`, and scrapers/amazon.py alerts (naming its dossier) and skips.
 """
 
 import logging
@@ -51,8 +51,8 @@ _AUTH_KEY = "amazon"
 # Things the page shows only when it wants you to sign in. Used ONLY as corroboration once discovery
 # has already found zero orders -- deliberately NOT folded into _looks_logged_out, because a false
 # positive THERE would send a perfectly good session into a doomed self-login. Here the run is
-# failing either way and the only open question is whether to spend money on the agent, so the safe
-# direction is to assume logged out.
+# failing either way and the only open question is which alert to send, so the safe direction is
+# to assume logged out (a re-login costs nothing; a wrong shape-change dossier wastes a human).
 _SIGNIN_CTA_SELECTORS = ("#ap_email", "#ap_email_login", "#ap_password", "#ap-claim",
                          "a[href*='/ap/signin']")
 
@@ -61,8 +61,8 @@ def _signin_affordances(page) -> list[str]:
     """Which sign-in CTAs the page is showing, if any.
 
     A silently-expired session and a genuine markup change look IDENTICAL at the point discovery
-    comes back empty, and they have opposite correct responses: a logout must skip for free, while a
-    shape change is exactly what the paid agent is for.
+    comes back empty, and they have opposite correct responses: a logout alerts "re-login the
+    profile", while a shape change deserves a failure dossier.
     """
     found = []
     for selector in _SIGNIN_CTA_SELECTORS:
@@ -90,8 +90,8 @@ def _time_filters_for(since_date: str, today: str) -> list[str]:
 
 
 class AmazonApiError(Exception):
-    """The deterministic path could not run (logged out, page shape changed, network) — the caller
-    should fall back to the agent."""
+    """The deterministic path could not run (page shape changed, network) — scrapers/amazon.py
+    answers it with a failure dossier."""
 
 
 def _looks_logged_out(page) -> bool:
@@ -188,8 +188,8 @@ class AmazonApiClient:
     def _sign_in_here(self, page) -> None:
         """Self-heal a lapsed session, raising the right error if it can't.
 
-        Every failure route out of here is `ApiLoginError`, so the caller alerts and SKIPS and the
-        paid agent is never run -- it cannot fix an auth failure. What differs is the MESSAGE: a
+        Every failure route out of here is `ApiLoginError`, so the caller alerts and SKIPS
+        rather than blaming the page shape. What differs is the MESSAGE: a
         missing auth block, a rejected password, an unanswerable SMS challenge and a network-layer
         rejection need four different responses from whoever reads the alert.
 
@@ -205,8 +205,7 @@ class AmazonApiClient:
                 "Amazon session is logged out and this profile has no auth block, so there is "
                 "nothing to sign in with. Either add auth['amazon'] (method/username/password/"
                 "totp_secret) to config.json, or re-login by hand with "
-                "`python -m scripts.create_profile`. The agent is NOT run for a login failure -- it "
-                "cannot fix auth."
+                "`python -m scripts.create_profile`."
             )
 
         log.info("Amazon [%s]: session logged out; attempting deterministic self-login.",
@@ -266,14 +265,14 @@ class AmazonApiClient:
                     break
         # DISCOVERY CAME BACK EMPTY. A logout that never tripped _looks_logged_out and a real markup
         # change are indistinguishable from the parse alone, and they have opposite responses: the
-        # first must skip for free, the second is what the paid agent is for.
+        # first says re-login, the second deserves a failure dossier.
         if not dates and (affordances := _signin_affordances(page)):
             log.info("Amazon [%s]: no orders parsed and the page is offering to sign in (%s) -- "
                      "treating as a lapsed session, not a shape change.",
                      self.profile.label, ", ".join(affordances))
             raise ApiLoginError(
                 "Amazon order history is empty and still showing a sign-in prompt; the session is "
-                "logged out. Not running the agent -- it cannot fix an auth failure."
+                "logged out."
             )
         # STILL EMPTY, AND NOT LOGGED OUT. An empty card selector is what an account with no orders
         # looks like, so it is not evidence of anything; only the page's CONTAINER decides. Rendered

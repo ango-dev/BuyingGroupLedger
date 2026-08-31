@@ -1,12 +1,10 @@
 {
   "//": "Copy to config.json and fill in. ENVIRONMENT VARIABLES OVERRIDE EVERY VALUE HERE — the name in each `// <KEY>` note below is the variable that wins over it, from .env or the shell. That is what makes a one-off possible without editing this file: BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking. README.md lists all of them in one table. Booleans are true/false in BOTH places; 1/yes/on still parse, but anything unrecognised is false, so a money switch fails closed on a typo.",
-  "//2": "EVERY setting lives here — nothing is environment-only any more, including the container schedule and the *_FORCE_AGENT hooks. .env is now purely the OVERRIDE layer, and is where dev/one-off values belong: COSTCO_FORCE_AGENT=true python main.py costco, or a host-specific RUN_INTERVAL_HOURS, without touching the config everything else shares.",
+  "//2": "EVERY setting lives here — nothing is environment-only any more, including the container schedule. .env is purely the OVERRIDE layer, and is where dev/one-off values belong: a temporary LOOKBACK_DAYS, or a host-specific RUN_INTERVAL_HOURS, without touching the config everything else shares.",
 
   "browser_use": {
     "// api_key": "BROWSER_USE_API_KEY — required. The cloud browser every scraper runs in (CDP reads, receipt capture, the Costco token grab) — NOT just the agent.",
-    "api_key": "",
-    "// agent_fallback_enabled": "AGENT_FALLBACK_ENABLED — may a deterministic-path failure fall back to the PAID agent? Off: the failure writes a dossier to logs/failures/ (traceback, page HTML, screenshot, selector audit), alerts with its path, and that retailer records nothing this run. Fix the selector from the dossier; the next run retries. A login failure never runs the agent either way.",
-    "agent_fallback_enabled": false
+    "api_key": ""
   },
 
   "google": {
@@ -88,17 +86,6 @@
     "preflight_strict": false,
     "// timezone": "TZ — the cron schedule follows this.",
     "timezone": "UTC"
-  },
-
-  "// dev": "Ops and test hooks. These belong in .env far more often than here — they are normally set for ONE command (`COSTCO_FORCE_AGENT=true python main.py costco`) rather than configured, and leaving one on in config.json would quietly route a retailer down its PAID agent on every run.",
-  "dev": {
-    "// force_agent": "Force a retailer past its deterministic path onto the Browser-Use agent, to exercise that branch deliberately. COSTS MONEY per run.",
-    "force_agent": {
-      "amazon": false,
-      "amazon_business": false,
-      "bestbuy": false,
-      "costco": false
-    }
   },
 
   "// profiles": "One Browser-Use browser identity per entry, each behind its own proxy. `amazon` and `amazon-business` are separate accounts and MUST NOT share a profile — one identity for both is exactly the linking risk the separate profile exists to avoid. `profile_id` is filled in for you by `python -m scripts.create_profile`.",

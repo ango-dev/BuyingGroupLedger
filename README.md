@@ -12,8 +12,8 @@ than an expensive one. So every retailer has a **deterministic, agent-free prima
 that path fails it **fails loudly with a failure dossier** — the traceback, the page HTML and a
 screenshot at the moment of failure, and an audit of every selector the parser depends on, written
 to `logs/failures/` and pointed at by the alert. Normal runs cost nothing; a site change costs one
-missed run and a selector fix, made from the dossier rather than guessed. The LLM agent still exists
-as an opt-in fallback (`AGENT_FALLBACK_ENABLED`), off by default.
+missed run and a selector fix, made from the dossier rather than guessed. (An LLM-agent fallback
+existed until 2026-08-29; it has been removed outright.)
 
 The second theme is that **the failures worth engineering against here are silent**. Nothing throws
 when a scraper reads page 1 of a paginated order history and misses the rest, or when a re-check
@@ -52,10 +52,10 @@ The parts worth reading if you're here to look at the engineering rather than to
 | Idea | Where | Why it exists |
 |---|---|---|
 | Deterministic primary, loud failure | `scrapers/<retailer>{,_api,_mapping}.py` | Cost is a per-run tax; silent data loss is unbounded. A normal run spends nothing, and a failure records nothing rather than something wrong — and says so. |
-| The failure dossier replaces the agent | `diagnostics/dossier.py`, `CdpBrowser.__exit__` | A paid agent run hid *what* broke. The dossier captures the page at the failure and audits every declared selector against it, so the fix is a code change made from evidence, not a retry that costs money. The agent is opt-in (`AGENT_FALLBACK_ENABLED`), off by default. |
+| The failure dossier is the failure path | `diagnostics/dossier.py`, `CdpBrowser.__exit__` | A paid agent run hid *what* broke. The dossier captures the page at the failure and audits every declared selector against it, so the fix is a code change made from evidence, not a retry that costs money. The agent fallback has been removed entirely. |
 | The schema is a wire format | `models/order.py` `FIELDNAMES`, `sheets/ledger_sync.py` `HEADER` | Rows are written *positionally*. Reordering columns without migrating scrambles every historical row with no error, so a test pins the pairing and the sync refuses to write a mismatched header. |
 | Idempotent upsert, blanks never overwrite | `ledger_sync.py` `_merge_row`, `_collapse_records` | Re-checks return partial data. A blank field must never erase a known-good value, and two paths reporting the same row in one sync must collapse rather than clobber. |
-| Reconcile on tracking number first | `ledger_sync.py` `sync_csv_to_sheet` | The deterministic path and the agent legitimately disagree about shipment *numbering*. Tracking number is an identity both read identically, so it beats the synthetic key. |
+| Reconcile on tracking number first | `ledger_sync.py` `sync_csv_to_sheet` | Different writers (scrapers, imports, hand edits) can legitimately disagree about shipment *numbering*. Tracking number is an identity both read identically, so it beats the synthetic key. |
 | Undisclosed-split safety net | `ledger_sync.py` | A retailer API that exposes one tracking number per line and rotates it will silently lose a box. An update that changes a non-blank tracking number to a *different* one appends instead of overwriting, and alerts. |
 | Audit the live data, not just the code | `scripts/audit_sheet.py` | Tests prove the code; they can't see the sheet. 40+ invariant checks, authenticated **read-only** so it cannot write even by accident. |
 | Ask storage before opening a browser | `receipts/capture.py` | Receipt capture runs every scrape, but the existence check comes first — so the common re-check run creates no cloud browser at all, and a browser is only ever paid for by a genuinely new order. |
@@ -142,8 +142,8 @@ config/profiles.py      profiles section loader + Sheet order-state reader
 config/warehouses.py    warehouses section + address -> buying-group/jig classifier
 config/cards.py         cards section + card last-4 -> card name/cashback-rate resolver
 models/                 OrderItem + ProfileConfig + Warehouse/Jig + Card schemas
-scrapers/base.py        the scrape contract: dossier context, failure handling, (opt-in) agent path
-scrapers/<retailer>.py           per-retailer scraper: selectors declared for the audit, agent prompt
+scrapers/base.py        the scrape contract: dossier context, failure handling, order state
+scrapers/<retailer>.py           per-retailer scraper: scrape() wrapper, selectors declared for the audit
 scrapers/<retailer>_api.py       deterministic client (CDP browser or GraphQL)
 scrapers/<retailer>_mapping.py   pure payload -> OrderItem rows (offline-tested)
 scrapers/<retailer>_signin.py    deterministic sign-in for the retailers that need one

@@ -29,7 +29,7 @@ class TestDeterministicImports:
         results = preflight.check_deterministic_imports()
         assert [r for r in results if r.level != OK] == []
 
-    def test_missing_playwright_is_reported_as_a_paid_fallback(self, monkeypatch):
+    def test_missing_playwright_is_reported_with_its_consequence(self, monkeypatch):
         """The exact bug this file exists for: playwright was undeclared in requirements.txt."""
         import builtins
 
@@ -51,7 +51,7 @@ class TestDeterministicImports:
 
         assert _by_name(results, "import scrapers.cdp").level == FAIL
         # The point isn't that it failed — it's that the report says why it matters.
-        assert all("PAID" in r.detail for r in failed)
+        assert all("fail on every run" in r.detail for r in failed)
         assert any("Best Buy" in r.detail for r in failed)
 
 

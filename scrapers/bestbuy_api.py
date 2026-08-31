@@ -15,11 +15,10 @@ If the session has lapsed (Best Buy dies ~20 min), `_deterministic_login` logs b
 profile's `auth.bestbuy` password creds — the exact 3-screen flow proven live (prefilled email ->
 Continue -> #password-radio -> password).
 
-WHICH ERROR IS RAISED DECIDES WHETHER MONEY IS SPENT, so the two are kept strictly apart:
-  - `ApiLoginError` -> scrapers/bestbuy.py alerts and SKIPS. The agent is never run for an auth
-    failure, because it cannot fix one — it would just spend ~$0.02 rediscovering the logout.
-  - `BestBuyApiError` -> falls back to the Browser-Use agent (like Costco). Reserved for a genuine
-    page/shape change, which is the one thing the agent CAN adapt to.
+WHICH ERROR IS RAISED DECIDES WHICH ALERT THE USER GETS, so the two are kept strictly apart:
+  - `ApiLoginError` -> scrapers/bestbuy.py alerts "re-login the profile" and SKIPS.
+  - `BestBuyApiError` -> a failure dossier. Reserved for a genuine page/shape change, which is the
+    thing a code fix (made from the dossier) can address.
 The hard case is discovery coming back empty, which both causes produce identically; see
 `_signin_affordances` for how they are told apart.
 
@@ -48,7 +47,7 @@ _SIGNIN_MARKERS = ("identity/signin", "/login", "signin/options")
 # has already found zero orders -- deliberately NOT folded into _looks_logged_out, because a false
 # positive THERE would send a perfectly good session into a doomed self-login and end in
 # skip-with-alert, i.e. a silently missed run. Here the run is failing either way and the only open
-# question is whether to spend money on an agent, so the safe direction is to assume logged out.
+# question is which alert to send, so the safe direction is to assume logged out.
 _SIGNIN_CTA_SELECTORS = (
     ".cia-signin",
     "#fld-e",
@@ -57,8 +56,8 @@ _SIGNIN_CTA_SELECTORS = (
 
 
 class BestBuyApiError(Exception):
-    """The deterministic path could not run (login failed, page shape changed, network) — the caller
-    should fall back to the agent."""
+    """The deterministic path could not run (page shape changed, network) — scrapers/bestbuy.py
+    answers it with a failure dossier."""
 
 
 
@@ -209,9 +208,9 @@ def _signin_affordances(page) -> list[str]:
 
     This exists because a silently-expired session and a genuine markup change look IDENTICAL at the
     point discovery comes back empty, and they have opposite correct responses: a logout must skip
-    for free (the agent cannot fix an auth failure), while a shape change is exactly what the paid
-    agent is for. Live the logged-out purchase-history page tripped neither URL redirect
-    nor the sign-in form selectors, so `not dates` fired, the agent ran, cost $0.02, and concluded
+    with a re-login alert, while a shape change deserves a failure dossier. Live (in
+    the agent era) the logged-out purchase-history page tripped neither URL redirect
+    nor the sign-in form selectors, so `not dates` fired, the then-extant agent ran, cost $0.02, and concluded
     "logged out" anyway -- rediscovering for money what this catches for free.
     """
     found = []
@@ -403,7 +402,7 @@ def _classify_signin_failure(info: dict, critical: list) -> tuple[str, str]:
                 "method that needs no code.")
     if re.search(r"captcha|unusual activity|are you a human", haystack, re.I):
         return ("CAPTCHA / BOT CHALLENGE",
-                "Back off; do not retry in a loop. The agent fallback cannot solve it either.")
+                "Back off; do not retry in a loop.")
     # "Failed to fetch" is Best Buy's OWN copy for its auth XHR dying, so it is direct evidence of a
     # transport failure whether or not we happened to capture the failed request. Observed live
     # 2026-08-29: the same profile produced ANTI-BOT/TRANSPORT on one run (auth-critical request
@@ -413,7 +412,7 @@ def _classify_signin_failure(info: dict, critical: list) -> tuple[str, str]:
     # built on.
     if critical or re.search(r"failed to fetch", haystack, re.I):
         return ("ANTI-BOT / TRANSPORT — auth requests died at the network layer",
-                "Not a page-shape problem, so the agent cannot fix it. Back off and retry later; see "
+                "Not a page-shape problem, so there is no selector to fix. Back off and retry later; see "
                 "reference-isp-proxy-breaks-post. Note the off-proxy retry and proxy rotation are "
                 "both already FALSIFIED for this failure — the rejection travels with "
                 "the browser, not the egress IP, so do not spend on either.")
@@ -480,8 +479,8 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
     if critical:
         log.warning(
             "Best Buy sign-in: %d auth-critical request(s) FAILED at the network layer — this is a "
-            "connectivity/anti-bot problem, NOT a page-shape one, so the agent fallback cannot fix "
-            "it either: %s", len(critical), critical[:6],
+            "connectivity/anti-bot problem, NOT a page-shape one, so there is no selector to fix: "
+            "%s", len(critical), critical[:6],
         )
     else:
         # "none auth-critical" alone reads as reassurance — but a PILE of tunnel/connection failures
@@ -758,8 +757,8 @@ class BestBuyApiClient:
                 if not outcome.ok:
                     log.warning("Best Buy [%s]: deterministic self-login did not succeed.",
                                 self.profile.label)
-                    # Both routes end the same way — skip with an alert, never the paid agent, since
-                    # it cannot fix an auth failure either. The distinction is carried in the MESSAGE
+                    # Both routes end the same way — skip with an alert. The distinction is
+                    # carried in the MESSAGE
                     # so whoever reads the alert knows which problem they have: a network-layer
                     # rejection is anti-bot/transport (not fixable by changing egress — proven live
                     # 2026-08-15, see fetch_order_payloads), while anything else points at the page
@@ -793,8 +792,8 @@ class BestBuyApiClient:
 
             # DISCOVERY CAME BACK EMPTY. Two causes, opposite responses, and they are indistinguishable
             # from the parse alone -- which is what the old "(shape changed?)" hedge was admitting.
-            # A logout must never reach the agent (it cannot fix an auth failure and costs ~$0.02 to
-            # confirm what we already know); a real markup change is precisely what the agent is for.
+            # A logout must be named as one (re-login fixes it); a real markup change deserves a
+            # failure dossier.
             if not dates and (affordances := _signin_affordances(page)):
                 log.info("Best Buy [%s]: no orders parsed and the page is offering to sign in (%s) -- "
                          "treating as a lapsed session, not a shape change.",
@@ -808,7 +807,7 @@ class BestBuyApiClient:
                 if not dates:
                     raise ApiLoginError(
                         "Best Buy purchase history is empty and still showing a sign-in prompt; the "
-                        "session is logged out. Not running the agent -- it cannot fix an auth failure."
+                        "session is logged out."
                     )
 
             if not dates:

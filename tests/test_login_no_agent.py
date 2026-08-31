@@ -2,9 +2,8 @@
 
 The agent cannot fix a logged-out session or a dead token (and Amazon/Best Buy/Costco logins involve
 OTP/2FA/passkeys the agent can't do), so a login failure alerts and skips (raises LoggedOutError)
-instead of running the agent. Any OTHER failure writes a failure dossier and — since 2026-08-29 —
-ALSO stops without the agent unless AGENT_FALLBACK_ENABLED (or the retailer's *_FORCE_AGENT hook)
-is on; see TestNonLoginFailures.
+instead of taking the shape-change path. Any OTHER failure writes a failure dossier and stops —
+the paid agent fallback is gone entirely; see TestNonLoginFailures.
 """
 
 import pytest
@@ -48,9 +47,9 @@ def test_login_failure_skips_the_agent(monkeypatch, module, cls):
         raise ApiLoginError("session logged out")
 
     monkeypatch.setattr(scraper, "_scrape_via_api", _login_fails)
-    # If the agent (base scrape) is ever reached, fail loudly.
-    monkeypatch.setattr(BaseRetailerScraper, "scrape",
-                        lambda self: pytest.fail("agent must NOT run on a login failure"))
+    # A login failure must never take the generic shape-change path.
+    monkeypatch.setattr(scraper, "_on_deterministic_failure",
+                        lambda *a, **k: pytest.fail("a login failure is not a page-shape failure"))
     alerts = []
     monkeypatch.setattr(module, "alert", lambda subject, body: alerts.append(subject))
 
@@ -60,24 +59,12 @@ def test_login_failure_skips_the_agent(monkeypatch, module, cls):
 
 
 class TestNonLoginFailures:
-    """A page-shape failure is now a DOSSIER, not a paid agent run — unless explicitly enabled.
+    """A page-shape failure is a DOSSIER, never a scrape that guesses.
 
-    The agent used to be the catch-all for anything that wasn't a login failure. Every retailer's
-    deterministic path is live-validated now, so the agent had become a per-failure tax that hid
-    WHAT broke; the dossier (traceback + page + selector audit) is what a fix actually needs.
+    The paid agent used to be the catch-all for anything that wasn't a login failure; it was
+    retired 2026-08-29 and fully removed the same week. A failure now records NOTHING, alerts with
+    the dossier's path, and raises DeterministicPathError so main.run_scrape just logs and skips.
     """
-
-    @staticmethod
-    def _configure(monkeypatch, module, **overrides):
-        """`Settings` is frozen, so swap the object in every module that reads it."""
-        import dataclasses
-
-        import scrapers.base as base
-        from config.settings import settings
-
-        replaced = dataclasses.replace(settings, **overrides)
-        monkeypatch.setattr(base, "settings", replaced)
-        monkeypatch.setattr(module, "settings", replaced)
 
     @staticmethod
     def _break(monkeypatch, scraper, module):
@@ -93,13 +80,10 @@ class TestNonLoginFailures:
         return alerts
 
     @pytest.mark.parametrize("module, cls", RETAILERS, ids=lambda x: getattr(x, "__name__", ""))
-    def test_by_default_it_writes_a_dossier_alerts_and_does_not_run_the_agent(
+    def test_a_page_shape_failure_writes_a_dossier_and_records_nothing(
             self, monkeypatch, tmp_path, module, cls):
-        self._configure(monkeypatch, module, agent_fallback_enabled=False)
         scraper = _scraper(cls)
         alerts = self._break(monkeypatch, scraper, module)
-        monkeypatch.setattr(BaseRetailerScraper, "scrape",
-                            lambda self: pytest.fail("the agent must NOT run with the fallback off"))
 
         with pytest.raises(DeterministicPathError):
             scraper.scrape()
@@ -112,32 +96,6 @@ class TestNonLoginFailures:
         report = (dossiers[0] / "report.md").read_text(encoding="utf-8")
         assert "RuntimeError" in report and "page shape changed" in report
         assert str(dossiers[0]) in body, "the alert must say where the dossier is"
-
-    @pytest.mark.parametrize("module, cls", RETAILERS, ids=lambda x: getattr(x, "__name__", ""))
-    def test_with_the_fallback_enabled_it_still_runs_the_agent(self, monkeypatch, module, cls):
-        self._configure(monkeypatch, module, agent_fallback_enabled=True)
-        scraper = _scraper(cls)
-        alerts = self._break(monkeypatch, scraper, module)
-        monkeypatch.setattr(BaseRetailerScraper, "scrape", lambda self: ["AGENT_RAN"])
-
-        assert scraper.scrape() == ["AGENT_RAN"]
-        assert "using agent fallback" in alerts[-1][0]
-        assert "Failure dossier:" in alerts[-1][1], "the dossier is written even when the agent runs"
-
-    @pytest.mark.parametrize("module, cls, flag", [
-        (amazon, amazon.AmazonScraper, "amazon_force_agent"),
-        (amazon_business, amazon_business.AmazonBusinessScraper, "amazon_business_force_agent"),
-        (bestbuy, bestbuy.BestBuyScraper, "bestbuy_force_agent"),
-        (costco, costco.CostcoScraper, "costco_force_agent"),
-    ], ids=lambda x: getattr(x, "__name__", "") if hasattr(x, "__name__") else "")
-    def test_the_force_agent_hook_overrides_the_off_switch(self, monkeypatch, module, cls, flag):
-        """Setting COSTCO_FORCE_AGENT is an explicit request to spend; it must keep working."""
-        self._configure(monkeypatch, module, agent_fallback_enabled=False, **{flag: True})
-        scraper = _scraper(cls)
-        self._break(monkeypatch, scraper, module)
-        monkeypatch.setattr(BaseRetailerScraper, "scrape", lambda self: ["AGENT_RAN"])
-
-        assert scraper.scrape() == ["AGENT_RAN"]
 
     def test_a_login_failure_alert_also_points_at_its_dossier(self, monkeypatch, tmp_path):
         """Sign-in flows have selectors too; a login failure's page is just as worth capturing."""
@@ -180,8 +138,6 @@ class TestCostcoSelfHealsADeadToken:
 
         monkeypatch.setattr(scraper, "_scrape_via_api", _api)
         monkeypatch.setattr(scraper, "_refresh_token_via_browser", lambda: True)
-        monkeypatch.setattr(BaseRetailerScraper, "scrape",
-                            lambda self: pytest.fail("the agent must never run on an auth failure"))
         alerts = []
         monkeypatch.setattr(costco, "alert", lambda subject, body: alerts.append(subject))
 
@@ -194,8 +150,6 @@ class TestCostcoSelfHealsADeadToken:
         monkeypatch.setattr(scraper, "_scrape_via_api",
                             lambda: (_ for _ in ()).throw(ApiLoginError("dead token")))
         monkeypatch.setattr(scraper, "_refresh_token_via_browser", lambda: False)
-        monkeypatch.setattr(BaseRetailerScraper, "scrape",
-                            lambda self: pytest.fail("the agent must never run on an auth failure"))
         alerts = []
         monkeypatch.setattr(costco, "alert", lambda subject, body: alerts.append((subject, body)))
 
@@ -264,11 +218,9 @@ class TestCostcoSharedProxyFailure:
         ConnectionError("Failed to connect over proxy"),
         TimeoutError("Failed to perform, curl: (28) Failed to connect to signin.costco.com:443"),
     ], ids=["connection", "timeout"])
-    def test_a_proxy_transport_failure_skips_the_agent(self, monkeypatch, exc):
+    def test_a_proxy_transport_failure_is_named_as_such(self, monkeypatch, exc):
         scraper = self._scraper(self._proxy())
         monkeypatch.setattr(scraper, "_scrape_via_api", lambda: (_ for _ in ()).throw(exc))
-        monkeypatch.setattr(BaseRetailerScraper, "scrape",
-                            lambda self: pytest.fail("agent must NOT run — it shares the proxy"))
         alerts = []
         monkeypatch.setattr(costco, "alert", lambda subject, body: alerts.append((subject, body)))
 
@@ -276,7 +228,7 @@ class TestCostcoSharedProxyFailure:
             scraper.scrape()
 
         subject, body = alerts[0]
-        assert "proxy unreachable" in subject and "agent NOT run" in subject
+        assert "proxy unreachable" in subject
         # The alert has to actively steer AWAY from the token, because the symptom that reached the
         # user last time was "session is logged out".
         assert "NOT A LOGIN PROBLEM" in body
@@ -288,12 +240,11 @@ class TestCostcoSharedProxyFailure:
         assert not issubclass(ScrapeUnavailableError, LoggedOutError)
 
     def test_the_same_failure_WITHOUT_a_proxy_is_NOT_a_proxy_failure(self, monkeypatch):
-        """Without a proxy the failure takes the generic path (dossier; agent only if enabled) —
-        it must not be reported as 'proxy unreachable', because there is no proxy to blame."""
+        """Without a proxy the failure takes the generic dossier path — it must not be reported as
+        'proxy unreachable', because there is no proxy to blame."""
         scraper = self._scraper(None)
         monkeypatch.setattr(scraper, "_scrape_via_api",
                             lambda: (_ for _ in ()).throw(ConnectionError("network down")))
-        monkeypatch.setattr(BaseRetailerScraper, "scrape", lambda self: ["AGENT_RAN"])
         subjects = []
         monkeypatch.setattr(costco, "alert", lambda subject, body: subjects.append(subject))
         import scrapers.base as base
@@ -309,7 +260,6 @@ class TestCostcoSharedProxyFailure:
         scraper = self._scraper(self._proxy())
         monkeypatch.setattr(scraper, "_scrape_via_api",
                             lambda: (_ for _ in ()).throw(RuntimeError("HTTP 500 from GraphQL")))
-        monkeypatch.setattr(BaseRetailerScraper, "scrape", lambda self: ["AGENT_RAN"])
         subjects = []
         monkeypatch.setattr(costco, "alert", lambda subject, body: subjects.append(subject))
         import scrapers.base as base

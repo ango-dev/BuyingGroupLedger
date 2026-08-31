@@ -56,24 +56,25 @@ _AUTH_KEY = "amazon-business"
 # Things the page shows only when it wants you to sign in. Used ONLY as corroboration once discovery
 # has already found zero orders -- deliberately NOT folded into looks_logged_out, because a false
 # positive THERE would send a perfectly good session into a doomed self-login. Here the run is
-# failing either way and the only open question is whether to spend money on the agent, so the safe
+# failing either way and the only open question is which alert to send, so the safe
 # direction is to assume logged out.
 _SIGNIN_CTA_SELECTORS = ("#ap_email", "#ap_password", "#ap-claim", "a[href*='/ap/signin']")
 
 
 class AmazonBusinessApiError(Exception):
-    """The deterministic path could not run (logged out, page shape changed, pagination stuck,
-    network) — the caller should fall back to the agent."""
+    """The deterministic path could not run (page shape changed, pagination stuck, network) —
+    scrapers/amazon_business.py answers it with a failure dossier."""
 
 
 def _signin_affordances(page) -> list[str]:
     """Which sign-in CTAs the page is showing, if any.
 
     A silently-expired session and a genuine markup change look IDENTICAL at the point discovery
-    comes back empty, and they have opposite correct responses: a logout must skip for free, while a
-    shape change is exactly what the paid agent is for. Best Buy proved the cost of not telling them
-    apart: the logged-out page tripped neither the URL check nor the form selectors,
-    the agent ran, and $0.02 bought the conclusion "logged out" that was already available for free.
+    comes back empty, and they have opposite correct responses: a logout alerts "re-login the
+    profile", while a shape change deserves a failure dossier. Best Buy proved the cost of not
+    telling them apart in the agent era: the logged-out page tripped neither the URL
+    check nor the form selectors, the then-extant paid agent ran, and $0.02 bought the conclusion
+    "logged out" that was already available for free.
     """
     found = []
     for selector in _SIGNIN_CTA_SELECTORS:
@@ -169,7 +170,7 @@ class AmazonBusinessApiClient:
         """Self-heal a lapsed session, raising the right error if it can't.
 
         Every failure route out of here is `ApiLoginError`, so the caller alerts and SKIPS and the
-        paid agent is never run — it cannot fix an auth failure. What differs is the MESSAGE, and
+        run reported as an auth failure, never a shape change. What differs is the MESSAGE, and
         that matters more than it looks: a missing auth block, a rejected password, an unanswerable
         SMS challenge and a network-layer rejection need four different responses from whoever reads
         the alert, and they are indistinguishable without being told.
@@ -180,8 +181,7 @@ class AmazonBusinessApiClient:
                 "Amazon Business session is logged out and this profile has no auth block, so there "
                 "is nothing to sign in with. Either add auth['amazon-business'] (method/username/"
                 "password/totp_secret) to config.json, or re-login by hand with "
-                "`python -m scripts.create_profile`. The agent is NOT run for a login failure — it "
-                "cannot fix auth."
+                "`python -m scripts.create_profile`."
             )
 
         log.info("Amazon Business [%s]: session logged out; attempting deterministic self-login.",
@@ -227,8 +227,8 @@ class AmazonBusinessApiClient:
         dates = self._read_paginated_history(page, since_date)
 
         # DISCOVERY CAME BACK EMPTY. Two causes, opposite responses, and the parse alone cannot tell
-        # them apart. A logout must never reach the agent (it cannot fix auth, and costs real money
-        # to confirm what is already known); a real markup change is precisely what the agent is for.
+        # them apart. A logout must be named as one (re-login fixes it); a real markup change
+        # deserves a failure dossier.
         if not dates and (affordances := _signin_affordances(page)):
             log.info("Amazon Business [%s]: no orders parsed and the page is offering to sign in "
                      "(%s) — treating as a lapsed session, not a shape change.",
@@ -242,7 +242,7 @@ class AmazonBusinessApiClient:
             if not dates:
                 raise ApiLoginError(
                     "Amazon Business order history is empty and still showing a sign-in prompt; the "
-                    "session is logged out. Not running the agent — it cannot fix an auth failure."
+                    "session is logged out."
                 )
         # STILL EMPTY, AND NOT LOGGED OUT. Only the page's container decides (see amazon_api): an
         # empty link selector is what an account with no orders looks like.
@@ -290,8 +290,8 @@ class AmazonBusinessApiClient:
 
         Returns True if it advanced, False if there is no next page (we're on the last page — the
         `li.a-last` becomes `a-disabled` with no anchor). Raises AmazonBusinessApiError if a next
-        control exists but the rendered order list never swaps — better to fall back to the agent
-        (which re-scans everything) than to silently miss the orders on pages we couldn't reach."""
+        control exists but the rendered order list never swaps — better to fail loudly with a
+        dossier than to silently miss the orders on pages we couldn't reach."""
         try:
             nxt = page.locator("li.a-last:not(.a-disabled) a")
             if nxt.count() == 0:

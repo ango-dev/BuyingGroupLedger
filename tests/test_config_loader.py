@@ -123,8 +123,6 @@ class TestNothingIsEnvironmentOnly:
 
     @pytest.mark.parametrize("name", [
         "RUN_INTERVAL_HOURS", "RUN_ON_START", "PREFLIGHT_STRICT", "TZ",
-        "AMAZON_FORCE_AGENT", "AMAZON_BUSINESS_FORCE_AGENT",
-        "BESTBUY_FORCE_AGENT", "COSTCO_FORCE_AGENT",
     ])
     def test_the_formerly_env_only_settings_have_a_config_home(self, name):
         assert name in ENV_TO_CONFIG
@@ -183,16 +181,17 @@ class TestNothingIsEnvironmentOnly:
             assert quoted == "'it'" + chr(92) + "''s a '" + chr(92) + "''value'" + chr(92) + \
                    "''; echo pwned'"
 
-    def test_force_agent_fails_closed_on_a_falsy_string(self, config_file, monkeypatch):
-        """A behaviour FIX. The old `if os.getenv("COSTCO_FORCE_AGENT")` treated ANY non-empty value
-        as true, so `COSTCO_FORCE_AGENT=0` forced the PAID agent — the opposite of what it reads as.
+    def test_a_flag_fails_closed_on_a_falsy_string(self, config_file, monkeypatch):
+        """A behaviour FIX (learned on the retired *_FORCE_AGENT hooks): a bare truthiness test
+        treats "0" as true, so a money switch written as =0 read as ON. Only affirmative spellings
+        count.
         """
         config_file()
-        monkeypatch.setenv("COSTCO_FORCE_AGENT", "0")
-        assert _get_bool("COSTCO_FORCE_AGENT", False) is False
+        monkeypatch.setenv("BUYING_GROUP_SYNC_ENABLED", "0")
+        assert _get_bool("BUYING_GROUP_SYNC_ENABLED", False) is False
 
-        monkeypatch.setenv("COSTCO_FORCE_AGENT", "1")
-        assert _get_bool("COSTCO_FORCE_AGENT", False) is True
+        monkeypatch.setenv("BUYING_GROUP_SYNC_ENABLED", "1")
+        assert _get_bool("BUYING_GROUP_SYNC_ENABLED", False) is True
 
 
 class TestCommentsSurvive:

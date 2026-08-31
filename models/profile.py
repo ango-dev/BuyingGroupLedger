@@ -16,8 +16,8 @@ class ProxyConfig(BaseModel):
     def as_url(self, scheme: str = "http") -> str:
         """`http://user:pass@host:port` — the form direct HTTP clients want.
 
-        Browser paths hand the fields to Browser-Use separately (see `BaseRetailerScraper.
-        _build_browser_settings` and `CdpBrowser`), but a retailer that calls an API over plain HTTP
+        Browser paths hand the fields to Browser-Use separately (see `CdpBrowser`), but a
+        retailer that calls an API over plain HTTP
         (Costco) needs the single-URL form so its traffic leaves from the same static ISP IP the
         browser paths use. Credentials are percent-encoded: a password containing `@` or `:` would
         otherwise split the URL in the wrong place.
@@ -54,23 +54,17 @@ class RetailerAuth(BaseModel):
     `totp_secret` is the base32 key from that enrolment (the "can't scan the QR?" key). Store it as
     shown; spacing and case are normalised. Without it the run stops at the 2-step screen and alerts.
 
-    The secrets reach the retailer two ways, and they are not equally exposed:
-
-    - **The deterministic path (primary)** types them into a CDP browser on this machine, generating
-      the code locally with `scrapers/totp.py`. Nothing leaves the host.
-    - **The agent fallback** puts the password in the task prompt, because Browser-Use v4 has no
-      secret-injection channel. **The TOTP secret is deliberately NOT given to the agent**: a
-      one-time code is derivable only from the seed, so handing the seed to an LLM and its cloud run
-      history would trade a per-run secret for a permanent one. The agent therefore cannot pass 2FA —
-      it alerts and skips, which is the correct outcome for an auth failure. (Amazon Business's agent
-      is given neither: its prompt tells it not to attempt a sign-in at all.)
+    The sign-in types these into a CDP browser session and generates the TOTP code locally with
+    `scrapers/totp.py` — no LLM prompt is built, so nothing leaves the host. (The retired agent
+    fallback used to carry the password in its task prompt; the TOTP seed was withheld from it even
+    then, a permanent key being strictly worse to expose than one 30-second code.)
     """
 
     method: Literal["password"] = "password"
     username: str = ""
-    # repr=False on both: these are account credentials. The password is already exposed to the agent
-    # fallback by necessity, so it must not ALSO leak everywhere a profile happens to be printed --
-    # and the TOTP seed is strictly worse, being a permanent key rather than a single code.
+    # repr=False on both: these are account credentials and must not leak anywhere a profile
+    # happens to be printed — the TOTP seed especially, being a permanent key rather than a single
+    # code.
     password: str = Field(default="", repr=False)
     totp_secret: str = Field(default="", repr=False)
 
@@ -88,5 +82,5 @@ class ProfileConfig(BaseModel):
     proxy: ProxyConfig | None = None
     retailers: list[str] = Field(default_factory=list)
     # Optional per-retailer auto-auth config, keyed by retailer_key (e.g. {"bestbuy": {...}}).
-    # Absent = the agent reports logged_out and does not try to sign in (today's behavior).
+    # Absent = a lapsed session alerts and skips instead of signing itself back in.
     auth: dict[str, RetailerAuth] = Field(default_factory=dict)

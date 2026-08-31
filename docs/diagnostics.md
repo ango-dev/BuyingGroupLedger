@@ -66,8 +66,8 @@ key — so a dossier uploads once and any key that already exists is linked, not
 should not see order pages). The upload is best-effort: if storage fails, the alert falls back to
 the local path.
 
-The paid Browser-Use agent still exists behind `AGENT_FALLBACK_ENABLED` (default `false`) and a
-per-retailer `*_FORCE_AGENT` hook. With it on, the dossier is still written and *then* the agent runs.
+The paid Browser-Use agent fallback has been REMOVED entirely (it was flag-gated and off from
+2026-08-29 until its removal). The dossier is the failure path; there is no paid retry.
 Since 2026-08-29 the answer to a broken selector is a fix made from the dossier, not a paid run.
 
 ## Preflight
@@ -159,7 +159,7 @@ Exit code `2` means the audit could not run at all — never read that as a gree
 
 Fully offline and free — no credentials, no network, no Browser-Use run. They cover the parts that
 fail *silently* rather than loudly: column drift between `FIELDNAMES`/`HEADER` (rows are written
-positionally, so drift misaligns every row), the blank-preserving upsert, the delivered rollup, agent
-JSON parsing, status normalization, and prompt instructions that data integrity depends on. Behavior
+positionally, so drift misaligns every row), the blank-preserving upsert, the delivered rollup,
+status normalization, and the selector-declaration tripwires that the dossier audit depends on. Behavior
 that only a real page can prove — selector accuracy, whether an order actually splits — still needs a
 live run.

@@ -263,12 +263,6 @@ class TestSelectorLiteralsAreDeclared:
 
 
 class TestSettingsAndDocs:
-    def test_the_agent_fallback_is_off_by_default(self, monkeypatch):
-        monkeypatch.delenv("AGENT_FALLBACK_ENABLED", raising=False)
-        from config.settings import _get_bool
-
-        assert _get_bool("AGENT_FALLBACK_ENABLED", False) is False
-
     def test_main_handles_the_new_error_quietly(self, monkeypatch):
         import main
         from models.profile import ProfileConfig

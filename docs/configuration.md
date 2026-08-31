@@ -15,7 +15,6 @@ next to it, so this is the only thing to read.
 > purely as the override layer, which is where dev and host-specific values belong:
 >
 > ```bash
-> COSTCO_FORCE_AGENT=true python main.py costco               # exercise the paid agent fallback, once
 > BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking     # just this run
 > LOOKBACK_DAYS=14 python main.py amazon                   # re-scan a wider window
 > ```
@@ -42,9 +41,6 @@ fails closed on a typo rather than turning itself on.
 | Variable | `config.json` key |
 |---|---|
 | `BROWSER_USE_API_KEY` | `browser_use.api_key` |
-| `BROWSER_USE_LLM` | `browser_use.llm` |
-| `BROWSER_USE_MAX_COST_USD` | `browser_use.max_cost_usd` |
-| `AGENT_FALLBACK_ENABLED` † | `browser_use.agent_fallback_enabled` |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | `google.service_account_file` |
 | `GOOGLE_SHEET_ID` | `google.sheet_id` |
 | `GOOGLE_SHEET_WORKSHEET_NAME` | `google.worksheet_name` |
@@ -78,10 +74,6 @@ fails closed on a typo rather than turning itself on.
 | `RUN_INTERVAL_HOURS` | `container.run_interval_hours` |
 | `RUN_ON_START` † | `container.run_on_start` |
 | `TZ` | `container.timezone` |
-| `AMAZON_FORCE_AGENT` † | `dev.force_agent.amazon` |
-| `AMAZON_BUSINESS_FORCE_AGENT` † | `dev.force_agent.amazon_business` |
-| `BESTBUY_FORCE_AGENT` † | `dev.force_agent.bestbuy` |
-| `COSTCO_FORCE_AGENT` † | `dev.force_agent.costco` |
 
 </details>
 

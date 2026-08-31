@@ -16,8 +16,8 @@ answer unattended — an authenticator code — and generate it locally from the
 that, for Amazon Business.
 
 WHICH ERROR IS RAISED DECIDES WHETHER MONEY IS SPENT, and that rule is unchanged here: a failed
-sign-in ends as `ApiLoginError` in the caller, which alerts and SKIPS. The paid agent is never run
-for an auth failure — it cannot fix one, and it would spend real money rediscovering the logout.
+sign-in ends as `ApiLoginError` in the caller, which alerts "re-login the profile" and SKIPS —
+an auth failure must never be reported as a page-shape change.
 
 WHAT THE LIVE PROBE ESTABLISHED (2026-08-25, profile-alpha, scripts/amazon_business_signin_probe.py):
 
@@ -329,7 +329,7 @@ def _classify_signin_failure(info: dict, critical: list, auth_key: str = "amazon
     if info.get("captcha") or re.search(r"enter the characters|type the characters|solve this puzzle",
                                         haystack, re.I):
         return ("CAPTCHA / BOT CHALLENGE",
-                "Back off; do not retry in a loop. The paid agent cannot solve it either, so it is "
+                "Back off; do not retry in a loop. It is "
                 "deliberately not run. Sign in by hand via scripts/create_profile if it persists.")
     if "/ap/cvf" in url or re.search(r"one time password|otp.{0,20}(sent|mobile|email)|"
                                      r"we (?:have )?sent (?:you )?a code|verify your identity",
@@ -347,7 +347,7 @@ def _classify_signin_failure(info: dict, critical: list, auth_key: str = "amazon
                 "produces valid-looking codes that are always wrong.")
     if critical:
         return ("ANTI-BOT / TRANSPORT — auth requests died at the network layer",
-                "Not a page-shape problem, so the agent cannot fix it. Back off and retry later; see "
+                "Not a page-shape problem, so there is no selector to fix. Back off and retry later; see "
                 "reference-isp-proxy-breaks-post.")
     return ("UNKNOWN — no usable error text on the page and no auth-critical request failures",
             "Inspect the page state logged below, and re-run scripts/amazon_business_signin_probe to "
@@ -407,7 +407,7 @@ def _log_signin_diagnostics(page, what_failed: str, failed_requests: list | None
         if critical:
             log.warning(
                 "Amazon sign-in: %d auth-critical request(s) FAILED at the network layer — "
-                "a connectivity/anti-bot problem, NOT a page-shape one, so the agent fallback cannot "
+                "a connectivity/anti-bot problem, NOT a page-shape one, so a code fix cannot "
                 "fix it either: %s", len(critical), critical[:6],
             )
         else:
@@ -531,7 +531,7 @@ def _answer_otp(page, auth, auth_key: str = "amazon") -> bool:
 
     Returns False rather than raising when no usable secret is configured, so the caller reports the
     usual "a human is needed" verdict instead of crashing — a crash here would escape as a
-    page-shape error and spend the PAID agent on an auth problem it cannot fix.
+    page-shape error and send a dossier-waving alert for an auth problem no code fix can address.
     """
     secret = getattr(auth, "totp_secret", "")
     if not secret:

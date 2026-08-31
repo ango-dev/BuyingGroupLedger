@@ -56,20 +56,13 @@ exactly that reason; it's noise, and the sign-in code ignores it.)
 
 Where the secrets go depends on which path runs:
 
-- the **deterministic path** (normal case) types them into a CDP browser on your machine and computes
-  the code locally — it builds no prompt, so nothing leaves the host;
-- the **agent fallback** puts the password in the task prompt, because Browser-Use v4 has no
-  secret-injection channel — so it's visible to the LLM and kept in the cloud run history.
-
-**The TOTP seed is never given to the agent**, on either retailer. A one-time code is derivable only
-from the seed, so handing the seed to an LLM would trade a 30-second secret for a permanent one. The
-agent therefore can't pass 2FA — it alerts and skips, which is the right outcome for an auth failure
-anyway, since the agent cannot fix one. (Amazon Business's agent is told not to attempt a sign-in at
-all.)
+the sign-in types them into a CDP browser session and computes the TOTP code locally with
+`scrapers/totp.py` — it builds no LLM prompt, so nothing leaves the host. (In the retired agent-
+fallback era the password rode in the agent's task prompt; that exposure is gone with the agent.)
 
 Without an `auth` block a profile just reports logged-out and alerts, without trying to log in.
 
-> **A failed sign-in never falls through to the paid agent.** It alerts with a *classified* reason —
+> **A failed sign-in is never misreported as a page-shape failure.** It alerts with a *classified* reason —
 > a stale password, a locked account, a CAPTCHA, an SMS-only challenge, or auth requests dying at the
 > network layer — because those need four different responses and are indistinguishable otherwise.
 > Sign-in is also attempted **once per run, never retried**: repeated automated attempts are what

@@ -41,8 +41,7 @@ def normalize_last4(text: str) -> str:
     """Reduce whatever a retailer reports for a card to its bare last 4 digits.
 
     Retailers word this differently — Amazon renders "ending in 4321", Best Buy's ss-api sends a
-    masked PAN like "************4321", Costco sends "xxxx4321" — and the agent fallback copies
-    whatever the page said. Both the config's `last4` and the scraped `card_last4` go through this ONE
+    masked PAN like "************4321", Costco sends "xxxx4321". Both the config's `last4` and the scraped `card_last4` go through this ONE
     function so the lookup can't miss on formatting alone. Returns "" when there aren't 4 digits.
     """
     digits = re.sub(r"\D", "", text or "")

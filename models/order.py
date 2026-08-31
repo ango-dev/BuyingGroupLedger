@@ -1,23 +1,23 @@
 import logging
 import re
 
-from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
 
 log = logging.getLogger(__name__)
 
 # Matches the old "Shipment N" wording so it can be reduced to a bare "N". The label used to carry the
 # word because the column didn't exist yet; under a column already headed "Shipment" it's redundant.
-#Kept as a normalizer rather than a one-off migration because the AGENT fallback
-# prompts still say "Shipment 1" — an LLM writing the labelled form must not create a second, differently
-# keyed row for a shipment the deterministic path already recorded as "1".
+#Kept as a normalizer rather than a one-off migration because imports and
+# hand-entered rows still arrive in the labelled form — writing it must not create a second,
+# differently keyed row for a shipment already recorded as "1".
 _SHIPMENT_PREFIX = re.compile(r"^shipment\s*", re.IGNORECASE)
 
 
 def shipment_label(number: int) -> str:
     """The canonical Shipment cell value for shipment `number` (1-based): a bare "1", "2", ...
 
-    Every producer goes through this so the upsert key (which includes Shipment) can't drift between
-    the deterministic paths, and normalize_shipment covers the agent path.
+    Every producer goes through this so the upsert key (which includes Shipment) can't drift
+    between the deterministic paths; normalize_shipment covers everything else (imports, hand edits).
     """
     return str(number)
 
@@ -106,7 +106,7 @@ FIELDNAMES = [
     # --- money: what it cost -> what the card gave back -> COGS -> what came back -> profit ---
     "cost_per_item",
     "total_cost",
-    # Every scraper/agent emits the ORDER-LEVEL shipping total, repeated on every shipment row (see
+    # Every scraper emits the ORDER-LEVEL shipping total, repeated on every shipment row (see
     # OrderItem.shipping below) — sheets.ledger_sync.sync_csv_to_sheet is what turns that into each
     # row's actual cost-weighted SHARE before it lands on the sheet, so this field's value in a CSV
     # and its value in the ledger are deliberately NOT the same number.
@@ -247,7 +247,7 @@ class OrderItem(BaseModel):
                      mode="before")
     @classmethod
     def _blank_to_none(cls, v):
-        # The agent may send "" (or whitespace) for numbers it skipped — treat as None, not 0.
+        # A scraper may send "" (or whitespace) for numbers it skipped — treat as None, not 0.
         if isinstance(v, str) and v.strip() == "":
             return None
         return v
@@ -275,10 +275,9 @@ class OrderItem(BaseModel):
     def _normalize_shipment(cls, v):
         """Strip the redundant "Shipment " wording so the cell reads "2", not "Shipment 2".
 
-        Enforced HERE, on every path, rather than only where the deterministic mappings build labels:
-        the agent-fallback prompts still describe shipments as "Shipment 1"/"Shipment 2" (the labelled
-        form reads unambiguously to an LLM), and Shipment is part of the upsert key — so an agent
-        re-check emitting "Shipment 2" for a row the API recorded as "2" would append a duplicate
+        Enforced HERE, on every path, rather than only where the deterministic mappings build
+        labels: Shipment is part of the upsert key, and imports / hand-entered rows still arrive in
+        the labelled form — a path emitting "Shipment 2" for a row recorded as "2" would append a duplicate
         instead of updating it.
         """
         return normalize_shipment(v) if isinstance(v, str) else v
@@ -286,13 +285,12 @@ class OrderItem(BaseModel):
     @field_validator("status", mode="before")
     @classmethod
     def _normalize_status(cls, v):
-        """Coerce the agent's status into the known vocabulary — never reject the row.
+        """Coerce a scraped status into the known vocabulary — never reject the row.
 
-        Rejecting would raise out of OrderExtractionResult.model_validate_json and kill the whole
-        profile's run for that cycle over one odd word, losing every other order in the batch. A
-        mislabeled order costs far less than a missed one, so an unrecognized value falls back to
-        "ordered" (the safe end: the order stays open and keeps getting re-checked) and logs a
-        warning, which is the signal that the prompt needs tightening.
+        Rejecting would kill the whole profile's run for that cycle over one odd word, losing every
+        other order in the batch. A mislabeled order costs far less than a missed one, so an
+        unrecognized value falls back to "ordered" (the safe end: the order stays open and keeps
+        getting re-checked) and logs a warning, which is the signal that a mapping needs tightening.
         """
         if not isinstance(v, str):
             return v
@@ -301,7 +299,7 @@ class OrderItem(BaseModel):
             return cleaned
         if cleaned == "":
             return "ordered"
-        log.warning("Unrecognized status %r from agent; treating as 'ordered'.", v)
+        log.warning("Unrecognized status %r; treating as 'ordered'.", v)
         return "ordered"
 
     @model_validator(mode="after")
@@ -343,9 +341,3 @@ class OrderItem(BaseModel):
             self.total_cost = round(self.quantity * self.cost_per_item, 2)
         return self
 
-
-class OrderExtractionResult(BaseModel):
-    """Structured output schema handed to the Browser-Use agent."""
-
-    logged_out: bool = False
-    items: list[OrderItem] = Field(default_factory=list)

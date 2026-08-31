@@ -82,8 +82,8 @@ def _cards():
 def _tag_cards(items: list, label: str) -> None:
     """Resolve each row's card name + cashback rate from the last 4 digits the scraper captured.
 
-    Same one-call-site reasoning as _classify_and_drop_personal: every retailer, deterministic path
-    and agent fallback alike, funnels through run_scrape. Unlike the warehouse classifier this never
+    Same one-call-site reasoning as _classify_and_drop_personal: every retailer
+    funnels through run_scrape. Unlike the warehouse classifier this never
     drops a row — an unrecognized card is only a missing profit input, not a reason to lose an order.
     """
     unknown = tag_cards(items, _cards(), apply_promo=settings.amazon_promo_cashback_enabled)
@@ -98,7 +98,7 @@ def _tag_cards(items: list, label: str) -> None:
 def _classify_and_drop_personal(items: list, label: str) -> list:
     """Tag each row's buying group from its delivery address and drop personal rows.
 
-    Runs here because every retailer (deterministic + agent) funnels through run_scrape, so one call
+    Runs here because every retailer funnels through run_scrape, so one call
     site handles them all. Personal-address orders are excluded from the ledger entirely; Unclassified
     (unrecognized) rows are kept and counted so a not-yet-configured warehouse stays visible.
     """
@@ -152,7 +152,7 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
         log.warning("%s could not be reached (%s); alert sent, skipping.", label, exc)
         return
     except DeterministicPathError as exc:
-        # The page/API changed shape and the agent fallback is off. The scraper already wrote the
+        # The page/API changed shape. The scraper already wrote the
         # failure dossier and alerted with its path; the fix is a code change, not a re-login.
         log.warning("%s deterministic path failed (%s); dossier written, alert sent, skipping.",
                     label, exc)

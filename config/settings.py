@@ -14,9 +14,9 @@ readable in one place rather than derived by a naming rule. Explicit on purpose:
 are published in DEPLOY.md, docker-compose.yml and the README, and a derived scheme would silently
 rename them the first time a config path moved.
 
-NOT EVERYTHING BELONGS HERE. `*_FORCE_AGENT` and `RUN_INTERVAL_HOURS` stay environment-only, read at
-their point of use: they are one-off ops and test hooks (`COSTCO_FORCE_AGENT=true python main.py
-costco`), and giving them a home in the config file would invite someone to leave one switched on.
+NOT EVERYTHING BELONGS HERE. One-off ops values (a temporary `LOOKBACK_DAYS`, a host-specific
+`RUN_INTERVAL_HOURS`) belong in `.env` or on the command line, not written into the file everything
+else shares.
 """
 
 import os
@@ -66,14 +66,6 @@ ENV_TO_CONFIG = {
     "RUN_ON_START": "container.run_on_start",
     "PREFLIGHT_STRICT": "container.preflight_strict",
     "TZ": "container.timezone",
-    # Dev/ops hooks: force a retailer down its PAID agent fallback to exercise that path.
-    "AMAZON_FORCE_AGENT": "dev.force_agent.amazon",
-    "AMAZON_BUSINESS_FORCE_AGENT": "dev.force_agent.amazon_business",
-    "BESTBUY_FORCE_AGENT": "dev.force_agent.bestbuy",
-    "COSTCO_FORCE_AGENT": "dev.force_agent.costco",
-    "BROWSER_USE_LLM": "browser_use.llm",
-    "BROWSER_USE_MAX_COST_USD": "browser_use.max_cost_usd",
-    "AGENT_FALLBACK_ENABLED": "browser_use.agent_fallback_enabled",
     "LOOKBACK_DAYS": "scraping.lookback_days",
     "DEFAULT_CASHBACK_RATE": "scraping.default_cashback_rate",
     "AMAZON_PROMO_CASHBACK_ENABLED": "scraping.amazon_promo_cashback_enabled",
@@ -195,30 +187,9 @@ class Settings:
     A masked repr costs nothing; the values are still read normally as attributes.
     """
 
-    # Browser-Use Cloud v4 (browser_use_sdk.v4.BrowserUse reads BROWSER_USE_API_KEY itself).
-    # v4 is BYOK-only. The SDK's RunModel enum is stale/incomplete — it doesn't list
-    # "gpt-5.6-luna", but the server accepts it and it's the cheapest confirmed-working
-    # option ($0.24/$1.44 per 1M tokens). Other verified-working values: minimax-m3,
-    # gemini-3-flash, gemini-3.5-flash, grok-4.5, gpt-5.5/5.6, claude-sonnet-5,
-    # claude-opus-4.7/4.8, glm-5.2 — but since the model list isn't authoritative, other
-    # unlisted names may also work; verify with a cheap test run before trusting one.
-    browser_use_llm: str = _get_str("BROWSER_USE_LLM", "gpt-5.6-luna")
-    # Per-run cost circuit breaker (v4's max_cost_usd) — stops a run that's spiraling on retries.
-    browser_use_max_cost_usd: float = _get_float(
-        "BROWSER_USE_MAX_COST_USD", 0.50)
-    # Whether a deterministic-path failure may fall back to the PAID Browser-Use agent. OFF by
-    # default since 2026-08-29: every retailer's deterministic path is live-validated, so the agent
-    # had become a per-failure tax that hid WHAT broke. With this off, a failure writes a failure
-    # dossier (logs/failures/<retailer>_<profile>_<ts>/ — traceback, page HTML, screenshot, selector
-    # audit), alerts with its path, and records nothing for that retailer this run; the next run
-    # retries. The `*_FORCE_AGENT` hooks still run the agent regardless, since setting one is an
-    # explicit request to spend on it. A login failure never runs the agent either way.
-    agent_fallback_enabled: bool = _get_bool("AGENT_FALLBACK_ENABLED", False)
-
     # How many CALENDAR days back to include, counting today as 0. Default 1 = "today and
-    # yesterday". Retailers expose only an order date (no time), and the agent gets confused
-    # reasoning about a rolling 24h clock, so the window is date-based and the exact cutoff date
-    # is handed to the agent (see BaseRetailerScraper._date_window).
+    # yesterday". Retailers expose only an order date (no time), so the window is date-based
+    # (see BaseRetailerScraper._date_window).
     lookback_days: int = _get_int("LOOKBACK_DAYS", 1)
 
     # Cashback rate applied to a row whose card isn't listed in cards.json (or is listed without its
@@ -335,21 +306,6 @@ class Settings:
     # `/o/failures/` form the console hands out is accepted. Treat as a secret, like the other PAR.
     oci_failures_par_url_prefix: str = field(
         default=_get_str("OCI_FAILURES_PAR_URL_PREFIX"), repr=False)
-
-    # --- dev / ops hooks -------------------------------------------------------------------------
-    # Force a retailer down its AGENT fallback instead of its deterministic path, to exercise the
-    # expensive branch on purpose. Normally set for one command — `COSTCO_FORCE_AGENT=true python
-    # main.py costco` — which is why .env remains the natural home for them even though config.json
-    # can hold them too.
-    #
-    # These now go through _get_bool, so only the affirmative spellings count. That is a behaviour
-    # FIX: the old `if os.getenv("COSTCO_FORCE_AGENT")` treated ANY non-empty value as true, so both
-    # `COSTCO_FORCE_AGENT=0` and `=false` forced the paid agent — the exact opposite of what they
-    # read as. Write these as `true` / `false`; 1 / 0 / yes / on still parse, for old scripts.
-    amazon_force_agent: bool = _get_bool("AMAZON_FORCE_AGENT", False)
-    amazon_business_force_agent: bool = _get_bool("AMAZON_BUSINESS_FORCE_AGENT", False)
-    bestbuy_force_agent: bool = _get_bool("BESTBUY_FORCE_AGENT", False)
-    costco_force_agent: bool = _get_bool("COSTCO_FORCE_AGENT", False)
 
     # --- container scheduling (read by docker/entrypoint.sh) --------------------------------------
     # How many hours between scheduled runs. Each run spends one of MaxOutDeals' 10 daily

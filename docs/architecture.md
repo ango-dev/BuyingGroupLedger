@@ -8,7 +8,7 @@ How a run is shaped, why each retailer's path looks the way it does, and where t
 
 Each run, for every configured profile × retailer: read the Sheet to decide what's new versus what
 needs re-checking, fetch through that retailer's **deterministic path**, and upsert the results back.
-The LLM agent enters only when the deterministic path raises.
+A failure writes a dossier and records nothing; there is no LLM fallback.
 
 ```mermaid
 flowchart TD
@@ -22,8 +22,6 @@ flowchart TD
     F --> G
     G -->|success| K[write CSV]
     G -->|ANY failure| Z[failure dossier + alert; nothing recorded this run]
-    Z -.->|only if AGENT_FALLBACK_ENABLED| Y[Browser-Use agent]
-    Y --> K
     K --> L[Upsert into Google Sheet]
     L --> M[post tracking to buying groups, read payouts back]
 ```
@@ -44,11 +42,11 @@ browser, which is why this runs happily on a Raspberry Pi.
 
 ## Cost model
 
-Browser-Use bills mostly by **input tokens** — every agent step ships the whole page to the model, so
-cost is step-count × per-step page context. That makes the agent the expensive component, and is the
-reason the deterministic paths exist: a normal run now spends no tokens at all.
+A normal run spends no LLM tokens at all: every read is a deterministic fetch through a cloud CDP
+browser or a direct API call. (Browser-Use's *agent* billed by input tokens — every step shipped the
+whole page to a model — which is why it was the expensive component and why these paths exist.)
 
-**The agent is off by default** (`AGENT_FALLBACK_ENABLED=false`, since 2026-08-29). Once every
+**There is no agent fallback** (off by default since 2026-08-29, then removed outright). Once every
 retailer's deterministic path had been live-validated, the agent fallback had become a per-failure
 tax that *hid what broke*: a layout change produced a paid run and a row, not a fix. Now a
 deterministic-path failure produces a **failure dossier** instead:
@@ -70,12 +68,6 @@ Nothing is recorded for that retailer that run, and the next scheduled run retri
 *succeeds* but could not read part of a page (a tracking page whose selectors stopped matching, an
 order-details page that failed to load) also leaves a dossier and alerts, because those used to be
 silent. Login failures never ran the agent and still don't; their alerts now point at a dossier too.
-
-Set `AGENT_FALLBACK_ENABLED=true` (or a retailer's `*_FORCE_AGENT` hook, which is an explicit request
-to spend) to restore the old behaviour: the dossier is still written, then the agent runs — one call
-per profile covering both jobs, scan for new orders (JOB 1) and re-check open ones (JOB 2). Pinning
-the exact click path through Best Buy's sign-in flow (instead of letting the agent screenshot its way
-to the password field) took a representative run from 3.35M to 932K tokens and $0.128 to $0.053.
 
 **A shipment's lifecycle:**
 

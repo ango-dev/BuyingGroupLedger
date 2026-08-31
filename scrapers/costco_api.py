@@ -3,15 +3,15 @@
 No browser and no AI agent at run time: a long-lived **refresh token** (grabbed once from a browser
 session, see scripts/costco_token.py) is exchanged for a short-lived id_token, which authorizes two
 GraphQL calls — `getOnlineOrders` (discover order numbers in a date range) and `getOrderDetails`
-(everything the ledger needs per order). `scrapers/costco.py` falls back to the Browser-Use agent if
-this path errors (auth dead, schema changed, network), so a broken API degrades instead of missing
-orders.
+(everything the ledger needs per order). `scrapers/costco.py` self-heals a dead refresh token over
+CDP and answers any other failure here with a failure dossier, so a broken API fails loudly instead
+of missing orders silently.
 
 curl_cffi impersonates a real Chrome TLS fingerprint because Costco's edge blocks vanilla clients.
 
 Requests go through the profile's static ISP proxy when one is configured (`CostcoApiClient(...,
-proxy=profile.proxy)`), so Costco sees this account from the same IP as the browser paths (agent
-fallback / CDP) rather than the host's own IP — which also matters once this runs in Docker/a server,
+proxy=profile.proxy)`), so Costco sees this account from the same IP as the CDP browser paths
+(token grab, receipts) rather than the host's own IP — which also matters once this runs in Docker/a server,
 where the host IP would be a datacenter address.
 
 The queries here are trimmed to only the fields `costco_mapping.build_order_items` consumes. The full
@@ -165,8 +165,8 @@ query getOrderDetails($orderNumbers: [String]) {
 class CostcoAuthError(ApiLoginError):
     """No usable refresh token, or the token exchange failed — the profile needs re-authorizing.
 
-    Subclasses ApiLoginError so costco.scrape() treats it as a login failure (alert + skip, NO agent)
-    rather than a DOM-change fallback."""
+    Subclasses ApiLoginError so costco.scrape() treats it as a login failure (alert + skip)
+    rather than a shape change worth a dossier."""
 
 
 class CostcoApiError(Exception):
@@ -191,7 +191,7 @@ class CostcoApiClient:
     def __init__(self, profile_label: str, proxy=None):
         """`proxy` is the profile's `ProxyConfig` (config.json). Passing it routes BOTH the token
         exchange and the GraphQL calls through that static ISP proxy, so Costco sees this account from
-        the same IP as the browser paths (agent fallback / CDP), instead of the host's own IP. Optional
+        the same IP as the CDP browser paths, instead of the host's own IP. Optional
         so a proxy-less profile still works; None = direct, the pre-2026-08-13 behavior."""
         self.profile_label = profile_label
         self._auth = load_costco_auth(profile_label)

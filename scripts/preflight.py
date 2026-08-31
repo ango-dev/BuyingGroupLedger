@@ -14,12 +14,11 @@ and quietly does the wrong thing, so no exception ever surfaces:
 
 - **A missing deterministic-path import.** `scrape()` on Amazon / Amazon Business / Best Buy wraps
   `_scrape_via_api` in a catch-all. An `ImportError` is caught by that catch-all, so a dependency
-  missing from the image doesn't crash anything — with the agent fallback OFF (the default since
-  2026-08-29) it fails those retailers on EVERY run, each time writing a failure dossier and alerting
-  that a "selector" broke, which sends whoever reads it hunting through page HTML for a problem that
-  is really a missing package; with it ON it moves them onto the PAID agent path, forever, at
-  roughly $0.01-0.10 per retailer per run. `playwright` was exactly this: used by scrapers/cdp.py,
-  installed in the dev venv by accident, and absent from requirements.txt.
+  missing from the image doesn't crash anything — it fails those retailers on EVERY run, each time
+  writing a failure dossier and alerting that a "selector" broke, which sends whoever reads it
+  hunting through page HTML for a problem that is really a missing package. `playwright` was exactly
+  this: used by scrapers/cdp.py, installed in the dev venv by accident, and absent from
+  requirements.txt.
 - **A bind mount whose host file is missing.** Docker creates an empty DIRECTORY at that path. The
   loaders test `is_file()`, so an optional config silently reads as "not configured" — every address
   tags `Unclassified` and every card falls back to DEFAULT_CASHBACK_RATE, quietly misstating profit.
@@ -52,9 +51,8 @@ class Result:
     detail: str
 
 
-# Modules that make up the deterministic (agent-free) paths, and which retailers fail every run (or,
-# with the agent fallback on, bill for it) if the import breaks. Imported for real — a stale
-# transitive dependency shows up here.
+# Modules that make up the deterministic paths, and which retailers fail every run if the import
+# breaks. Imported for real — a stale transitive dependency shows up here.
 DETERMINISTIC_IMPORTS = {
     "scrapers.cdp": "Amazon, Amazon Business and Best Buy (the CDP browser client)",
     "scrapers.amazon_api": "Amazon",
@@ -77,8 +75,7 @@ def check_deterministic_imports() -> list[Result]:
         except Exception as exc:  # noqa: BLE001 — any import problem has the same consequence
             out.append(Result(
                 FAIL, f"import {module}",
-                f"{type(exc).__name__}: {exc} — {covers} would fail on every run (or, with "
-                f"AGENT_FALLBACK_ENABLED, fall back to the PAID Browser-Use agent), without raising.",
+                f"{type(exc).__name__}: {exc} — {covers} would fail on every run, without raising.",
             ))
         else:
             out.append(Result(OK, f"import {module}", covers))
@@ -209,9 +206,9 @@ def check_costco_tokens(root: Path = ROOT) -> list[Result]:
     reporting it as a FAIL trains people to ignore this check — the one outcome worse than not
     having it.
 
-    The old wording also claimed a missing token "silently uses the agent". It does not, and never
-    did: an auth failure raises `ApiLoginError`, which `costco.py` deliberately does NOT hand to the
-    paid agent ("an auth failure is not something it can fix"). It alerts and SKIPS.
+    The old wording also claimed a missing token "silently uses the agent" (this predates the
+    agent's removal). It never did: an auth failure raises `ApiLoginError` and costco.py alerts
+    and SKIPS.
     """
     try:
         from config.profiles import load_profiles_for_retailer
@@ -231,9 +228,8 @@ def check_costco_tokens(root: Path = ROOT) -> list[Result]:
         if load_costco_auth(profile.label):
             # Present is not enough: Costco ROTATES the refresh token on every refresh and
             # _save_auth persists the new one. A read-only mount (the natural-looking `:ro` for a
-            # file full of secrets) turns that write into an OSError, so Costco degrades to the
-            # PAID agent on every run AND the rotated token is thrown away, which can strand the
-            # stored one. Probe the directory rather than trusting permission bits, since a
+            # file full of secrets) turns that write into an OSError, so the rotated token is
+            # thrown away, which can strand the stored one. Probe the directory rather than trusting permission bits, since a
             # container running as root reads as writable right up until the mount refuses.
             probe = token.parent / ".preflight_write_probe"
             try:
@@ -245,7 +241,7 @@ def check_costco_tokens(root: Path = ROOT) -> list[Result]:
                     f"present but its directory is NOT WRITABLE ({exc.strerror}). Costco ROTATES "
                     f"its refresh token on every use and must save the new one; discarding it "
                     f"strands the stored copy, so the next run cannot authenticate and alerts "
-                    f"and SKIPS Costco (the paid agent is never run for an auth failure). In "
+                    f"and SKIPS Costco. In "
                     f"Docker, drop the `:ro` from the ./.state.json volume in docker-compose.yml.",
                 ))
             else:
@@ -263,8 +259,8 @@ def check_costco_tokens(root: Path = ROOT) -> list[Result]:
                 out.append(Result(
                     FAIL, f"costco token [{profile.label}]",
                     f"no token stored in {token} AND no auth['costco'] to sign in with, so Costco "
-                    f"cannot authenticate at all: every run alerts and SKIPS it (the paid agent is "
-                    f"never run for an auth failure). Fix EITHER by adding auth['costco'] "
+                    f"cannot authenticate at all: every run alerts and SKIPS it. Fix EITHER by "
+                    f"adding auth['costco'] "
                     f"(method/username/password) and letting a run bootstrap the token, OR by hand "
                     f"with `python -m scripts.costco_token --label {profile.label} --token "
                     f"'<REFRESH_TOKEN>'`. In a container, also check ./.state.json is mounted.",
