@@ -46,6 +46,10 @@ HEADER = [
     "Cost Per Item",
     "Total Cost",  # = Quantity x Cost Per Item, so it sits directly after both
     "Shipping",  # this row's cost-weighted SHARE of the order-level total
+    # Each is this row's cost-weighted SHARE of the order-level total, prorated exactly like
+    # Shipping above; the COGS formula reads both.
+    "Sales Tax",   # real acquisition cost: ADDED in COGS (usually 0 under the resale certificate)
+    "Gift Card",   # tender the card never spent: SUBTRACTED in COGS (earns no cashback either)
     "Card",  # derived from Card Last 4 (config.cards.resolve_card)
     "Cashback Rate",  # decimal fraction (0.02) — format the column as a percentage to taste
     "COGS",  # a live sheet formula, written by _cogs_formula: cost + shipping, net of cashback
@@ -66,10 +70,6 @@ HEADER = [
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Last Scraped At",
-    # --- order-level money, appended 2026-08-30; each cell is this row's cost-weighted SHARE of the
-    # order total (prorated exactly like Shipping), and the COGS formula reads both ---
-    "Gift Card",   # tender the card never spent: SUBTRACTED in COGS (earns no cashback either)
-    "Sales Tax",   # real acquisition cost: ADDED in COGS (usually 0 under the resale certificate)
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is

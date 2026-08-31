@@ -64,6 +64,51 @@ TABLE_COLUMN_TYPES = {
 }
 
 
+#: Table column types that COERCE the value written into them. A numeric type parses what it is given,
+#: so writing the text "0315" into a CURRENCY or PERCENT column stores the NUMBER 766 -- the leading
+#: zero is gone and no error is raised.
+_COERCING_TYPES = {"CURRENCY", "PERCENT", "BOOLEAN", "DATE", "TIME", "DATE_TIME"}
+
+
+def neutralise_coercing_types_request(table: dict, header: list[str]) -> dict | None:
+    """A request that strips every COERCING column type, to be sent BEFORE a bulk positional rewrite.
+
+    THE BUG THIS EXISTS FOR. `reorder_sheet` moves values while the table's column TYPES are still on
+    their old letters -- that is the definition of the migration window. A type is not just display:
+    a numeric one PARSES what is written into it. On 2026-08-31 `Card Last 4` moved into a position
+    still typed PERCENT, so writing "0315" stored the number 766 and the leading zero was lost on 28
+    rows. Silently: RAW input, no error, and the value looks plausible afterwards.
+
+    Clearing the types first makes the write inert, and `apply_sheet_formats` then puts the correct
+    ones back. DROPDOWN is deliberately left alone -- it validates rather than parses, it cannot
+    damage a value, and clearing it would discard the dataValidationRule that holds the status
+    vocabulary.
+
+    Returns None when there is no table, or nothing to clear.
+    """
+    if not table:
+        return None
+    existing = {c.get("columnIndex", 0): c for c in table.get("columnProperties", [])}
+    if not any((existing.get(i) or {}).get("columnType") in _COERCING_TYPES
+               for i in range(len(header))):
+        return None
+    columns = []
+    for index, name in enumerate(header):
+        prop = {"columnIndex": index, "columnName": name}
+        current = (existing.get(index) or {})
+        if current.get("columnType") not in _COERCING_TYPES:
+            # Carry DROPDOWN (and anything else non-coercing) through untouched, rule included.
+            if current.get("columnType"):
+                prop["columnType"] = current["columnType"]
+            if current.get("dataValidationRule"):
+                prop["dataValidationRule"] = current["dataValidationRule"]
+        columns.append(prop)
+    return {"updateTable": {
+        "table": {"tableId": table["tableId"], "columnProperties": columns},
+        "fields": "columnProperties",
+    }}
+
+
 def plan_table_columns(table: dict, header: list[str]) -> list[dict]:
     """The full columnProperties list the table should have, by NAME.
 

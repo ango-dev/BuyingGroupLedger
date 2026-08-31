@@ -17,6 +17,7 @@ from scripts.apply_sheet_formats import (
     PERCENT_COLUMNS,
     TABLE_COLUMN_TYPES,
     plan_formats,
+    neutralise_coercing_types_request,
     plan_stale_checkbox_padding,
     plan_table_columns,
 )
@@ -182,3 +183,71 @@ class TestStaleCheckboxPadding:
         data[header.index("Order ID")] = "A1"
 
         assert plan_stale_checkbox_padding([header, data], header, "Tracking Submitted") == []
+
+
+class TestNeutralisingCoercingTypesBeforeAWrite:
+    """A table column TYPE does not just display a value -- a numeric one PARSES what is written into
+    it. `reorder_sheet` moves values while the types are still on their OLD letters, which is the
+    definition of the migration window.
+
+    Live on 2026-08-31: `Card Last 4` moved into a position still typed PERCENT, so writing the text
+    "0315" stored the NUMBER 766 and the leading zero was lost on 28 rows. RAW input, no error raised,
+    and the result still looked like a card number. Only audit_sheet's card_last4_is_text caught it.
+    """
+
+    def _table(self, **types):
+        return {"tableId": "1", "columnProperties": [
+            {"columnIndex": HEADER.index(n), "columnName": n, "columnType": t}
+            for n, t in types.items()
+        ]}
+
+    def _types(self, request):
+        cols = request["updateTable"]["table"]["columnProperties"]
+        return {HEADER[c["columnIndex"]]: c.get("columnType") for c in cols}
+
+    def test_numeric_types_are_stripped(self):
+        req = neutralise_coercing_types_request(
+            self._table(**{"Gift Card": "PERCENT", "Total Cost": "CURRENCY"}), list(HEADER))
+
+        types = self._types(req)
+        assert types["Gift Card"] is None and types["Total Cost"] is None
+
+    def test_the_checkbox_type_is_stripped_too(self):
+        # BOOLEAN parses as well: a stray string written under it becomes TRUE/FALSE.
+        req = neutralise_coercing_types_request(
+            self._table(**{"Tracking Submitted": "BOOLEAN"}), list(HEADER))
+
+        assert self._types(req)["Tracking Submitted"] is None
+
+    def test_the_status_dropdown_and_its_rule_survive(self):
+        """DROPDOWN validates rather than parses, so it cannot damage a value -- and clearing it would
+        discard the dataValidationRule holding the status vocabulary, which nothing else stores."""
+        rule = {"condition": {"type": "ONE_OF_LIST", "values": [{"userEnteredValue": "paid"}]}}
+        # Paired with a coercing type: with ONLY a dropdown there is nothing to clear and the helper
+        # correctly returns None, so the preservation would never be exercised.
+        table = self._table(Status="DROPDOWN", **{"Total Cost": "CURRENCY"})
+        table["columnProperties"][0]["dataValidationRule"] = rule
+
+        req = neutralise_coercing_types_request(table, list(HEADER))
+
+        col = next(c for c in req["updateTable"]["table"]["columnProperties"]
+                   if c["columnIndex"] == HEADER.index("Status"))
+        assert col["columnType"] == "DROPDOWN"
+        assert col["dataValidationRule"] == rule
+
+    def test_every_column_is_described_so_the_update_is_total(self):
+        # updateTable REPLACES columnProperties; a column left out would lose whatever it had.
+        req = neutralise_coercing_types_request(self._table(**{"Total Cost": "CURRENCY"}), list(HEADER))
+        cols = req["updateTable"]["table"]["columnProperties"]
+        assert [c["columnIndex"] for c in cols] == list(range(len(HEADER)))
+
+    def test_nothing_to_clear_is_a_no_op(self):
+        assert neutralise_coercing_types_request(self._table(), list(HEADER)) is None
+        assert neutralise_coercing_types_request({}, list(HEADER)) is None
+
+    def test_apply_sheet_formats_puts_them_all_back(self):
+        """The pair has to be complete: whatever this strips, plan_table_columns must restore."""
+        stripped = set(TABLE_COLUMN_TYPES) - {"Status"}
+        restored = {HEADER[c["columnIndex"]] for c in plan_table_columns({}, list(HEADER))
+                    if c.get("columnType")}
+        assert stripped <= restored

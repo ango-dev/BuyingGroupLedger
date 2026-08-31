@@ -111,6 +111,15 @@ FIELDNAMES = [
     # row's actual cost-weighted SHARE before it lands on the sheet, so this field's value in a CSV
     # and its value in the ledger are deliberately NOT the same number.
     "shipping",
+    # Both are the ORDER-LEVEL total repeated on every row by the mappings (the same contract as
+    # `shipping` above); ledger_sync reprorates each into the row's cost-weighted share, and the COGS
+    # formula reads the shares: sales tax is ADDED (a real acquisition cost; usually 0 under the
+    # resale certificate, but hand-kept orders pay it), gift card is SUBTRACTED (a tender the card
+    # never spent, so it earns no cashback and isn't our cost — the gift-card purchase has its own
+    # row). They sit here, beside shipping, because all three are the same kind of number: an
+    # order-level adjustment to what this row actually cost.
+    "sales_tax",
+    "gift_card",
     # Derived from card_last4 at run time (main.run_scrape -> config.cards.tag_cards): the friendly
     # card name and the cashback rate that applies to this row. Both blank when card_last4 is blank
     # (a partial re-check), so _merge_row preserves what the first full extraction recorded.
@@ -171,14 +180,6 @@ FIELDNAMES = [
     "delivery_address",
     "card_last4",
     "last_scraped_at",
-    # --- order-level money, appended like every new column ---
-    # Both are the ORDER-LEVEL total repeated on every row by the mappings (the same contract as
-    # `shipping`); ledger_sync reprorates each into the row's cost-weighted share, and the COGS
-    # formula reads the shares: gift card is SUBTRACTED (a tender the card never spent, so it earns
-    # no cashback and isn't our cost — the gift-card purchase has its own row), sales tax is ADDED
-    # (a real acquisition cost; usually 0 under the resale certificate, but hand-kept orders pay it).
-    "gift_card",
-    "sales_tax",
 ]
 
 

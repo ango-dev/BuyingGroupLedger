@@ -32,6 +32,7 @@ from pathlib import Path
 from gspread.utils import ValueInputOption, ValueRenderOption
 
 from models.order import FIELDNAMES, normalize_shipment
+from scripts.apply_sheet_formats import neutralise_coercing_types_request
 from sheets.ledger_sync import (
     HEADER,
     _blank_money_for_cancelled,
@@ -193,6 +194,21 @@ def main() -> None:
     # One RAW write of header + every row. RAW (not USER_ENTERED) so numeric-looking text such as a
     # long tracking number stays text instead of being reinterpreted into scientific notation.
     block = [list(HEADER)] + plan["new_rows"]
+    # CLEAR THE COERCING TABLE COLUMN TYPES FIRST. They are still on their OLD letters -- that is what
+    # this script is here to fix -- and a numeric column type PARSES whatever is written into it. On
+    # 2026-08-31 `Card Last 4` moved into a position still typed PERCENT and "0315" was stored as the
+    # number 766 on 28 rows: RAW input, no error, value still plausible. apply_sheet_formats puts the
+    # right types back afterwards, so this is the first half of a pair.
+    spreadsheet = worksheet.spreadsheet
+    meta = spreadsheet.fetch_sheet_metadata(params={"fields": "sheets(properties/title,tables)"})
+    sheet_meta = next((m for m in meta["sheets"]
+                       if m["properties"]["title"] == worksheet.title), {})
+    tables = sheet_meta.get("tables", [])
+    request = neutralise_coercing_types_request(tables[0], header) if tables else None
+    if request:
+        spreadsheet.batch_update({"requests": [request]})
+        print("Cleared the table's coercing column types so the rewrite cannot be re-parsed.")
+
     worksheet.update(range_name="A1", values=block,
                      value_input_option=ValueInputOption.raw)
     print(f"Rewrote {len(plan['new_rows'])} row(s) into the new column order.")
