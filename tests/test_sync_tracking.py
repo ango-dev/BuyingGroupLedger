@@ -631,6 +631,22 @@ class TestSettledPackagesAreNotReSubmitted:
         plan = plan_tracking_submissions(header, rows)
         assert plan["settled_keys"] == set()
 
+    def test_a_return_row_is_settled_regardless_of_payout(self):
+        """Found live: a scheduled run tried to submit a `return` row's tracking to BFMR
+        and raised ACTION NEEDED. `return` was terminal for re-scraping but nothing sync-side read
+        it — a returned package has nothing left to submit or insure, with or without a payout."""
+        for payout in ("", "0", "-387.00", "774.00"):
+            header, rows = self._rows("return", payout)
+            plan = plan_tracking_submissions(header, rows)
+            assert ("O-1", "1Z1") in plan["settled_keys"], f"payout={payout!r}"
+
+    def test_a_return_row_is_still_read_for_payouts(self):
+        # The clawback lands through the read — settling must not drop the row from it.
+        header, rows = self._rows("return", "")
+        plan = plan_tracking_submissions(header, rows)
+        assert plan["rows_by_tracking"].get("1Z1") == [2]
+        assert plan["by_group"]["MOD"], "the row stays in the group's list for the payout read"
+
     def test_a_settled_row_is_still_read_for_payouts(self):
         """Deliberately NOT dropped from the payout read. BFMR reports `returned`, which outranks
         `paid`, so a post-payment CLAWBACK is a real forward transition -- and dropping settled rows

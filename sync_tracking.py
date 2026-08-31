@@ -239,6 +239,16 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         # "paid" alone would drop packages the group has not actually settled.
         if status_by_row[row_number] == "paid" and (_as_float(cell(PAYOUT_AMOUNT_COL)) or 0.0) != 0.0:
             settled_keys.add((order_id, tracking))
+        # A RETURNED package's submission story is equally over (found live: a scheduled
+        # run raised ACTION NEEDED for a `return` row's tracking that BFMR would not take). Whether
+        # the goods went back to the retailer or the group returned them, there is nothing left to
+        # submit or insure — but the row deliberately STAYS in the payout read below, because that
+        # is where the group's clawback lands. `return` being TERMINAL only ever governed
+        # re-scraping (load_order_state); this is the sync-side half of that finality. Unlike
+        # `cancelled` (unpostable above, the order never shipped), a return DID ship, so its row
+        # keeps flowing everywhere except the submit and insurance calls.
+        if status_by_row[row_number] == "return":
+            settled_keys.add((order_id, tracking))
 
         by_group.setdefault(group_key, []).append(TrackingSubmission(
             row_number=row_number,
@@ -572,7 +582,8 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
         log.info("%s: %d package(s) already recorded there", group_key, len(known))
     settled_here = sum(1 for r in rows if (r.order_id, r.tracking_number) in settled)
     if settled_here:
-        log.info("%s: %d package(s) already paid, not re-submitting", group_key, settled_here)
+        log.info("%s: %d package(s) settled (paid or returned), not re-submitting",
+                 group_key, settled_here)
 
     push = client.submit_tracking(fresh)
     log.info("%s push: %s", group_key, push.summary())
