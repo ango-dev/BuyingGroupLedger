@@ -105,7 +105,8 @@ def fetch_summaries(retailer: str, profile, order_ids: list[str]) -> dict[str, t
                 print(f"  ?? {oid}: no order summary on the page (kept? too old? wrong account) -- skipped",
                       file=sys.stderr)
                 continue
-            results[oid] = (mapping._gift_card_amount(summary), mapping._sales_tax_amount(summary))
+            results[oid] = (mapping._gift_card_amount(summary), mapping._sales_tax_amount(summary),
+                            mapping._order_subtotal(summary))
     return results
 
 
@@ -142,13 +143,29 @@ def main(argv=None) -> int:
             continue
         print(f"{retailer} [{profile_label}]: fetching {len(orders)} order-details page(s)...")
         summaries = fetch_summaries(retailer, profile, sorted(orders))
-        for oid, (gift_card, sales_tax) in sorted(summaries.items()):
+        for oid, (gift_card, sales_tax, subtotal) in sorted(summaries.items()):
             if not gift_card:
                 no_gift_card += 1
                 print(f"  -- {oid}: no gift card on this order -- left alone")
                 continue
             rows = orders[oid]
             cost_sum = sum(c for _n, c in rows)
+            # LEGACY-NETTED GUARD. Before 2026-08-30 the mappings scaled Total Cost down to the
+            # card-paid share instead of filling this column, so a row from that era ALREADY nets
+            # the gift card inside its cost -- writing the amount again would subtract it twice.
+            # The page's own subtotal tells the two shapes apart: a gross row matches the subtotal,
+            # a legacy row matches (subtotal - gift card). Anything else is ambiguous (a partial
+            # order, a hand edit) and is reported, not guessed.
+            if subtotal is not None:
+                if abs(cost_sum - (subtotal - gift_card)) <= 0.02:
+                    print(f"  -- {oid}: sheet cost {cost_sum:.2f} == subtotal {subtotal:.2f} - gift "
+                          f"card {gift_card:.2f} -- ALREADY netted the old way (COGS is right; a "
+                          f"blank Gift Card cell counts as 0) -- left alone")
+                    continue
+                if abs(cost_sum - subtotal) > 0.02:
+                    print(f"  ?? {oid}: sheet cost {cost_sum:.2f} matches neither the subtotal "
+                          f"{subtotal:.2f} nor its netted form -- resolve by hand", file=sys.stderr)
+                    continue
             for n, cost in rows:
                 weight = (cost / cost_sum) if cost_sum else (1 / len(rows))
                 live = grid[n - 1] if n - 1 < len(grid) else []
