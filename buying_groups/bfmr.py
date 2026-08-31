@@ -105,7 +105,10 @@ def _is_bestbuy(retailer) -> bool:
 #: from the retailer cancelling the order.)
 LEDGER_STATUS_BY_BFMR_STATUS = {
     "paid": "paid",
-    "returned": "return",  # the ledger spells it "return"
+    # BFMR uses BOTH spellings for the same outcome; the ledger spells it
+    # "return" either way.
+    "returned": "return",
+    "return": "return",
 }
 
 #: BFMR statuses past the point where insuring a package makes sense — the purchase is settled.
@@ -114,7 +117,7 @@ LEDGER_STATUS_BY_BFMR_STATUS = {
 #: on 62 rows, every one of them in one of these states, and 58 of those were INSURED — so it marks
 #: the end of the lifecycle, not a refusal to cover. Keying off BFMR's own `status` says that
 #: plainly, and stops "not eligible" being read as "BFMR won't insure this".
-_TERMINAL_BFMR_STATUSES = {"paid", "returned", "cancelled"}
+_TERMINAL_BFMR_STATUSES = {"paid", "returned", "return", "cancelled"}
 
 #: BFMR's handling of the **Best Buy duplicate tracking issue**:
 #: https://support.bfmr.com/hc/en-us/articles/50968170907547

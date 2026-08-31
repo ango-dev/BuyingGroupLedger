@@ -1290,8 +1290,12 @@ class TestBfmrPayoutsAndStatus:
         record = bfmr.fetch_payouts(["TBA1"])[0]
         assert record.payout_amount is None and record.payout_date == ""
 
-    def test_bfmrs_returned_maps_to_the_ledgers_return_spelling(self, bfmr, transport):
-        transport.responses = [self._payout_row(status="returned")]
+    @pytest.mark.parametrize("bfmr_status", ["returned", "return"])
+    def test_bfmrs_both_return_spellings_map_to_the_ledgers_return(self, bfmr, transport, bfmr_status):
+        # BFMR uses BOTH spellings for the same outcome; either must land as the
+        # ledger's `return`, or the forward-only status walk would rank the unknown one below
+        # everything and the row would never flip.
+        transport.responses = [self._payout_row(status=bfmr_status)]
         assert bfmr.fetch_payouts(["TBA1"])[0].status == "return"
 
     @pytest.mark.parametrize("bfmr_status", ["shipped", "processed", "cancelled"])
