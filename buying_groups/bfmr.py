@@ -704,6 +704,7 @@ class BFMRClient(HttpClient):
         tracker = self.fetch_tracker()
         terminal = _index_terminal_purchases(tracker)
         spellings = _index_tracker_spellings(tracker)
+        donations = _index_donation_shipments(tracker)
 
         try:
             insured = self.insured_shipments()
@@ -728,6 +729,11 @@ class BFMRClient(HttpClient):
                     "BFMR's purchase is already terminal (paid/returned/cancelled)",
                 ))
                 continue
+            if _has_any_spelling(donations, row.tracking_number):
+                # See _index_donation_shipments: a 1-cent deal is never worth a $2-minimum premium,
+                # and BFMR 400s the filing anyway. Skipped BEFORE the call, every run, for free.
+                result.skipped.append((row.tracking_number, DONATION_SKIP_REASON))
+                continue
             if (row.total_cost or 0) < self.min_insurance_value:
                 result.skipped.append((
                     row.tracking_number,
@@ -746,12 +752,20 @@ class BFMRClient(HttpClient):
             #
             # Name and package value are automatic for the same reason: the account supplies the one
             # and the shipment's items the other.
-            response = self.request(
-                "POST",
-                "/api/v2/insurance/file",
-                mutating=True,
-                data={"tracking_number": spelling},
-            )
+            try:
+                response = self.request(
+                    "POST",
+                    "/api/v2/insurance/file",
+                    mutating=True,
+                    data={"tracking_number": spelling},
+                )
+            except BuyingGroupError as exc:
+                # ONE refused filing must not abort the pass — before this, a single 400 (BFMR's
+                # donation refusal) bubbled up and killed the whole sync, every
+                # run. The failure is recorded per shipment; the caller alerts on anything the
+                # donation skip above didn't already explain.
+                result.failed.append((row.tracking_number, f"{row.tracking_number}: {exc}"))
+                continue
             if response is None:
                 result.skipped.append((row.tracking_number, "dry run"))
             else:
@@ -896,6 +910,37 @@ def _index_terminal_purchases(tracker: list[dict]) -> dict[str, str]:
 def _index_tracker_spellings(tracker: list[dict]) -> dict[str, str]:
     """`{tracking_number: itself}` for every spelling My Tracker holds, for `_held_spelling`."""
     return {number: number for entry in tracker if (number := _tracking_of(entry))}
+
+
+#: The skip reason `file_insurance` reports for a donation shipment. sync_tracking matches on it
+#: to write a real $0.00 into the row's Insurance cell, so the sheet reads "no premium, by design".
+DONATION_SKIP_REASON = "donation shipment (1-cent payout) -- BFMR does not insure these"
+
+
+def _index_donation_shipments(tracker: list[dict]) -> dict[str, bool]:
+    """`{tracking_number: True}` for shipments that belong to BFMR's DONATION program.
+
+    BFMR's donation deals season an account: reserve and submit tracking as normal, payout $0.01 —
+    and their insurance endpoint refuses the filing with a bare 400 "Unexpected Error" (observed
+    live; before this the refusal aborted the whole filing pass every run).
+    The tracker's `total_payout` identifies one WITHOUT spending the probe call: a deal that pays a
+    cent can never be worth a premium whose floor is $2.00.
+
+    EVERY entry under the number must pay at most a cent. A combined box that also carries a real
+    order still has real value riding on it, and skipping its filing would leave that money
+    uninsured — the miss that costs more than a wasted probe. An entry whose `total_payout` does
+    not parse counts as real for the same reason.
+    """
+    totals: dict[str, list] = {}
+    for entry in tracker:
+        number = _tracking_of(entry)
+        if number and not _is_insurance_fee_row(entry):
+            totals.setdefault(number, []).append(parse_money(entry.get("total_payout")))
+    return {
+        number: True
+        for number, amounts in totals.items()
+        if amounts and all(amount is not None and amount <= 0.011 for amount in amounts)
+    }
 
 
 def _index_purchases_by_order(tracker: list[dict]) -> dict[str, dict]:

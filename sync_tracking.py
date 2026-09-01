@@ -629,6 +629,33 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
         insurance = client.file_insurance(insurable)
         log.info("%s insurance: %s", group_key, insurance.summary())
 
+        # BFMR's DONATION program: a 1-cent deal is submitted like any other
+        # package but is never insured — the client skips its filing with DONATION_SKIP_REASON, and
+        # a real $0.00 lands in the row's Insurance cell so the sheet reads "no premium, by design"
+        # rather than "still waiting". Blank cells only; a typed figure always wins.
+        from buying_groups.bfmr import DONATION_SKIP_REASON  # local: MOD has no insurance at all
+        donation_rows = sorted({
+            n
+            for tracking, reason in insurance.skipped
+            if reason == DONATION_SKIP_REASON
+            for n in plan["rows_by_tracking"].get(tracking, [])
+            if not str(plan["insurance_by_row"].get(n, "")).strip()
+        })
+        if donation_rows:
+            log.info("%s: %d donation-shipment row(s) marked Insurance $0.00.",
+                     group_key, len(donation_rows))
+            _merge_writes(all_writes, {n: {INSURANCE_COL: 0.0} for n in donation_rows})
+
+        # Anything the donation skip did not explain is a real refusal on a package that SHOULD be
+        # covered. Before 2026-09-01 one of these aborted the whole sync (loud but useless); now it
+        # is caught per shipment, so it must be alerted or a genuinely uninsured package goes quiet.
+        if insurance.failed:
+            _alert(
+                apply,
+                f"{group_key}: {len(insurance.failed)} insurance filing(s) rejected",
+                "\n".join(reason for _t, reason in insurance.failed),
+            )
+
     payouts = client.fetch_payouts([r.tracking_number for r in rows])
     _merge_writes(all_writes, allocate_payouts(
         payouts, plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],

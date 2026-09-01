@@ -462,6 +462,56 @@ class TestBfmrInsurance:
         assert result.skipped[0][1] == "dry run"
         assert "POST" not in [c["method"] for c in transport.calls]
 
+    def test_a_donation_shipment_is_skipped_without_spending_the_call(self, bfmr, transport):
+        """BFMR's donation program: reserve + submit as normal, payout $0.01,
+        and the insurance endpoint 400s the filing. The tracker's total_payout identifies one
+        BEFORE the probe — a 1-cent deal is never worth a $2-minimum premium."""
+        from buying_groups.bfmr import DONATION_SKIP_REASON
+
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "status": "shipped", "order_id": "O1",
+                     "deal_title": "Donation", "total_payout": "0.01"}),
+            insured(),
+        ]
+        result = bfmr.file_insurance([submission(tracking_number="TBA1")])
+        assert result.skipped[0][1] == DONATION_SKIP_REASON
+        assert "POST" not in [c["method"] for c in transport.calls]
+
+    def test_a_combined_box_with_a_real_order_is_still_filed(self, bfmr, transport):
+        """ALL entries under the number must pay a cent. A box also carrying a real deal has real
+        money riding on it — skipping its filing would leave that money uninsured."""
+        transport.responses = [
+            tracker(
+                {"tracking_number": "TBA1", "status": "shipped", "order_id": "O1",
+                 "deal_title": "Donation", "total_payout": "0.01"},
+                {"tracking_number": "TBA1", "status": "shipped", "order_id": "O2",
+                 "deal_title": "Real deal", "total_payout": "1,800.00"},
+            ),
+            insured(),
+            FakeResponse(payload={"message": "filed"}),
+            insured(("TBA1", 8.18, 1796)),
+        ]
+        assert bfmr.file_insurance([submission(tracking_number="TBA1")]).submitted == ["TBA1"]
+
+    def test_a_refused_filing_no_longer_aborts_the_pass(self, bfmr, transport):
+        """one 400 from insurance/file raised out of the loop and killed the whole
+        sync, every run. It now lands in `failed` for THAT shipment and the next one still files."""
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "status": "shipped", "order_id": "O1",
+                     "deal_title": "A", "total_payout": "500.00"},
+                    {"tracking_number": "TBA2", "status": "shipped", "order_id": "O2",
+                     "deal_title": "B", "total_payout": "900.00"}),
+            insured(),
+            FakeResponse(status_code=400,
+                         text='{"message":"Unable to file insurance for the shipment, Unexpected Error"}'),
+            FakeResponse(payload={"message": "filed"}),
+            insured(("TBA2", 4.0, 900)),
+        ]
+        result = bfmr.file_insurance([submission(tracking_number="TBA1"),
+                                      submission(tracking_number="TBA2", order_id="O2")])
+        assert result.submitted == ["TBA2"]
+        assert result.failed[0][0] == "TBA1" and "400" in result.failed[0][1]
+
 
 class TestInsurancePremiumSource:
     """The premium now comes from BFMR's insurance record, with the fee row as the fallback."""

@@ -724,6 +724,8 @@ class TestPayoutsOnly:
             self.insured_with = list(rows)
 
             class I:
+                skipped, failed = [], []
+
                 def summary(self):
                     return "0 filed"
             return I()
@@ -759,6 +761,83 @@ class TestPayoutsOnly:
                 "insurance_by_row": {}, "awaiting_by_group": {}, "cancelled_by_group": {}}
         sync_tracking._run_one_group("BFMR", rows, plan, {}, apply=True)
         assert [r.order_id for r in client.submitted_with] == ["B2"] and client.insured_with is not None
+
+
+class TestDonationShipments:
+    """BFMR's donation program: a 1-cent deal is reserved and submitted like any
+    package, but BFMR refuses its insurance filing with a 400. The client skips those with
+    DONATION_SKIP_REASON; the sync's job is to turn that skip into a real $0.00 in the Insurance
+    cell (blank cells only) so the sheet reads "no premium, by design" — and to ALERT on any
+    filing failure the donation skip does not explain, because those used to abort the whole run
+    and now merely land in `failed`."""
+
+    class Row:
+        def __init__(self, n, oid, trk):
+            self.row_number, self.order_id, self.tracking_number = n, oid, trk
+
+    def _client(self, skipped=(), failed=()):
+        class FakeClient:
+            group_key = "BFMR"
+
+            def already_submitted(self, rows):
+                return set()
+
+            def submit_tracking(self, rows):
+                class R:
+                    submitted, failed, needs_manual = [], [], []
+
+                    def summary(self):
+                        return "0 submitted"
+                return R()
+
+            def file_insurance(self, rows):
+                class I:
+                    def summary(self):
+                        return "insurance"
+                I.skipped, I.failed = list(skipped), list(failed)
+                return I()
+
+            def fetch_payouts(self, numbers):
+                return []
+        return FakeClient()
+
+    def _plan(self):
+        return {"settled_keys": set(), "rows_by_tracking": {"T1": [4, 5]},
+                "costs_by_row": {4: 100.0, 5: 50.0}, "status_by_row": {},
+                "insurance_by_row": {4: "", 5: "4.5"},
+                "awaiting_by_group": {}, "cancelled_by_group": {}}
+
+    def _run(self, monkeypatch, client):
+        from buying_groups.base import PayoutRecord  # noqa: F401
+        alerts = []
+        monkeypatch.setattr(sync_tracking, "get_client", lambda group, dry_run: client)
+        monkeypatch.setattr(sync_tracking, "allocate_payouts", lambda *a, **k: {})
+        monkeypatch.setattr(sync_tracking, "_tick_submitted", lambda rows, plan, apply: {})
+        monkeypatch.setattr(sync_tracking, "_alert", lambda apply, subject, body: alerts.append(subject))
+        all_writes = {}
+        rows = [self.Row(4, "A1", "T1"), self.Row(5, "A1", "T1")]
+        sync_tracking._run_one_group("BFMR", rows, self._plan(), all_writes, apply=True)
+        return all_writes, alerts
+
+    def test_a_donation_skip_writes_a_real_zero_into_blank_insurance_cells(self, monkeypatch):
+        from buying_groups.bfmr import DONATION_SKIP_REASON
+
+        writes, alerts = self._run(monkeypatch, self._client(skipped=[("T1", DONATION_SKIP_REASON)]))
+        assert writes[4][sync_tracking.INSURANCE_COL] == 0.0
+        assert 5 not in writes, "the hand-typed 4.5 on row 5 survives"
+        assert alerts == [], "a donation is by design, not a problem to page about"
+
+    def test_an_ordinary_skip_writes_nothing(self, monkeypatch):
+        writes, alerts = self._run(monkeypatch, self._client(skipped=[("T1", "already insured")]))
+        assert writes == {} and alerts == []
+
+    def test_a_real_filing_failure_alerts_and_writes_nothing(self, monkeypatch):
+        # A refusal on a package that SHOULD be covered used to abort the whole sync (loud); now it
+        # is caught per shipment, so the alert is the only thing keeping it visible.
+        writes, alerts = self._run(
+            monkeypatch, self._client(failed=[("T1", "T1: POST ... returned 400: nope")]))
+        assert writes == {}
+        assert alerts and "insurance filing(s) rejected" in alerts[0]
 
 
 class TestOrderScopedAllocation:
