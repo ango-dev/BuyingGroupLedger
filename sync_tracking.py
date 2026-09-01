@@ -57,6 +57,7 @@ Apply for real:
 
 import argparse
 import logging
+import re
 
 from gspread.utils import ValueInputOption, ValueRenderOption
 
@@ -83,6 +84,11 @@ SUBMITTED_COL = "Tracking Submitted"
 
 #: Statuses that can never be submitted. A cancelled order was never shipped to anyone.
 _UNPOSTABLE_STATUSES = {"cancelled"}
+
+#: A Tracking Number cell Google Sheets float-ified: a long all-digit number typed without a leading
+#: apostrophe is stored as a double and rendered like '9.339589752066617e+21' — with its trailing
+#: digits already lost. See the guard in plan_tracking_submissions.
+_FLOAT_CORRUPTED_TRACKING = re.compile(r"\d+(\.\d+)?[eE][+-]?\d+")
 
 #: What the undisclosed-split safety net writes into Quantity when it cannot tell how a multi-box
 #: line was divided. Not a number, so no API will take it.
@@ -113,6 +119,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
           "insurance_by_row":    {row_number: str},     # so an inferred 0 can't clobber a typed one
           "submitted_by_row":    {row_number: bool},    # already ticked? don't re-tick
           "unresolved_split":    [(row_number, order_id, tracking_number), ...],   # Quantity "*"
+          "corrupted_tracking":  [(row_number, order_id, tracking_number), ...],   # float-ified cell
           "unroutable_tracked":  [(row_number, order_id, tracking_number, group_as_written), ...],
           "skipped_no_tracking": int,
           "skipped_unroutable":  {buying_group_as_written: count},
@@ -149,6 +156,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     skipped_no_tracking = 0
     skipped_cancelled = 0
     settled_keys: set[tuple[str, str]] = set()
+    corrupted_tracking: list[tuple[int, str, str]] = []
 
     for offset, row in enumerate(data_rows):
         row_number = offset + 2  # row 1 is the header
@@ -177,6 +185,15 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
             continue
 
         tracking = cell("Tracking Number")
+        if _FLOAT_CORRUPTED_TRACKING.fullmatch(tracking):
+            # Google Sheets stored a long all-digit tracking number as a NUMBER and rendered it in
+            # scientific notation — the trailing digits are gone from the stored double, so the real
+            # number is UNRECOVERABLE from the sheet. Submitting the mangled form would post garbage
+            # to a group (not undoable at MOD), so the row is withheld and alerted instead: the fix
+            # is re-typing the number as text (leading apostrophe). 
+            # '9.339589752066617e+21' on an Amazon Business row very nearly went to MOD.
+            corrupted_tracking.append((row_number, order_id, tracking))
+            continue
         if not tracking:
             skipped_no_tracking += 1
             # Kept, not just counted. An order still AWAITING SHIPMENT is the only state BFMR can
@@ -272,6 +289,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "insurance_by_row": insurance_by_row,
         "submitted_by_row": submitted_by_row,
         "unresolved_split": unresolved_split,
+        "corrupted_tracking": corrupted_tracking,
         "unroutable_tracked": unroutable_tracked,
         "skipped_no_tracking": skipped_no_tracking,
         "skipped_unroutable": skipped_unroutable,
@@ -447,6 +465,7 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
     plan = plan_tracking_submissions(header, existing[1:])
     _report_plan(plan, apply)
     _alert_on_unresolved_splits(plan, apply)
+    _alert_on_corrupted_tracking(plan, apply)
     _alert_on_unroutable(plan, apply)
 
     all_writes: dict[int, dict] = {}
@@ -793,6 +812,29 @@ def _alert_on_unresolved_splits(plan: dict, apply: bool) -> None:
         "These rows carry Quantity '*' from the undisclosed-split safety net, so no buying group "
         "will accept them. Set the real per-box quantity on each row and they'll go out on the "
         f"next run:\n{detail}",
+    )
+
+
+def _alert_on_corrupted_tracking(plan: dict, apply: bool) -> None:
+    """A Tracking Number cell Sheets float-ified is garbage with the real digits already lost.
+
+    Alerted rather than logged for the same reason as unresolved splits: the row looks ordinary
+    while its package can never be submitted — and the mangled number is one --apply away from
+    being posted to a group, which at MOD is not undoable. Only a human can fix it, by re-typing
+    the number from the carrier email/page AS TEXT (a leading apostrophe: '9339...).
+    """
+    rows = plan.get("corrupted_tracking") or []
+    if not rows:
+        return
+    detail = "\n".join(f"  row {n}: order {oid}, cell shows {t!r}" for n, oid, t in rows)
+    log.warning("%d row(s) have a float-corrupted tracking number and cannot be submitted", len(rows))
+    _alert(
+        apply,
+        f"{len(rows)} tracking number(s) were mangled by Sheets and need re-typing",
+        "These Tracking Number cells were stored as NUMBERS, so Sheets rendered them in scientific "
+        "notation and the trailing digits are permanently gone from the sheet. The rows are "
+        "withheld from every submission until fixed. Re-type each number from the carrier "
+        "email/page AS TEXT — start the cell with an apostrophe ('):\n" + detail,
     )
 
 

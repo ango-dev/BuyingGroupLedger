@@ -159,6 +159,23 @@ class TestUnresolvedSplitQuantity:
         plan = plan_tracking_submissions(HEADER_LIST, [shipped("O1", "T1")])
         assert plan["unresolved_split"] == []
 
+    def test_a_float_corrupted_tracking_number_is_withheld_and_reported(self):
+        """a 22-digit tracking number typed without a leading apostrophe was
+        stored by Sheets as a double and read back as '9.339589752066617e+21' — its trailing digits
+        already gone. Submitting that posts garbage to a group (not undoable at MOD), so the row is
+        withheld and surfaced for a human to re-type the number as text."""
+        plan = plan_tracking_submissions(
+            HEADER_LIST, [shipped("O1", "9.339589752066617e+21")]
+        )
+        assert not plan["by_group"], "the mangled number must never reach a submission"
+        assert plan["corrupted_tracking"] == [(2, "O1", "9.339589752066617e+21")]
+
+    def test_real_tracking_numbers_are_not_mistaken_for_corruption(self):
+        for t in ("TBA999000000004", "1Z999TST0000000004", "9399990000000000000001"):
+            plan = plan_tracking_submissions(HEADER_LIST, [shipped("O1", t)])
+            assert plan["corrupted_tracking"] == [], t
+            assert plan["by_group"], t
+
 
 class TestPackageGrouping:
     def test_rows_sharing_a_tracking_number_are_recorded_as_one_package(self):
