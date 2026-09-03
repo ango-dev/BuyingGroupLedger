@@ -240,16 +240,29 @@ class BFMRClient(HttpClient):
         here — deliberately. The cost of ignoring it is one redundant submission attempt, which the
         post-submit verification catches; the cost of trusting it would be a silently skipped package.
         """
+        entries = self.fetch_tracker()
         lookup = _spelling_lookup(r.tracking_number for r in rows)
         held: set[tuple[str, str]] = set()
-        for entry in self.fetch_tracker():
+        for entry in entries:
             if _is_insurance_fee_row(entry):
                 continue
             number = lookup.get(_tracking_of(entry))
             order_id = _order_id_of(entry)
             if number and order_id:
                 held.add((order_id, number))
-        return held
+        # A pair only counts as DONE when its order has no ACTIVE purchase still waiting for a
+        # shipment. One retailer order can carry SEVERAL BFMR purchases (multiple reservations of a
+        # deal, or two deals bought together), and the old order+tracking key read the FIRST
+        # purchase's shipment as the whole order being handled — so the other reservations sat
+        # empty at BFMR forever while the sheet ticked every row. Withholding the pair keeps the
+        # rows in the submission plan until submit_tracking has attached the package to every
+        # purchase — which also makes a silently-dropped attachment retry itself next run.
+        incomplete = {
+            order_id
+            for order_id, purchase_list in _index_active_purchases_by_order(entries).items()
+            if any(not p.get("shipment_id") for p in purchase_list)
+        }
+        return {(order_id, number) for order_id, number in held if order_id not in incomplete}
 
     def active_purchases_for(self, order_ids) -> set[str]:
         """Which of these orders BFMR still holds an ACTIVE (non-cancelled) purchase for.
@@ -343,33 +356,134 @@ class BFMRClient(HttpClient):
 
         tracker = self.fetch_tracker()
         purchases = _index_purchases_by_order(tracker)
+        active_by_order = _index_active_purchases_by_order(tracker)
         shipments = _index_shipments(tracker)
+        taken = {_tracking_of(e) for e in tracker if _tracking_of(e)}
+
+        # Planned per ORDER, per PACKAGE (distinct tracking number) — NOT per row. One retailer
+        # order can carry SEVERAL BFMR purchases (multiple reservations of one deal, or two deals
+        # bought together), and one physical box can have to satisfy all of them. The old per-row
+        # loop sent every row's number to the single indexed purchase, leaving the other
+        # reservations EMPTY at BFMR while the order+tracking confirm read everything as submitted
+        # — live on order 1399000016: three qty-2 reservations, one box, two purchases
+        # never received a shipment, and every sheet row ticked.
+        orders: dict[str, dict[str, list[TrackingSubmission]]] = {}
+        for row in rows:
+            orders.setdefault(row.order_id, {}).setdefault(row.tracking_number, []).append(row)
 
         objects: list[dict] = []
-        for row in rows:
-            purchase = purchases.get(row.order_id)
-            if purchase is None:
-                result.needs_manual.append((row.tracking_number, _no_purchase_hint(row)))
-                continue
-            if _is_cancelled_purchase(purchase):
-                result.needs_manual.append((row.tracking_number, _cancelled_purchase_hint(row)))
-                continue
-
-            existing = _find_shipment(shipments, row.order_id, row.tracking_number)
-            if existing is not None and _as_int(existing.get("qty")) == row.quantity:
-                result.skipped.append((row.tracking_number, "already recorded with this quantity"))
+        for order_id, packages in orders.items():
+            active = active_by_order.get(order_id) or []
+            if not active:
+                purchase = purchases.get(order_id)
+                for tracking, package_rows in packages.items():
+                    row = package_rows[0]
+                    if purchase is not None and _is_cancelled_purchase(purchase):
+                        result.needs_manual.append((tracking, _cancelled_purchase_hint(row)))
+                    else:
+                        result.needs_manual.append((tracking, _no_purchase_hint(row)))
                 continue
 
-            if existing is not None and _as_int(existing.get("qty")) < row.quantity:
-                result.failed.append((
-                    row.tracking_number,
-                    f"{row.describe()}: BFMR records qty {existing.get('qty')} but the ledger says "
-                    f"{row.quantity}, and BFMR only allows a quantity to be REDUCED. Fix whichever "
-                    f"side is wrong by hand.",
-                ))
+            # Packages BFMR already holds a shipment for: skip / reduce / refuse. On a MULTI-purchase
+            # order the box's units are spread across one shipment PER PURCHASE (2+2+2 under three
+            # spellings), so its held quantity is the SUM over every spelling — judged against one
+            # shipment, a box mid-attachment reads as a forbidden quantity increase. The reduction
+            # object is built from the EXISTING entry, which carries its own purchase ids.
+            unmatched: list[tuple[str, int, TrackingSubmission]] = []
+            for tracking, package_rows in packages.items():
+                quantity = sum(r.quantity for r in package_rows)
+                row = package_rows[0]
+                if len(active) == 1:
+                    existing = _find_shipment(shipments, order_id, tracking)
+                    if existing is None:
+                        unmatched.append((tracking, quantity, row))
+                        continue
+                    held_qty = _as_int(existing.get("qty"))
+                    if held_qty == quantity:
+                        result.skipped.append((tracking, "already recorded with this quantity"))
+                    elif held_qty < quantity:
+                        result.failed.append((
+                            tracking,
+                            f"{row.describe()}: BFMR records qty {held_qty} but the ledger says "
+                            f"{quantity}, and BFMR only allows a quantity to be REDUCED. Fix "
+                            f"whichever side is wrong by hand.",
+                        ))
+                    else:
+                        objects.append({**_tracker_object(row, existing, existing),
+                                        "qty": quantity, "_is_reduction": True})
+                    continue
+                held_entries = [shipments[(order_id, sp)] for sp in bfmr_spellings(tracking)
+                                if (order_id, sp) in shipments]
+                held_total = sum(_as_int(e.get("qty")) for e in held_entries)
+                if held_entries and held_total == quantity:
+                    result.skipped.append((tracking, "already recorded with this quantity"))
+                elif held_total > quantity:
+                    result.needs_manual.append((
+                        tracking,
+                        f"{row.describe()}: BFMR holds {held_total} unit(s) of this box across "
+                        f"{len(held_entries)} shipment(s) but the ledger says {quantity} — with "
+                        f"several purchases on the order, which shipment to reduce is a human "
+                        f"call. Adjust it in BFMR's dashboard.",
+                    ))
+                elif not held_entries:
+                    unmatched.append((tracking, quantity, row))
+                # else: partially attached — the loop below hands the box to the purchases still
+                # waiting, which is exactly the missing remainder.
+
+            if len(active) == 1:
+                # One purchase: the split model — every new box is a create on that purchase.
+                for tracking, quantity, row in unmatched:
+                    objects.append({**_tracker_object(row, active[0], None), "qty": quantity})
                 continue
 
-            objects.append(_tracker_object(row, purchase, existing))
+            unshipped = [p for p in active if not p.get("shipment_id")]
+            if not unshipped and not unmatched:
+                continue  # every purchase has its shipment and every box is accounted for
+
+            if len(packages) == 1:
+                # ONE box serving several purchases: attach it to EVERY purchase still waiting,
+                # each under the next free spelling (BFMR refuses a duplicate bare number — the
+                # same suffix scheme the Best Buy combined carton uses). Quantity is the
+                # PURCHASE's own reservation qty: the box holds the sum, each purchase its share.
+                base = next(iter(packages))
+                for p in unshipped:
+                    spelling = _free_spelling(taken, base)
+                    taken.add(spelling)
+                    objects.append({
+                        "reserve_id": p.get("reserve_id"), "purchase_id": p.get("purchase_id"),
+                        "shipment_id": None, "order_no": order_id, "tracking_number": spelling,
+                        "qty": _as_int(p.get("qty")) or sum(
+                            r.quantity for r in packages[base]) or 1,
+                        "_is_reduction": False,
+                    })
+                continue
+
+            # Several boxes AND several purchases: pair them 1:1 when the quantities line up
+            # exactly; anything else is guessed only by a human.
+            purchase_quantities = sorted(_as_int(p.get("qty")) for p in unshipped)
+            package_quantities = sorted(q for _t, q, _r in unmatched)
+            if unmatched and len(unmatched) == len(unshipped) \
+                    and purchase_quantities == package_quantities:
+                for (tracking, quantity, _row), p in zip(
+                    sorted(unmatched, key=lambda t: t[1]),
+                    sorted(unshipped, key=lambda p: _as_int(p.get("qty"))),
+                ):
+                    spelling = _free_spelling(taken, tracking)
+                    taken.add(spelling)
+                    objects.append({
+                        "reserve_id": p.get("reserve_id"), "purchase_id": p.get("purchase_id"),
+                        "shipment_id": None, "order_no": order_id, "tracking_number": spelling,
+                        "qty": quantity, "_is_reduction": False,
+                    })
+                continue
+
+            result.needs_manual.append((
+                next(iter(packages)),
+                f"order {order_id}: {len(packages)} ledger package(s) against "
+                f"{len(unshipped)} open BFMR purchase(s) and the quantities don't pair up 1:1 — "
+                f"attach each box to its purchase in BFMR's dashboard by hand "
+                f"(unattached boxes: {', '.join(t for t, _q, _r in unmatched) or 'none'}).",
+            ))
 
         # Retailer per order, so the batch poster can tell a Best Buy carton from everything else.
         retailers = {row.order_id: row.retailer for row in rows}
@@ -910,6 +1024,48 @@ def _index_terminal_purchases(tracker: list[dict]) -> dict[str, str]:
 def _index_tracker_spellings(tracker: list[dict]) -> dict[str, str]:
     """`{tracking_number: itself}` for every spelling My Tracker holds, for `_held_spelling`."""
     return {number: number for entry in tracker if (number := _tracking_of(entry))}
+
+
+def _index_active_purchases_by_order(tracker: list[dict]) -> dict[str, list[dict]]:
+    """EVERY active purchase per retailer order — not just one.
+
+    `_index_purchases_by_order` keeps a single winner per order, which is right for the hint paths
+    but was fatally wrong for submission: an order carrying several reservations of one deal (or
+    two deals bought together) has several purchases, each needing its own shipment. Deduped by
+    `purchase_id` with the shipment-bearing entry winning, because the tracker can list a purchase
+    both as its bare row and as its shipment row — counting those twice would read a fully-handled
+    purchase as still waiting. Tracker order is preserved.
+    """
+    by_purchase: dict[str, dict] = {}
+    order_of: dict[str, str] = {}
+    for entry in tracker:
+        order_id = _order_id_of(entry)
+        pid = str(entry.get("purchase_id") or "")
+        if (not order_id or not pid or _is_cancelled_purchase(entry)
+                or _is_insurance_fee_row(entry)):
+            continue
+        current = by_purchase.get(pid)
+        if current is None or (entry.get("shipment_id") and not current.get("shipment_id")):
+            by_purchase[pid] = entry
+            order_of[pid] = order_id
+    index: dict[str, list[dict]] = {}
+    for pid, entry in by_purchase.items():
+        index.setdefault(order_of[pid], []).append(entry)
+    return index
+
+
+def _free_spelling(taken: set, tracking_number: str) -> str:
+    """The first spelling of this number not yet in My Tracker — bare first, then the suffixes.
+
+    BFMR refuses a duplicate tracking number, so a second shipment of the same physical box (a
+    second purchase on the same order, or a Best Buy combined carton) is recorded under the next
+    letter. Falls back to the bare number if every letter is somehow taken — colliding loudly
+    beats inventing a spelling outside the scheme.
+    """
+    for spelling in bfmr_spellings(tracking_number):
+        if spelling not in taken:
+            return spelling
+    return tracking_number
 
 
 #: The skip reason `file_insurance` reports for a donation shipment. sync_tracking matches on it

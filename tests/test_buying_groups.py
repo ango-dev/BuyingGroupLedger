@@ -283,6 +283,145 @@ class TestBfmrSubmission:
             "no suffixed re-send for a non-Best-Buy order")
 
 
+class TestMultiplePurchasesPerOrder:
+    """One retailer order carrying SEVERAL BFMR purchases. The old per-row planner sent the
+    number to the single indexed purchase, the confirm read keyed on order+tracking reported
+    everything submitted, and every sheet row ticked — while two reservations sat empty at BFMR
+    until their deadline. Submission is now planned per purchase."""
+
+    def _three_reservations(self, first_shipped=True):
+        first = {"reserve_id": "R1", "purchase_id": "P1", "order_id": "C1", "qty": 2,
+                 "status": "shipped" if first_shipped else "purchased"}
+        if first_shipped:
+            first.update({"shipment_id": "S1", "tracking_number": "1Z1"})
+        return [
+            first,
+            {"reserve_id": "R2", "purchase_id": "P2", "order_id": "C1", "qty": 2,
+             "status": "purchased"},
+            {"reserve_id": "R3", "purchase_id": "P3", "order_id": "C1", "qty": 2,
+             "status": "purchased"},
+        ]
+
+    def test_one_box_is_attached_to_every_waiting_purchase_under_free_spellings(self, bfmr, transport):
+        # The live case: purchase P1 already holds the box; P2 and P3 get it as 1Z1B / 1Z1C.
+        transport.responses = [
+            tracker(*self._three_reservations()),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker(*self._three_reservations(),
+                    {"purchase_id": "P2", "order_id": "C1", "shipment_id": "S2",
+                     "tracking_number": "1Z1A"},
+                    {"purchase_id": "P3", "order_id": "C1", "shipment_id": "S3",
+                     "tracking_number": "1Z1B"}),
+        ]
+        rows = [submission(order_id="C1", tracking_number="1Z1", quantity=2, row_number=n)
+                for n in (5, 6, 7)]
+        result = bfmr.submit_tracking(rows)
+
+        body = transport.bodies()[-1]["tracker_data"]
+        assert [(o["purchase_id"], o["tracking_number"], o["qty"], o["shipment_id"])
+                for o in body] == [("P2", "1Z1A", 2, None), ("P3", "1Z1B", 2, None)]
+        assert not result.needs_manual and not result.failed
+        assert result.submitted == ["1Z1A", "1Z1B"]
+
+    def test_a_fully_attached_box_is_skipped_by_its_summed_quantity(self, bfmr, transport):
+        # After the attachments land, the box's 6 units live as 2+2+2 across three spellings; judged
+        # against one shipment it would read as a forbidden quantity increase every run.
+        entries = self._three_reservations()
+        entries[1].update({"shipment_id": "S2", "tracking_number": "1Z1A"})
+        entries[2].update({"shipment_id": "S3", "tracking_number": "1Z1B"})
+        transport.responses = [tracker(*entries)]
+        rows = [submission(order_id="C1", tracking_number="1Z1", quantity=2, row_number=n)
+                for n in (5, 6, 7)]
+        result = bfmr.submit_tracking(rows)
+        assert ("1Z1", "already recorded with this quantity") in result.skipped
+        assert not result.failed and not result.needs_manual
+        assert len(transport.calls) == 1, "nothing left to post"
+
+    def test_a_fresh_multi_reservation_order_attaches_the_bare_number_first(self, bfmr, transport):
+        transport.responses = [
+            tracker(*self._three_reservations(first_shipped=False)),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker({"purchase_id": "P1", "order_id": "C1", "shipment_id": "S1",
+                     "tracking_number": "1Z1"},
+                    {"purchase_id": "P2", "order_id": "C1", "shipment_id": "S2",
+                     "tracking_number": "1Z1A"},
+                    {"purchase_id": "P3", "order_id": "C1", "shipment_id": "S3",
+                     "tracking_number": "1Z1B"}),
+        ]
+        result = bfmr.submit_tracking(
+            [submission(order_id="C1", tracking_number="1Z1", quantity=2)])
+        body = transport.bodies()[-1]["tracker_data"]
+        assert [o["tracking_number"] for o in body] == ["1Z1", "1Z1A", "1Z1B"]
+        assert [o["purchase_id"] for o in body] == ["P1", "P2", "P3"]
+        assert not result.needs_manual
+
+    def test_two_deals_in_one_box_both_get_the_number(self, bfmr, transport):
+        # Live: 114-5684551 — the AirTag purchase held the box, the Fitbit purchase sat empty.
+        transport.responses = [
+            tracker({"reserve_id": "RA", "purchase_id": "PA", "order_id": "O1", "qty": 1,
+                     "shipment_id": "SA", "tracking_number": "TBA1", "status": "shipped",
+                     "deal_title": "AirTag"},
+                    {"reserve_id": "RF", "purchase_id": "PF", "order_id": "O1", "qty": 1,
+                     "status": "purchased", "deal_title": "Fitbit"}),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker({"purchase_id": "PF", "order_id": "O1", "shipment_id": "SF",
+                     "tracking_number": "TBA1A"}),
+        ]
+        rows = [submission(order_id="O1", tracking_number="TBA1", item_name="AirTag"),
+                submission(order_id="O1", tracking_number="TBA1", item_name="Fitbit")]
+        bfmr.submit_tracking(rows)
+        body = transport.bodies()[-1]["tracker_data"]
+        assert body[0]["purchase_id"] == "PF" and body[0]["tracking_number"] == "TBA1A"
+
+    def test_separate_boxes_pair_with_purchases_by_quantity(self, bfmr, transport):
+        transport.responses = [
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 1,
+                     "status": "purchased"},
+                    {"reserve_id": "R2", "purchase_id": "P2", "order_id": "O1", "qty": 3,
+                     "status": "purchased"}),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker({"purchase_id": "P1", "order_id": "O1", "shipment_id": "SA",
+                     "tracking_number": "TA"},
+                    {"purchase_id": "P2", "order_id": "O1", "shipment_id": "SB",
+                     "tracking_number": "TB"}),
+        ]
+        bfmr.submit_tracking([
+            submission(order_id="O1", tracking_number="TB", quantity=3),
+            submission(order_id="O1", tracking_number="TA", quantity=1),
+        ])
+        body = transport.bodies()[-1]["tracker_data"]
+        assert {(o["purchase_id"], o["tracking_number"], o["qty"]) for o in body} == \
+            {("P1", "TA", 1), ("P2", "TB", 3)}
+
+    def test_unpairable_quantities_go_to_a_human_not_a_guess(self, bfmr, transport):
+        transport.responses = [
+            tracker({"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 2,
+                     "status": "purchased"},
+                    {"reserve_id": "R2", "purchase_id": "P2", "order_id": "O1", "qty": 2,
+                     "status": "purchased"}),
+        ]
+        result = bfmr.submit_tracking([
+            submission(order_id="O1", tracking_number="TA", quantity=3),
+            submission(order_id="O1", tracking_number="TB", quantity=1),
+        ])
+        assert not result.submitted
+        assert "don't pair up 1:1" in result.needs_manual[0][1]
+        assert len(transport.calls) == 1, "nothing was posted on a guess"
+
+    def test_already_submitted_withholds_an_order_with_an_empty_purchase(self, bfmr, transport):
+        transport.responses = [tracker(*self._three_reservations())]
+        held = bfmr.already_submitted([submission(order_id="C1", tracking_number="1Z1")])
+        assert held == set(), "an empty reservation remains, so the pair is NOT done"
+
+    def test_already_submitted_reports_the_pair_once_every_purchase_is_shipped(self, bfmr, transport):
+        entries = self._three_reservations()
+        entries[1].update({"shipment_id": "S2", "tracking_number": "1Z1A"})
+        entries[2].update({"shipment_id": "S3", "tracking_number": "1Z1B"})
+        transport.responses = [tracker(*entries)]
+        held = bfmr.already_submitted([submission(order_id="C1", tracking_number="1Z1")])
+        assert held == {("C1", "1Z1")}
+
+
 class TestBfmrSplitOrdering:
     def test_reductions_are_sent_before_new_shipments(self):
         """When a qty-3 box splits into 2+1, applying the create first would momentarily claim
