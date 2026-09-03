@@ -412,20 +412,24 @@ class BFMRClient(HttpClient):
                         objects.append({**_tracker_object(row, existing, existing),
                                         "qty": quantity, "_is_reduction": True})
                     continue
-                held_entries = [shipments[(order_id, sp)] for sp in bfmr_spellings(tracking)
-                                if (order_id, sp) in shipments]
-                held_total = sum(_as_int(e.get("qty")) for e in held_entries)
-                if held_entries and held_total == quantity:
+                # Counted over the PURCHASE entries, not the spelling-keyed shipment index: the
+                # linked purchases share one shipment object, so by
+                # spelling they collapse to a single record and the box would read half-attached
+                # forever.
+                matching = [p for p in active
+                            if _tracking_of(p) and _tracking_of(p) in bfmr_spellings(tracking)]
+                held_total = sum(_as_int(p.get("qty")) for p in matching)
+                if matching and held_total == quantity:
                     result.skipped.append((tracking, "already recorded with this quantity"))
                 elif held_total > quantity:
                     result.needs_manual.append((
                         tracking,
                         f"{row.describe()}: BFMR holds {held_total} unit(s) of this box across "
-                        f"{len(held_entries)} shipment(s) but the ledger says {quantity} — with "
+                        f"{len(matching)} purchase(s) but the ledger says {quantity} — with "
                         f"several purchases on the order, which shipment to reduce is a human "
                         f"call. Adjust it in BFMR's dashboard.",
                     ))
-                elif not held_entries:
+                elif not matching:
                     unmatched.append((tracking, quantity, row))
                 # else: partially attached — the loop below hands the box to the purchases still
                 # waiting, which is exactly the missing remainder.
@@ -442,16 +446,17 @@ class BFMRClient(HttpClient):
 
             if len(packages) == 1:
                 # ONE box serving several purchases: attach it to EVERY purchase still waiting,
-                # each under the next free spelling (BFMR refuses a duplicate bare number — the
-                # same suffix scheme the Best Buy combined carton uses). Quantity is the
-                # PURCHASE's own reservation qty: the box holds the sum, each purchase its share.
+                # under the BARE number. Probed live (order 1399000016): a create with
+                # the same bare number and the next purchase's ids makes BFMR LINK THE EXISTING
+                # SHIPMENT OBJECT to that purchase — the suffix scheme is for a number shared
+                # across DIFFERENT orders (the Best Buy carton), and a suffixed create here is
+                # accepted-then-silently-dropped. Quantity is the PURCHASE's own reservation qty:
+                # the box holds the sum, each purchase its share.
                 base = next(iter(packages))
                 for p in unshipped:
-                    spelling = _free_spelling(taken, base)
-                    taken.add(spelling)
                     objects.append({
                         "reserve_id": p.get("reserve_id"), "purchase_id": p.get("purchase_id"),
-                        "shipment_id": None, "order_no": order_id, "tracking_number": spelling,
+                        "shipment_id": None, "order_no": order_id, "tracking_number": base,
                         "qty": _as_int(p.get("qty")) or sum(
                             r.quantity for r in packages[base]) or 1,
                         "_is_reduction": False,

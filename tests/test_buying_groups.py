@@ -319,16 +319,16 @@ class TestMultiplePurchasesPerOrder:
 
         body = transport.bodies()[-1]["tracker_data"]
         assert [(o["purchase_id"], o["tracking_number"], o["qty"], o["shipment_id"])
-                for o in body] == [("P2", "1Z1A", 2, None), ("P3", "1Z1B", 2, None)]
+                for o in body] == [("P2", "1Z1", 2, None), ("P3", "1Z1", 2, None)]
         assert not result.needs_manual and not result.failed
-        assert result.submitted == ["1Z1A", "1Z1B"]
+        assert result.submitted == ["1Z1", "1Z1"]
 
     def test_a_fully_attached_box_is_skipped_by_its_summed_quantity(self, bfmr, transport):
         # After the attachments land, the box's 6 units live as 2+2+2 across three spellings; judged
         # against one shipment it would read as a forbidden quantity increase every run.
         entries = self._three_reservations()
-        entries[1].update({"shipment_id": "S2", "tracking_number": "1Z1A"})
-        entries[2].update({"shipment_id": "S3", "tracking_number": "1Z1B"})
+        entries[1].update({"shipment_id": "S1", "tracking_number": "1Z1"})
+        entries[2].update({"shipment_id": "S1", "tracking_number": "1Z1"})
         transport.responses = [tracker(*entries)]
         rows = [submission(order_id="C1", tracking_number="1Z1", quantity=2, row_number=n)
                 for n in (5, 6, 7)]
@@ -343,15 +343,15 @@ class TestMultiplePurchasesPerOrder:
             FakeResponse(payload={"reservations_response": {}}),
             tracker({"purchase_id": "P1", "order_id": "C1", "shipment_id": "S1",
                      "tracking_number": "1Z1"},
-                    {"purchase_id": "P2", "order_id": "C1", "shipment_id": "S2",
-                     "tracking_number": "1Z1A"},
-                    {"purchase_id": "P3", "order_id": "C1", "shipment_id": "S3",
-                     "tracking_number": "1Z1B"}),
+                    {"purchase_id": "P2", "order_id": "C1", "shipment_id": "S1",
+                     "tracking_number": "1Z1"},
+                    {"purchase_id": "P3", "order_id": "C1", "shipment_id": "S1",
+                     "tracking_number": "1Z1"}),
         ]
         result = bfmr.submit_tracking(
             [submission(order_id="C1", tracking_number="1Z1", quantity=2)])
         body = transport.bodies()[-1]["tracker_data"]
-        assert [o["tracking_number"] for o in body] == ["1Z1", "1Z1A", "1Z1B"]
+        assert [o["tracking_number"] for o in body] == ["1Z1", "1Z1", "1Z1"]
         assert [o["purchase_id"] for o in body] == ["P1", "P2", "P3"]
         assert not result.needs_manual
 
@@ -364,14 +364,14 @@ class TestMultiplePurchasesPerOrder:
                     {"reserve_id": "RF", "purchase_id": "PF", "order_id": "O1", "qty": 1,
                      "status": "purchased", "deal_title": "Fitbit"}),
             FakeResponse(payload={"reservations_response": {}}),
-            tracker({"purchase_id": "PF", "order_id": "O1", "shipment_id": "SF",
-                     "tracking_number": "TBA1A"}),
+            tracker({"purchase_id": "PF", "order_id": "O1", "shipment_id": "SA",
+                     "tracking_number": "TBA1"}),
         ]
         rows = [submission(order_id="O1", tracking_number="TBA1", item_name="AirTag"),
                 submission(order_id="O1", tracking_number="TBA1", item_name="Fitbit")]
         bfmr.submit_tracking(rows)
         body = transport.bodies()[-1]["tracker_data"]
-        assert body[0]["purchase_id"] == "PF" and body[0]["tracking_number"] == "TBA1A"
+        assert body[0]["purchase_id"] == "PF" and body[0]["tracking_number"] == "TBA1"
 
     def test_separate_boxes_pair_with_purchases_by_quantity(self, bfmr, transport):
         transport.responses = [
