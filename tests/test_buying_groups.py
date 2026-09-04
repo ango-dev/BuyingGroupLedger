@@ -643,6 +643,33 @@ class TestBfmrInsurance:
         result = bfmr.file_insurance([submission(tracking_number="TBA1")])
         assert result.skipped[0][1] == DONATION_SKIP_REASON
 
+    def test_the_donation_title_rescues_unparseable_or_drifted_money(self, bfmr, transport):
+        """The program runs continuously under a stable name, so the title is
+        the second signal: it covers an entry whose money fields don't parse, or whose token
+        payout drifts off exactly one cent (here 5 cents/unit)."""
+        from buying_groups.bfmr import DONATION_SKIP_REASON
+
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "status": "shipped", "order_id": "O1",
+                     "deal_title": "Year Round Toy Drive", "qty": "10",
+                     "payout_price": 0.05, "total_payout": "0.50"}),
+            insured(),
+        ]
+        result = bfmr.file_insurance([submission(tracking_number="TBA1")])
+        assert result.skipped[0][1] == DONATION_SKIP_REASON
+
+    def test_a_donation_titled_entry_with_real_money_is_still_insured(self, bfmr, transport):
+        """Money outranks the title: a mislabel must never leave actual value uninsured."""
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "status": "shipped", "order_id": "O1",
+                     "deal_title": "Toy Drive Special", "qty": "1",
+                     "payout_price": 631, "total_payout": "631.00"}),
+            insured(),
+            FakeResponse(payload={"message": "filed"}),
+            insured(("TBA1", 2.97, 631)),
+        ]
+        assert bfmr.file_insurance([submission(tracking_number="TBA1")]).submitted == ["TBA1"]
+
     def test_a_combined_box_with_a_real_order_is_still_filed(self, bfmr, transport):
         """ALL entries under the number must pay a cent. A box also carrying a real deal has real
         money riding on it — skipping its filing would leave that money uninsured."""

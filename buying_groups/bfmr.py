@@ -44,6 +44,7 @@ BFMR push as a validation event.
 
 import dataclasses
 import logging
+import re
 
 from buying_groups.base import (
     BuyingGroupError,
@@ -1132,21 +1133,34 @@ def _index_donation_shipments(tracker: list[dict]) -> dict[str, bool]:
     exceeds 1. `payout_price` is BFMR's own per-unit figure (0.01 on the live qty-10 entry);
     `total_payout / qty` is the fallback when it's absent.
 
-    EVERY entry under the number must pay at most a cent a unit. A combined box that also carries
-    a real order still has real value riding on it, and skipping its filing would leave that money
-    uninsured — the miss that costs more than a wasted probe. An entry whose money fields do not
-    parse counts as real for the same reason.
+    The deal TITLE is the second signal: the donation program runs continuously
+    under a stable name ("Year Round Toy Drive"), so a matching title rescues an entry whose money
+    fields don't parse or whose token payout drifts off exactly one cent. Money still outranks it:
+    a donation-titled entry carrying real per-unit value (>= $1) counts as REAL, because a mislabel
+    must never leave actual money uninsured.
+
+    EVERY entry under the number must qualify. A combined box that also carries a real order still
+    has real value riding on it, and skipping its filing would leave that money uninsured — the
+    miss that costs more than a wasted probe. An entry with an unmatched title AND unparseable
+    money counts as real for the same reason.
     """
-    totals: dict[str, list] = {}
+    flags: dict[str, list] = {}
     for entry in tracker:
         number = _tracking_of(entry)
         if number and not _is_insurance_fee_row(entry):
-            totals.setdefault(number, []).append(_per_unit_payout(entry))
-    return {
-        number: True
-        for number, amounts in totals.items()
-        if amounts and all(amount is not None and amount <= 0.011 for amount in amounts)
-    }
+            flags.setdefault(number, []).append(_is_donation_entry(entry))
+    return {number: True for number, entries in flags.items() if entries and all(entries)}
+
+
+_DONATION_TITLE_RE = re.compile(r"donation|toy drive", re.IGNORECASE)
+
+
+def _is_donation_entry(entry: dict) -> bool:
+    per_unit = _per_unit_payout(entry)
+    if per_unit is not None and per_unit <= 0.011:
+        return True
+    return (bool(_DONATION_TITLE_RE.search(str(entry.get("deal_title") or "")))
+            and (per_unit is None or per_unit < 1.0))
 
 
 def _per_unit_payout(entry: dict) -> float | None:
