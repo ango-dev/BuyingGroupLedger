@@ -694,6 +694,11 @@ class BFMRClient(HttpClient):
                 insurance=None,
                 order_id=_order_id_of(entry),
                 status=status,
+                # Both of BFMR's names for the item, so allocate_payouts can tell two deals of one
+                # order apart when their outcomes diverge inside one box (deal_title is the deal's
+                # own wording, item_name their catalog line — either can carry the matching words).
+                item_hint=" ".join(part for part in (
+                    str(entry.get("deal_title") or ""), str(entry.get("item_name") or "")) if part),
             ))
 
         # The insurance list is authoritative for the premium, and unlike the fee row it exists from

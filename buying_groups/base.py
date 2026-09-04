@@ -137,6 +137,11 @@ class PayoutRecord:
     #: about the package's journey (shipped/delivered) stays the retailer's to report, or the two
     #: sources would overwrite each other on every run.
     status: str = ""
+    #: What ITEM this record is about, in the group's own words (BFMR: deal_title + their item_name).
+    #: One order can hold two deals with DIVERGING outcomes in one box, and this is what lets allocate_payouts match
+    #: each record to its own ledger row by word overlap instead of walking the whole order. Blank
+    #: means "no item information" (every MOD record) and keeps the order-level behavior.
+    item_hint: str = ""
 
 
 @dataclass

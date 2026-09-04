@@ -857,6 +857,77 @@ class TestDonationShipments:
         assert alerts and "insurance filing(s) rejected" in alerts[0]
 
 
+class TestDealScopedAllocation:
+    """One order, two deals, one box, DIVERGING outcomes. Records carry BFMR's own wording (`item_hint`); rows are partitioned by word
+    overlap with their Item Name, and anything unclean falls back to the merged behavior."""
+
+    ROWS = {"T1": [11, 12]}
+    COSTS = {11: 68.0, 12: 60.0}
+    STATUS = {11: "shipped", 12: "shipped"}
+    ORDERS = {11: "O1", 12: "O1"}
+    ITEMS = {11: "Apple AirTag (2nd Generation) - 4 Pack: Tracker",
+             12: "Fitbit Google Air - Screenless Activity Tracker, Obsidian"}
+
+    def _writes(self, records, items=None):
+        from buying_groups.base import PayoutRecord
+        return sync_tracking.allocate_payouts(
+            [PayoutRecord(**r) for r in records],
+            rows_by_tracking=dict(self.ROWS), costs_by_row=dict(self.COSTS),
+            status_by_row=dict(self.STATUS), order_of_row=dict(self.ORDERS),
+            item_of_row=dict(items if items is not None else self.ITEMS),
+        )
+
+    def test_the_returned_deal_marks_only_its_own_row(self):
+        writes = self._writes([
+            {"tracking_number": "T1", "order_id": "O1", "status": "return",
+             "item_hint": "Apple AirTag - Four Pack (2nd Generation) Apple AirTag"},
+            {"tracking_number": "T1", "order_id": "O1", "status": "paid", "payout_amount": 97.0,
+             "payout_date": "2026-09-03",
+             "item_hint": "Google - Fitbit Air - Obsidian Google - Fitbit Air"},
+        ])
+        assert writes[11][sync_tracking.STATUS_COL] == "return"
+        assert sync_tracking.PAYOUT_AMOUNT_COL not in writes[11], "the returned deal has no money"
+        assert writes[12][sync_tracking.STATUS_COL] == "paid"
+        assert writes[12][sync_tracking.PAYOUT_AMOUNT_COL] == 97.0, "the paid deal's FULL amount"
+        assert writes[12][sync_tracking.PAYOUT_DATE_COL] == "2026-09-03"
+
+    def test_indistinguishable_rows_fall_back_to_the_merged_order_level(self):
+        # Two rows with the SAME item name can't be told apart -- the old (coarse but money-safe)
+        # merge applies rather than a guess.
+        writes = self._writes(
+            [
+                {"tracking_number": "T1", "order_id": "O1", "status": "return",
+                 "item_hint": "Apple AirTag - Four Pack"},
+                {"tracking_number": "T1", "order_id": "O1", "status": "paid",
+                 "payout_amount": 97.0, "item_hint": "Google - Fitbit Air"},
+            ],
+            items={11: "Widget", 12: "Widget"},
+        )
+        assert writes[11][sync_tracking.STATUS_COL] == "return"
+        assert writes[12][sync_tracking.STATUS_COL] == "return"
+
+    def test_a_deal_matching_no_row_falls_back_rather_than_dropping_its_money(self):
+        writes = self._writes(
+            [
+                {"tracking_number": "T1", "order_id": "O1", "status": "paid",
+                 "payout_amount": 50.0, "item_hint": "Apple AirTag"},
+                {"tracking_number": "T1", "order_id": "O1", "status": "paid",
+                 "payout_amount": 47.0, "item_hint": "PlayStation 6 Console"},
+            ],
+            items={11: "Apple AirTag 4 Pack", 12: "Apple AirTag 4 Pack Extra"},
+        )
+        total = sum(w[sync_tracking.PAYOUT_AMOUNT_COL] for w in writes.values())
+        assert round(total, 2) == 97.0, "the unmatchable deal's money folds into the order, not away"
+
+    def test_records_without_hints_keep_the_old_order_level_merge(self):
+        writes = self._writes([
+            {"tracking_number": "T1", "order_id": "O1", "status": "paid", "payout_amount": 97.0},
+            {"tracking_number": "T1", "order_id": "O1", "status": "return"},
+        ])
+        assert writes[11][sync_tracking.STATUS_COL] == "return"
+        assert writes[12][sync_tracking.STATUS_COL] == "return"
+
+
 class TestOrderScopedAllocation:
     """One tracking number, two orders, two outcomes. The paid order's rows must get the full payout and
     stay paid; the returned order's rows get the return; nothing is netted across orders."""

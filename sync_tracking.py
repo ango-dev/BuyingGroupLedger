@@ -157,6 +157,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     skipped_cancelled = 0
     settled_keys: set[tuple[str, str]] = set()
     corrupted_tracking: list[tuple[int, str, str]] = []
+    item_of_row: dict[int, str] = {}
 
     for offset, row in enumerate(data_rows):
         row_number = offset + 2  # row 1 is the header
@@ -238,6 +239,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         cost = _as_float(cell("Total Cost"))
         costs_by_row[row_number] = cost or 0.0
         status_by_row[row_number] = cell("Status").lower()
+        item_of_row[row_number] = cell("Item Name")
         insurance_by_row[row_number] = cell(INSURANCE_COL)
         submitted_by_row[row_number] = _is_ticked(cell(SUBMITTED_COL))
         rows_by_tracking.setdefault(tracking, []).append(row_number)
@@ -284,6 +286,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "by_group": by_group,
         "rows_by_tracking": rows_by_tracking,
         "order_of_row": order_of_row,
+        "item_of_row": item_of_row,
         "costs_by_row": costs_by_row,
         "status_by_row": status_by_row,
         "insurance_by_row": insurance_by_row,
@@ -307,6 +310,7 @@ def allocate_payouts(
     status_by_row: dict[int, str] | None = None,
     insurance_by_row: dict[int, str] | None = None,
     order_of_row: dict[int, str] | None = None,
+    item_of_row: dict[int, str] | None = None,
 ) -> dict[int, dict]:
     """Spread each package's payout across the ledger rows that make up that package.
 
@@ -325,6 +329,15 @@ def allocate_payouts(
     sheet does not know under this tracking number folds back into the tracking-level remainder
     rather than being dropped.
 
+    AND ONE ORDER CAN HOLD TWO DEALS WITH DIFFERENT OUTCOMES IN ONE BOX. Live on
+    114-5684551: the AirTag deal `returned`, the Fitbit deal `paid` $97 — same order, same tracking
+    — and the order-level merge walked BOTH rows to `return`. Records carrying an `item_hint`
+    (BFMR's deal_title + item name) are therefore kept apart per deal, and the order's rows are
+    partitioned among them by WORD OVERLAP with each row's Item Name (BFMR shortens names, but the
+    distinctive words — model, color — survive). The partition must be clean: every row picks a
+    unique best-matching deal and every deal claims at least one row, or the whole order falls back
+    to the merged order-level behavior rather than guessing where money and outcomes land.
+
     Rows whose costs are all zero (or missing) split the payout evenly rather than dividing by zero;
     that only happens for rows the scraper never priced, and an even split is at least defensible.
 
@@ -333,6 +346,7 @@ def allocate_payouts(
     status_by_row = status_by_row or {}
     insurance_by_row = insurance_by_row or {}
     order_of_row = order_of_row or {}
+    item_of_row = item_of_row or {}
     totals: dict[str, dict] = {}
     for record in records:
         bucket = totals.setdefault(
@@ -341,8 +355,13 @@ def allocate_payouts(
         )
         target = bucket
         if record.order_id:
-            target = bucket["orders"].setdefault(
-                record.order_id, {"amount": None, "date": "", "status": ""})
+            # Sub-bucketed PER DEAL within the order (see the docstring): records about different
+            # items must not merge, or one deal's `return` outranks the other deal's `paid` on
+            # every row. Records with no item information share the "" key and merge as before.
+            deals = bucket["orders"].setdefault(record.order_id, {})
+            key = " ".join(sorted(_hint_tokens(record.item_hint)))
+            target = deals.setdefault(
+                key, {"amount": None, "date": "", "status": "", "hint": record.item_hint})
         if record.payout_amount is not None:
             target["amount"] = (target["amount"] or 0.0) + record.payout_amount
         if record.insurance is not None:
@@ -362,18 +381,34 @@ def allocate_payouts(
         groups: list[tuple[list[int], dict]] = []
         claimed: set[int] = set()
         fallback = {"amount": bucket["amount"], "date": bucket["date"], "status": bucket["status"]}
-        for oid, sub in bucket["orders"].items():
+        for oid, deals in bucket["orders"].items():
             scoped = [n for n in row_numbers if order_of_row.get(n) == oid]
-            if scoped:
-                groups.append((scoped, sub))
-                claimed.update(scoped)
+            if not scoped:
+                for sub in deals.values():
+                    if sub["amount"] is not None:
+                        fallback["amount"] = (fallback["amount"] or 0.0) + sub["amount"]
+                    if sub["date"] and not fallback["date"]:
+                        fallback["date"] = sub["date"]
+                    if _status_rank(sub["status"]) > _status_rank(fallback["status"]):
+                        fallback["status"] = sub["status"]
+                continue
+            claimed.update(scoped)
+            subs = list(deals.values())
+            if len(subs) == 1:
+                groups.append((scoped, subs[0]))
+                continue
+            partition = _split_rows_by_deal(scoped, subs, item_of_row)
+            if partition is not None:
+                groups.extend((rows, sub) for sub, rows in zip(subs, partition))
             else:
-                if sub["amount"] is not None:
-                    fallback["amount"] = (fallback["amount"] or 0.0) + sub["amount"]
-                if sub["date"] and not fallback["date"]:
-                    fallback["date"] = sub["date"]
-                if _status_rank(sub["status"]) > _status_rank(fallback["status"]):
-                    fallback["status"] = sub["status"]
+                # Can't tell which row is which deal — merge to order level (the pre-item_hint
+                # behavior) rather than guess where the money and the outcomes land.
+                log.warning(
+                    "%s / %s: %d deal record(s) but the rows' item names don't partition cleanly; "
+                    "allocating order-level (a mixed outcome may over-mark rows -- check by hand).",
+                    tracking, oid, len(subs),
+                )
+                groups.append((scoped, _merge_deal_subs(subs)))
         rest = [n for n in row_numbers if n not in claimed]
         if rest:
             groups.append((rest, fallback))
@@ -422,6 +457,51 @@ def allocate_payouts(
                 if any(v not in ("", None) for v in cells.values()):
                     writes[row_number] = cells
     return writes
+
+
+_HINT_STOPWORDS = {"the", "a", "an", "and", "of", "with", "for", "in", "by", "to"}
+
+
+def _hint_tokens(text: str) -> set[str]:
+    """Comparable words of an item description: lowercase alphanumeric runs, minus filler."""
+    return {t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if t not in _HINT_STOPWORDS}
+
+
+def _split_rows_by_deal(scoped: list[int], subs: list[dict],
+                        item_of_row: dict[int, str]) -> list[list[int]] | None:
+    """Partition one order's rows among its deal records by word overlap, or None when unsure.
+
+    Each row goes to the deal whose hint shares the MOST words with the row's Item Name (BFMR
+    shortens names, but the distinctive words — model, color, brand — survive both sides). The
+    partition only stands when it is CLEAN: every row has a unique, nonzero best match and every
+    deal claims at least one row. Anything less falls back to the merged order-level allocation —
+    mis-attributing a `return` or a payout to the wrong row is worse than the old coarseness.
+    """
+    assignment: list[list[int]] = [[] for _ in subs]
+    sub_tokens = [_hint_tokens(sub.get("hint", "")) for sub in subs]
+    for n in scoped:
+        row_tokens = _hint_tokens(item_of_row.get(n, ""))
+        scores = [len(row_tokens & tokens) for tokens in sub_tokens]
+        best = max(scores)
+        if best == 0 or scores.count(best) > 1:
+            return None
+        assignment[scores.index(best)].append(n)
+    if any(not rows for rows in assignment):
+        return None  # a deal with money or an outcome would land on no row and silently vanish
+    return assignment
+
+
+def _merge_deal_subs(subs: list[dict]) -> dict:
+    """One order-level bucket from several deal records — the pre-item_hint behavior."""
+    merged: dict = {"amount": None, "date": "", "status": ""}
+    for sub in subs:
+        if sub["amount"] is not None:
+            merged["amount"] = (merged["amount"] or 0.0) + sub["amount"]
+        if sub["date"] and not merged["date"]:
+            merged["date"] = sub["date"]
+        if _status_rank(sub["status"]) > _status_rank(merged["status"]):
+            merged["status"] = sub["status"]
+    return merged
 
 
 def _status_rank(status: str) -> int:
@@ -678,7 +758,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
     payouts = client.fetch_payouts([r.tracking_number for r in rows])
     _merge_writes(all_writes, allocate_payouts(
         payouts, plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
-        plan["insurance_by_row"], plan.get("order_of_row"),
+        plan["insurance_by_row"], plan.get("order_of_row"), plan.get("item_of_row"),
     ))
     log.info("%s: %d payout record(s) read back", group_key, len(payouts))
 
