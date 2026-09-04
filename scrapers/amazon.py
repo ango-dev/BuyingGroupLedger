@@ -76,6 +76,10 @@ class AmazonScraper(BaseRetailerScraper):
     promise_selector = "h1.pt-promise-main-slot"
     delivery_card_selector = ".pt-delivery-card-wrapper"
     tracking_number_selector = ".pt-delivery-card-trackingId"  # text reads "Tracking ID: <number>"
+    # Pre-estimate state — twin of scrapers/amazon_business.py (where the dossier caught it live,
+    # 2026-09-04): before Amazon has a delivery estimate the pt page has NO pt-* elements, just
+    # this container reading "Order received".
+    preship_promise_selector = ".promise-container-inner"
 
     # Audited against the captured page by the failure dossier (see BaseRetailerScraper).
     diagnostic_selectors = {
@@ -83,6 +87,7 @@ class AmazonScraper(BaseRetailerScraper):
         "pt_promise_headline": promise_selector,
         "pt_delivery_card": delivery_card_selector,
         "pt_tracking_number": tracking_number_selector,
+        "pt_preship_promise": preship_promise_selector,
         "signin_email": "#ap_email",
         "signin_password": "#ap_password",
         "signin_claim": "#ap-claim",
@@ -118,6 +123,12 @@ class AmazonScraper(BaseRetailerScraper):
         """
         promise_el = page.query_selector(self.promise_selector)
         if promise_el is None:
+            # PRE-ESTIMATE state — twin of scrapers/amazon_business.py, see the note there. Gated
+            # on the exact "Order received" wording so any other unknown layout still fails loudly.
+            early = page.query_selector(self.preship_promise_selector)
+            if early is not None and "order received" in early.inner_text().strip().lower():
+                return {"status": "ordered", "tracking_number": "",
+                        "delivery_promise": early.inner_text().strip()}
             return None  # unexpected layout / not the tracking page → dossier problem
         promise = promise_el.inner_text().strip()
         lowered = promise.lower()

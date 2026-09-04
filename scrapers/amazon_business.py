@@ -76,6 +76,9 @@ class AmazonBusinessScraper(BaseRetailerScraper):
     promise_selector = "h1.pt-promise-main-slot"
     delivery_card_selector = ".pt-delivery-card-wrapper"
     tracking_number_selector = ".pt-delivery-card-trackingId"  # text reads "Tracking ID: <number>"
+    # An order SO early Amazon has no delivery estimate renders a minimal pt page with NO pt-*
+    # elements at all — just this container reading "Order received".
+    preship_promise_selector = ".promise-container-inner"
 
     # Audited against the captured page by the failure dossier (see BaseRetailerScraper).
     diagnostic_selectors = {
@@ -83,6 +86,7 @@ class AmazonBusinessScraper(BaseRetailerScraper):
         "pt_promise_headline": promise_selector,
         "pt_delivery_card": delivery_card_selector,
         "pt_tracking_number": tracking_number_selector,
+        "pt_preship_promise": preship_promise_selector,
         "history_next_page": "li.a-last:not(.a-disabled) a",
         "signin_email": "#ap_email",
         "signin_password": "#ap_password",
@@ -119,6 +123,15 @@ class AmazonBusinessScraper(BaseRetailerScraper):
         """
         promise_el = page.query_selector(self.promise_selector)
         if promise_el is None:
+            # PRE-ESTIMATE state: before Amazon has a delivery estimate the
+            # pt page renders none of the pt-* elements — just a promise container reading "Order
+            # received". That is a legitimate 'ordered', not a stale selector. Gated on that exact
+            # wording deliberately: any OTHER text in this container is an unknown layout and must
+            # still fail loudly, or a shipped order could quietly read as unshipped forever.
+            early = page.query_selector(self.preship_promise_selector)
+            if early is not None and "order received" in early.inner_text().strip().lower():
+                return {"status": "ordered", "tracking_number": "",
+                        "delivery_promise": early.inner_text().strip()}
             return None  # unexpected layout / not the tracking page → dossier problem
         promise = promise_el.inner_text().strip()
         lowered = promise.lower()

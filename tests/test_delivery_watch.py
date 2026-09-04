@@ -82,3 +82,40 @@ class TestReadTrackingPage:
         info = self.read({self.P: "Delivered", self.C: "x", self.T: "Tracking ID: TBA303999"})
         assert info["status"] == "delivered"
         assert info["tracking_number"] == "TBA303999"
+
+
+class TestPreEstimateState:
+    """The pt page BEFORE Amazon has a delivery estimate:
+    no pt-* elements at all — just `.promise-container-inner` reading "Order received" (the page's
+    state JSON showed shortStatus ORDER_PLACED, trackingId ""). A legitimate 'ordered', not a stale
+    selector — but ONLY on that exact wording, so a truly unknown layout still fails loudly."""
+
+    scraper = AmazonScraper(ProfileConfig(label="p1", profile_id="x", retailers=["amazon"]))
+    E = AmazonScraper.preship_promise_selector
+
+    def read(self, elements):
+        return AmazonScraper.read_tracking_page(self.scraper, SelectorPage(elements))
+
+    def test_order_received_is_a_legitimate_ordered(self):
+        info = self.read({self.E: "Order received"})
+        assert info is not None
+        assert info["status"] == "ordered"
+        assert info["tracking_number"] == ""
+
+    def test_any_other_wording_in_that_container_is_still_unreadable(self):
+        assert self.read({self.E: "Something unrecognized"}) is None
+
+    def test_the_normal_promise_headline_still_wins_when_both_render(self):
+        info = self.read({AmazonScraper.promise_selector: "Arriving tomorrow",
+                          self.E: "Order received"})
+        assert info["status"] == "ordered"
+
+
+def test_business_scraper_shares_the_pre_estimate_reader():
+    from models.profile import ProfileConfig as PC
+    from scrapers.amazon_business import AmazonBusinessScraper
+    s = AmazonBusinessScraper(PC(label="p2", profile_id="y", retailers=["amazon-business"]))
+    info = AmazonBusinessScraper.read_tracking_page(
+        s, SelectorPage({AmazonBusinessScraper.preship_promise_selector: "Order received"}))
+    assert info is not None and info["status"] == "ordered"
+    assert AmazonBusinessScraper.read_tracking_page(s, SelectorPage({})) is None
