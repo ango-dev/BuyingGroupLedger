@@ -636,9 +636,14 @@ class BFMRClient(HttpClient):
 
         records: list[PayoutRecord] = []
         fee_row_premiums: dict[str, int] = {}   # ledger number -> its index in `records`
-        # (number, order, shipment_id) -> [(index in `records`, total_payout weight)] for settled
-        # deal rows, so the per-shipment `amount_paid` stamp can be apportioned after the loop.
-        shipment_paid: dict[tuple[str, str, str], list[tuple[int, float]]] = {}
+        # (number, shipment_id) -> [(index in `records`, total_payout weight)] for settled deal
+        # rows, so the per-shipment `amount_paid` stamp can be apportioned after the loop. NOT
+        # order-scoped: one box can hold TWO ORDERS (bare number, one shared shipment object) and
+        # the stamp spans both
+        # from different Amazon orders. And not tracking-only: the tracker holds twin "Referral
+        # Bonus" entries with IDENTICAL $250 figures that are genuinely two payments — their
+        # different shipment_ids are what tells them apart from one duplicated stamp.
+        shipment_paid: dict[tuple[str, str], list[tuple[int, float]]] = {}
         for entry in self.fetch_tracker():
             spelling = _tracking_of(entry)
             number = lookup.get(spelling, "")
@@ -687,7 +692,7 @@ class BFMRClient(HttpClient):
 
             if settled is not None:
                 shipment_paid.setdefault(
-                    (number, _order_id_of(entry), str(entry.get("shipment_id") or "")), []
+                    (number, str(entry.get("shipment_id") or "")), []
                 ).append((len(records), parse_money(entry.get("total_payout")) or 0.0))
             records.append(PayoutRecord(
                 tracking_number=number,

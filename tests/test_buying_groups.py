@@ -1460,6 +1460,35 @@ class TestBfmrPayoutsAndStatus:
         assert round(sum(amounts), 2) == 100.00, "the last share takes the rounding remainder"
         assert amounts[0] > amounts[1]
 
+    def test_a_stamp_spanning_two_orders_in_one_box_is_still_counted_once(self, bfmr, transport):
+        """One box can hold TWO ORDERS (bare number, one shared shipment object) and the stamp
+        spans both: $481 stamped on a $439 Switch and a $42 Echo Dot from
+        different Amazon orders. Order-scoped grouping missed it; the shipment object is the
+        boundary that matters."""
+        transport.responses = [tracker(
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "481.00", "total_payout": "439.00", "date_paid": "09/03/2026",
+             "deal_title": "Nintendo Switch 2 Console"},
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O2", "status": "paid",
+             "amount_paid": "481.00", "total_payout": "42.00", "date_paid": "09/03/2026",
+             "deal_title": "Amazon Echo Dot 5 - 2022"},
+        )]
+        assert [r.payout_amount for r in bfmr.fetch_payouts(["TBA1"])] == [439.0, 42.0]
+
+    def test_identical_figures_on_different_shipments_are_two_real_payments(self, bfmr, transport):
+        """The live tracker holds twin "Referral Bonus" entries with IDENTICAL $250 figures that
+        are genuinely two payments — their different shipment_ids are what keeps them apart from
+        one duplicated stamp. Grouping by tracking number alone would halve them."""
+        transport.responses = [tracker(
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "250.00", "total_payout": "250.00", "date_paid": "09/03/2026",
+             "deal_title": "Bonus A"},
+            {"tracking_number": "TBA1", "shipment_id": "S2", "order_id": "O1", "status": "paid",
+             "amount_paid": "250.00", "total_payout": "250.00", "date_paid": "09/03/2026",
+             "deal_title": "Bonus B"},
+        )]
+        assert [r.payout_amount for r in bfmr.fetch_payouts(["TBA1"])] == [250.0, 250.0]
+
     def test_differing_figures_on_one_shipment_are_left_as_reported(self, bfmr, transport):
         """Different numbers cannot be one duplicated stamp — treat them as genuinely per-purchase
         rather than guessing which to keep."""
