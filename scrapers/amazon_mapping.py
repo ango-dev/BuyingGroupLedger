@@ -453,6 +453,34 @@ def _order_subtotal(summary_el) -> float | None:
     return _num(m.group(1)) if m else None
 
 
+def _sum_split_quantity_lines(rows: list[OrderItem]) -> list[OrderItem]:
+    """Amazon sometimes SPLITS one line's quantity into several item blocks inside ONE shipment
+    card — and the qty-1 block carries no `.od-item-view-qty` badge at all. Live on
+    113-9990028-9990028: 4 Apple Watches rendered as a qty-3 block plus a badgeless block, so the
+    order parsed as two rows (3 and 1) under the SAME upsert key, and ledger_sync's collapse kept
+    one and silently dropped the +1.
+
+    Two same-item rows in the SAME shipment can only be that split, so they sum: the upsert key has
+    no column that could ever tell them apart. Same item across DIFFERENT shipments is a genuine
+    split and is untouched. Runs AFTER _reconcile_against_subtotal so a duplicated (re-tracked)
+    card has already been dropped rather than summed, and skips anything that helper left
+    unresolved ('*') or cancelled (quantity None).
+    """
+    merged: dict[tuple, OrderItem] = {}
+    out: list[OrderItem] = []
+    for row in rows:
+        key = (row.shipment, row.item_name, row.cost_per_item, row.status)
+        first = merged.get(key)
+        if first is None or not isinstance(row.quantity, int) or not isinstance(first.quantity, int):
+            merged.setdefault(key, row)
+            out.append(row)
+            continue
+        first.quantity += row.quantity
+        if first.cost_per_item is not None:
+            first.total_cost = round(first.quantity * first.cost_per_item, 2)
+    return out
+
+
 def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
                                 order_id: str) -> list[OrderItem]:
     """Drop shipment cards that would make an order cost MORE than the order is worth.
@@ -682,6 +710,7 @@ def build_order_items(
     # A duplicated shipment card inflates the Total Cost basis the sync's cost-weighted proration
     # (and the COGS netting that reads it) divides over, so the collapse still has to run.
     rows = _reconcile_against_subtotal(rows, _order_subtotal(summary_el), order_id)
+    rows = _sum_split_quantity_lines(rows)
     # Rides to config.cards.tag_cards, which folds it into cashback_rate (see OrderItem).
     promo = _promo_cashback_rate(region)
     for row in rows:

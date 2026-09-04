@@ -685,3 +685,33 @@ def test_a_kept_gift_card_is_paid_with_a_zero_payout_dated_on_the_order():
     r = rows[0]
     assert r.status == "paid" and r.payout_amount == 0.0 and r.insurance == 0.0 and r.payout_date == "2026-08-01"
     assert r.delivery_date == "2026-08-01", "a gift card is delivered the day it is bought"
+
+
+# --- split-quantity lines (twin of test_amazon_mapping's; this retailer is where it hit live) ---
+def test_a_quantity_split_across_blocks_in_one_shipment_sums_into_one_row():
+    """113-9990028-9990028 live: 4 Apple Watches rendered in one shipment card as a
+    qty-3 block plus a badgeless (qty-1) block; the sheet recorded 3 and dropped the +1."""
+    html = _details(
+        "113-9990028-9990028", "July 22, 2026",
+        [_shipment("113-9990028-9990028", 0, "Delivered July 27",
+                   [_item("Apple Watch S11", "$299.00", qty=3),
+                    _item("Apple Watch S11", "$299.00")])],
+        subtotal="$1,196.00",
+    )
+    rows = build_order_items(html)
+    assert len(rows) == 1
+    assert rows[0].quantity == 4
+    assert rows[0].total_cost == 1196.0
+
+
+def test_the_same_item_in_two_shipments_is_a_genuine_split_not_a_sum():
+    html = _details(
+        "111-2223334-5556667", "July 26, 2026",
+        [_shipment("111-2223334-5556667", 0, "Delivered July 28",
+                   [_item("Widget", "$10.00", qty=2)], shipment_id="A"),
+         _shipment("111-2223334-5556667", 1, "Delivered July 29",
+                   [_item("Widget", "$10.00", qty=1)], shipment_id="B")],
+        subtotal="$30.00",
+    )
+    rows = build_order_items(html)
+    assert [(r.shipment, r.quantity) for r in rows] == [("1", 2), ("2", 1)]

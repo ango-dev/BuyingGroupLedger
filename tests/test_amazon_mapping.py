@@ -707,3 +707,35 @@ def test_a_kept_gift_card_is_paid_with_a_zero_payout_dated_on_the_order():
     r = rows[0]
     assert r.status == "paid" and r.payout_amount == 0.0 and r.insurance == 0.0 and r.payout_date == "2026-08-01"
     assert r.delivery_date == "2026-08-01", "a gift card is delivered the day it is bought"
+
+
+# --- split-quantity lines (one line rendered as several blocks in ONE shipment card) ------------
+def test_a_quantity_split_across_blocks_in_one_shipment_sums_into_one_row():
+    """Amazon sometimes splits one line's quantity into several item blocks inside ONE shipment
+    card — and the qty-1 block carries NO qty badge at all. Live on 113-9990028-9990028:
+    4 Apple Watches rendered as a qty-3 block plus a badgeless block. Two rows under the same
+    upsert key collapse downstream, silently dropping the +1 — so the mapping must sum them."""
+    html = _details(
+        "113-9990028-9990028", "July 22, 2026",
+        [_shipment("113-9990028-9990028", 0, "Delivered July 27",
+                   [_item("Apple Watch S11", "$299.00", qty=3),
+                    _item("Apple Watch S11", "$299.00")])],  # badgeless = qty 1
+        subtotal="$1,196.00",
+    )
+    rows = build_order_items(html)
+    assert len(rows) == 1
+    assert rows[0].quantity == 4
+    assert rows[0].total_cost == 1196.0
+
+
+def test_the_same_item_in_two_shipments_is_a_genuine_split_not_a_sum():
+    html = _details(
+        "111-2223334-5556667", "July 26, 2026",
+        [_shipment("111-2223334-5556667", 0, "Delivered July 28",
+                   [_item("Widget", "$10.00", qty=2)], shipment_id="A"),
+         _shipment("111-2223334-5556667", 1, "Delivered July 29",
+                   [_item("Widget", "$10.00", qty=1)], shipment_id="B")],
+        subtotal="$30.00",
+    )
+    rows = build_order_items(html)
+    assert [(r.shipment, r.quantity) for r in rows] == [("1", 2), ("2", 1)]
