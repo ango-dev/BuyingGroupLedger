@@ -394,11 +394,11 @@ def _shop_card_detail(order_id="1399000011", price=100.0, qty=1, discount=0.0):
 
 
 def test_a_purchased_shop_card_gets_its_own_paid_row():
-    """The Amazon 1i model ported: a bought Shop Card is inventory funding — its own row, `paid`
-    with a real $0 payout/$0 insurance, order date as payout AND delivery date, Gift Card tag
-    (deliberately unrouted). Kept regardless of the paying card, unlike the Amazons' boosted gate:
-    this account's Costco use is pure reselling."""
-    rows = build_order_items([_shop_card_detail()], "profile-alpha")
+    """The Amazon 1i model ported: a Shop Card bought on a card with an explicit Costco rate in
+    cards.json is inventory funding — its own row, `paid` with a real $0 payout/$0 insurance,
+    order date as payout AND delivery date, Gift Card tag (deliberately unrouted)."""
+    rows = build_order_items([_shop_card_detail()], "profile-alpha",
+                             keep_digital_last4s=frozenset({"4351"}))
     assert len(rows) == 1
     r = rows[0]
     assert r.status == "paid"
@@ -408,6 +408,14 @@ def test_a_purchased_shop_card_gets_its_own_paid_row():
     assert r.quantity == 1 and r.cost_per_item == 100.0 and r.total_cost == 100.0
 
 
+def test_a_shop_card_on_an_unlisted_card_is_personal_and_dropped():
+    """Same gate as both Amazons: no explicit Costco rate on the paying card ->
+    personal spending, no ledger row."""
+    assert build_order_items([_shop_card_detail()], "profile-alpha") == []
+    assert build_order_items([_shop_card_detail()], "profile-alpha",
+                             keep_digital_last4s=frozenset({"4335"})) == []
+
+
 def test_other_digital_lines_are_still_dropped_alongside_a_shop_card():
     detail = _shop_card_detail()
     detail["shipToAddress"][0]["orderLineItems"].append({
@@ -415,5 +423,5 @@ def test_other_digital_lines_are_still_dropped_alongside_a_shop_card():
         "price": 0.01, "quantity": 1, "discountAmount": 0.01, "isFeeItem": False,
         "carrierItemCategory": "Digital", "orderedShipMethod": "EDG", "itemStatus": {}, "shipment": [],
     })
-    rows = build_order_items([detail], "profile-alpha")
+    rows = build_order_items([detail], "profile-alpha", keep_digital_last4s=frozenset({"4351"}))
     assert [r.item_name for r in rows] == ["Costco Shop Card, Digital, $100 Shop Card"]

@@ -111,11 +111,12 @@ _SHOP_CARD_RE = re.compile(r"shop\s*card", re.IGNORECASE)
 
 
 def _is_shop_card(line_item: dict) -> bool:
-    """A purchased Costco Shop Card. Kept REGARDLESS of the paying card, unlike the
-    two Amazons' boosted-card gate: this account's Costco use is pure reselling, so a Shop Card
-    bought here is inventory funding by definition — orders 1399000011/1399000010 funded the $350
-    that part-paid 1399000012 — and a personally-meant one is a hand-delete, where a silently
-    dropped one is missed money. The $0.01 e-delivery software stubs stay dropped."""
+    """A purchased Costco Shop Card. Kept only when the order was paid on a card
+    with an explicit Costco rate in cards.json (`keep_digital_last4s`) — the SAME gate as both
+    Amazons: on a listed card it is funding inventory (orders
+    1399000011/1399000010 funded the $350 that part-paid 1399000012), on any other card it is
+    personal spending and stays off the ledger. The $0.01 e-delivery software stubs are dropped
+    regardless."""
     return bool(_SHOP_CARD_RE.search(str(line_item.get("itemDescription") or "")))
 
 
@@ -256,14 +257,16 @@ def build_order_items(
     order_details: list[dict],
     profile_label: str = "",
     known_open_ids: frozenset[str] | set[str] = frozenset(),
+    keep_digital_last4s: frozenset[str] = frozenset(),
 ) -> list[OrderItem]:
     items: list[OrderItem] = []
     for detail in order_details or []:
-        items.extend(_build_one_order(detail, profile_label, known_open_ids))
+        items.extend(_build_one_order(detail, profile_label, known_open_ids, keep_digital_last4s))
     return items
 
 
-def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[OrderItem]:
+def _build_one_order(detail: dict, profile_label: str, known_open_ids,
+                     keep_digital_last4s: frozenset[str] = frozenset()) -> list[OrderItem]:
     if not isinstance(detail, dict):
         raise PayloadShapeError("getOrderDetails returned a non-object order -- shape changed?", detail)
     order_id = str(detail.get("orderNumber") or "").strip()
@@ -294,7 +297,7 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
         address = _format_address(shipto)
         for line_item in shipto.get("orderLineItems") or []:
             if _is_digital(line_item):
-                if _is_shop_card(line_item):
+                if _is_shop_card(line_item) and card_last4 in keep_digital_last4s:
                     shop_card_lines.append((line_item, address))
                 continue
             item_number = str(line_item.get("itemNumber") or "").strip()

@@ -226,8 +226,14 @@ class CostcoScraper(BaseRetailerScraper):
         if not order_numbers:
             return []
         details = client.get_order_details(order_numbers)
+        # Same contract as both Amazons (scrapers/amazon_api.py): a Shop Card bought on a card with
+        # an explicit Costco rate in cards.json is funding inventory and gets its own ledger row;
+        # on any other card it is personal spending and the mapping drops it.
+        from config.cards import boosted_last4s, load_cards
+        keep_digital = boosted_last4s("costco", load_cards())
         try:
-            items = build_order_items(details, self.profile.label, known_open_ids=frozenset(open_ids))
+            items = build_order_items(details, self.profile.label, known_open_ids=frozenset(open_ids),
+                                      keep_digital_last4s=keep_digital)
         except PayloadShapeError as exc:
             from scrapers.costco_api import CostcoApiError
             diagnostics.record_response("getOrderDetails order (shape)", 200, exc.payload)
