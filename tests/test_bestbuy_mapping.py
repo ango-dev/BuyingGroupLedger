@@ -203,3 +203,24 @@ class TestAnUnparseablePayloadIsAShapeChange:
         p = self._first(payloads)
         p["order"]["groups"]["fulfillmentGroups"] = []
         assert build_order_items([p]) == []
+
+
+def test_the_live_confirmed_gift_tender_shape(payloads):
+    """CONFIRMED LIVE on BBY03-809900000009 (the user's deliberate gift-card order):
+    the gift tender is type 'giftCard' with totalNetAmount carrying what the card paid, while the
+    IN-FLIGHT credit tender reads amount 0 / chargedAmount 0 with only totalNetAmount truthful —
+    exactly the field choice _gift_card_total banked on. A KEYED card also has no creditCardNumber;
+    its last-4 rides displayCreditCardNumber. And the order id prefix is BBY03, not BBY01."""
+    payload = json.loads(json.dumps(payloads[0]))  # deep copy of a real shipped order
+    payload["order"]["userOrderId"] = "BBY03-809900000009"
+    payload["order"]["payments"] = [
+        {"type": "creditCard", "cardEntryType": "KEYED", "amount": 0, "chargedAmount": 0.0,
+         "requestedAmount": 0.43, "authorizedAmount": 0.43, "totalNetAmount": 0.43,
+         "displayCreditCardNumber": "4341"},
+        {"type": "giftCard", "amount": 5.0, "chargedAmount": 5.0, "totalNetAmount": 5.0,
+         "displaySvcNumber": "8973"},
+    ]
+    rows = _rows_for(build_order_items([payload], "profile-alpha"), "BBY03-809900000009")
+    assert rows, "a BBY03- order id must map like any BBY01- one"
+    assert rows[0].gift_card == 5.0
+    assert rows[0].card_last4 == "4341"

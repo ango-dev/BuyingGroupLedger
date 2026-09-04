@@ -313,7 +313,29 @@ class CostcoApiClient:
     def list_order_numbers(self, start_date: str, end_date: str, page_size: int = 25) -> list[str]:
         """Every online order number placed in [start_date, end_date], across the configured
         warehouse(s). Costco requires a single warehouseNumber per call and has no 'all' value, so we
-        page through each warehouse and merge, de-duplicating by order number (first seen wins)."""
+        page through each warehouse and merge, de-duplicating by order number (first seen wins).
+
+        THE WINDOW IS CHUNKED to 60-day slices because getOnlineOrders silently truncates long
+        ranges. Production's 1-3 day lookbacks never hit this; sweeps and backfills did."""
+        import datetime as _dt
+        try:
+            start = _dt.date.fromisoformat(start_date[:10])
+            end = _dt.date.fromisoformat(end_date[:10])
+        except ValueError:
+            return self._list_order_numbers_window(start_date, end_date, page_size)
+        merged: dict[str, None] = {}
+        cursor = start
+        while cursor <= end:
+            slice_end = min(cursor + _dt.timedelta(days=59), end)
+            for number in self._list_order_numbers_window(
+                cursor.isoformat(), slice_end.isoformat(), page_size
+            ):
+                merged.setdefault(number, None)
+            cursor = slice_end + _dt.timedelta(days=1)
+        return list(merged.keys())
+
+    def _list_order_numbers_window(self, start_date: str, end_date: str,
+                                   page_size: int = 25) -> list[str]:
         seen: dict[str, None] = {}
         for warehouse in self.warehouse_numbers:
             page_number = 1

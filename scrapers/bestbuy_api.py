@@ -138,14 +138,15 @@ def _history_rendered(html: str) -> bool:
 
 
 def _order_ids_and_dates(html: str) -> dict[str, str]:
-    """Bare order id (BBY01-<digits>, group suffix stripped) -> order date (YYYY-MM-DD) for every
+    """Bare order id (BBY0N-<digits> -- BBY01 usually, but BBY03 exists live (2026-09-04, order
+    BBY03-809900000009, a gift-card order) -- group suffix stripped) -> order date (YYYY-MM-DD) for every
     order in the purchase-history flight data. Date is best-effort ('' if not found)."""
     flight = _reassemble_flight(html)
     key = '"purchaseHistoryOrdersExperience"'
     idx = flight.find(key)
     if idx < 0:
         # Fall back to any bare ids in the raw HTML (no dates) so discovery still works.
-        return {oid: "" for oid in dict.fromkeys(re.findall(r"BBY01-\d+", html))}
+        return {oid: "" for oid in dict.fromkeys(re.findall(r"BBY0\d-\d+", html))}
     colon = flight.index(":", idx + len(key))
     v = colon + 1
     while v < len(flight) and flight[v] in " \t\r\n":
@@ -153,14 +154,14 @@ def _order_ids_and_dates(html: str) -> dict[str, str]:
     try:
         obj = json.loads(_match_json(flight, v))
     except (ValueError, json.JSONDecodeError):
-        return {oid: "" for oid in dict.fromkeys(re.findall(r"BBY01-\d+", html))}
+        return {oid: "" for oid in dict.fromkeys(re.findall(r"BBY0\d-\d+", html))}
 
     result: dict[str, str] = {}
 
     def walk(node):
         if isinstance(node, dict):
             raw_id = node.get("id")
-            if isinstance(raw_id, str) and raw_id.startswith("BBY01-"):
+            if isinstance(raw_id, str) and re.match(r"BBY0\d-", raw_id):
                 bare = raw_id.split("-group")[0]
                 created = node.get("created")
                 date = created[:10] if isinstance(created, str) and len(created) >= 10 else ""
@@ -514,7 +515,7 @@ TWO_STEP_TRUST_CHECKBOX = "#cia-trust-me"
 DIAGNOSTIC_SELECTORS: dict[str, str] = {
     "flight_chunk": "text:self.__next_f.push([1,",
     "flight_orders_key": 'text:"purchaseHistoryOrdersExperience"',
-    "flight_order_id": "text:BBY01-",
+    "flight_order_id": "text:BBY0",
     "signin_form": ".cia-signin",
     "signin_email_field": "#fld-e",
     "signin_prefilled_email": ".prefilled-value, .cia-signin__username",

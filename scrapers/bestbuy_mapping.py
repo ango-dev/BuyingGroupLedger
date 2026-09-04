@@ -83,11 +83,15 @@ def _is_gift_tender(payment: dict) -> bool:
 
 
 def _card_last4(payments: list) -> str:
-    """Last 4 of the real payment card. Skip gift cards / non-card tenders (no reusable last-4)."""
+    """Last 4 of the real payment card. Skip gift cards / non-card tenders (no reusable last-4).
+
+    A card KEYED at checkout (cardEntryType "KEYED", live on BBY03-809900000009) has no
+    `creditCardNumber` field at all — its number rides `displayCreditCardNumber` (bare last-4)
+    instead, so that is the fallback."""
     for payment in payments or []:
         if _is_gift_tender(payment):
             continue
-        number = (payment.get("creditCardNumber") or "").strip()
+        number = (payment.get("creditCardNumber") or payment.get("displayCreditCardNumber") or "").strip()
         if number:
             return number[-4:]
     return ""

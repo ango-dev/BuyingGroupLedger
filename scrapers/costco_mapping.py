@@ -44,6 +44,9 @@ open in the sheet; a brand-new fully-cancelled order (not in that set) is ignore
 a recorded order that has since been cancelled is emitted as `cancelled` so its rows go terminal.
 """
 
+import re
+
+from config.warehouses import GIFT_CARD
 from models.order import OrderItem, shipment_label
 
 RETAILER = "Costco"
@@ -102,6 +105,18 @@ def _is_digital(line_item: dict) -> bool:
     if (line_item.get("orderedShipMethod") or "").strip().upper() == "EDG":
         return True
     return False
+
+
+_SHOP_CARD_RE = re.compile(r"shop\s*card", re.IGNORECASE)
+
+
+def _is_shop_card(line_item: dict) -> bool:
+    """A purchased Costco Shop Card. Kept REGARDLESS of the paying card, unlike the
+    two Amazons' boosted-card gate: this account's Costco use is pure reselling, so a Shop Card
+    bought here is inventory funding by definition — orders 1399000011/1399000010 funded the $350
+    that part-paid 1399000012 — and a personally-meant one is a hand-delete, where a silently
+    dropped one is missed money. The $0.01 e-delivery software stubs stay dropped."""
+    return bool(_SHOP_CARD_RE.search(str(line_item.get("itemDescription") or "")))
 
 
 def _shipment_status(package: dict) -> str:
@@ -274,10 +289,13 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
     # Group physical lines by SKU (itemNumber), preserving first-seen order for stable numbering.
     groups: dict[str, dict] = {}
     order_keys: list[str] = []
+    shop_card_lines: list[tuple[dict, str]] = []
     for shipto in detail.get("shipToAddress") or []:
         address = _format_address(shipto)
         for line_item in shipto.get("orderLineItems") or []:
             if _is_digital(line_item):
+                if _is_shop_card(line_item):
+                    shop_card_lines.append((line_item, address))
                 continue
             item_number = str(line_item.get("itemNumber") or "").strip()
             description = (line_item.get("itemDescription") or "").strip()
@@ -373,6 +391,39 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids) -> list[O
             shipment_number, unshipped_shipment, shipping_total, gift_card_total, sales_tax_total,
         )
     ]
+
+    # A purchased Shop Card completes the moment the balance lands (same contract as the Amazons'
+    # kept gift card, user 2026-08-30): `paid` with a real $0 payout, $0 insurance, and the order
+    # date as payout AND delivery date — no group is ever involved, the income arrives through the
+    # order the balance later pays, whose Gift Card cell nets the COGS. Tagged Gift Card so it is
+    # DELIBERATELY unrouted rather than "still awaiting submission".
+    for line_item, address in shop_card_lines:
+        quantity = int(_num(line_item.get("quantity")) or 1) or 1
+        price = _num(line_item.get("price"))
+        discount = _num(line_item.get("discountAmount")) or 0.0
+        unit = round(price - discount / quantity, 2) if price is not None else None
+        rows.append(OrderItem(
+            retailer=RETAILER,
+            profile_label=profile_label,
+            order_id=order_id,
+            order_date=order_date,
+            status="paid",
+            buying_group=GIFT_CARD,
+            payout_amount=0.0,
+            insurance=0.0,
+            payout_date=order_date,
+            delivery_date=order_date,
+            order_url=_order_url(order_id),
+            delivery_address=address,
+            item_name=(line_item.get("itemDescription") or "").strip(),
+            quantity=quantity,
+            cost_per_item=unit,
+            shipping=shipping_total,
+            gift_card=gift_card_total,
+            sales_tax=sales_tax_total,
+            card_last4=card_last4,
+            shipment=shipment_label(unshipped_shipment),
+        ))
 
     # Brand-new fully-cancelled order → ignore at discovery. A recorded (open) order that has since
     # been cancelled still flows through so its rows flip to cancelled and go terminal.
