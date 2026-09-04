@@ -1428,6 +1428,64 @@ class TestBfmrPayoutsAndStatus:
         transport.responses = [self._payout_row(amount_paid="2,210.00")]
         assert bfmr.fetch_payouts(["TBA1"])[0].payout_amount == 2210.0
 
+    def test_the_shipment_total_stamped_on_every_purchase_is_counted_once(self, bfmr, transport):
+        """BFMR stamps `amount_paid` PER SHIPMENT, duplicated onto every purchase entry sharing the
+        shipment_id. Summing the
+        duplicates booked $11,358 against a $3,900 order. Identical figures on one shipment are ONE
+        total, apportioned by each purchase's total_payout."""
+        transport.responses = [tracker(
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "3786.00", "total_payout": "1,262.00", "date_paid": "09/03/2026",
+             "deal_title": "iPad Air", "item_name": "iPad Air - Blue"},
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "3786.00", "total_payout": "1,262.00", "date_paid": "09/03/2026",
+             "deal_title": "iPad Air", "item_name": "iPad Air - Starlight"},
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "3786.00", "total_payout": "1,262.00", "date_paid": "09/03/2026",
+             "deal_title": "iPad Air", "item_name": "iPad Air - Space Gray"},
+        )]
+        records = bfmr.fetch_payouts(["TBA1"])
+        assert [r.payout_amount for r in records] == [1262.0, 1262.0, 1262.0]
+
+    def test_apportionment_follows_each_purchases_worth_and_sums_to_the_cent(self, bfmr, transport):
+        transport.responses = [tracker(
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "100.00", "total_payout": "66.67", "date_paid": "09/03/2026",
+             "deal_title": "A"},
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "100.00", "total_payout": "33.33", "date_paid": "09/03/2026",
+             "deal_title": "B"},
+        )]
+        amounts = [r.payout_amount for r in bfmr.fetch_payouts(["TBA1"])]
+        assert round(sum(amounts), 2) == 100.00, "the last share takes the rounding remainder"
+        assert amounts[0] > amounts[1]
+
+    def test_differing_figures_on_one_shipment_are_left_as_reported(self, bfmr, transport):
+        """Different numbers cannot be one duplicated stamp — treat them as genuinely per-purchase
+        rather than guessing which to keep."""
+        transport.responses = [tracker(
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "100.00", "total_payout": "100.00", "date_paid": "09/03/2026",
+             "deal_title": "A"},
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "50.00", "total_payout": "50.00", "date_paid": "09/03/2026",
+             "deal_title": "B"},
+        )]
+        assert [r.payout_amount for r in bfmr.fetch_payouts(["TBA1"])] == [100.0, 50.0]
+
+    def test_a_diverging_box_keeps_the_paid_deals_full_amount(self, bfmr, transport):
+        """A returned entry reports no settled amount, so it never joins the shipment group and the
+        one paid deal keeps the whole figure — the 114-5684551 AirTag/Fitbit shape."""
+        transport.responses = [tracker(
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "returned",
+             "amount_paid": "0.00", "total_payout": "79.00", "deal_title": "AirTag"},
+            {"tracking_number": "TBA1", "shipment_id": "S1", "order_id": "O1", "status": "paid",
+             "amount_paid": "97.00", "total_payout": "97.00", "date_paid": "09/03/2026",
+             "deal_title": "Fitbit Air"},
+        )]
+        records = bfmr.fetch_payouts(["TBA1"])
+        assert [r.payout_amount for r in records] == [None, 97.0]
+
     def test_the_fee_row_becomes_insurance_and_the_deal_row_stays_gross(self, bfmr, transport):
         """Each package has TWO tracker rows: the deal, and a negative FEE row (no order_id, no
         deal_title) which is the insurance premium. Summing them nets to the right bottom line but

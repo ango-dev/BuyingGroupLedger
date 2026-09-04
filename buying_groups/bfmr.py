@@ -42,6 +42,7 @@ duplicate has not been observed live. Until `scripts/bg_probe.py` answers it, tr
 BFMR push as a validation event.
 """
 
+import dataclasses
 import logging
 
 from buying_groups.base import (
@@ -635,6 +636,9 @@ class BFMRClient(HttpClient):
 
         records: list[PayoutRecord] = []
         fee_row_premiums: dict[str, int] = {}   # ledger number -> its index in `records`
+        # (number, order, shipment_id) -> [(index in `records`, total_payout weight)] for settled
+        # deal rows, so the per-shipment `amount_paid` stamp can be apportioned after the loop.
+        shipment_paid: dict[tuple[str, str, str], list[tuple[int, float]]] = {}
         for entry in self.fetch_tracker():
             spelling = _tracking_of(entry)
             number = lookup.get(spelling, "")
@@ -681,6 +685,10 @@ class BFMRClient(HttpClient):
                 # about besides payment.
                 paid, status, settled = False, "", None
 
+            if settled is not None:
+                shipment_paid.setdefault(
+                    (number, _order_id_of(entry), str(entry.get("shipment_id") or "")), []
+                ).append((len(records), parse_money(entry.get("total_payout")) or 0.0))
             records.append(PayoutRecord(
                 tracking_number=number,
                 # `amount_paid`, not `total_payout`: the latter is what the deal is WORTH and is
@@ -700,6 +708,29 @@ class BFMRClient(HttpClient):
                 item_hint=" ".join(part for part in (
                     str(entry.get("deal_title") or ""), str(entry.get("item_name") or "")) if part),
             ))
+
+        # `amount_paid` IS STAMPED PER SHIPMENT, NOT PER PURCHASE. Live on 1399000016
+        # (3 x qty-2 iPad reservations, one box): every entry read amount_paid "3786.00" — exactly
+        # the SUM of the three entries' total_payout ("1,262.00" each) — and summing the duplicates
+        # booked $11,358 against a $3,900 order. So when several settled entries share a shipment
+        # and report the IDENTICAL figure, that figure is one shipment total: count it once and
+        # apportion it across the entries by each purchase's total_payout (its worth). Entries with
+        # DIFFERING figures are left alone — different numbers cannot be one stamp. A box whose
+        # deals diverge is unaffected: a returned entry never lands in `shipment_paid` at all.
+        for members in shipment_paid.values():
+            amounts = {records[i].payout_amount for i, _ in members}
+            if len(members) < 2 or len(amounts) != 1:
+                continue
+            total = amounts.pop() or 0.0
+            weights = [w if w > 0 else 1.0 for _, w in members]
+            weight_sum = sum(weights)
+            allotted = 0.0
+            for pos, ((i, _), w) in enumerate(zip(members, weights)):
+                # Last member takes the remainder so the shares sum to the total to the cent.
+                share = (round(total - allotted, 2) if pos == len(members) - 1
+                         else round(total * w / weight_sum, 2))
+                allotted = round(allotted + share, 2)
+                records[i] = dataclasses.replace(records[i], payout_amount=share)
 
         # The insurance list is authoritative for the premium, and unlike the fee row it exists from
         # the moment a package is insured. Both sources agreed on all 30 real filings to the cent
