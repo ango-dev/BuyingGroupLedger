@@ -739,3 +739,18 @@ def test_the_same_item_in_two_shipments_is_a_genuine_split_not_a_sum():
     )
     rows = build_order_items(html)
     assert [(r.shipment, r.quantity) for r in rows] == [("1", 2), ("2", 1)]
+
+
+def test_two_identical_badged_blocks_in_one_shipment_also_sum():
+    """Twin of the Amazon Business test — 114-9990033-9990033's shape (two qty-3 badged blocks,
+    subtotal rendered blank on the live page)."""
+    html = _details(
+        "114-9990033-9990033", "September 1, 2026",
+        [_shipment("114-9990033-9990033", 0, "Arriving September 11",
+                   [_item("MacBook Air 13", "$1,259.99", qty=3),
+                    _item("MacBook Air 13", "$1,259.99", qty=3)], track=False)],
+    )
+    rows = build_order_items(html)
+    assert len(rows) == 1
+    assert rows[0].quantity == 6
+    assert rows[0].total_cost == 7559.94
