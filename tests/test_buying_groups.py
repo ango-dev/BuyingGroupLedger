@@ -616,6 +616,33 @@ class TestBfmrInsurance:
         assert result.skipped[0][1] == DONATION_SKIP_REASON
         assert "POST" not in [c["method"] for c in transport.calls]
 
+    def test_a_multi_quantity_donation_is_still_a_donation(self, bfmr, transport):
+        """total_payout is QUANTITY-SCALED: a qty-10 toy-drive reservation reads
+        "0.10", so a flat threshold on the total mistakes it for a real deal and files insurance
+        BFMR will 400-refuse. The per-unit figure (payout_price, or total/qty) is what's a cent."""
+        from buying_groups.bfmr import DONATION_SKIP_REASON
+
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "status": "shipped", "order_id": "O1",
+                     "deal_title": "Year Round Toy Drive", "qty": "10",
+                     "payout_price": 0.01, "total_payout": "0.10"}),
+            insured(),
+        ]
+        result = bfmr.file_insurance([submission(tracking_number="TBA1")])
+        assert result.skipped[0][1] == DONATION_SKIP_REASON
+        assert "POST" not in [c["method"] for c in transport.calls]
+
+    def test_the_qty_fallback_when_payout_price_is_absent(self, bfmr, transport):
+        from buying_groups.bfmr import DONATION_SKIP_REASON
+
+        transport.responses = [
+            tracker({"tracking_number": "TBA1", "status": "shipped", "order_id": "O1",
+                     "deal_title": "Toy Drive", "qty": "10", "total_payout": "0.10"}),
+            insured(),
+        ]
+        result = bfmr.file_insurance([submission(tracking_number="TBA1")])
+        assert result.skipped[0][1] == DONATION_SKIP_REASON
+
     def test_a_combined_box_with_a_real_order_is_still_filed(self, bfmr, transport):
         """ALL entries under the number must pay a cent. A box also carrying a real deal has real
         money riding on it — skipping its filing would leave that money uninsured."""

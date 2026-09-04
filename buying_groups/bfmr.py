@@ -1125,24 +1125,43 @@ def _index_donation_shipments(tracker: list[dict]) -> dict[str, bool]:
     BFMR's donation deals season an account: reserve and submit tracking as normal, payout $0.01 —
     and their insurance endpoint refuses the filing with a bare 400 "Unexpected Error" (observed
     live; before this the refusal aborted the whole filing pass every run).
-    The tracker's `total_payout` identifies one WITHOUT spending the probe call: a deal that pays a
-    cent can never be worth a premium whose floor is $2.00.
+    The tracker's money fields identify one WITHOUT spending the probe call: a deal that pays a
+    cent PER UNIT can never be worth a premium whose floor is $2.00. Per unit is the operative
+    scope: `total_payout` is quantity-scaled, so a qty-10 toy-drive reservation
+    reads "0.10" — a flat threshold on the total mistakes it for a real deal the moment quantity
+    exceeds 1. `payout_price` is BFMR's own per-unit figure (0.01 on the live qty-10 entry);
+    `total_payout / qty` is the fallback when it's absent.
 
-    EVERY entry under the number must pay at most a cent. A combined box that also carries a real
-    order still has real value riding on it, and skipping its filing would leave that money
-    uninsured — the miss that costs more than a wasted probe. An entry whose `total_payout` does
-    not parse counts as real for the same reason.
+    EVERY entry under the number must pay at most a cent a unit. A combined box that also carries
+    a real order still has real value riding on it, and skipping its filing would leave that money
+    uninsured — the miss that costs more than a wasted probe. An entry whose money fields do not
+    parse counts as real for the same reason.
     """
     totals: dict[str, list] = {}
     for entry in tracker:
         number = _tracking_of(entry)
         if number and not _is_insurance_fee_row(entry):
-            totals.setdefault(number, []).append(parse_money(entry.get("total_payout")))
+            totals.setdefault(number, []).append(_per_unit_payout(entry))
     return {
         number: True
         for number, amounts in totals.items()
         if amounts and all(amount is not None and amount <= 0.011 for amount in amounts)
     }
+
+
+def _per_unit_payout(entry: dict) -> float | None:
+    """What ONE unit of this tracker entry pays: `payout_price`, else `total_payout / qty`."""
+    price = parse_money(entry.get("payout_price"))
+    if price is not None:
+        return price
+    total = parse_money(entry.get("total_payout"))
+    if total is None:
+        return None
+    try:
+        qty = int(str(entry.get("qty") or "").strip() or "1")
+    except ValueError:
+        qty = 1
+    return total / max(qty, 1)
 
 
 def _index_purchases_by_order(tracker: list[dict]) -> dict[str, dict]:
