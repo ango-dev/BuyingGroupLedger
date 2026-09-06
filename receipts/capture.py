@@ -157,6 +157,32 @@ def _reject_if_not_final(body: bytes, ext: str, retailer_key: str, order_id: str
         )
 
 
+def _reject_if_wrong_document(body: bytes, ext: str, order_id: str) -> None:
+    """Refuse a rendered page that provably is not THIS order's receipt.
+
+    Live twice in one week: Amazon 401-bounced three order-details pages to a DIFFERENT order's
+    page (2026-09-04), and Costco's SPA rendered its HOMEPAGE shell when the order route lost the
+    load race (2026-09-05, 4 of 18 stored receipts) — the ready-selector wait fails open by
+    design, so the wrong page printed cleanly, uploaded, and marked the order receipted forever.
+    Both wrong documents share one property a real receipt cannot lack: the order's own id in the
+    text — the exact rule scripts/receipt_verify.py applies after the fact, moved to capture time
+    so the wrong document is never stored at all.
+
+    FAILS OPEN like _reject_if_not_final: a PNG, a missing pypdf, or a PDF with no extractable
+    text stores as before (an unverifiable receipt still beats no receipt) — only a READABLE
+    document that does not name the order is refused. Raising lands in attach_receipts' per-order
+    handler, so the order stays un-captured and a later run retries it.
+    """
+    if ext != "pdf":
+        return
+    text = pdf_text(body)
+    if text.strip() and order_id.lower() not in text.lower():
+        raise RuntimeError(
+            f"the rendered page for {order_id} does not contain its own order id — a wrong "
+            f"document (homepage shell / another order's page), not this receipt; not storing it"
+        )
+
+
 def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
     """Navigate to one order's receipt page and render it. Returns (body, extension).
 
@@ -189,6 +215,7 @@ def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
                  order_id)
         body = _download(page, landed)
         _reject_if_not_final(body, "pdf", retailer_key, order_id)
+        _reject_if_wrong_document(body, "pdf", order_id)
         return body, "pdf"
 
     selector = ready_selector(retailer_key)
@@ -219,6 +246,7 @@ def _capture_one(page, retailer_key: str, order_id: str) -> tuple[bytes, str]:
                     "screenshot.", order_id, type(exc).__name__, exc)
         body, ext = page.screenshot(full_page=True), "png"
     _reject_if_not_final(body, ext, retailer_key, order_id)
+    _reject_if_wrong_document(body, ext, order_id)
     return body, ext
 
 

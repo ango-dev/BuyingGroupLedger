@@ -744,9 +744,10 @@ class TestANonFinalDocumentIsNeverStored:
 
         class Mixed(FakePage):
             def new_cdp_session(self, page):
-                body = (TestANonFinalDocumentIsNeverStored.INTERIM
+                # Each order's page names ITS OWN id — the wrong-document guard checks for it.
+                body = (b"%PDF-1.4 Details for Order #BAD ... Not Yet Shipped"
                         if "BAD" in (self.visited[-1] if self.visited else "")
-                        else TestANonFinalDocumentIsNeverStored.FINAL)
+                        else b"%PDF-1.4 Final Details for Order #GOOD ... Shipped")
                 import base64
                 return type("S", (), {
                     "send": lambda _s, m, p=None: {"data": base64.b64encode(body).decode()},
@@ -792,3 +793,56 @@ class TestTheGuardFailsOpen:
         assert capture.pdf_text(b"") == ""
         assert capture.pdf_text(b"\x89PNG not a pdf at all") == ""
         assert capture.pdf_text(b"%PDF-1.4 truncated garbage") == ""
+
+
+class TestAWrongDocumentIsNeverStored:
+    """The capture-time twin of receipt_verify's own-order-id rule.
+
+    Live twice in one week: Amazon 401-bounced three order pages to a DIFFERENT order (2026-09-04)
+    and Costco's SPA rendered its HOMEPAGE shell when the order route lost the load race
+    (2026-09-05, 4 of 18 stored receipts) — the ready-selector wait fails open by design, so the
+    wrong page printed cleanly and became the permanent record. A readable document that does not
+    name its own order is refused at capture; unreadable ones still store (fail open)."""
+
+    def test_a_homepage_shell_is_refused(self, wired, monkeypatch):
+        recorder = wired(Recorder())
+        monkeypatch.setattr(capture, "pdf_text", lambda b: b.decode("latin-1"))
+        body = b"%PDF-1.4 Welcome to Costco Wholesale. Shop online. Total savings await. Visa accepted"
+        items = _items(("1399000004", "2026-06-24", "iPad"))
+
+        capture.attach_receipts(items, _profile(), "costco",
+                                browser_factory=BrowserFactory(FakePage(pdf=body)))
+
+        assert recorder.puts == [], "a homepage render must never become the permanent receipt"
+        assert items[0].receipt_url == "", "and the row stays blank so a later run retries"
+
+    def test_another_orders_page_is_refused(self, wired, monkeypatch):
+        recorder = wired(Recorder())
+        monkeypatch.setattr(capture, "pdf_text", lambda b: b.decode("latin-1"))
+        body = b"%PDF-1.4 Order #132-9990034-9990034 ... Grand Total: $12.00 ... Visa ending in 1234"
+
+        capture.attach_receipts(_items(("111-9990019-9990019", "2026-04-01", "Watch")),
+                                _profile(), "amazon",
+                                browser_factory=BrowserFactory(FakePage(pdf=body)))
+
+        assert recorder.puts == []
+
+    def test_an_unreadable_pdf_still_stores(self, wired, monkeypatch):
+        """Fail open: no extractable text means unverifiable, and unverifiable beats no receipt."""
+        recorder = wired(Recorder())
+        monkeypatch.setattr(capture, "pdf_text", lambda b: "")
+
+        capture.attach_receipts(_items(("A1", "2026-08-21", "iPad")), _profile(), "costco",
+                                browser_factory=BrowserFactory(FakePage(pdf=b"%PDF-1.4 binary")))
+
+        assert len(recorder.puts) == 1
+
+    def test_a_matching_document_stores(self, wired, monkeypatch):
+        recorder = wired(Recorder())
+        monkeypatch.setattr(capture, "pdf_text", lambda b: b.decode("latin-1"))
+        body = b"%PDF-1.4 Order Number 1399000003 ... Total $99.99 ... Visa"
+
+        capture.attach_receipts(_items(("1399000003", "2026-06-20", "Laptop")), _profile(), "costco",
+                                browser_factory=BrowserFactory(FakePage(pdf=body)))
+
+        assert len(recorder.puts) == 1
