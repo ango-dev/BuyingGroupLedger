@@ -138,6 +138,12 @@ etc.) — they're never resold, so they never hit the ledger.
   the dollar and knows it the moment the order is placed; the order's related-transactions page is
   the fallback, and on consumer Amazon the only source. If neither prices it the cell stays blank
   and the run ends with a dossier problem, rather than writing a false 0.
+
+  **The EARN side of Business Prime Rewards is deliberately not a rate.** Those points (a flat 1%
+  of the order) accrue only when an Amazon Business order chooses Amazon-day delivery on a card that
+  is not the Business Prime card, so folding them into `Cashback Rate` would misstate the orders
+  that did not qualify. The owner already subtracts all Amazon rewards from COGS at year end, outside
+  this ledger, so the sheet records rewards only when they are SPENT (the Gift Card column).
 - **Sales Tax** is its own column, read from the order summary's "Estimated tax to be collected"
   line and prorated the same way. It is usually $0.00 (the resale certificate), but a hand-kept
   order that paid tax records its true cost: the COGS formula adds it inside the cashback netting,
