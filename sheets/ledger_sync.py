@@ -50,6 +50,9 @@ HEADER = [
     # Shipping above; the COGS formula reads both.
     "Sales Tax",   # real acquisition cost: ADDED in COGS (usually 0 under the resale certificate)
     "Gift Card",   # tender the card never spent: SUBTRACTED in COGS (earns no cashback either)
+    "Rewards Used",  # Amazon rewards SPENT on the order (cash back / points): kept IN cost,
+                     # out of the cashback basis. Sits by Gift Card — both are order-level
+                     # tender the card never spent. See models/order.py.
     "Card",  # derived from Card Last 4 (config.cards.resolve_card)
     "Cashback Rate",  # decimal fraction (0.02) — format the column as a percentage to taste
     "COGS",  # a live sheet formula, written by _cogs_formula: cost + shipping, net of cashback
@@ -70,8 +73,6 @@ HEADER = [
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Last Scraped At",
-    "Rewards Used",  # Amazon rewards SPENT on the order (cash back / points): kept IN cost, out of
-                     # the cashback basis. Appended last 2026-09-08 — see models/order.py.
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is

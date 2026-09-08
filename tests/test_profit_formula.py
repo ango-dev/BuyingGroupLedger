@@ -42,10 +42,10 @@ class TestFormulaShape:
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
         # here rather than quietly producing wrong money on the sheet.
         assert ledger_sync._cogs_formula(7) == (
-            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-W7*L7-P7+N7+O7-AG7)*(1-R7)+AG7,"")))'
+            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-X7*L7-P7+N7+O7-Q7)*(1-S7)+Q7,"")))'
         )
         assert ledger_sync._profit_formula(7) == (
-            '=IF(B7="cancelled","",IF(U7="","",IFERROR(U7-S7-T7,"")))'
+            '=IF(B7="cancelled","",IF(V7="","",IFERROR(V7-T7-U7,"")))'
         )
 
     def test_profit_is_algebraically_what_it_always_was(self):

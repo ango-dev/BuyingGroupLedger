@@ -120,6 +120,13 @@ FIELDNAMES = [
     # order-level adjustment to what this row actually cost.
     "sales_tax",
     "gift_card",
+    # Amazon rewards SPENT on the order — a Prime cash-back balance or Amazon points — as an
+    # order-level total like `gift_card` above, and placed beside it for that reason. Deliberately
+    # NOT a gift card: the user nets every Amazon reward out of COGS at year end, outside the sheet,
+    # so the sheet must keep the order's FULL cost (as if the card paid it all) or the reward is
+    # counted twice. What this column changes is only the cashback basis: the card earns nothing on
+    # dollars it never paid.
+    "rewards_used",
     # Derived from card_last4 at run time (main.run_scrape -> config.cards.tag_cards): the friendly
     # card name and the cashback rate that applies to this row. Both blank when card_last4 is blank
     # (a partial re-check), so _merge_row preserves what the first full extraction recorded.
@@ -180,12 +187,6 @@ FIELDNAMES = [
     "delivery_address",
     "card_last4",
     "last_scraped_at",
-    # Appended LAST (2026-09-08). Amazon rewards SPENT on the order — a Prime cash-back balance or
-    # Amazon points — as an order-level total like `gift_card`. Deliberately NOT a gift card: the
-    # user nets every Amazon reward out of COGS at year end, outside the sheet, so the sheet must
-    # keep the order's FULL cost (as if the card paid it all) or the reward is counted twice. What
-    # the column changes is only the cashback basis: the card earns nothing on dollars it never paid.
-    "rewards_used",
 ]
 
 
