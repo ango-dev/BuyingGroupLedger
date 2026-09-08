@@ -240,6 +240,10 @@ class OrderItem(BaseModel):
     # existing Cashback Rate column instead of claiming a column of its own. It only has to survive
     # from the mapping to tag_cards inside one run — nothing rebuilds an OrderItem in between.
     _promo_cashback_rate: float | None = PrivateAttr(default=None)
+    # The block's "Sold by" merchant, read by the Amazon mappings so two same-titled lines in ONE
+    # shipment (two sellers, two prices -- 114-9990029-9990029, 2026-09-08) can be told apart.
+    # Mapping-internal like the promo rate: it feeds the Item Name suffix, never a column.
+    _seller: str = PrivateAttr(default="")
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
                      "cashback_rate", "insurance", "payout_amount", "cogs", "total_profit",

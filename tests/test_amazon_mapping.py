@@ -18,12 +18,15 @@ BASE = "https://www.amazon.com"
 
 
 # --- HTML builders mirroring the real structure -------------------------------------------------
-def _item(title: str, price: str, qty: int | None = None, asin: str = "B000000001") -> str:
+def _item(title: str, price: str, qty: int | None = None, asin: str = "B000000001",
+          seller: str = "") -> str:
     qty_html = f'<div class="od-item-view-qty"><span>{qty}</span></div>' if qty is not None else ""
+    seller_html = f'<div data-component="orderedMerchant">Sold by: {seller}</div>' if seller else ""
     return (
         '<div class="a-fixed-left-grid a-spacing-base">'
         f'<a href="/dp/{asin}">img</a>'
         f'<div data-component="itemTitle">{title}</div>'
+        f"{seller_html}"
         f"{qty_html}"
         f'<div data-component="unitPrice">{price} {price}</div>'
         "</div>"
@@ -882,3 +885,50 @@ def test_the_non_card_tender_selectors_are_declared_for_the_audit():
 
     assert SELECTORS["payment_instrument"] == ".pmts-payments-instrument-detail-box-paystationpaymentmethod"
     assert SELECTORS["transactions_line_item"] == ".apx-transactions-line-item-component-container"
+
+
+# --- two sellers, one box (114-9990029-9990029, 2026-09-08) ---------------------------------------
+def test_the_same_item_from_two_sellers_in_one_shipment_keeps_both_lines():
+    """One shipment card, two blocks with the SAME title at different prices (two sellers), one
+    tracking number. They are two real lines, not a split quantity, so they must not sum -- but
+    under one upsert key the ledger's collapse silently dropped the $649 iPad. The cheaper line
+    keeps its plain name (an existing row stays matched); the other is suffixed seller + price."""
+    html = _details(
+        "114-9990029-9990029", "September 7, 2026",
+        [_shipment("114-9990029-9990029", 0, "Arriving tomorrow",
+                   [_item("Apple iPad Air 11-inch (M4)", "$626.29", seller="Amazon"),
+                    _item("Apple iPad Air 11-inch (M4)", "$649.00", seller="Amazon.com")])],
+        subtotal="$1,275.29",
+    )
+    rows = build_order_items(html)
+    assert [(r.item_name, r.quantity, r.cost_per_item) for r in rows] == [
+        ("Apple iPad Air 11-inch (M4)", 1, 626.29),
+        ("Apple iPad Air 11-inch (M4) (Sold by Amazon.com @ $649.00)", 1, 649.0),
+    ]
+    assert {r.shipment for r in rows} == {"1"}
+    assert round(sum(r.total_cost for r in rows), 2) == 1275.29
+
+
+def test_the_cheaper_line_keeps_the_plain_name_whatever_the_page_order():
+    """Stable across re-reads: if Amazon lists the dearer seller first, the names must not swap."""
+    html = _details(
+        "114-9990029-9990029", "September 7, 2026",
+        [_shipment("114-9990029-9990029", 0, "Arriving tomorrow",
+                   [_item("iPad", "$649.00", seller="Amazon.com"),
+                    _item("iPad", "$626.29", seller="Amazon")])],
+    )
+    names = {r.cost_per_item: r.item_name for r in build_order_items(html)}
+    assert names[626.29] == "iPad"
+    assert names[649.0] == "iPad (Sold by Amazon.com @ $649.00)"
+
+
+def test_same_seller_same_price_blocks_still_sum_not_suffix():
+    """The split-quantity case is untouched: identical price blocks are one line, summed."""
+    html = _details(
+        "114-0000000-0000001", "September 7, 2026",
+        [_shipment("114-0000000-0000001", 0, "Arriving tomorrow",
+                   [_item("MacBook", "$1,259.99", qty=3, seller="Amazon.com"),
+                    _item("MacBook", "$1,259.99", qty=3, seller="Amazon.com")])],
+    )
+    rows = build_order_items(html)
+    assert [(r.item_name, r.quantity) for r in rows] == [("MacBook", 6)]

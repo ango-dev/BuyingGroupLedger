@@ -103,6 +103,7 @@ SELECTORS: dict[str, str] = {
     "item_title": "[data-component='itemTitle']",
     "item_quantity": ".od-item-view-qty",
     "item_unit_price": "[data-component='unitPrice']",
+    "item_merchant": "[data-component='orderedMerchant']",
     "card_earn_line": _EARN_LINE_SELECTOR,
     "payment_instrument": _PAYMENT_INSTRUMENT_SELECTOR,
     # Matches only on the related-transactions page (TRANSACTIONS_URL), so it audits at 0 on an
@@ -635,6 +636,45 @@ def _sum_split_quantity_lines(rows: list[OrderItem]) -> list[OrderItem]:
     return out
 
 
+def _disambiguate_same_named_lines(rows: list[OrderItem]) -> list[OrderItem]:
+    """Twin of scrapers/amazon_mapping._disambiguate_same_named_lines -- keep the two in step.
+
+    Two DISTINCT lines can share a title inside ONE shipment: the same product bought from two
+    sellers at two prices, boxed together. Live on 114-9990029-9990029 (Amazon
+    Business): one shipment card, two iPad Air blocks -- "Sold by: Amazon" at $626.29 and
+    "Sold by: Amazon.com" at $649.00 -- one tracking number. _sum_split_quantity_lines rightly left
+    them apart (different prices are not one split line), so both rows reached ledger_sync under
+    the SAME upsert key (order + date + item + shipment) and its collapse silently kept one: the
+    $649 iPad vanished from the ledger while the box physically held it.
+
+    The upsert key has no other column, so the NAME has to carry the difference. The cheapest line
+    (then seller, then page order) keeps its plain name -- an already-recorded row stays matched
+    and a re-read cannot swap the rows' prices -- and every other line is suffixed with its seller
+    and unit price. Only a collision is renamed: an ordinary order's names never change.
+    """
+    groups: dict[tuple, list[OrderItem]] = {}
+    for row in rows:
+        groups.setdefault((row.shipment, row.item_name), []).append(row)
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        ordered = sorted(
+            enumerate(members),
+            key=lambda pair: (pair[1].cost_per_item if pair[1].cost_per_item is not None
+                              else float("inf"), pair[1]._seller, pair[0]),
+        )
+        seen = {ordered[0][1].item_name}
+        for position, (_, row) in enumerate(ordered[1:], start=2):
+            seller = f"Sold by {row._seller}" if row._seller else f"line {position}"
+            price = f" @ ${row.cost_per_item:,.2f}" if row.cost_per_item is not None else ""
+            name = f"{row.item_name} ({seller}{price})"
+            if name in seen:  # same seller AND price twice can only be a split, already summed
+                name = f"{row.item_name} ({seller}{price}, line {position})"
+            seen.add(name)
+            row.item_name = name
+    return rows
+
+
 def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
                                 order_id: str) -> list[OrderItem]:
     """Twin of scrapers/amazon_mapping._reconcile_against_subtotal — keep the two in step.
@@ -834,6 +874,9 @@ def build_order_items(
                 quantity = int(qm.group(0)) if qm else None
             price_el = container.select_one("[data-component='unitPrice']")
             cost_per_item = _num(price_el.get_text(" ", strip=True)) if price_el else None
+            seller_el = container.select_one("[data-component='orderedMerchant']")
+            seller = re.sub(r"^\s*sold by:?\s*", "", seller_el.get_text(" ", strip=True),
+                            flags=re.IGNORECASE).strip() if seller_el else ""
 
             rows.append(
                 OrderItem(
@@ -862,6 +905,7 @@ def build_order_items(
                     shipment=shipment,
                 )
             )
+            rows[-1]._seller = seller
 
     # Brand-new fully-cancelled order -> ignore at discovery (a recorded/open order that has since been
     # cancelled flows through so its rows go terminal). Same rule as Amazon / Best Buy / Costco.
@@ -872,6 +916,7 @@ def build_order_items(
     # (and the COGS netting that reads it) divides over, so the collapse still has to run.
     rows = _reconcile_against_subtotal(rows, _order_subtotal(summary_el), order_id)
     rows = _sum_split_quantity_lines(rows)
+    rows = _disambiguate_same_named_lines(rows)
     # Rides to config.cards.tag_cards, which folds it into cashback_rate (see OrderItem). The
     # AMAZON_PROMO_CASHBACK_ENABLED toggle already gates BOTH Amazons at the tag_cards call site.
     promo = _promo_cashback_rate(region)
