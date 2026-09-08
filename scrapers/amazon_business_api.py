@@ -36,9 +36,10 @@ import logging
 import diagnostics
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
-from scrapers.amazon_business_mapping import (RETAILER, TRANSACTIONS_URL, build_order_items,
+from scrapers.amazon_business_mapping import (RETAILER, REWARDS_URL, TRANSACTIONS_URL, build_order_items,
                                               discover_orders, history_rendered, order_uses_points,
-                                              parse_shipment_targets, points_used_from_transactions)
+                                              parse_shipment_targets, points_redeemed_by_order,
+                                              points_used_from_transactions)
 from scrapers.amazon_mapping import OrderPageShapeError
 from scrapers.amazon_signin import deterministic_login, looks_logged_out
 from scrapers.base import ApiLoginError
@@ -137,8 +138,8 @@ class AmazonBusinessApiClient:
 
             # TRACKING NUMBERS: visit each non-terminal shipment's pt page and read the number.
             tracking_by_order = self._read_tracking_numbers(page, details_html)
-            # AMAZON POINTS: the one tender the order page does not price — one extra page load per
-            # order whose payment list names points, none for the rest.
+            # AMAZON POINTS: the one tender the order page does not price — the rewards ledger,
+            # loaded once, when any order's payment list names points; nothing otherwise.
             points_by_order = self._read_points_used(page, details_html)
 
         # Build rows (pure) with the tracking numbers injected so the invariant promotes to 'shipped'.
@@ -315,31 +316,51 @@ class AmazonBusinessApiClient:
         raise AmazonBusinessApiError("order-history pagination did not advance (list never changed).")
 
     def _read_points_used(self, page, details_html: dict[str, str]) -> dict[str, float]:
-        """{order_id: Amazon points spent} for every order whose payment-method list names Amazon
-        points — ONE extra page load each (the related-transactions page), none for the rest.
+        """{order_id: dollars paid with Amazon points} for every order whose payment-method list
+        names Amazon points — priced from the Business Prime Rewards LEDGER, loaded ONCE at the end
+        of the run, and nothing is loaded when no order used points.
 
-        The order page never prices this tender: the summary shows the full Grand Total whether
-        points paid none or all of it. Only the transactions
-        page says "Amazon Points used -$48.28". When it gives no amount — the points have not posted
-        yet, or the page changed shape — the Gift Card cell stays BLANK (never a false 0) and the run
-        ends with a dossier problem, so the understated cost is loud rather than silent."""
+        The order page never prices this tender (the summary shows the full Grand Total whether
+        points paid none, some or all of it), and a redemption can be PARTIAL, so the amount is
+        always read. The ledger knows it the moment the order is placed; the related-transactions
+        page — the FALLBACK, one load per order the ledger does not list — only once the points
+        post. An order neither can price keeps a BLANK Gift Card cell (never a false 0) and ends
+        the run with a dossier problem, so the overstated cost is loud rather than silent."""
+        points_orders = [oid for oid, html in details_html.items() if order_uses_points(html)]
+        if not points_orders:
+            return {}
+        ledger: dict[str, float] = {}
+        try:
+            page.goto(REWARDS_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(4000)
+            # The history is an infinite-scroll list; nudge it a few times so an older order is
+            # rendered too. The default filter already spans "since you joined".
+            for _ in range(4):
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(800)
+            ledger = points_redeemed_by_order(page.content())
+            log.info("Amazon Business [%s]: rewards ledger lists %d redemption(s).",
+                     self.profile.label, len(ledger))
+        except Exception:
+            log.warning("Amazon Business [%s]: Business Prime Rewards ledger failed to load.",
+                        self.profile.label, exc_info=True)
         result: dict[str, float] = {}
-        for oid, html in details_html.items():
-            if not order_uses_points(html):
-                continue
-            amount = None
-            try:
-                page.goto(TRANSACTIONS_URL.format(oid), wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(3000)
-                amount = points_used_from_transactions(page.content(), oid)
-            except Exception:
-                log.warning("Amazon Business [%s]: related-transactions page failed for %s.",
-                            self.profile.label, oid, exc_info=True)
+        for oid in points_orders:
+            amount = ledger.get(oid)
+            if amount is None:
+                try:
+                    page.goto(TRANSACTIONS_URL.format(oid), wait_until="domcontentloaded", timeout=60000)
+                    page.wait_for_timeout(3000)
+                    amount = points_used_from_transactions(page.content(), oid)
+                except Exception:
+                    log.warning("Amazon Business [%s]: related-transactions page failed for %s.",
+                                self.profile.label, oid, exc_info=True)
             if amount is None:
                 diagnostics.snapshot(page, f"Amazon points amount unreadable: {oid}")
                 diagnostics.problem(
-                    f"order {oid}: paid partly with Amazon points, but the related-transactions page "
-                    f"gave no amount — Gift Card NOT recorded (cost overstated until it is)")
+                    f"order {oid}: paid partly with Amazon points, but neither the rewards ledger nor "
+                    f"the related-transactions page gave an amount — Gift Card NOT recorded (cost "
+                    f"overstated until it is)")
                 continue
             result[oid] = amount
             log.info("Amazon Business [%s]: order %s paid $%.2f with Amazon points.",

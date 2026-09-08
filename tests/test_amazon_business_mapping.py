@@ -761,3 +761,38 @@ def test_business_non_card_tenders_cash_back_and_points():
     assert points_used_from_transactions(page, oid) == 48.28
     assert points_used_from_transactions(_transactions(), oid) is None
     assert {"payment_instrument", "transactions_line_item"} <= set(SELECTORS)
+
+
+def _rewards_ledger(*entries):
+    """The Business Prime Rewards history, fixture-shaped: one list entry per
+    posting — kind, the order link, the items, and the signed points at the end."""
+    blocks = "".join(
+        '<div data-testid="points-history-list-entry" class="space-y-[10px]">'
+        '<div class="flex justify-between"><div class="w-3/4"><div class="mb-[10px]"><p>2026/09/04</p></div>'
+        f'<div class="space-y-0"><p class="mb-0"><span class="font-bold">{kind}</span><span> - </span>'
+        f'<a href="/gp/aw/ya?oid={oid}&amp;ac=od&amp;ref_=abr_op_d_ol">{oid}</a></p>'
+        '<div class="flex w-full flex-row"><p class="overflow-hidden">2x Paint by Sticker Kids</p>'
+        '<p class="whitespace-nowrap"><div> and 6 more</div></p></div></div></div>'
+        '<div class="w-1/4"><div class="space-y-0 text-right mb-[5px]"><button type="button" '
+        'aria-label="See order detail"></button></div>'
+        f'<div class="space-y-0 text-right font-bold"><p>{points}</p></div></div></div></div>'
+        for kind, oid, points in entries
+    )
+    return f'<html><body><section id="points-history">{blocks}</section></body></html>'
+
+
+def test_the_rewards_ledger_prices_every_redemption_at_100_points_per_dollar():
+    """-4828 on 111-9990010-9990010 ($48.28, the whole order) and -1370 on
+    111-9990012-9990012 ($13.70 of a $15.48 order — a PARTIAL redemption). Earning entries are
+    other kinds and never count; two redemptions against one order sum."""
+    from scrapers.amazon_business_mapping import SELECTORS, points_redeemed_by_order
+
+    page = _rewards_ledger(("Redeeming points", "111-9990010-9990010", "-4828"),
+                           ("Redeeming points", "111-9990012-9990012", "-1370"),
+                           ("Earning points", "111-9990014-9990014", "+1699"),
+                           ("Redeeming points", "111-9990012-9990012", "-100"),
+                           ("Refunding points", "114-9990032-9990032", "+7,532"))
+    assert points_redeemed_by_order(page) == {"111-9990010-9990010": 48.28,
+                                              "111-9990012-9990012": 14.70}
+    assert points_redeemed_by_order("<html>nothing</html>") == {}
+    assert SELECTORS["rewards_history_entry"] == '[data-testid="points-history-list-entry"]'

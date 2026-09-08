@@ -325,12 +325,15 @@ class TestAnEmptyAccountIsNotAShapeChange:
 
 
 class TestAmazonPoints:
-    """Twin of the consumer test: a points order gets ONE related-transactions load and the amount
-    lands in gift_card; an order paid by card alone costs no extra load."""
+    """Amazon points never show on the order page. The client prices them from
+    the Business Prime Rewards ledger — ONE load at the end of the run, only when some order's
+    payment list names points — and falls back to the related-transactions page
+    for an order the ledger does not list. A redemption can be partial, so the amount is read."""
 
     class _P(_FakePage):
-        def __init__(self, pages, details, transactions=""):
+        def __init__(self, pages, details, ledger="", transactions=""):
             super().__init__(pages, details)
+            self.ledger = ledger
             self.transactions = transactions
             self.visited = []
 
@@ -339,26 +342,70 @@ class TestAmazonPoints:
             super().goto(url, **kwargs)
 
         def content(self):
+            if "businessprime/rewards" in self._current:
+                return self.ledger
             if "yourpayments/transactions" in self._current:
                 return self.transactions
             return super().content()
 
-    def test_a_points_order_gets_one_transactions_load_and_the_amount(self, monkeypatch):
-        from tests.test_amazon_mapping import _POINTS_INSTRUMENT, _transactions
+    @staticmethod
+    def _points_details(oid, price="$48.28"):
+        from tests.test_amazon_mapping import _POINTS_INSTRUMENT
 
-        pts, plain = "111-9990010-9990010", "222-2222222-2222222"
-        with_points = _details(pts, "September 4, 2026",
-                               [_shipment(pts, 0, "Shipped", [_item("Book", "$48.28")])], subtotal="$48.28")
-        with_points = with_points.replace("Payment method Prime Business Card ending in 1234 5% back",
-                                          "Payment method " + _POINTS_INSTRUMENT)
-        page = self._P([_history(_order_card(pts, "September 4, 2026"), _order_card(plain, "September 4, 2026"))],
-                       {pts: with_points, plain: _deliv(plain, "September 4, 2026")},
-                       transactions=_transactions(("Amazon Points used", "-$48.28", pts)))
+        html = _details(oid, "September 4, 2026",
+                        [_shipment(oid, 0, "Shipped", [_item("Book", price)])], subtotal=price)
+        return html.replace("Payment method Prime Business Card ending in 1234 5% back",
+                            "Payment method " + _POINTS_INSTRUMENT)
+
+    def test_the_ledger_is_loaded_once_and_prices_partial_redemptions(self, monkeypatch):
+        from tests.test_amazon_business_mapping import _rewards_ledger
+
+        whole, part, plain = "111-9990010-9990010", "111-9990012-9990012", "222-2222222-2222222"
+        page = self._P([_history(_order_card(whole, "September 4, 2026"), _order_card(part, "September 4, 2026"),
+                                 _order_card(plain, "September 4, 2026"))],
+                       {whole: self._points_details(whole), part: self._points_details(part, "$15.48"),
+                        plain: _deliv(plain, "September 4, 2026")},
+                       ledger=_rewards_ledger(("Redeeming points", whole, "-4828"),
+                                              ("Redeeming points", part, "-1370")))
         monkeypatch.setattr(api, "CdpBrowser", _FakeCdp(page))
 
         rows = AmazonBusinessApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
         by_id = {r.order_id: r for r in rows}
-        assert by_id[pts].gift_card == 48.28
+        assert by_id[whole].gift_card == 48.28
+        assert by_id[part].gift_card == 13.70 and by_id[part].total_cost == 15.48
         assert by_id[plain].gift_card == 0.0
+        assert [u for u in page.visited if "businessprime/rewards" in u] == [
+            "https://www.amazon.com/businessprime/rewards"]
+        assert not [u for u in page.visited if "yourpayments/transactions" in u]
+
+    def test_no_points_order_means_no_ledger_load(self, monkeypatch):
+        plain = "222-2222222-2222222"
+        page = self._P([_history(_order_card(plain, "September 4, 2026"))], {plain: _deliv(plain, "September 4, 2026")})
+        monkeypatch.setattr(api, "CdpBrowser", _FakeCdp(page))
+        AmazonBusinessApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
+        assert not [u for u in page.visited if "businessprime/rewards" in u]
+
+    def test_an_order_the_ledger_lacks_falls_back_to_the_transactions_page(self, monkeypatch):
+        from tests.test_amazon_mapping import _transactions
+
+        pts = "111-9990010-9990010"
+        page = self._P([_history(_order_card(pts, "September 4, 2026"))], {pts: self._points_details(pts)},
+                       ledger="<html>no history rendered</html>",
+                       transactions=_transactions(("Amazon Points used", "-$48.28", pts)))
+        monkeypatch.setattr(api, "CdpBrowser", _FakeCdp(page))
+        rows = AmazonBusinessApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
+        assert rows[0].gift_card == 48.28
         assert [u for u in page.visited if "yourpayments/transactions" in u] == [
             f"https://www.amazon.com/cpe/yourpayments/transactions?transactionTag={pts}"]
+
+    def test_neither_source_pricing_it_is_a_dossier_problem_not_a_zero(self, monkeypatch, tmp_path):
+        import diagnostics
+
+        pts = "111-9990010-9990010"
+        page = self._P([_history(_order_card(pts, "September 4, 2026"))], {pts: self._points_details(pts)},
+                       ledger="<html></html>", transactions="<html></html>")
+        monkeypatch.setattr(api, "CdpBrowser", _FakeCdp(page))
+        with diagnostics.collecting("amazon-business", "p", root=tmp_path) as d:
+            rows = AmazonBusinessApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
+        assert rows[0].gift_card is None
+        assert d.problems and "rewards ledger" in d.problems[0] and pts in d.problems[0]

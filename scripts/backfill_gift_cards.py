@@ -187,6 +187,7 @@ def fetch_summaries(retailer: str, profile, order_ids: list[str]) -> dict[str, t
     client_cls = getattr(api, "AmazonApiClient", None) or api.AmazonBusinessApiClient
     client = client_cls(profile)
     results: dict[str, tuple] = {}
+    parsed: dict[str, tuple] = {}  # order -> (summary element, order region), resolved below
     with CdpBrowser(profile) as page:
         signed_in = False
         for oid in order_ids:
@@ -203,12 +204,28 @@ def fetch_summaries(retailer: str, profile, order_ids: list[str]) -> dict[str, t
                 print(f"  ?? {oid}: no order summary on the page (kept? too old? wrong account) -- skipped",
                       file=sys.stderr)
                 continue
+            parsed[oid] = (summary, region)
+        # Amazon points never show on the order page. Business: the rewards ledger, loaded ONCE,
+        # prices every points order (a redemption can be partial); the transactions page is the
+        # fallback for an order the ledger does not list. Consumer: the transactions page only.
+        points_orders = [oid for oid, (_, region) in parsed.items() if mapping.uses_points(region)]
+        ledger: dict[str, float] = {}
+        if points_orders and hasattr(mapping, "points_redeemed_by_order"):
+            page.goto(mapping.REWARDS_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(4000)
+            for _ in range(4):
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(800)
+            ledger = mapping.points_redeemed_by_order(page.content())
+            print(f"  rewards ledger lists {len(ledger)} redemption(s)")
+        for oid, (summary, region) in parsed.items():
             points = None
-            if mapping.uses_points(region):
-                # Amazon points never show on the order page: one more load, the transactions page.
-                page.goto(mapping.TRANSACTIONS_URL.format(oid), wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(3000)
-                points = mapping.points_used_from_transactions(page.content(), oid)
+            if oid in points_orders:
+                points = ledger.get(oid)
+                if points is None:
+                    page.goto(mapping.TRANSACTIONS_URL.format(oid), wait_until="domcontentloaded", timeout=60000)
+                    page.wait_for_timeout(3000)
+                    points = mapping.points_used_from_transactions(page.content(), oid)
                 print(f"  {oid}: paid with Amazon points -> "
                       f"{f'{points:.2f}' if points is not None else 'amount NOT readable (left blank)'}")
             results[oid] = (mapping.non_card_tenders(summary, region, points, oid),

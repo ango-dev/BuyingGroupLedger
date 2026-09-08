@@ -78,6 +78,7 @@ _EARN_LINE_SELECTOR = ".pmts-payments-instrument-supplemental-box-paystationpaym
 # the non-card-tender rules declared next to _GIFT_CARD_RE below.
 _PAYMENT_INSTRUMENT_SELECTOR = ".pmts-payments-instrument-detail-box-paystationpaymentmethod"
 _TRANSACTION_LINE_SELECTOR = ".apx-transactions-line-item-component-container"
+_REWARDS_ENTRY_SELECTOR = '[data-testid="points-history-list-entry"]'
 
 #: Every selector this parser depends on, by name — audited by the failure dossier against the
 #: captured page (see scrapers/amazon_mapping.SELECTORS for the rationale). Business discovery is
@@ -107,6 +108,8 @@ SELECTORS: dict[str, str] = {
     # Matches only on the related-transactions page (TRANSACTIONS_URL), so it audits at 0 on an
     # order-details snapshot — the same way the pt-page selectors do.
     "transactions_line_item": _TRANSACTION_LINE_SELECTOR,
+    # Matches only on the Business Prime Rewards ledger (REWARDS_URL).
+    "rewards_history_entry": _REWARDS_ENTRY_SELECTOR,
 }
 # Order-summary line that only renders when a gift card actually paid part of the order. Twin of the
 # consumer rule in scrapers/amazon_mapping.py — kept duplicated because this module is deliberately a
@@ -121,6 +124,17 @@ _CASH_BACK_USED_RE = re.compile(r"([^\n:]*cash back):\s*\n?\s*(-?\$\s*[\d,]+\.\d
 _POINTS_INSTRUMENT_RE = re.compile(r"^\s*Amazon\s+points?\s*$", re.IGNORECASE)
 TRANSACTIONS_URL = "https://www.amazon.com/cpe/yourpayments/transactions?transactionTag={}"
 _POINTS_USED_RE = re.compile(r"Amazon\s+points\s+used", re.IGNORECASE)
+# THE LEDGER: Business Prime Rewards keeps its own points history, one entry per
+# order — "Redeeming points - <order> ... -1370", "Earning points - <order> ... +1699" — at 100 points
+# to the dollar, under a "since you joined" filter, so ONE page load prices every points order of
+# the run at once. It also knows a redemption the moment the order is placed, where the
+# related-transactions page shows nothing until the points post (live: 111-9990012-9990012, still
+# `ordered`, ledger -1370 = $13.70 of a $15.48 order, transactions page empty). A redemption can be
+# PARTIAL, which is why the amount is read and never assumed to be the whole order.
+REWARDS_URL = "https://www.amazon.com/businessprime/rewards"
+_REWARDS_POINTS_RE = re.compile(r"([+-]\d[\d,]*)\s*$")
+_REWARDS_REDEEMING_RE = re.compile(r"\bRedeeming points\b", re.IGNORECASE)
+_POINTS_PER_DOLLAR = 100
 # The tax line renders on every order summary, usually as $0.00 (the resale certificate).
 _TAX_RE = re.compile(r"Estimated tax to be collected:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 # What the order is actually worth — the ceiling its shipment cards may not exceed.
@@ -529,6 +543,28 @@ def points_used_from_transactions(transactions_html: str, order_id: str) -> floa
         total += abs(amount)
         found = True
     return round(total, 2) if found else None
+
+
+def points_redeemed_by_order(rewards_html: str) -> dict[str, float]:
+    """{order_id: dollars paid with points} from the Business Prime Rewards ledger page.
+
+    Only "Redeeming points" entries count; earning / refund / expiry entries are other kinds. Several
+    redemptions against one order sum. An order absent from the result did not redeem points as far
+    as the ledger shows — the API client then falls back to the related-transactions page, and only
+    after THAT fails does it raise a dossier problem."""
+    soup = BeautifulSoup(rewards_html or "", "html.parser")
+    out: dict[str, float] = {}
+    for entry in soup.select(_REWARDS_ENTRY_SELECTOR):
+        text = entry.get_text(" ", strip=True)  # "2026/09/04 Redeeming points - 111-... items... -4828"
+        if not _REWARDS_REDEEMING_RE.search(text):
+            continue
+        oid_m = ORDER_ID_RE.search(text)
+        pts_m = _REWARDS_POINTS_RE.search(text)
+        if not oid_m or not pts_m:
+            continue
+        points = abs(int(pts_m.group(1).replace(",", "")))
+        out[oid_m.group(0)] = round(out.get(oid_m.group(0), 0.0) + points / _POINTS_PER_DOLLAR, 2)
+    return out
 
 
 def non_card_tenders(summary_el, region, points_used: float | None, order_id: str = "") -> float | None:

@@ -132,8 +132,11 @@ etc.) — they're never resold, so they never hit the ledger.
   and **Amazon points** (the Prime Business card's rewards) are treated exactly like a gift card.
   Points are the one tender the order page never prices: the summary shows the full Grand Total
   whether points paid none or all of it, and only the payment-method list betrays them ("Amazon
-  point"). For such an order the scraper makes one extra page load, the order's related-transactions
-  page, and reads its "Amazon Points used" line. If that amount can't be read the cell stays blank
+  point"). A redemption can be partial, so the amount is always read, never assumed. On Amazon
+  Business it comes from the **Business Prime Rewards ledger** (one page, loaded once at the end of
+  the run whenever some order used points), which lists every redemption by order at 100 points to
+  the dollar and knows it the moment the order is placed; the order's related-transactions page is
+  the fallback, and on consumer Amazon the only source. If neither prices it the cell stays blank
   and the run ends with a dossier problem, rather than writing a false 0.
 - **Sales Tax** is its own column, read from the order summary's "Estimated tax to be collected"
   line and prorated the same way. It is usually $0.00 (the resale certificate), but a hand-kept
