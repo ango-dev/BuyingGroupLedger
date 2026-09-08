@@ -322,3 +322,43 @@ class TestAnEmptyAccountIsNotAShapeChange:
         client = AmazonBusinessApiClient(_Profile())
         with pytest.raises(api.AmazonBusinessApiError):
             client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+
+class TestAmazonPoints:
+    """Twin of the consumer test: a points order gets ONE related-transactions load and the amount
+    lands in gift_card; an order paid by card alone costs no extra load."""
+
+    class _P(_FakePage):
+        def __init__(self, pages, details, transactions=""):
+            super().__init__(pages, details)
+            self.transactions = transactions
+            self.visited = []
+
+        def goto(self, url, **kwargs):
+            self.visited.append(url)
+            super().goto(url, **kwargs)
+
+        def content(self):
+            if "yourpayments/transactions" in self._current:
+                return self.transactions
+            return super().content()
+
+    def test_a_points_order_gets_one_transactions_load_and_the_amount(self, monkeypatch):
+        from tests.test_amazon_mapping import _POINTS_INSTRUMENT, _transactions
+
+        pts, plain = "111-9990010-9990010", "222-2222222-2222222"
+        with_points = _details(pts, "September 4, 2026",
+                               [_shipment(pts, 0, "Shipped", [_item("Book", "$48.28")])], subtotal="$48.28")
+        with_points = with_points.replace("Payment method Prime Business Card ending in 1234 5% back",
+                                          "Payment method " + _POINTS_INSTRUMENT)
+        page = self._P([_history(_order_card(pts, "September 4, 2026"), _order_card(plain, "September 4, 2026"))],
+                       {pts: with_points, plain: _deliv(plain, "September 4, 2026")},
+                       transactions=_transactions(("Amazon Points used", "-$48.28", pts)))
+        monkeypatch.setattr(api, "CdpBrowser", _FakeCdp(page))
+
+        rows = AmazonBusinessApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
+        by_id = {r.order_id: r for r in rows}
+        assert by_id[pts].gift_card == 48.28
+        assert by_id[plain].gift_card == 0.0
+        assert [u for u in page.visited if "yourpayments/transactions" in u] == [
+            f"https://www.amazon.com/cpe/yourpayments/transactions?transactionTag={pts}"]

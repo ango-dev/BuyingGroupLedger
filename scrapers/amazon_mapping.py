@@ -50,6 +50,11 @@ _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
 # read — the base rate is cards.json's job.
 _EXTRA_PCT_RE = re.compile(r"extra\s+(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
 _EARN_LINE_SELECTOR = ".pmts-payments-instrument-supplemental-box-paystationpaymentmethod"
+# The payment-method list's instrument rows ("Prime Business Card ending in 0315", "Amazon point",
+# "Prime for Young Adults cash back") and the related-transactions page's line items — both used by
+# the non-card-tender rules declared next to _GIFT_CARD_RE below.
+_PAYMENT_INSTRUMENT_SELECTOR = ".pmts-payments-instrument-detail-box-paystationpaymentmethod"
+_TRANSACTION_LINE_SELECTOR = ".apx-transactions-line-item-component-container"
 
 #: Every selector this parser depends on, by name — the failure dossier's selector audit runs these
 #: against the captured page so a report can say WHICH one stopped matching. The parser itself keeps
@@ -76,9 +81,24 @@ SELECTORS: dict[str, str] = {
     "item_quantity": ".od-item-view-qty",
     "item_unit_price": "[data-component='unitPrice']",
     "card_earn_line": _EARN_LINE_SELECTOR,
+    "payment_instrument": _PAYMENT_INSTRUMENT_SELECTOR,
+    # Matches only on the related-transactions page (TRANSACTIONS_URL), so it audits at 0 on an
+    # order-details snapshot — the same way the pt-page selectors do.
+    "transactions_line_item": _TRANSACTION_LINE_SELECTOR,
 }
 # Order-summary line that only renders when a gift card actually paid part of the order.
 _GIFT_CARD_RE = re.compile(r"Gift Card Amount:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
+# A cash-back BALANCE spent on the order renders as its own summary line, exactly like a gift card:
+# "Prime for Young Adults cash back: -$15.98". The colon AND an amount are required: the same label also appears, without either, in the
+# payment-method list, which sits inside this summary element.
+_CASH_BACK_USED_RE = re.compile(r"([^\n:]*cash back):\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
+# Amazon POINTS (the Prime Business card's rewards) are the one non-card tender the order page does
+# NOT price: the payment-method list gains an "Amazon point" instrument and the summary still shows
+# the full Grand Total. The amount lives ONLY on the related-transactions
+# page, as "Amazon Points used  -$48.28" — see points_used_from_transactions().
+_POINTS_INSTRUMENT_RE = re.compile(r"^\s*Amazon\s+points?\s*$", re.IGNORECASE)
+TRANSACTIONS_URL = "https://www.amazon.com/cpe/yourpayments/transactions?transactionTag={}"
+_POINTS_USED_RE = re.compile(r"Amazon\s+points\s+used", re.IGNORECASE)
 # The tax line renders on every order summary, usually as $0.00 (the resale certificate).
 _TAX_RE = re.compile(r"Estimated tax to be collected:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 # What the order is actually worth — the ceiling its shipment cards may not exceed.
@@ -432,6 +452,71 @@ def _gift_card_amount(summary_el) -> float | None:
     return abs(_num(m.group(1)) or 0.0) if m else 0.0
 
 
+def _cash_back_used(summary_el) -> float | None:
+    """A cash-back balance spent on the order ("Prime for Young Adults cash back: -$15.98"), as a
+    POSITIVE number; several such lines sum. Same 0-vs-None rule as _gift_card_amount."""
+    if summary_el is None:
+        return None
+    total = 0.0
+    for _label, amount in _CASH_BACK_USED_RE.findall(summary_el.get_text("\n", strip=True)):
+        total += abs(_num(amount) or 0.0)
+    return round(total, 2)
+
+
+def uses_points(region) -> bool:
+    """True when the payment-method list names Amazon points as one of the order's tenders."""
+    return any(_POINTS_INSTRUMENT_RE.match(el.get_text(" ", strip=True) or "")
+               for el in region.select(_PAYMENT_INSTRUMENT_SELECTOR))
+
+
+def order_uses_points(order_details_html: str) -> bool:
+    """`uses_points` straight off the page HTML — what the API client asks before spending a page
+    load on the related-transactions page. False for every order that paid by card alone."""
+    return uses_points(_order_region(BeautifulSoup(order_details_html or "", "html.parser")))
+
+
+def points_used_from_transactions(transactions_html: str, order_id: str) -> float | None:
+    """Amazon points spent on `order_id`, read from its related-transactions page, as a POSITIVE
+    number. Each line item there is one block holding a label ("Amazon Points used"), an amount
+    ("-$48.28") and a link to the order; only blocks naming THIS order count, and several sum.
+    None when no such block exists — the page is empty until the points post, or its shape changed
+    — so the caller leaves the cell blank and says so rather than writing a false 0."""
+    soup = BeautifulSoup(transactions_html or "", "html.parser")
+    total, found = 0.0, False
+    for block in soup.select(_TRANSACTION_LINE_SELECTOR):
+        text = block.get_text(" ", strip=True)
+        if order_id not in text or not _POINTS_USED_RE.search(text):
+            continue
+        amount = _num(text)
+        if amount is None:
+            continue
+        total += abs(amount)
+        found = True
+    return round(total, 2) if found else None
+
+
+def non_card_tenders(summary_el, region, points_used: float | None, order_id: str = "") -> float | None:
+    """Everything that paid for the order WITHOUT touching the card — gift card + cash-back balance
+    + Amazon points — which is what the sheet's Gift Card column records. The COGS formula subtracts the cell, so no
+    cost and no cashback is booked on money the card never spent.
+
+    None ("unknown": a blank, which never overwrites) when the summary did not parse, or when the
+    page says points were used but their amount could not be read — a 0 there would be a lie, and
+    the API client raises a dossier problem for that case so the run says so out loud.
+    """
+    base = _gift_card_amount(summary_el)
+    if base is None:
+        return None
+    total = base + (_cash_back_used(summary_el) or 0.0)
+    if uses_points(region):
+        if points_used is None:
+            log.warning("Amazon order %s was paid partly with Amazon points but the amount is "
+                        "unknown — Gift Card left blank rather than understated.", order_id)
+            return None
+        total += points_used
+    return round(total, 2)
+
+
 def _sales_tax_amount(summary_el) -> float | None:
     """"Estimated tax to be collected: $1.19" from the order summary.
 
@@ -565,10 +650,13 @@ def build_order_items(
     today: str | None = None,
     net_gift_cards: bool = True,
     keep_digital_last4s: frozenset[str] = frozenset(),
+    points_used: float | None = None,
 ) -> list[OrderItem]:
     """Ledger rows for ONE order-details page. `tracking_by_shipment` maps a shipment's number
     ('Shipment 1') OR its Amazon shipmentId to a tracking number read from the pt page; absent leaves
-    tracking blank (the shipment then stays `ordered` until the number is read)."""
+    tracking blank (the shipment then stays `ordered` until the number is read). `points_used` is
+    the Amazon-points amount the API client read off the related-transactions page, for an order
+    whose payment list names points; it folds into `gift_card` (see non_card_tenders)."""
     tracking_by_shipment = tracking_by_shipment or {}
     today = today or __import__("datetime").date.today().isoformat()
     soup = BeautifulSoup(order_details_html or "", "html.parser")
@@ -604,9 +692,10 @@ def build_order_items(
     # netted by the COGS formula (gift card subtracted — a tender the card never spent, so it earns
     # no cashback; tax added). This replaced _net_gift_card's silent cost-scaling (2026-08-30):
     # same algebra, but Total Cost now stays the GROSS number the order page shows and the amount is
-    # visible on the sheet. The toggle keeps its old name and meaning — netting off means the
-    # gift-card amount is simply not emitted, so COGS uses the full sticker cost.
-    gift_card = (_gift_card_amount(summary_el) if net_gift_cards else None)
+    # visible on the sheet. Since 2026-09-07 the "gift card" is every NON-CARD tender: gift card +
+    # a spent cash-back balance + Amazon points. The toggle keeps its old name and meaning —
+    # netting off means the amount is simply not emitted, so COGS uses the full sticker cost.
+    gift_card = (non_card_tenders(summary_el, region, points_used, order_id) if net_gift_cards else None)
     sales_tax = _sales_tax_amount(summary_el)
 
     addr_el = region.select_one("[data-component='shippingAddress']")

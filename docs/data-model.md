@@ -126,6 +126,15 @@ etc.) — they're never resold, so they never hit the ledger.
   cost down invisibly; the formula computes the identical number, with the amount now on the
   sheet.) `AMAZON_GIFT_CARD_NETTING_ENABLED=false` leaves the Gift Card cell blank, so COGS uses
   the full sticker cost.
+
+  The column holds every **non-card tender**, not only gift cards (since 2026-09-07). A spent Prime
+  cash-back balance — the `Prime for Young Adults cash back: -$15.98` line in the order summary —
+  and **Amazon points** (the Prime Business card's rewards) are treated exactly like a gift card.
+  Points are the one tender the order page never prices: the summary shows the full Grand Total
+  whether points paid none or all of it, and only the payment-method list betrays them ("Amazon
+  point"). For such an order the scraper makes one extra page load, the order's related-transactions
+  page, and reads its "Amazon Points used" line. If that amount can't be read the cell stays blank
+  and the run ends with a dossier problem, rather than writing a false 0.
 - **Sales Tax** is its own column, read from the order summary's "Estimated tax to be collected"
   line and prorated the same way. It is usually $0.00 (the resale certificate), but a hand-kept
   order that paid tax records its true cost: the COGS formula adds it inside the cashback netting,

@@ -21,9 +21,9 @@ def grid(*rows):
 BASE = {"Retailer": "Amazon", "Profile": "p1", "Status": "delivered"}
 
 
-def prow(n, cost, qty=1, shipping=0.0, gc_blank=True, tax_blank=True):
+def prow(n, cost, qty=1, shipping=0.0, gc_blank=True, tax_blank=True, gc_zero=False):
     return {"n": n, "cost": cost, "quantity": qty, "shipping": shipping,
-            "gc_blank": gc_blank, "tax_blank": tax_blank}
+            "gc_blank": gc_blank, "gc_zero": gc_zero, "tax_blank": tax_blank}
 
 
 # --- collect_candidates --------------------------------------------------------------------------
@@ -124,4 +124,30 @@ def test_a_cost_matching_neither_shape_is_refused():
 
 def test_an_already_filled_cell_is_not_rewritten():
     writes, _ = plan_order_writes([prow(2, 100.0, gc_blank=False, tax_blank=False)], 40.0, 1.0, 100.0)
+    assert writes == []
+
+
+# --- --recheck-zeros: a 0 the pre-2026-09-07 parser wrote may hide a cash-back / points tender ----
+def test_zero_cells_are_candidates_only_when_rechecking_zeros():
+    g = grid(
+        row(**BASE, **{"Order ID": "A1", "Total Cost": "100", "Gift Card": "$0.00"}),
+        row(**BASE, **{"Order ID": "A2", "Total Cost": "50", "Gift Card": "$10.00"}),
+    )
+    assert collect_candidates(g, None, set()) == {}
+    out = collect_candidates(g, None, set(), recheck_zeros=True)
+    assert set(out[("Amazon", "p1")]) == {"A1"}
+    assert out[("Amazon", "p1")]["A1"][0]["gc_zero"] is True
+
+
+def test_a_zero_cell_is_corrected_under_a_guard_on_the_zero():
+    writes, _ = plan_order_writes(
+        [prow(2, 30.0, gc_blank=False, tax_blank=False, gc_zero=True),
+         prow(3, 70.0, gc_blank=False, tax_blank=False, gc_zero=True)], 48.28, 0.0, 100.0)
+    assert writes == [{"n": 2, "field": "gift_card", "value": 14.48, "expect": 0.0},
+                      {"n": 3, "field": "gift_card", "value": 33.8, "expect": 0.0}]
+
+
+def test_a_zero_cell_stays_when_the_page_still_shows_no_tender():
+    writes, _ = plan_order_writes([prow(2, 100.0, gc_blank=False, tax_blank=False, gc_zero=True)],
+                                  0.0, 0.0, 100.0)
     assert writes == []

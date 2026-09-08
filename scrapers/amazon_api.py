@@ -27,8 +27,9 @@ from datetime import date
 import diagnostics
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
-from scrapers.amazon_mapping import (RETAILER, OrderPageShapeError, build_order_items, discover_orders,
-                                     history_rendered, parse_shipment_targets)
+from scrapers.amazon_mapping import (RETAILER, TRANSACTIONS_URL, OrderPageShapeError, build_order_items,
+                                     discover_orders, history_rendered, order_uses_points,
+                                     parse_shipment_targets, points_used_from_transactions)
 from scrapers.amazon_signin import deterministic_login, looks_logged_out
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
@@ -155,6 +156,9 @@ class AmazonApiClient:
 
             # TRACKING NUMBERS: visit each non-terminal shipment's pt page and read the number.
             tracking_by_order = self._read_tracking_numbers(page, details_html)
+            # AMAZON POINTS: the one tender the order page does not price — one extra page load per
+            # order whose payment list names points, none for the rest.
+            points_by_order = self._read_points_used(page, details_html)
 
         # Build rows (pure) with the tracking numbers injected so the invariant promotes to 'shipped'.
         # A gift card bought on a card with an explicit Amazon rate in cards.json is funding
@@ -169,6 +173,7 @@ class AmazonApiClient:
                 tracking_by_shipment=tracking_by_order.get(oid), today=today,
                 net_gift_cards=settings.amazon_gift_card_netting_enabled,
                 keep_digital_last4s=keep_digital,
+                points_used=points_by_order.get(oid),
                 )
             except OrderPageShapeError as exc:
                 # The browser is already closed, so attach the document that failed to parse — the
@@ -290,6 +295,38 @@ class AmazonApiClient:
         log.info("Amazon [%s]: discovered %d order(s) across paginated history.",
                  self.profile.label, len(dates))
         return dates
+
+    def _read_points_used(self, page, details_html: dict[str, str]) -> dict[str, float]:
+        """{order_id: Amazon points spent} for every order whose payment-method list names Amazon
+        points — ONE extra page load each (the related-transactions page), none for the rest.
+
+        The order page never prices this tender: the summary shows the full Grand Total whether
+        points paid none or all of it. Only the transactions
+        page says "Amazon Points used -$48.28". When it gives no amount — the points have not posted
+        yet, or the page changed shape — the Gift Card cell stays BLANK (never a false 0) and the run
+        ends with a dossier problem, so the understated cost is loud rather than silent."""
+        result: dict[str, float] = {}
+        for oid, html in details_html.items():
+            if not order_uses_points(html):
+                continue
+            amount = None
+            try:
+                page.goto(TRANSACTIONS_URL.format(oid), wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(3000)
+                amount = points_used_from_transactions(page.content(), oid)
+            except Exception:
+                log.warning("Amazon [%s]: related-transactions page failed for %s.",
+                            self.profile.label, oid, exc_info=True)
+            if amount is None:
+                diagnostics.snapshot(page, f"Amazon points amount unreadable: {oid}")
+                diagnostics.problem(
+                    f"order {oid}: paid partly with Amazon points, but the related-transactions page "
+                    f"gave no amount — Gift Card NOT recorded (cost overstated until it is)")
+                continue
+            result[oid] = amount
+            log.info("Amazon [%s]: order %s paid $%.2f with Amazon points.",
+                     self.profile.label, oid, amount)
+        return result
 
     def _read_tracking_numbers(self, page, details_html: dict[str, str]) -> dict[str, dict]:
         """{order_id: {shipment_label: tracking_number}} read from each non-terminal shipment's pt page.

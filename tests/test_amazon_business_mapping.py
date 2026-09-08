@@ -731,3 +731,33 @@ def test_two_identical_badged_blocks_in_one_shipment_also_sum():
     assert len(rows) == 1
     assert rows[0].quantity == 6
     assert rows[0].total_cost == 7559.94
+
+
+# --- non-card tenders: a spent cash-back balance + Amazon points (2026-09-07) ---------------------
+def test_business_non_card_tenders_cash_back_and_points():
+    """Twin of the consumer tests, 111-9990010-9990010 (Business) paid its whole
+    $48.28 in Amazon points and the order page never said how much — only the related-transactions
+    page does. Both the cash-back summary line and the points fold into the Gift Card column."""
+    from tests.test_amazon_mapping import _POINTS_INSTRUMENT, _transactions
+    from scrapers.amazon_business_mapping import (SELECTORS, order_uses_points,
+                                                  points_used_from_transactions)
+
+    oid = "111-9990010-9990010"
+    base = _details(oid, "September 4, 2026", [_shipment(oid, 0, "Shipped", [_item("Book", "$48.28")])],
+                    gift_card="$0.72", subtotal="$48.28")
+    cash_back = base.replace("Gift Card Amount: -$0.72\n",
+                             "Gift Card Amount: -$0.72\nPrime for Young Adults cash back: -$5.00\n")
+    assert build_order_items(cash_back)[0].gift_card == 5.72
+
+    points = base.replace("Payment method Prime Business Card ending in 1234 5% back",
+                          "Payment method " + _POINTS_INSTRUMENT)
+    assert order_uses_points(points) is True and order_uses_points(base) is False
+    assert build_order_items(points, points_used=47.56)[0].gift_card == 48.28
+    assert build_order_items(points)[0].gift_card is None            # amount unknown -> blank
+    assert build_order_items(base, points_used=47.56)[0].gift_card == 0.72  # no points tender -> ignored
+
+    page = _transactions(("Amazon Points used", "-$48.28", oid),
+                         ("Amazon Points used", "-$1.00", "111-0000000-0000000"))
+    assert points_used_from_transactions(page, oid) == 48.28
+    assert points_used_from_transactions(_transactions(), oid) is None
+    assert {"payment_instrument", "transactions_line_item"} <= set(SELECTORS)

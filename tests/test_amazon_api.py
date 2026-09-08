@@ -298,3 +298,64 @@ class TestAnEmptyAccountIsNotAShapeChange:
         client = AmazonApiClient(_Profile())
         with pytest.raises(amazon_api.AmazonApiError):
             client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+
+class TestAmazonPoints:
+    """Amazon points never show on the order page; the client reads them off the
+    related-transactions page — one extra load for a points order, none for the rest — and an
+    unreadable amount is a dossier problem with a blank cell, never a false 0."""
+
+    class _P(_FakePage):
+        def __init__(self, history, details, transactions=""):
+            super().__init__(history, details)
+            self.transactions = transactions
+            self.visited = []
+
+        def goto(self, url, **kwargs):
+            self.visited.append(url)
+            super().goto(url, **kwargs)
+
+        def content(self):
+            if "yourpayments/transactions" in self._current:
+                return self.transactions
+            return super().content()
+
+    @staticmethod
+    def _points_details(oid):
+        from tests.test_amazon_mapping import _POINTS_INSTRUMENT
+
+        html = _details(oid, "September 4, 2026", [_shipment(oid, 0, "Shipped", [_item("Book", "$48.28")])],
+                        subtotal="$48.28")
+        return html.replace("Payment method Visa ending in 1234", "Payment method " + _POINTS_INSTRUMENT)
+
+    def test_a_points_order_gets_one_transactions_load_and_the_amount(self, monkeypatch):
+        from tests.test_amazon_mapping import _transactions
+
+        pts, plain = "111-9990010-9990010", "222-2222222-2222222"
+        details = {pts: self._points_details(pts),
+                   plain: _details(plain, "September 4, 2026",
+                                   [_shipment(plain, 0, "Shipped", [_item("Thing", "$5.00")])])}
+        page = self._P(_history((pts, "September 4, 2026"), (plain, "September 4, 2026")), details,
+                       transactions=_transactions(("Amazon Points used", "-$48.28", pts)))
+        monkeypatch.setattr(amazon_api, "CdpBrowser", _FakeCdp(page))
+
+        rows = AmazonApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
+        by_id = {r.order_id: r for r in rows}
+        assert by_id[pts].gift_card == 48.28
+        assert by_id[plain].gift_card == 0.0
+        assert [u for u in page.visited if "yourpayments/transactions" in u] == [
+            f"https://www.amazon.com/cpe/yourpayments/transactions?transactionTag={pts}"]
+
+    def test_an_unreadable_points_amount_is_a_dossier_problem_not_a_zero(self, monkeypatch, tmp_path):
+        import diagnostics
+
+        pts = "111-9990010-9990010"
+        page = self._P(_history((pts, "September 4, 2026")), {pts: self._points_details(pts)},
+                       transactions="<html>It looks like we couldn't find the transaction</html>")
+        monkeypatch.setattr(amazon_api, "CdpBrowser", _FakeCdp(page))
+
+        with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
+            rows = AmazonApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
+        assert rows[0].gift_card is None
+        assert d.problems and "Amazon points" in d.problems[0] and pts in d.problems[0]
+        assert d.snapshots and "points amount unreadable" in d.snapshots[0]["label"]

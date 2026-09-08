@@ -754,3 +754,131 @@ def test_two_identical_badged_blocks_in_one_shipment_also_sum():
     assert len(rows) == 1
     assert rows[0].quantity == 6
     assert rows[0].total_cost == 7559.94
+
+
+# --- non-card tenders: a spent cash-back balance + Amazon points (2026-09-07) ---------------------
+# The payment-method list of a points order, fixture-shaped.
+_POINTS_INSTRUMENT = (
+    '<ul class="pmts-payments-instrument-list">'
+    '<li class="a-spacing-micro pmts-payments-instrument-detail-box-paystationpaymentmethod">'
+    '<span class="a-list-item">Prime Business Card ending in 1234</span></li>'
+    '<li class="pmts-payments-instrument-supplemental-box-paystationpaymentmethod">'
+    '<span class="a-list-item">5% back</span></li>'
+    '<li class="a-spacing-micro pmts-payments-instrument-detail-box-paystationpaymentmethod">'
+    '<span class="a-list-item">Amazon point</span></li></ul>'
+)
+
+
+def _transactions(*entries):
+    """The related-transactions page, fixture-shaped: one block per line item,
+    each holding the label, the amount and a link naming the order."""
+    blocks = "".join(
+        '<div class="a-section a-spacing-base apx-transactions-line-item-component-container">'
+        '<div class="a-row"><div class="a-column a-span9">'
+        f'<span class="a-size-base a-text-bold">{label}</span></div>'
+        '<div class="a-column a-span3 a-text-right a-span-last">'
+        f'<span class="a-size-base-plus a-text-bold">{amount}</span></div></div>'
+        '<div class="a-section"><a class="a-link-normal" '
+        f'href="https://www.amazon.com/gp/css/summary/edit.html?orderID={oid}">Order #{oid}</a></div>'
+        "</div>"
+        for label, amount, oid in entries
+    )
+    return f'<html><body><div id="a-page">{blocks}</div></body></html>'
+
+
+def test_a_spent_cash_back_balance_is_a_gift_card():
+    """ "Prime for Young Adults cash back: -$15.98" paid the
+    whole order. It is a tender the card never spent, so it joins the Gift Card column and the COGS
+    formula nets it — the user's rule: treat it like a gift card. The bare label ALSO sits in the
+    payment list (no colon, no amount) and must not count twice."""
+    oid = "111-9990008-9990008"
+    html = _details(oid, "September 7, 2026",
+                    [_shipment(oid, 0, "Arriving tomorrow", [_item("Object Permanence Box", "$15.98")])],
+                    gift_card="$4.02", subtotal="$15.98")
+    html = html.replace("Gift Card Amount: -$4.02\n",
+                        "Gift Card Amount: -$4.02\nPrime for Young Adults cash back: -$11.96\n")
+    html = html.replace("Payment method Visa ending in 1234",
+                        "Payment method Visa ending in 1234 Prime for Young Adults cash back")
+    rows = build_order_items(html)
+    assert rows[0].gift_card == 15.98          # 4.02 gift card + 11.96 cash back = the whole order
+    assert rows[0].total_cost == 15.98         # the GROSS cost stays; the formula nets
+
+
+def test_the_cash_back_label_alone_is_not_a_tender():
+    from bs4 import BeautifulSoup
+
+    from scrapers.amazon_mapping import _cash_back_used
+
+    summary = BeautifulSoup(
+        '<div data-component="orderSummary">Payment method Visa ending in 0301\n'
+        "Prime for Young Adults cash back\nItem(s) Subtotal: $73.77\nGrand Total: $73.77</div>",
+        "html.parser").div
+    assert _cash_back_used(summary) == 0.0
+    assert _cash_back_used(None) is None
+
+
+def test_several_cash_back_lines_sum_and_split_spans_parse():
+    from bs4 import BeautifulSoup
+
+    from scrapers.amazon_mapping import _cash_back_used
+
+    summary = BeautifulSoup(
+        '<div data-component="orderSummary">'
+        "<span>Prime for Young Adults cash back:</span><span>-$10.00</span>"
+        "<span>Prime cash back:</span><span>-$2.50</span>"
+        "<span>Grand Total:</span><span>$0.00</span></div>", "html.parser").div
+    assert _cash_back_used(summary) == 12.50
+
+
+def test_amazon_points_are_detected_from_the_payment_list_only():
+    from scrapers.amazon_mapping import order_uses_points
+
+    oid = "111-9990010-9990010"
+    plain = _details(oid, "September 4, 2026", [_shipment(oid, 0, "Shipped", [_item("Book", "$48.28")])])
+    assert order_uses_points(plain) is False
+    assert order_uses_points(plain.replace("Payment method Visa ending in 1234",
+                                           "Payment method " + _POINTS_INSTRUMENT)) is True
+    # Marketing text elsewhere on the page never counts.
+    assert order_uses_points(plain.replace("</body>", "<div>Shop with Amazon points!</div></body>")) is False
+
+
+def test_points_used_reads_only_this_orders_lines_from_the_transactions_page():
+    from scrapers.amazon_mapping import points_used_from_transactions
+
+    oid, other = "111-9990010-9990010", "111-9999999-9999999"
+    page = _transactions(("Amazon Points used", "-$48.28", oid),
+                         ("Amazon Points used", "-$5.00", other),                 # another order
+                         ("Prime Business Card ending in 0315", "-$10.00", oid))  # a card charge
+    assert points_used_from_transactions(page, oid) == 48.28
+    assert points_used_from_transactions(page, other) == 5.00
+    # Two postings for one order sum (a multi-shipment order charges in pieces).
+    two = _transactions(("Amazon Points used", "-$30.00", oid), ("Amazon Points used", "-$18.28", oid))
+    assert points_used_from_transactions(two, oid) == 48.28
+    # Nothing posted yet / shape changed / no amount -> unknown, never 0.
+    assert points_used_from_transactions(_transactions(), oid) is None
+    assert points_used_from_transactions("<html>It looks like we couldn't find the transaction</html>",
+                                         oid) is None
+    assert points_used_from_transactions(_transactions(("Amazon Points used", "pending", oid)), oid) is None
+
+
+def test_points_fold_into_the_gift_card_and_an_unknown_amount_leaves_it_blank():
+    """the order page showed the full $48.28 Grand Total with
+    "Amazon point" listed as a tender — every dollar was points. The API client reads the amount off
+    the transactions page and hands it in; without it the cell must be BLANK, not a false 0."""
+    oid = "111-9990010-9990010"
+    html = _details(oid, "September 4, 2026", [_shipment(oid, 0, "Shipped", [_item("Book", "$48.28")])],
+                    gift_card="$0.72", subtotal="$48.28")
+    html = html.replace("Payment method Visa ending in 1234", "Payment method " + _POINTS_INSTRUMENT)
+    assert build_order_items(html, points_used=47.56)[0].gift_card == 48.28   # 0.72 gift card + points
+    assert build_order_items(html)[0].gift_card is None                        # amount unknown
+    assert build_order_items(html, points_used=47.56, net_gift_cards=False)[0].gift_card is None
+    # An order that paid by card alone ignores a stray points figure.
+    plain = _details(oid, "September 4, 2026", [_shipment(oid, 0, "Shipped", [_item("Book", "$48.28")])])
+    assert build_order_items(plain, points_used=47.56)[0].gift_card == 0.0
+
+
+def test_the_non_card_tender_selectors_are_declared_for_the_audit():
+    from scrapers.amazon_mapping import SELECTORS
+
+    assert SELECTORS["payment_instrument"] == ".pmts-payments-instrument-detail-box-paystationpaymentmethod"
+    assert SELECTORS["transactions_line_item"] == ".apx-transactions-line-item-component-container"
