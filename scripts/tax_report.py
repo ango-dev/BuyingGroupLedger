@@ -66,7 +66,7 @@ def _money(value) -> float:
 
 def _blank_bucket() -> dict:
     return {"rows": 0, "orders": set(), "gross_cost": 0.0, "shipping": 0.0, "returns": 0.0,
-            "gift_card": 0.0, "sales_tax": 0.0, "cashback": 0.0,
+            "gift_card": 0.0, "sales_tax": 0.0, "rewards_used": 0.0, "cashback": 0.0,
             "cogs": 0.0, "insurance": 0.0, "payouts": 0.0, "payout_rows": 0}
 
 
@@ -104,10 +104,13 @@ def build_report(sheet: Sheet, year: int) -> dict:
             returns = _money(cell("Return Qty")) * _money(cell("Cost Per Item"))
             gift_card = _money(cell("Gift Card"))
             sales_tax = _money(cell("Sales Tax"))
-            basis = total_cost - returns - gift_card + shipping + sales_tax
+            # Rewards spent stay IN the cost (netted from COGS at year end outside the sheet) and
+            # only leave the cashback basis — the same shape as the sheet's formula.
+            rewards_used = _money(cell("Rewards Used"))
+            basis = total_cost - returns - gift_card + shipping + sales_tax - rewards_used
             cogs_cell = _parse_display_number(cell("COGS"))
-            cogs = float(cogs_cell) if cogs_cell is not None else basis * (1 - rate)
-            cashback = basis - cogs
+            cogs = float(cogs_cell) if cogs_cell is not None else basis * (1 - rate) + rewards_used
+            cashback = basis - (cogs - rewards_used)
             insurance = _money(cell("Insurance"))
             for bucket in (total, by_retailer[retailer], by_group[group]):
                 bucket["rows"] += 1
@@ -117,6 +120,7 @@ def build_report(sheet: Sheet, year: int) -> dict:
                 bucket["returns"] += returns
                 bucket["gift_card"] += gift_card
                 bucket["sales_tax"] += sales_tax
+                bucket["rewards_used"] += rewards_used
                 bucket["cashback"] += cashback
                 bucket["cogs"] += cogs
                 bucket["insurance"] += insurance
@@ -188,6 +192,8 @@ def render_text(report: dict, *, list_rows: bool = True) -> str:
         *([f"      less gift-card tenders                 {_fmt(-t['gift_card']):>14}"] if t["gift_card"] else []),
         *([f"      plus sales tax                         {_fmt(t['sales_tax']):>14}"] if t["sales_tax"] else []),
         f"      less cashback netted into cost         {_fmt(-t['cashback']):>14}",
+        *([f"      (of which paid with Amazon rewards     {_fmt(t['rewards_used']):>14}   kept in cost; "
+           "net ALL Amazon rewards from COGS at year end)"] if t["rewards_used"] else []),
         f"  Insurance (Schedule C expense)            {_fmt(-t['insurance']):>14}",
         f"  {'-' * 56}",
         f"  Net                                       {_fmt(t['net']):>14}",

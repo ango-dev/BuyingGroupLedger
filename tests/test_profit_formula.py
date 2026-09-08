@@ -1,3 +1,4 @@
+import re
 """The Total Profit cell is a LIVE sheet formula, not a scraped value. Shipping, by contrast, is a
 Python-computed NUMBER written once per sync (see TestShippingReproration below) — not a formula.
 
@@ -41,7 +42,7 @@ class TestFormulaShape:
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
         # here rather than quietly producing wrong money on the sheet.
         assert ledger_sync._cogs_formula(7) == (
-            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-W7*L7-P7+N7+O7)*(1-R7),"")))'
+            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-W7*L7-P7+N7+O7-AG7)*(1-R7)+AG7,"")))'
         )
         assert ledger_sync._profit_formula(7) == (
             '=IF(B7="cancelled","",IF(U7="","",IFERROR(U7-S7-T7,"")))'
@@ -108,6 +109,22 @@ class TestFormulaShape:
                 new = (cost - gc_share + ship_share) * (1 - rate)
                 assert round(new, 9) == round(old, 9), (cost, gc_total, rate)
 
+    def test_rewards_used_keep_the_full_cost_but_earn_no_cashback(self):
+        """Amazon rewards SPENT on an order. Unlike a gift card they are NOT
+        netted out of the cost — the user nets every Amazon reward from COGS at year end outside the
+        sheet, so netting here too would count it twice. They only leave the cashback basis: the
+        card earns nothing on dollars it never paid. A blank cell computes the old number exactly."""
+        cost, rate = 48.28, 0.05
+        as_gift_card = (cost - cost) * (1 - rate)                 # the 09-07 treatment: cost 0
+        as_rewards = (cost - cost) * (1 - rate) + cost            # the column's treatment: cost 48.28
+        assert round(as_rewards, 9) == cost and as_gift_card == 0.0
+        # A partial redemption: $13.70 of $15.48 -> cost stays 15.48, cashback only on the $1.78.
+        cost, rewards = 15.48, 13.70
+        cogs = (cost - rewards) * (1 - rate) + rewards
+        assert round(cost - cogs, 9) == round((cost - rewards) * rate, 9)
+        # Blank (0) rewards -> identical to the formula before the column existed.
+        assert (cost - 0) * (1 - rate) + 0 == cost * (1 - rate)
+
     def test_the_pre_tax_cap_is_obsolete_now_that_tax_is_recorded(self):
         """The real case the old cap existed for: a $14.04 gift card against a $12.85 order with
         $1.19 tax. The old scheme capped the reduction at the pre-tax basis so cost floored at 0;
@@ -135,20 +152,23 @@ class TestFormulaShape:
             assert f"{letter}7" in profit, f"{name} ({letter}) missing from the profit formula"
         # The cost side now lives in COGS, so profit must NOT re-derive it — two copies of the same
         # arithmetic is exactly what would drift.
+        def refs(formula):
+            return set(re.findall(r"[A-Z]+7", formula))  # whole cell references ("G7" is not in "AG7")
+
         for name in ("Card", "Payout Date", "Order ID", "Total Cost", "Shipping", "Cashback Rate"):
             letter = ledger_sync._col_letter(HEADER.index(name))
-            assert f"{letter}7" not in profit, f"{name} should not be part of the profit math"
+            assert f"{letter}7" not in refs(profit), f"{name} should not be part of the profit math"
 
         cogs = ledger_sync._cogs_formula(7)
         for name in ("Total Cost", "Shipping", "Cashback Rate", "Status", "Return Qty",
-                     "Cost Per Item", "Gift Card", "Sales Tax"):
+                     "Cost Per Item", "Gift Card", "Sales Tax", "Rewards Used"):
             letter = ledger_sync._col_letter(HEADER.index(name))
             assert f"{letter}7" in cogs, f"{name} ({letter}) missing from the COGS formula"
         # Insurance is an EXPENSE, not part of the cost of the goods. Order ID: no SUMIF here —
         # Shipping already holds this row's final cost-weighted share by the time this runs.
         for name in ("Insurance", "Payout Amount", "Order ID", "Card"):
             letter = ledger_sync._col_letter(HEADER.index(name))
-            assert f"{letter}7" not in cogs, f"{name} should not be part of the COGS math"
+            assert f"{letter}7" not in refs(cogs), f"{name} should not be part of the COGS math"
 
     def test_blank_payout_leaves_the_cell_blank(self):
         # Not 0: an un-paid-out row would otherwise show a large fake loss and poison a column sum.

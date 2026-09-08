@@ -371,9 +371,9 @@ class TestAmazonPoints:
 
         rows = AmazonBusinessApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
         by_id = {r.order_id: r for r in rows}
-        assert by_id[whole].gift_card == 48.28
-        assert by_id[part].gift_card == 13.70 and by_id[part].total_cost == 15.48
-        assert by_id[plain].gift_card == 0.0
+        assert by_id[whole].rewards_used == 48.28
+        assert by_id[part].rewards_used == 13.70 and by_id[part].total_cost == 15.48
+        assert by_id[plain].rewards_used == 0.0
         assert [u for u in page.visited if "businessprime/rewards" in u] == [
             "https://www.amazon.com/businessprime/rewards"]
         assert not [u for u in page.visited if "yourpayments/transactions" in u]
@@ -394,7 +394,7 @@ class TestAmazonPoints:
                        transactions=_transactions(("Amazon Points used", "-$48.28", pts)))
         monkeypatch.setattr(api, "CdpBrowser", _FakeCdp(page))
         rows = AmazonBusinessApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
-        assert rows[0].gift_card == 48.28
+        assert rows[0].rewards_used == 48.28
         assert [u for u in page.visited if "yourpayments/transactions" in u] == [
             f"https://www.amazon.com/cpe/yourpayments/transactions?transactionTag={pts}"]
 
@@ -407,5 +407,5 @@ class TestAmazonPoints:
         monkeypatch.setattr(api, "CdpBrowser", _FakeCdp(page))
         with diagnostics.collecting("amazon-business", "p", root=tmp_path) as d:
             rows = AmazonBusinessApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
-        assert rows[0].gift_card is None
+        assert rows[0].rewards_used is None
         assert d.problems and "rewards ledger" in d.problems[0] and pts in d.problems[0]

@@ -324,7 +324,7 @@ class AmazonBusinessApiClient:
         points paid none, some or all of it), and a redemption can be PARTIAL, so the amount is
         always read. The ledger knows it the moment the order is placed; the related-transactions
         page — the FALLBACK, one load per order the ledger does not list — only once the points
-        post. An order neither can price keeps a BLANK Gift Card cell (never a false 0) and ends
+        post. An order neither can price keeps a BLANK Rewards Used cell (never a false 0) and ends
         the run with a dossier problem, so the overstated cost is loud rather than silent."""
         points_orders = [oid for oid, html in details_html.items() if order_uses_points(html)]
         if not points_orders:
@@ -359,8 +359,8 @@ class AmazonBusinessApiClient:
                 diagnostics.snapshot(page, f"Amazon points amount unreadable: {oid}")
                 diagnostics.problem(
                     f"order {oid}: paid partly with Amazon points, but neither the rewards ledger nor "
-                    f"the related-transactions page gave an amount — Gift Card NOT recorded (cost "
-                    f"overstated until it is)")
+                    f"the related-transactions page gave an amount — Rewards Used NOT recorded "
+                    f"(cashback overstated until it is)")
                 continue
             result[oid] = amount
             log.info("Amazon Business [%s]: order %s paid $%.2f with Amazon points.",

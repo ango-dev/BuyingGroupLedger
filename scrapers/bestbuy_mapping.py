@@ -277,6 +277,7 @@ def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[
                     # the agent path's convention so the two writers agree on this field.
                     shipping=shipping_total,
                     gift_card=gift_card_total,
+                    rewards_used=0.0,  # no rewards programme on this retailer yet: a real 0, not unknown
                     sales_tax=sales_tax_total,
                     card_last4=card_last4,
                     shipment=shipment,

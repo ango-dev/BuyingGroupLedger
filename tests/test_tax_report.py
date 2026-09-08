@@ -89,6 +89,17 @@ class TestTheTwoDates:
         # cashback = basis − cogs off the SAME netted basis, not the stale (cost + shipping) one.
         assert totals["cashback"] == 6.0
 
+    def test_rewards_used_stay_in_cost_and_leave_the_cashback_basis(self):
+        """Rewards spent (2026-09-08): (100 − 20) × 0.9 + 20 = 92, cashback 8 — the cost stays the
+        full 100 because the user nets the reward from COGS at year end, outside the sheet."""
+        sheet = build(row_cells(2, **{"Order Date": Cell("2026-05-05"), "COGS": Cell(""),
+                                     "Total Cost": Cell(100.0), "Rewards Used": Cell(20.0),
+                                     "Cashback Rate": Cell(0.1, fmt="percent")}))
+        totals = build_report(sheet, 2026)["totals"]
+        assert totals["cogs"] == 92.0
+        assert totals["rewards_used"] == 20.0
+        assert totals["cashback"] == 8.0
+
 
 class TestRendering:
     def test_text_names_the_basis_and_the_numbers(self):

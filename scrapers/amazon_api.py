@@ -303,7 +303,7 @@ class AmazonApiClient:
         The order page never prices this tender: the summary shows the full Grand Total whether
         points paid none or all of it. Only the transactions
         page says "Amazon Points used -$48.28". When it gives no amount — the points have not posted
-        yet, or the page changed shape — the Gift Card cell stays BLANK (never a false 0) and the run
+        yet, or the page changed shape — the Rewards Used cell stays BLANK (never a false 0) and the run
         ends with a dossier problem, so the understated cost is loud rather than silent."""
         result: dict[str, float] = {}
         for oid, html in details_html.items():
@@ -321,7 +321,7 @@ class AmazonApiClient:
                 diagnostics.snapshot(page, f"Amazon points amount unreadable: {oid}")
                 diagnostics.problem(
                     f"order {oid}: paid partly with Amazon points, but the related-transactions page "
-                    f"gave no amount — Gift Card NOT recorded (cost overstated until it is)")
+                    f"gave no amount — Rewards Used NOT recorded (cashback overstated until it is)")
                 continue
             result[oid] = amount
             log.info("Amazon [%s]: order %s paid $%.2f with Amazon points.",

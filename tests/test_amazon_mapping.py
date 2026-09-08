@@ -789,10 +789,10 @@ def _transactions(*entries):
     return f'<html><body><div id="a-page">{blocks}</div></body></html>'
 
 
-def test_a_spent_cash_back_balance_is_a_gift_card():
+def test_a_spent_cash_back_balance_is_rewards_used_not_a_gift_card():
     """ "Prime for Young Adults cash back: -$15.98" paid the
-    whole order. It is a tender the card never spent, so it joins the Gift Card column and the COGS
-    formula nets it — the user's rule: treat it like a gift card. The bare label ALSO sits in the
+    whole order. It lands in Rewards Used, while
+    the Gift Card column keeps the real gift-card line alone. The bare label ALSO sits in the
     payment list (no colon, no amount) and must not count twice."""
     oid = "111-9990008-9990008"
     html = _details(oid, "September 7, 2026",
@@ -803,8 +803,9 @@ def test_a_spent_cash_back_balance_is_a_gift_card():
     html = html.replace("Payment method Visa ending in 1234",
                         "Payment method Visa ending in 1234 Prime for Young Adults cash back")
     rows = build_order_items(html)
-    assert rows[0].gift_card == 15.98          # 4.02 gift card + 11.96 cash back = the whole order
-    assert rows[0].total_cost == 15.98         # the GROSS cost stays; the formula nets
+    assert rows[0].gift_card == 4.02           # the gift-card line only
+    assert rows[0].rewards_used == 11.96       # the cash back, its own column
+    assert rows[0].total_cost == 15.98         # the GROSS cost stays
 
 
 def test_the_cash_back_label_alone_is_not_a_tender():
@@ -864,20 +865,25 @@ def test_points_used_reads_only_this_orders_lines_from_the_transactions_page():
     assert points_used_from_transactions(_transactions(("Amazon Points used", "pending", oid)), oid) is None
 
 
-def test_points_fold_into_the_gift_card_and_an_unknown_amount_leaves_it_blank():
+def test_points_land_in_rewards_used_and_an_unknown_amount_leaves_it_blank():
     """the order page showed the full $48.28 Grand Total with
     "Amazon point" listed as a tender — every dollar was points. The API client reads the amount off
-    the transactions page and hands it in; without it the cell must be BLANK, not a false 0."""
+    the rewards ledger / transactions page and hands it in; without it the cell must be BLANK, not a
+    false 0. The Gift Card column is untouched by points."""
     oid = "111-9990010-9990010"
     html = _details(oid, "September 4, 2026", [_shipment(oid, 0, "Shipped", [_item("Book", "$48.28")])],
                     gift_card="$0.72", subtotal="$48.28")
     html = html.replace("Payment method Visa ending in 1234", "Payment method " + _POINTS_INSTRUMENT)
-    assert build_order_items(html, points_used=47.56)[0].gift_card == 48.28   # 0.72 gift card + points
-    assert build_order_items(html)[0].gift_card is None                        # amount unknown
-    assert build_order_items(html, points_used=47.56, net_gift_cards=False)[0].gift_card is None
+    row = build_order_items(html, points_used=47.56)[0]
+    assert (row.gift_card, row.rewards_used) == (0.72, 47.56)
+    row = build_order_items(html)[0]
+    assert (row.gift_card, row.rewards_used) == (0.72, None)                   # amount unknown
+    row = build_order_items(html, points_used=47.56, net_gift_cards=False)[0]
+    assert (row.gift_card, row.rewards_used) == (None, None)
     # An order that paid by card alone ignores a stray points figure.
     plain = _details(oid, "September 4, 2026", [_shipment(oid, 0, "Shipped", [_item("Book", "$48.28")])])
-    assert build_order_items(plain, points_used=47.56)[0].gift_card == 0.0
+    row = build_order_items(plain, points_used=47.56)[0]
+    assert (row.gift_card, row.rewards_used) == (0.0, 0.0)
 
 
 def test_the_non_card_tender_selectors_are_declared_for_the_audit():

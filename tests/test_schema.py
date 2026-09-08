@@ -36,7 +36,7 @@ def test_column_order_is_pinned():
         "total_cost", "shipping", "sales_tax", "gift_card", "card_name", "cashback_rate", "cogs",
         "insurance", "payout_amount", "payout_date", "return_quantity", "return_date",
         "total_profit", "profile_label", "order_url", "tracking_url", "receipt_url",
-        "delivery_address", "card_last4", "last_scraped_at",
+        "delivery_address", "card_last4", "last_scraped_at", "rewards_used",
     ]
     assert HEADER == [
         "Order Date", "Status", "Retailer", "Item Name", "Shipment", "Quantity", "Order ID",
@@ -44,7 +44,7 @@ def test_column_order_is_pinned():
         "Total Cost", "Shipping", "Sales Tax", "Gift Card", "Card", "Cashback Rate", "COGS",
         "Insurance", "Payout Amount", "Payout Date", "Return Qty", "Return Date", "Total Profit",
         "Profile", "Order Link", "Tracking Link", "Receipt Link", "Delivery Address",
-        "Card Last 4", "Last Scraped At",
+        "Card Last 4", "Last Scraped At", "Rewards Used",
     ]
 
 
@@ -93,3 +93,13 @@ def test_hand_entered_statuses_are_terminal():
     re-check list."""
     for status in ("paid", "return"):
         assert status in TERMINAL_STATUSES
+
+
+def test_rewards_used_defaults_to_a_real_zero():
+    """the column reads 0 by default, not blank. A scraper that knows nothing about
+    rewards (Best Buy, Costco, a history import) therefore writes 0; the Amazon mappings override it
+    with the amount, or with None only when the amount could not be read."""
+    item = OrderItem(retailer="Costco", order_id="1", order_date="2026-09-08", item_name="Thing")
+    assert item.rewards_used == 0.0
+    assert OrderItem(retailer="Amazon", order_id="1", order_date="2026-09-08", item_name="Thing",
+                     rewards_used="").rewards_used is None  # a blank CSV cell stays "unknown"

@@ -164,6 +164,9 @@ def main() -> None:
                         help="Actually write to the live sheet (default: dry run, read-only)")
     parser.add_argument("--refresh", action="store_true",
                         help="Also correct non-blank cells that disagree with config.json `cards`")
+    parser.add_argument("--formulas-only", action="store_true",
+                        help="Touch no card cell at all; just re-stamp COGS / Total Profit on every "
+                             "row (the migration step after the formula itself changes)")
     args = parser.parse_args()
 
     cards = load_cards()
@@ -185,6 +188,9 @@ def main() -> None:
         )
 
     plan = plan_profit_backfill(header, existing[1:], cards, refresh=args.refresh)
+    if args.formulas_only:
+        plan["will_write"] = []
+        print("--formulas-only: card cells untouched; only the formulas will be re-stamped.\n")
     _print_plan(plan, args.apply, args.refresh)
 
     if not args.apply:

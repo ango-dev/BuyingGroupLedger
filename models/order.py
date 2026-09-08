@@ -180,6 +180,12 @@ FIELDNAMES = [
     "delivery_address",
     "card_last4",
     "last_scraped_at",
+    # Appended LAST (2026-09-08). Amazon rewards SPENT on the order — a Prime cash-back balance or
+    # Amazon points — as an order-level total like `gift_card`. Deliberately NOT a gift card: the
+    # user nets every Amazon reward out of COGS at year end, outside the sheet, so the sheet must
+    # keep the order's FULL cost (as if the card paid it all) or the reward is counted twice. What
+    # the column changes is only the cashback basis: the card earns nothing on dollars it never paid.
+    "rewards_used",
 ]
 
 
@@ -232,6 +238,12 @@ class OrderItem(BaseModel):
     # per-row cost-weighted shares and the COGS formula nets them. See FIELDNAMES.
     gift_card: float | None = None
     sales_tax: float | None = None
+    # ORDER-LEVEL like the two above; Amazon only (cash-back balance + points). See FIELDNAMES.
+    # DEFAULTS TO A REAL 0: a row that never named rewards spent none, and the
+    # sheet should read 0 rather than blank. Every scraper still sets it explicitly; only the Amazon
+    # mappings ever emit None, and only when the amount could not be read (a blank never
+    # overwrites, so the cell stays whatever it was until a run can price it).
+    rewards_used: float | None = 0.0
 
     # TRANSIENT, Amazon only: a per-order promo the order page advertises under the payment method
     # ("... plus an extra 1% back ..."), which config.cards.tag_cards ADDS to the card's own rate when
@@ -247,7 +259,7 @@ class OrderItem(BaseModel):
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
                      "cashback_rate", "insurance", "payout_amount", "cogs", "total_profit",
-                     "return_quantity", "gift_card", "sales_tax",
+                     "return_quantity", "gift_card", "sales_tax", "rewards_used",
                      mode="before")
     @classmethod
     def _blank_to_none(cls, v):

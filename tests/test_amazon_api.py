@@ -341,8 +341,8 @@ class TestAmazonPoints:
 
         rows = AmazonApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
         by_id = {r.order_id: r for r in rows}
-        assert by_id[pts].gift_card == 48.28
-        assert by_id[plain].gift_card == 0.0
+        assert by_id[pts].rewards_used == 48.28
+        assert by_id[plain].rewards_used == 0.0
         assert [u for u in page.visited if "yourpayments/transactions" in u] == [
             f"https://www.amazon.com/cpe/yourpayments/transactions?transactionTag={pts}"]
 
@@ -356,6 +356,6 @@ class TestAmazonPoints:
 
         with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
             rows = AmazonApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
-        assert rows[0].gift_card is None
+        assert rows[0].rewards_used is None
         assert d.problems and "Amazon points" in d.problems[0] and pts in d.problems[0]
         assert d.snapshots and "points amount unreadable" in d.snapshots[0]["label"]

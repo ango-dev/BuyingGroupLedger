@@ -65,6 +65,8 @@ def test_no_gift_tender_is_a_detected_zero_and_zero_tax_is_real(payloads):
     row = _rows_for(build_order_items(payloads, "p"), "BBY01-809900000006")[0]
     assert row.gift_card == 0.0
     assert row.sales_tax == 0.0
+    # No rewards programme on this retailer yet: a real 0, not "unknown".
+    assert row.rewards_used == 0.0
 
 
 def test_a_payload_without_the_new_price_keys_emits_blank_tax(payloads):

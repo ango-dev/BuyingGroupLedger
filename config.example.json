@@ -33,7 +33,7 @@
     "default_cashback_rate": 0,
     "// amazon_promo_cashback_enabled": "AMAZON_PROMO_CASHBACK_ENABLED — add Amazon's per-order 'Earn N% back' promo on top of the card's rate.",
     "amazon_promo_cashback_enabled": true,
-    "// amazon_gift_card_netting_enabled": "AMAZON_GIFT_CARD_NETTING_ENABLED — record every non-card tender an order was part-paid with — gift card, a spent Prime cash-back balance, Amazon points — in the Gift Card column (the COGS formula subtracts it), so no cost or cashback is booked on money the card never spent. false leaves the cell blank and COGS uses the full sticker cost.",
+    "// amazon_gift_card_netting_enabled": "AMAZON_GIFT_CARD_NETTING_ENABLED — record the gift-card amount an order was part-paid with (the Gift Card column; the COGS formula subtracts it) and the Amazon rewards spent on it (the Rewards Used column; kept in cost, out of the cashback basis), so no cost or cashback is booked on money the card never spent. false leaves the cell blank and COGS uses the full sticker cost.",
     "amazon_gift_card_netting_enabled": true
   },
 

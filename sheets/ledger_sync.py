@@ -70,6 +70,8 @@ HEADER = [
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Last Scraped At",
+    "Rewards Used",  # Amazon rewards SPENT on the order (cash back / points): kept IN cost, out of
+                     # the cashback basis. Appended last 2026-09-08 — see models/order.py.
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
@@ -84,7 +86,7 @@ HEADER = [
 _NUMERIC_FIELDS = {
     "quantity", "cost_per_item", "shipping", "total_cost",
     "cashback_rate", "insurance", "payout_amount",
-    "shipment", "return_quantity", "gift_card", "sales_tax",
+    "shipment", "return_quantity", "gift_card", "sales_tax", "rewards_used",
 }
 
 # Fields that must be a plain int rather than a float when coerced (quantity: "3", not "3.0"; shipment:
@@ -124,8 +126,15 @@ _COL = {field: _col_letter(i) for i, field in enumerate(FIELDNAMES)}
 def _cogs_formula(row_number: int) -> str:
     """The live COGS (Cost of Goods Sold) formula for one sheet row.
 
-        COGS = (Total Cost - Return Qty x Cost Per Item - Gift Card + Shipping + Sales Tax)
-               * (1 - Cashback Rate)
+        COGS = (Total Cost - Return Qty x Cost Per Item - Gift Card + Shipping + Sales Tax
+                - Rewards Used) * (1 - Cashback Rate) + Rewards Used
+
+    REWARDS USED STAY IN THE COST. Amazon rewards spent on an order — a
+    Prime cash-back balance or Amazon points — are taken OUT of the parenthesis and ADDED BACK
+    outside it: the order still costs its full sticker (the reward is netted from COGS at year end,
+    outside this sheet, so netting it here too would count it twice — an all-points order would
+    show a $0 cost AND a year-end rewards deduction), while the card earns no cashback on dollars
+    it never paid. A blank cell is 0, so every pre-existing row computes the identical number.
 
     RETURNS ARE NETTED HERE, IN THE FORMULA. Quantity and Total Cost stay
     the GROSS bought numbers the scraper wrote -- putting a formula in those cells would freeze to a
@@ -176,12 +185,13 @@ def _cogs_formula(row_number: int) -> str:
     n = row_number
     cost, ship, rate = _COL["total_cost"], _COL["shipping"], _COL["cashback_rate"]
     ret_qty, unit = _COL["return_quantity"], _COL["cost_per_item"]
-    gift, tax = _COL["gift_card"], _COL["sales_tax"]
+    gift, tax, rew = _COL["gift_card"], _COL["sales_tax"], _COL["rewards_used"]
     status = _COL["status"]
     return (
         f'=IF({status}{n}="cancelled","",'
         f'IF({cost}{n}="","",'
-        f'IFERROR(({cost}{n}-{ret_qty}{n}*{unit}{n}-{gift}{n}+{ship}{n}+{tax}{n})*(1-{rate}{n}),"")))'
+        f'IFERROR(({cost}{n}-{ret_qty}{n}*{unit}{n}-{gift}{n}+{ship}{n}+{tax}{n}-{rew}{n})'
+        f'*(1-{rate}{n})+{rew}{n},"")))'
     )
 
 
@@ -844,7 +854,7 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
 # blank themselves on a cancelled row (see _cogs_formula).
 _CANCELLED_BLANK_FIELDS = (
     "cost_per_item", "total_cost", "shipping", "insurance", "payout_amount", "payout_date",
-    "gift_card", "sales_tax",
+    "gift_card", "sales_tax", "rewards_used",
 )
 
 
@@ -954,11 +964,11 @@ def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
 # The ORDER-LEVEL amounts every mapping emits identically on all of an order's rows, in the field
 # order they were added. Each one's sheet cell holds that row's cost-weighted SHARE of the order
 # total, written by _reprorate_order_level below.
-_ORDER_LEVEL_FIELDS = ("shipping", "gift_card", "sales_tax")
+_ORDER_LEVEL_FIELDS = ("shipping", "gift_card", "sales_tax", "rewards_used")
 
 
 def _reprorate_order_level(worksheet, order_ids: set, raw_totals: dict) -> None:
-    """Rewrite the Shipping / Gift Card / Sales Tax cell of EVERY row belonging to `order_ids` to
+    """Rewrite the Shipping / Gift Card / Sales Tax / Rewards Used cell of EVERY row belonging to `order_ids` to
     that row's cost-weighted SHARE of the order-level total (weighted by Total Cost), replacing the raw order-level value every scraper/agent emits.
     `raw_totals` is {field: {order_id: total}} over _ORDER_LEVEL_FIELDS.
 

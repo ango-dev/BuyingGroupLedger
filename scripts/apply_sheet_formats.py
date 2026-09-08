@@ -34,7 +34,7 @@ log = logging.getLogger("apply_sheet_formats")
 #: Columns that must display as money, by NAME. Everything the year-end totals are read off.
 CURRENCY_COLUMNS = (
     "Cost Per Item", "Total Cost", "Shipping", "COGS", "Insurance", "Payout Amount", "Total Profit",
-    "Gift Card", "Sales Tax",
+    "Gift Card", "Sales Tax", "Rewards Used",
 )
 #: Columns that must display as a percentage. Cashback Rate STORES a fraction (0.04) and shows "4%".
 PERCENT_COLUMNS = ("Cashback Rate",)
@@ -58,6 +58,7 @@ TABLE_COLUMN_TYPES = {
     "Cost Per Item": "CURRENCY", "Total Cost": "CURRENCY", "Shipping": "CURRENCY",
     "COGS": "CURRENCY", "Insurance": "CURRENCY", "Payout Amount": "CURRENCY",
     "Total Profit": "CURRENCY", "Gift Card": "CURRENCY", "Sales Tax": "CURRENCY",
+    "Rewards Used": "CURRENCY",
     "Cashback Rate": "PERCENT",
     "Tracking Submitted": "BOOLEAN",   # the checkbox sync_tracking.py ticks
     "Status": "DROPDOWN",              # its dataValidationRule is preserved, never rebuilt

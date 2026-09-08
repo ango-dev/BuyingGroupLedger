@@ -18,7 +18,8 @@ rarely-scanned reference/audit columns parked at the end:
 Order ID · Tracking Number · Tracking Submitted · Delivery Date · Buying Group ·
 Cost Per Item · Total Cost · Shipping · Sales Tax · Gift Card · Card · Cashback Rate · COGS ·
 Insurance · Payout Amount · Payout Date · Return Qty · Return Date · Total Profit ·
-Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Last Scraped At`
+Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Last Scraped At ·
+Rewards Used`
 
 > **Changing the column order is a MIGRATION, not an edit**, and it takes two steps.
 > `python -m scripts.reorder_sheet --apply` moves the row *values*; `python -m
@@ -127,23 +128,27 @@ etc.) — they're never resold, so they never hit the ledger.
   sheet.) `AMAZON_GIFT_CARD_NETTING_ENABLED=false` leaves the Gift Card cell blank, so COGS uses
   the full sticker cost.
 
-  The column holds every **non-card tender**, not only gift cards (since 2026-09-07). A spent Prime
-  cash-back balance — the `Prime for Young Adults cash back: -$15.98` line in the order summary —
-  and **Amazon points** (the Prime Business card's rewards) are treated exactly like a gift card.
-  Points are the one tender the order page never prices: the summary shows the full Grand Total
-  whether points paid none or all of it, and only the payment-method list betrays them ("Amazon
-  point"). A redemption can be partial, so the amount is always read, never assumed. On Amazon
-  Business it comes from the **Business Prime Rewards ledger** (one page, loaded once at the end of
-  the run whenever some order used points), which lists every redemption by order at 100 points to
-  the dollar and knows it the moment the order is placed; the order's related-transactions page is
-  the fallback, and on consumer Amazon the only source. If neither prices it the cell stays blank
-  and the run ends with a dossier problem, rather than writing a false 0.
+  **Amazon rewards spent on an order are NOT gift cards** — they get their own **Rewards Used**
+  column (appended last, 2026-09-08). Two kinds exist: a spent Prime cash-back balance (the
+  `Prime for Young Adults cash back: -$15.98` line in the order summary) and **Amazon points**
+  (Business Prime Rewards). A redemption can be partial, so the amount is always read, never
+  assumed. On Amazon Business it comes from the **Business Prime Rewards ledger** (one page,
+  loaded once at the end of the run whenever some order's payment list names "Amazon point"),
+  which lists every redemption by order at 100 points to the dollar and knows it the moment the
+  order is placed; the order's related-transactions page is the fallback, and on consumer Amazon
+  the only source. If neither prices it the cell stays blank and the run ends with a dossier
+  problem, rather than writing a false 0. Best Buy and Costco write a real 0 (no rewards
+  programme there yet), and the column defaults to 0 rather than blank everywhere else.
 
-  **The EARN side of Business Prime Rewards is deliberately not a rate.** Those points (a flat 1%
-  of the order) accrue only when an Amazon Business order chooses Amazon-day delivery on a card that
-  is not the Business Prime card, so folding them into `Cashback Rate` would misstate the orders
-  that did not qualify. The owner already subtracts all Amazon rewards from COGS at year end, outside
-  this ledger, so the sheet records rewards only when they are SPENT (the Gift Card column).
+  **Why a separate column, and the year-end rule it encodes (owner, 2026-09-08).** The owner nets
+  **every** Amazon reward — Prime for Young Adults cash back **and** Business Prime Rewards — out
+  of COGS at year end, from Amazon's own rewards history, outside this sheet. So the sheet must
+  record an order paid with rewards at its **full cost**, exactly as if the card had paid all of
+  it; netting the redemption here as well would count the same dollars twice (an all-points order
+  would show a $0 cost *and* a year-end rewards deduction). What Rewards Used changes is only the
+  cashback basis: the card earns nothing on dollars it never paid. The COGS formula below does
+  exactly that — the amount leaves the parenthesis and is added straight back.
+
 - **Sales Tax** is its own column, read from the order summary's "Estimated tax to be collected"
   line and prorated the same way. It is usually $0.00 (the resale certificate), but a hand-kept
   order that paid tax records its true cost: the COGS formula adds it inside the cashback netting,
@@ -179,13 +184,13 @@ etc.) — they're never resold, so they never hit the ledger.
 - **COGS** and **Total Profit** are **live Google Sheets formulas**, not scraped numbers:
 
   ```
-  COGS         = (Total Cost − Return Qty × Cost Per Item − Gift Card + Shipping + Sales Tax)
-                 × (1 − Cashback Rate)
+  COGS         = (Total Cost − Return Qty × Cost Per Item − Gift Card + Shipping + Sales Tax
+                  − Rewards Used) × (1 − Cashback Rate) + Rewards Used
   Total Profit = Payout Amount − COGS − Insurance
   ```
 
-  Blank cells count as 0, so a row with no return, no gift card and no recorded tax is simply
-  `(Total Cost + Shipping) × (1 − Cashback Rate)`.
+  Blank cells count as 0, so a row with no return, no gift card, no recorded tax and no rewards
+  spent is simply `(Total Cost + Shipping) × (1 − Cashback Rate)`.
 
   **COGS exists for end-of-year tax**, and the split is where the tax form wants it. Cashback is
   netted into *cost* rather than counted as income, because a card reward earned on a purchase is a

@@ -496,23 +496,23 @@ def points_used_from_transactions(transactions_html: str, order_id: str) -> floa
     return round(total, 2) if found else None
 
 
-def non_card_tenders(summary_el, region, points_used: float | None, order_id: str = "") -> float | None:
-    """Everything that paid for the order WITHOUT touching the card — gift card + cash-back balance
-    + Amazon points — which is what the sheet's Gift Card column records. The COGS formula subtracts the cell, so no
-    cost and no cashback is booked on money the card never spent.
+def rewards_used_amount(summary_el, region, points_used: float | None, order_id: str = "") -> float | None:
+    """Amazon REWARDS spent on the order — a cash-back balance + Amazon points — for the Rewards Used
+    column. NOT a gift card: the user nets every Amazon reward out of COGS at
+    year end outside the sheet, so the order keeps its FULL cost here and only the cashback basis
+    shrinks (the card earns nothing on dollars it never paid). The COGS formula does that.
 
     None ("unknown": a blank, which never overwrites) when the summary did not parse, or when the
     page says points were used but their amount could not be read — a 0 there would be a lie, and
     the API client raises a dossier problem for that case so the run says so out loud.
     """
-    base = _gift_card_amount(summary_el)
-    if base is None:
+    if summary_el is None:
         return None
-    total = base + (_cash_back_used(summary_el) or 0.0)
+    total = _cash_back_used(summary_el) or 0.0
     if uses_points(region):
         if points_used is None:
-            log.warning("Amazon order %s was paid partly with Amazon points but the amount is "
-                        "unknown — Gift Card left blank rather than understated.", order_id)
+            log.warning("Amazon order %s was paid partly with Amazon points but the amount is unknown "
+                        "— Rewards Used left blank rather than understated.", order_id)
             return None
         total += points_used
     return round(total, 2)
@@ -694,7 +694,7 @@ def build_order_items(
     ('Shipment 1') OR its Amazon shipmentId to a tracking number read from the pt page; absent leaves
     tracking blank (the shipment then stays `ordered` until the number is read). `points_used` is
     the Amazon-points amount the API client read off the related-transactions page, for an order
-    whose payment list names points; it folds into `gift_card` (see non_card_tenders)."""
+    whose payment list names points; it lands in `rewards_used` (see rewards_used_amount)."""
     tracking_by_shipment = tracking_by_shipment or {}
     today = today or __import__("datetime").date.today().isoformat()
     soup = BeautifulSoup(order_details_html or "", "html.parser")
@@ -730,10 +730,13 @@ def build_order_items(
     # netted by the COGS formula (gift card subtracted — a tender the card never spent, so it earns
     # no cashback; tax added). This replaced _net_gift_card's silent cost-scaling (2026-08-30):
     # same algebra, but Total Cost now stays the GROSS number the order page shows and the amount is
-    # visible on the sheet. Since 2026-09-07 the "gift card" is every NON-CARD tender: gift card +
-    # a spent cash-back balance + Amazon points. The toggle keeps its old name and meaning —
-    # netting off means the amount is simply not emitted, so COGS uses the full sticker cost.
-    gift_card = (non_card_tenders(summary_el, region, points_used, order_id) if net_gift_cards else None)
+    # visible on the sheet. The toggle keeps its old name and meaning — netting off means the amount
+    # is simply not emitted, so COGS uses the full sticker cost.
+    gift_card = (_gift_card_amount(summary_el) if net_gift_cards else None)
+    # Rewards SPENT (a Prime cash-back balance + Amazon points, 2026-09-07/08) are their OWN column,
+    # not a gift card: the cost stays full and only the cashback basis shrinks — see
+    # rewards_used_amount. Gated by the same toggle.
+    rewards_used = (rewards_used_amount(summary_el, region, points_used, order_id) if net_gift_cards else None)
     sales_tax = _sales_tax_amount(summary_el)
 
     addr_el = region.select_one("[data-component='shippingAddress']")
@@ -826,6 +829,7 @@ def build_order_items(
                     cost_per_item=cost_per_item,
                     shipping=shipping,
                     gift_card=gift_card,
+                    rewards_used=rewards_used,
                     sales_tax=sales_tax,
                     card_last4=card_last4,
                     shipment=shipment,

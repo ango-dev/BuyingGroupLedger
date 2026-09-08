@@ -4,7 +4,6 @@
     python -m scripts.backfill_gift_cards --apply                  # write it
     python -m scripts.backfill_gift_cards --retailer amazon        # one side only (amazon-business)
     python -m scripts.backfill_gift_cards --orders 111-1111111-1111111 ...
-    python -m scripts.backfill_gift_cards --recheck-zeros --orders ...   # correct a 0 the old parser wrote
 
 WHY. The Gift Card / Sales Tax columns landed 2026-08-30, and terminal rows are never re-scraped —
 so an order part-paid with an Amazon gift card BEFORE then never gets its cell filled. This
@@ -27,12 +26,12 @@ Shipping (the old scaling shrank that too, and re-deriving it needs the page's s
 exist on the live sheet today), and a sheet cost matching neither form (a partial order or a hand
 edit).
 
-THE GIFT CARD COLUMN IS EVERY NON-CARD TENDER: the gift-card line, a spent
-cash-back balance ("Prime for Young Adults cash back: -$15.98", a summary line) and Amazon points
-(the Prime Business card's rewards, which the order page never prices — the amount is read off the
-related-transactions page, one more load for such an order). A 0 written before that date could not
-see the last two, so `--recheck-zeros` also re-reads orders whose Gift Card cells hold 0 and corrects
-them — guarded on the cell STILL holding 0 at write time.
+REWARDS USED (2026-09-08) rides along: a spent Prime cash-back balance ("Prime for Young Adults
+cash back: -$15.98", a summary line) and Amazon points (the Prime Business card's rewards, which
+the order page never prices — Business reads the rewards ledger once, the related-transactions
+page is the fallback) land in their own column, filled here into BLANK cells like the other two.
+They are NOT gift cards: the cost stays full and only the cashback basis shrinks, because the user
+nets every Amazon reward from COGS at year end outside the sheet.
 
 COST. One cloud CDP page-load per candidate order, per owning profile — no discovery pass, no
 tracking pages, no agent. Orders whose profile is not in config.json are reported and skipped.
@@ -62,17 +61,17 @@ _RETAILERS = {
 }
 
 
-def collect_candidates(grid: list[list], only_retailer: str | None, only_orders: set[str],
-                       recheck_zeros: bool = False) -> dict[tuple[str, str], dict[str, list[dict]]]:
+def collect_candidates(grid: list[list], only_retailer: str | None,
+                       only_orders: set[str]) -> dict[tuple[str, str], dict[str, list[dict]]]:
     """{(retailer_display, profile): {order_id: [row dict, ...]}} for orders with at least one blank
-    Gift Card cell — or, with `recheck_zeros`, one holding 0. Cancelled rows never count (they carry
-    no money). Each row dict carries what the planner needs: row number, cost, quantity, shipping,
-    and which target cells are blank / zero."""
+    Gift Card or Rewards Used cell. Cancelled rows never count (they carry no money). Each row dict
+    carries what the planner needs: row number, cost, quantity, shipping, and which target cells
+    are blank."""
     idx = {h: i for i, h in enumerate(grid[0])}
     cell = lambda row, name: (str(row[idx[name]]).strip() if name in idx and idx[name] < len(row) else "")  # noqa: E731
 
     out: dict[tuple[str, str], dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
-    needs: set[tuple[str, str]] = set()  # (retailer, order) with >= 1 blank Gift Card cell
+    needs: set[tuple[str, str]] = set()  # (retailer, order) with >= 1 blank target cell
     for n, row in enumerate(grid[1:], start=2):
         retailer = cell(row, "Retailer")
         order_id = cell(row, "Order ID")
@@ -85,19 +84,18 @@ def collect_candidates(grid: list[list], only_retailer: str | None, only_orders:
         if cell(row, "Status").lower() == "cancelled":
             continue
         quantity = _parse_display_number(cell(row, "Quantity"))
-        gc_text = cell(row, "Gift Card")
-        gc_number = _parse_display_number(gc_text) if gc_text else None
-        gc_zero = gc_number is not None and float(gc_number) == 0.0
+        gc_blank = not cell(row, "Gift Card")
+        rw_blank = not cell(row, "Rewards Used")
         out[(retailer, cell(row, "Profile"))][order_id].append({
             "n": n,
             "cost": float(_parse_display_number(cell(row, "Total Cost")) or 0.0),
             "quantity": int(quantity) if quantity else None,
             "shipping": float(_parse_display_number(cell(row, "Shipping")) or 0.0),
-            "gc_blank": not gc_text,
-            "gc_zero": gc_zero,
+            "gc_blank": gc_blank,
+            "rw_blank": rw_blank,
             "tax_blank": not cell(row, "Sales Tax"),
         })
-        if not gc_text or (recheck_zeros and gc_zero):
+        if gc_blank or rw_blank:
             needs.add((retailer, order_id))
     for (retailer, profile), orders in list(out.items()):
         for oid in list(orders):
@@ -108,9 +106,25 @@ def collect_candidates(grid: list[list], only_retailer: str | None, only_orders:
     return out
 
 
+def _rewards_writes(rows: list[dict], rewards_used: float | None) -> list[dict]:
+    """Rewards Used shares for the rows whose cell is blank — cost-weighted like the others. None
+    (the amount could not be read) writes nothing, so a blank never becomes a false 0."""
+    if rewards_used is None:
+        return []
+    cost_sum = sum(r["cost"] for r in rows)
+    writes = []
+    for r in rows:
+        if not r.get("rw_blank"):
+            continue
+        weight = (r["cost"] / cost_sum) if cost_sum else (1 / len(rows))
+        writes.append({"n": r["n"], "field": "rewards_used",
+                       "value": round(rewards_used * weight, 2), "expect": None})
+    return writes
+
+
 def plan_order_writes(rows: list[dict], gift_card: float | None, sales_tax: float | None,
-                      subtotal: float | None) -> tuple[list[dict], str]:
-    """The cell writes for ONE gift-card order, and a one-line note describing what was decided.
+                      subtotal: float | None, rewards_used: float | None = None) -> tuple[list[dict], str]:
+    """The cell writes for ONE order, and a one-line note describing what was decided.
 
     Pure. Returns ([], note) when the order is left alone. Each write is
     {"n": row, "field": ledger field, "value": ..., "expect": current-value-or-None} — "expect" is
@@ -119,6 +133,8 @@ def plan_order_writes(rows: list[dict], gift_card: float | None, sales_tax: floa
     if gift_card is None:
         return [], "no parsed summary for this order -- left alone"
     cost_sum = sum(r["cost"] for r in rows)
+    rewards = _rewards_writes(rows, rewards_used)
+    rewards_note = f"; rewards used {rewards_used:.2f}" if rewards_used else ""
 
     # A detected 0 IS a value now: fill the blanks with real zeros (and the
     # page's tax) so the column reads "checked, none" instead of "unknown". No legacy/shape checks
@@ -132,7 +148,8 @@ def plan_order_writes(rows: list[dict], gift_card: float | None, sales_tax: floa
             if sales_tax is not None and r["tax_blank"]:
                 writes.append({"n": r["n"], "field": "sales_tax",
                                "value": round(sales_tax * weight, 2), "expect": None})
-        return writes, f"no gift card -> 0.00 filled (tax {sales_tax if sales_tax is not None else 'unknown'})"
+        return writes + rewards, (f"no gift card -> 0.00 filled (tax "
+                                  f"{sales_tax if sales_tax is not None else 'unknown'}){rewards_note}")
 
     legacy = subtotal is not None and abs(cost_sum - (subtotal - gift_card)) <= 0.02
     if subtotal is not None and not legacy and abs(cost_sum - subtotal) > 0.02:
@@ -140,7 +157,7 @@ def plan_order_writes(rows: list[dict], gift_card: float | None, sales_tax: floa
                     f"its netted form -- resolve by hand")
 
     writes: list[dict] = []
-    note = f"gift card {gift_card:.2f}"
+    note = f"gift card {gift_card:.2f}{rewards_note}"
     if legacy:
         # CONVERT: restore gross costs (the old scaling was uniform, so each row's gross share is
         # subtotal-proportional), then fill the Gift Card cell — COGS nets back to the same number.
@@ -149,7 +166,7 @@ def plan_order_writes(rows: list[dict], gift_card: float | None, sales_tax: floa
                         "and this can't re-derive it; resolve by hand")
         if not cost_sum:
             return [], "?? legacy-netted but every cost is 0 -- can't apportion; resolve by hand"
-        note = f"CONVERTED from legacy netting: cost -> gross, gift card {gift_card:.2f}"
+        note = f"CONVERTED from legacy netting: cost -> gross, gift card {gift_card:.2f}{rewards_note}"
         for r in rows:
             gross = round(subtotal * r["cost"] / cost_sum, 2)
             unit = round(gross / r["quantity"], 2) if r["quantity"] else gross
@@ -159,24 +176,22 @@ def plan_order_writes(rows: list[dict], gift_card: float | None, sales_tax: floa
         # The gift-card/tax shares below weight by the GROSS costs just derived.
         rows = [dict(r, cost=round(subtotal * r["cost"] / cost_sum, 2)) for r in rows]
         cost_sum = sum(r["cost"] for r in rows)
+        rewards = _rewards_writes(rows, rewards_used)
 
     for r in rows:
         weight = (r["cost"] / cost_sum) if cost_sum else (1 / len(rows))
-        if r["gc_blank"] or r.get("gc_zero"):
-            # A 0 the parser wrote before 2026-09-07 could not see a cash-back or points tender; it
-            # is corrected only while the cell STILL holds 0 (the apply-time guard reads "expect").
+        if r["gc_blank"]:
             writes.append({"n": r["n"], "field": "gift_card",
-                           "value": round(gift_card * weight, 2),
-                           "expect": None if r["gc_blank"] else 0.0})
+                           "value": round(gift_card * weight, 2), "expect": None})
         if sales_tax is not None and r["tax_blank"]:
             writes.append({"n": r["n"], "field": "sales_tax",
                            "value": round(sales_tax * weight, 2), "expect": None})
-    return writes, note
+    return writes + rewards, note
 
 
 def fetch_summaries(retailer: str, profile, order_ids: list[str]) -> dict[str, tuple]:
-    """{order_id: (gift_card, sales_tax, subtotal)} read live from each order's details page —
-    `gift_card` being every non-card tender (gift card + cash back + points), as the sheet records it."""
+    """{order_id: (gift_card, sales_tax, subtotal, rewards_used)} read live from each order's
+    details page (+ the rewards ledger / transactions page for an order that used points)."""
     import importlib
 
     mapping = importlib.import_module(_RETAILERS[retailer][1])
@@ -228,8 +243,9 @@ def fetch_summaries(retailer: str, profile, order_ids: list[str]) -> dict[str, t
                     points = mapping.points_used_from_transactions(page.content(), oid)
                 print(f"  {oid}: paid with Amazon points -> "
                       f"{f'{points:.2f}' if points is not None else 'amount NOT readable (left blank)'}")
-            results[oid] = (mapping.non_card_tenders(summary, region, points, oid),
-                            mapping._sales_tax_amount(summary), mapping._order_subtotal(summary))
+            results[oid] = (mapping._gift_card_amount(summary), mapping._sales_tax_amount(summary),
+                            mapping._order_subtotal(summary),
+                            mapping.rewards_used_amount(summary, region, points, oid))
     return results
 
 
@@ -240,26 +256,24 @@ def main(argv=None) -> int:
     ap.add_argument("--retailer", choices=["amazon", "amazon-business"],
                     help="limit to one Amazon side")
     ap.add_argument("--orders", nargs="*", default=[], help="limit to these order numbers")
-    ap.add_argument("--recheck-zeros", action="store_true",
-                    help="also re-read orders whose Gift Card cells hold 0 — a 0 written before "
-                         "2026-09-07 could not see a cash-back or Amazon-points tender")
     args = ap.parse_args(argv)
 
     from config.profiles import load_profiles_for_retailer
 
     worksheet = _get_worksheet()
     grid = worksheet.get_all_values()
-    candidates = collect_candidates(grid, args.retailer, set(args.orders), recheck_zeros=args.recheck_zeros)
+    candidates = collect_candidates(grid, args.retailer, set(args.orders))
     if not candidates:
-        print("No Amazon orders with a blank" + (" (or zero)" if args.recheck_zeros else "")
-              + " Gift Card cell match the filters. Nothing to do.")
+        print("No Amazon orders with a blank Gift Card / Rewards Used cell match the filters. Nothing to do.")
         return 0
 
     col_of = {"gift_card": _col_letter(HEADER.index("Gift Card")),
               "sales_tax": _col_letter(HEADER.index("Sales Tax")),
+              "rewards_used": _col_letter(HEADER.index("Rewards Used")),
               "cost_per_item": _col_letter(HEADER.index("Cost Per Item")),
               "total_cost": _col_letter(HEADER.index("Total Cost"))}
     idx_of = {f: HEADER.index(h) for f, h in (("gift_card", "Gift Card"), ("sales_tax", "Sales Tax"),
+                                              ("rewards_used", "Rewards Used"),
                                               ("cost_per_item", "Cost Per Item"),
                                               ("total_cost", "Total Cost"))}
 
@@ -274,8 +288,8 @@ def main(argv=None) -> int:
             continue
         print(f"{retailer} [{profile_label}]: fetching {len(orders)} order-details page(s)...")
         summaries = fetch_summaries(retailer, profile, sorted(orders))
-        for oid, (gift_card, sales_tax, subtotal) in sorted(summaries.items()):
-            writes, note = plan_order_writes(orders[oid], gift_card, sales_tax, subtotal)
+        for oid, (gift_card, sales_tax, subtotal, rewards_used) in sorted(summaries.items()):
+            writes, note = plan_order_writes(orders[oid], gift_card, sales_tax, subtotal, rewards_used)
             no_gift_card += "no gift card" in note
             if not writes:
                 print(f"  -- {oid}: {note}")
@@ -293,9 +307,8 @@ def main(argv=None) -> int:
     if not all_writes:
         return 0
 
-    # One batch per the guards: blank-only for gift_card/sales_tax (or still-0 for a --recheck-zeros
-    # correction); a conversion's cost cells must still hold what the plan derived its gross numbers
-    # from (the netted value read above).
+    # One batch per the guards: blank-only for gift_card/sales_tax/rewards_used; a conversion's cost
+    # cells must still hold what the plan derived its gross numbers from (the netted value read above).
     live = worksheet.get_all_values()
     data, kept = [], 0
     stale_i = {n: (live[n - 1] if n - 1 < len(live) else []) for n in {w["n"] for w in all_writes}}
@@ -306,12 +319,6 @@ def main(argv=None) -> int:
         if w["expect"] is None and current:
             print(f"  {col_of[w['field']]}{w['n']} now holds {current!r}; left alone", file=sys.stderr)
             continue
-        if isinstance(w["expect"], float):
-            now = _parse_display_number(current)
-            if now is None or abs(float(now) - w["expect"]) > 1e-9:
-                print(f"  {col_of[w['field']]}{w['n']} now holds {current!r}, not {w['expect']}; "
-                      f"left alone", file=sys.stderr)
-                continue
         data.append({"range": f"{col_of[w['field']]}{w['n']}", "values": [[w["value"]]]})
         kept += 1
     if data:

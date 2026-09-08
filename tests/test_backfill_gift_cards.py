@@ -1,7 +1,8 @@
 """Offline tests for scripts/backfill_gift_cards.py's pure planning half.
 
 The fetch half drives a real CDP browser and is exercised live; what must be provable for free is
-WHICH orders get fetched (only Amazon rows with a blank Gift Card cell, cancelled rows never) and
+WHICH orders get fetched (only Amazon rows with a blank Gift Card / Rewards Used cell, cancelled
+rows never) and
 what `plan_order_writes` decides — especially the legacy-netted CONVERSION, where getting the
 arithmetic wrong double-nets a gift card out of COGS.
 """
@@ -21,16 +22,16 @@ def grid(*rows):
 BASE = {"Retailer": "Amazon", "Profile": "p1", "Status": "delivered"}
 
 
-def prow(n, cost, qty=1, shipping=0.0, gc_blank=True, tax_blank=True, gc_zero=False):
+def prow(n, cost, qty=1, shipping=0.0, gc_blank=True, tax_blank=True, rw_blank=True):
     return {"n": n, "cost": cost, "quantity": qty, "shipping": shipping,
-            "gc_blank": gc_blank, "gc_zero": gc_zero, "tax_blank": tax_blank}
+            "gc_blank": gc_blank, "rw_blank": rw_blank, "tax_blank": tax_blank}
 
 
 # --- collect_candidates --------------------------------------------------------------------------
 def test_only_orders_with_a_blank_gift_card_cell_are_candidates():
     g = grid(
         row(**BASE, **{"Order ID": "A1", "Total Cost": "100", "Gift Card": ""}),
-        row(**BASE, **{"Order ID": "A2", "Total Cost": "50", "Gift Card": "10"}),  # already filled
+        row(**BASE, **{"Order ID": "A2", "Total Cost": "50", "Gift Card": "10", "Rewards Used": "0"}),  # filled
         row(**{**BASE, "Retailer": "Best Buy"}, **{"Order ID": "B1", "Total Cost": "70"}),
     )
     out = collect_candidates(g, None, set())
@@ -41,8 +42,8 @@ def test_only_orders_with_a_blank_gift_card_cell_are_candidates():
 def test_all_of_an_orders_rows_ride_along_for_the_cost_split():
     # A2's first row already has its share, but the split weights need EVERY row of the order.
     g = grid(
-        row(**BASE, **{"Order ID": "A2", "Total Cost": "100", "Gift Card": "10"}),
-        row(**BASE, **{"Order ID": "A2", "Total Cost": "300", "Gift Card": ""}),
+        row(**BASE, **{"Order ID": "A2", "Total Cost": "100", "Gift Card": "10", "Rewards Used": "0"}),
+        row(**BASE, **{"Order ID": "A2", "Total Cost": "300", "Gift Card": "", "Rewards Used": "0"}),
     )
     out = collect_candidates(g, None, set())
     assert [r["cost"] for r in out[("Amazon", "p1")]["A2"]] == [100.0, 300.0]
@@ -127,27 +128,38 @@ def test_an_already_filled_cell_is_not_rewritten():
     assert writes == []
 
 
-# --- --recheck-zeros: a 0 the pre-2026-09-07 parser wrote may hide a cash-back / points tender ----
-def test_zero_cells_are_candidates_only_when_rechecking_zeros():
-    g = grid(
-        row(**BASE, **{"Order ID": "A1", "Total Cost": "100", "Gift Card": "$0.00"}),
-        row(**BASE, **{"Order ID": "A2", "Total Cost": "50", "Gift Card": "$10.00"}),
-    )
-    assert collect_candidates(g, None, set()) == {}
-    out = collect_candidates(g, None, set(), recheck_zeros=True)
-    assert set(out[("Amazon", "p1")]) == {"A1"}
-    assert out[("Amazon", "p1")]["A1"][0]["gc_zero"] is True
+# --- Rewards Used rides along (2026-09-08) --------------------------------------------------------
+def test_a_blank_rewards_cell_alone_makes_an_order_a_candidate():
+    g = grid(row(**BASE, **{"Order ID": "A1", "Total Cost": "100", "Gift Card": "0", "Rewards Used": ""}))
+    out = collect_candidates(g, None, set())
+    assert out[("Amazon", "p1")]["A1"][0] == {"n": 2, "cost": 100.0, "quantity": None, "shipping": 0.0,
+                                              "gc_blank": False, "rw_blank": True, "tax_blank": True}
 
 
-def test_a_zero_cell_is_corrected_under_a_guard_on_the_zero():
-    writes, _ = plan_order_writes(
-        [prow(2, 30.0, gc_blank=False, tax_blank=False, gc_zero=True),
-         prow(3, 70.0, gc_blank=False, tax_blank=False, gc_zero=True)], 48.28, 0.0, 100.0)
-    assert writes == [{"n": 2, "field": "gift_card", "value": 14.48, "expect": 0.0},
-                      {"n": 3, "field": "gift_card", "value": 33.8, "expect": 0.0}]
+def test_rewards_used_is_split_by_cost_into_blank_cells_only():
+    """The real order: $48.28 of points across 4 rows -- and each row's share equals its cost, so
+    the cashback basis is 0 while the cost stays full. Gift Card is a real 0 beside it."""
+    rows = [prow(7, 12.58, gc_blank=False, tax_blank=False), prow(8, 11.70, gc_blank=False, tax_blank=False),
+            prow(9, 12.54, gc_blank=False, tax_blank=False), prow(10, 11.46, gc_blank=False, tax_blank=False)]
+    writes, note = plan_order_writes(rows, 0.0, 0.0, 48.28, rewards_used=48.28)
+    assert "rewards used 48.28" in note
+    assert [(w["n"], w["field"], w["value"], w["expect"]) for w in writes] == [
+        (7, "rewards_used", 12.58, None), (8, "rewards_used", 11.7, None),
+        (9, "rewards_used", 12.54, None), (10, "rewards_used", 11.46, None)]
 
 
-def test_a_zero_cell_stays_when_the_page_still_shows_no_tender():
-    writes, _ = plan_order_writes([prow(2, 100.0, gc_blank=False, tax_blank=False, gc_zero=True)],
-                                  0.0, 0.0, 100.0)
+def test_a_partial_redemption_and_a_gift_card_are_separate_columns():
+    writes, _ = plan_order_writes([prow(12, 15.48)], 0.72, 0.0, 15.48, rewards_used=13.70)
+    assert {(w["field"], w["value"]) for w in writes} == {
+        ("gift_card", 0.72), ("sales_tax", 0.0), ("rewards_used", 13.7)}
+
+
+def test_an_unknown_rewards_amount_writes_no_rewards_cell():
+    writes, _ = plan_order_writes([prow(2, 100.0)], 0.0, 0.0, 100.0, rewards_used=None)
+    assert [w["field"] for w in writes] == ["gift_card", "sales_tax"]
+
+
+def test_a_filled_rewards_cell_is_not_rewritten():
+    writes, _ = plan_order_writes([prow(2, 100.0, gc_blank=False, tax_blank=False, rw_blank=False)],
+                                  0.0, 0.0, 100.0, rewards_used=40.0)
     assert writes == []

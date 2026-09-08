@@ -750,14 +750,15 @@ def test_business_non_card_tenders_cash_back_and_points():
                     gift_card="$0.72", subtotal="$48.28")
     cash_back = base.replace("Gift Card Amount: -$0.72\n",
                              "Gift Card Amount: -$0.72\nPrime for Young Adults cash back: -$5.00\n")
-    assert build_order_items(cash_back)[0].gift_card == 5.72
+    assert (build_order_items(cash_back)[0].gift_card, build_order_items(cash_back)[0].rewards_used) == (0.72, 5.0)
 
     points = base.replace("Payment method Prime Business Card ending in 1234 5% back",
                           "Payment method " + _POINTS_INSTRUMENT)
     assert order_uses_points(points) is True and order_uses_points(base) is False
-    assert build_order_items(points, points_used=47.56)[0].gift_card == 48.28
-    assert build_order_items(points)[0].gift_card is None            # amount unknown -> blank
-    assert build_order_items(base, points_used=47.56)[0].gift_card == 0.72  # no points tender -> ignored
+    assert build_order_items(points, points_used=47.56)[0].rewards_used == 47.56
+    assert build_order_items(points, points_used=47.56)[0].gift_card == 0.72
+    assert build_order_items(points)[0].rewards_used is None            # amount unknown -> blank
+    assert build_order_items(base, points_used=47.56)[0].rewards_used == 0.0  # no points tender -> ignored
 
     page = _transactions(("Amazon Points used", "-$48.28", oid),
                          ("Amazon Points used", "-$1.00", "111-0000000-0000000"))

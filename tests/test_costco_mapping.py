@@ -425,3 +425,9 @@ def test_other_digital_lines_are_still_dropped_alongside_a_shop_card():
     })
     rows = build_order_items([detail], "profile-alpha", keep_digital_last4s=frozenset({"4351"}))
     assert [r.item_name for r in rows] == ["Costco Shop Card, Digital, $100 Shop Card"]
+
+
+def test_rewards_used_is_a_real_zero_on_every_row(details):
+    # Costco has no rewards tender: "checked, none", never a blank.
+    rows = build_order_items(details, "p")
+    assert rows and all(r.rewards_used == 0.0 for r in rows)

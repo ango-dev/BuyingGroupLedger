@@ -1653,8 +1653,8 @@ def check_cogs_inputs_complete(sheet: Sheet, opts: Options) -> Result:
     """COGS is the year-end cost figure, and every way it goes wrong is SILENT.
 
     `cashback_rate_sane` only asks whether a rate is plausible; it cannot see a MISSING one. But COGS
-    is `(Total Cost - Return Qty x Cost Per Item - Gift Card + Shipping + Sales Tax) * (1 - Cashback
-    Rate)`, so a blank rate quietly computes the FULL cost as cost of goods -- overstating COGS,
+    is `(Total Cost - Return Qty x Cost Per Item - Gift Card + Shipping + Sales Tax - Rewards Used)
+    * (1 - Cashback Rate) + Rewards Used`, so a blank rate quietly computes the FULL cost as cost of goods -- overstating COGS,
     understating income, and under-reporting tax. Nothing else in the audit looks at it, and the
     number stays perfectly plausible while being wrong.
 
@@ -1916,7 +1916,7 @@ def diff_snapshots(before: Grids, after: Grids, ignore=_DIFF_IGNORED_COLUMNS) ->
 # Payout Amount / Payout Date / Insurance / Status / Tracking Submitted are deliberately NOT here:
 # the buying-group sync writes those onto delivered rows every run, and that is the normal case.
 _SCRAPED_MONEY_COLUMNS = ("Quantity", "Cost Per Item", "Total Cost", "Shipping", "Cashback Rate",
-                          "Gift Card", "Sales Tax")
+                          "Gift Card", "Sales Tax", "Rewards Used")
 
 
 def classify_diff(diff: dict, opts: Options) -> list[Result]:

@@ -423,6 +423,7 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids,
             cost_per_item=unit,
             shipping=shipping_total,
             gift_card=gift_card_total,
+            rewards_used=0.0,  # no rewards programme on this retailer yet: a real 0, not unknown
             sales_tax=sales_tax_total,
             card_last4=card_last4,
             shipment=shipment_label(unshipped_shipment),
@@ -462,6 +463,7 @@ def _rows_for_group(
                 cost_per_item=unit_price,
                 shipping=shipping_total,
                 gift_card=gift_card_total,
+                rewards_used=0.0,  # no rewards programme on this retailer yet: a real 0, not unknown
                 sales_tax=sales_tax_total,
                 card_last4=card_last4,
                 shipment=shipment_label(unshipped_shipment),
@@ -490,6 +492,7 @@ def _rows_for_group(
                 # Order-level shipping, repeated on every shipment row (matches the agent + Best Buy).
                 shipping=shipping_total,
                 gift_card=gift_card_total,
+                rewards_used=0.0,  # no rewards programme on this retailer yet: a real 0, not unknown
                 sales_tax=sales_tax_total,
                 card_last4=card_last4,
                 shipment=shipment_label(shipment_number[package["package_key"]]),
