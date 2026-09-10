@@ -47,6 +47,15 @@ class TestTheTwoDates:
         r = build_report(build(_row(2, order_date="2026-03-01", status="cancelled", cogs="")), 2026)
         assert r["totals"]["rows"] == 0 and r["totals"]["cogs"] == 0
 
+    def test_a_bought_gift_card_is_a_cost_but_never_money_still_owed(self):
+        """Its income arrives through the orders it funded (their Gift Card cell netted their COGS), so
+        it counts in COGS but must not read as an unpaid straddle -- the audit draws the same line."""
+        r = build_report(build(_row(2, order_date="2026-04-24", group="Gift Card", payout="")), 2026)
+        assert r["totals"]["cogs"] == 798.0
+        assert r["straddling"]["ordered_this_year_not_yet_paid"] == {"rows": 0, "cogs": 0.0}
+        assert r["straddling"]["gift_card_purchases_never_paid"] == {"rows": 1, "cogs": 798.0}
+        assert "gift cards bought" in render_text(r)
+
     def test_a_superseded_row_carries_no_cost(self):
         r = build_report(build(_row(2, order_date="2026-03-01", status="superseded", cogs="")), 2026)
         assert r["totals"]["rows"] == 0 and r["totals"]["cogs"] == 0

@@ -9,7 +9,8 @@ TWO DATES DRIVE THE YEAR, and that is the whole reason this is a script rather t
 cash basis, money IN counts when it arrives and money OUT counts when it is spent:
 
   - receipts    = Payout Amount, on rows whose **Payout Date** falls in the year
-  - COGS        = the COGS cell, on rows whose **Order Date** falls in the year (not cancelled)
+  - COGS        = the COGS cell, on rows whose **Order Date** falls in the year (cancelled and
+                  superseded rows carry no money and are excluded)
   - insurance   = Insurance, on rows whose **Order Date** falls in the year -- the premium is charged
                   at filing, which happens at ship time; the sheet keeps no filing date, and an order
                   ships within days of being placed, so Order Date is the honest proxy
@@ -18,6 +19,11 @@ So a December order paid in January is a cost in one year and income in the next
 says how much of each year's money is "straddling" like that, because that is the number a preparer
 asks about. Insurance stays out of COGS on purpose: a buying-group premium is an ordinary expense
 (Schedule C Part II), not a cost of the goods.
+
+A BOUGHT gift card (Buying Group `Gift Card`) is a real cost that never gets a payout of its own --
+the income arrives through the orders it funds, whose Gift Card cell netted their COGS -- so it is
+counted in COGS but reported on its own line, NOT as money still owed (the audit's
+cogs_inputs_complete draws the same distinction).
 
 Reads the sheet through scripts/audit_sheet's READ-ONLY path (read-only OAuth scope), so it cannot
 write even by accident. Cashback is already netted into COGS by the sheet formula; the report shows
@@ -32,6 +38,7 @@ import sys
 from collections import defaultdict
 from datetime import date, timedelta
 
+from config.warehouses import is_deliberately_unrouted
 from models.order import MONEY_FREE_STATUSES
 from scripts.audit_sheet import (
     Grids,
@@ -80,6 +87,7 @@ def build_report(sheet: Sheet, year: int) -> dict:
     cost_rows: list[dict] = []
     payout_rows: list[dict] = []
     unpaid_cost = {"rows": 0, "cogs": 0.0}
+    funding_rows = {"rows": 0, "cogs": 0.0}  # bought gift cards: cost, never a payout
     paid_from_other_years = {"rows": 0, "payouts": 0.0}
     paid_in_later_year = {"rows": 0, "payouts": 0.0}
 
@@ -132,7 +140,10 @@ def build_report(sheet: Sheet, year: int) -> dict:
                 "status": status, "cogs": round(cogs, 2), "insurance": round(insurance, 2),
                 "payout_date": str(cell("Payout Date", f)).strip(), "payout": round(payout, 2),
             })
-            if payout_year is None or not payout:
+            if is_deliberately_unrouted(group):
+                funding_rows["rows"] += 1
+                funding_rows["cogs"] += cogs
+            elif payout_year is None or not payout:
                 unpaid_cost["rows"] += 1
                 unpaid_cost["cogs"] += cogs
             elif payout_year > year:
@@ -162,7 +173,7 @@ def build_report(sheet: Sheet, year: int) -> dict:
     payout_rows.sort(key=lambda r: (r["payout_date"], r["order_id"]))
     return {
         "year": year,
-        "basis": "cash: receipts by Payout Date; COGS and insurance by Order Date; cancelled excluded",
+        "basis": "cash: receipts by Payout Date; COGS and insurance by Order Date; cancelled and superseded excluded",
         "totals": finish(total),
         "by_retailer": {k: finish(v) for k, v in sorted(by_retailer.items())},
         "by_buying_group": {k: finish(v) for k, v in sorted(by_group.items())},
@@ -170,6 +181,7 @@ def build_report(sheet: Sheet, year: int) -> dict:
             "ordered_this_year_not_yet_paid": {**unpaid_cost, "cogs": round(unpaid_cost["cogs"], 2)},
             "ordered_this_year_paid_in_a_later_year": {**paid_in_later_year, "payouts": round(paid_in_later_year["payouts"], 2)},
             "paid_this_year_for_orders_from_other_years": {**paid_from_other_years, "payouts": round(paid_from_other_years["payouts"], 2)},
+            "gift_card_purchases_never_paid": {**funding_rows, "cogs": round(funding_rows["cogs"], 2)},
         },
         "cost_rows": cost_rows,
         "payout_rows": payout_rows,
@@ -206,6 +218,8 @@ def render_text(report: dict, *, list_rows: bool = True) -> str:
         f"    ordered {report['year']}, not yet paid out:        {s['ordered_this_year_not_yet_paid']['rows']} row(s), COGS {_fmt(s['ordered_this_year_not_yet_paid']['cogs'])}",
         f"    ordered {report['year']}, paid in a later year:    {s['ordered_this_year_paid_in_a_later_year']['rows']} row(s), payouts {_fmt(s['ordered_this_year_paid_in_a_later_year']['payouts'])}",
         f"    paid {report['year']}, ordered in another year:    {s['paid_this_year_for_orders_from_other_years']['rows']} row(s), payouts {_fmt(s['paid_this_year_for_orders_from_other_years']['payouts'])}",
+        *([f"    gift cards bought (income arrives via the orders they fund): {s['gift_card_purchases_never_paid']['rows']} row(s), COGS {_fmt(s['gift_card_purchases_never_paid']['cogs'])}"]
+          if s["gift_card_purchases_never_paid"]["rows"] else []),
         "",
     ]
     for title, table in (("By retailer", report["by_retailer"]), ("By buying group", report["by_buying_group"])):
