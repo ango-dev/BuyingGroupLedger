@@ -1,5 +1,5 @@
 """
-One-off repair: remove ledger rows left behind by a SUPERSEDED tracking number.
+Repair for a SUPERSEDED tracking number: mark the dead row `superseded` (default), or delete it.
 
 Amazon re-issues a new tracking number for the SAME physical shipment when one is delayed. While that
 is in flight the order-details page can render the package twice, and because shipments are numbered by
@@ -8,20 +8,43 @@ again — the order's cost is then booked twice. Seen live on 111-9990021-999002
 against a $2,847 order, booking $5,694.
 
 `scrapers/amazon_mapping._reconcile_against_subtotal` stops NEW ones (an order's shipment cards may not
-be worth more than its subtotal). This script cleans up rows written before that guard existed.
+be worth more than its subtotal). This script repairs rows written before that guard existed, or left
+behind by a re-label the guard could not see (the dead card had already left the page).
 
 HOW IT DECIDES: it re-reads the order's page and its tracking pages, which together are the only
 authority on what packages actually exist, and matches sheet rows on TRACKING NUMBER — the one durable
 identity a row has (the Shipment number is a DOM ordinal that is recomputed every scrape). A row whose
-tracking number no longer appears on the order is superseded and gets deleted; survivors are renumbered
-to the page's own ordering so future scrapes match them. A row with a BLANK tracking number is never
-deleted — it cannot be matched, so it is reported and left alone.
+tracking number no longer appears on the order is superseded. Survivors are renumbered to the page's own
+ordering so future scrapes match them. A row with a BLANK tracking number is never touched — it cannot
+be matched, so it is reported and left alone.
+
+WHAT HAPPENS TO THE DEAD ROW:
+
+  MARK (the default). The row STAYS, as the record that this number really was posted to the buying
+  group: Status -> `superseded`, every money cell blanked (Quantity included — see
+  ledger_sync._SUPERSEDED_BLANK_FIELDS), and its Shipment renumbered AFTER the live packages so the
+  row's key can never collide with a real box. Tracking number, dates, card, rate and the
+  Tracking Submitted tick are kept. `superseded` is terminal and RETIRED: never re-scraped, never a
+  merge target, never submitted/insured/paid (sync_tracking skips it). REFUSED, before anything is
+  written, for a dead row that already carries money from a group (Payout Amount / Payout Date /
+  Insurance non-blank) or whose status is not ordered/shipped/delivered — money exchanged on that
+  number is a human decision, not something to blank.
+
+  DELETE (`--delete`). The old behaviour: the row is removed and every remaining row's formulas are
+  re-stamped (they use same-row references). Its only trace is the backup CSV.
+
+  RESTORE (`--restore-from <backup.csv>`). Puts a row DELETED by an earlier run back as a superseded
+  row, read from that run's backup by column NAME (older backups have fewer columns): needs no
+  browser. The row is appended at the bottom — run `python -m scripts.sort_ledger --apply` after.
 
 Costs a small Browser-Use browser fee (one CDP session, one page load per order plus one per shipment)
-and spends no LLM tokens.
+and spends no LLM tokens; `--restore-from` costs nothing.
 
 DRY RUN BY DEFAULT — reads the live sheet and the order pages, and writes NOTHING:
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021
+    python -m scripts.fix_superseded_shipments --order 111-9990021-9990021 --delete
+    python -m scripts.fix_superseded_shipments --order 111-9990021-9990021 \\
+        --restore-from data/sheet_backup_20260822T200318Z.csv
 
 Apply for real (backs the sheet up to data/sheet_backup_<timestamp>.csv FIRST):
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021 --apply
@@ -30,6 +53,7 @@ Apply for real (backs the sheet up to data/sheet_backup_<timestamp>.csv FIRST):
 import argparse
 import csv
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,33 +64,93 @@ from gspread.utils import ValueInputOption, ValueRenderOption
 # currently arrives transitively via sheets.ledger_sync, but stated explicitly so an import
 # tidy-up somewhere else cannot quietly break this script with a valid config.
 import config.settings  # noqa: F401
-from models.order import shipment_label
-from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet, _write_profit_formulas
+from models.order import FIELDNAMES, shipment_label
+from sheets.ledger_sync import (
+    HEADER,
+    _SUPERSEDED_BLANK_FIELDS,
+    _clear_cells,
+    _coerce,
+    _col_letter,
+    _ensure_grid_rows,
+    _get_worksheet,
+    _last_occupied_row,
+    _write_profit_formulas,
+)
 
 log = logging.getLogger("fix_superseded_shipments")
 
-# retailer -> (profiles.json key, mapping module, scraper class holding the pt-page reader)
+# retailer -> (profiles.json key, mapping module, scraper class holding the pt-page reader).
+# Best Buy has no page to parse: its ss-api payload names every package's number directly, so it
+# is read through the API client instead (see read_live_shipments).
 RETAILERS = {
     "Amazon": ("amazon", "scrapers.amazon_mapping", "scrapers.amazon", "AmazonScraper"),
     "Amazon Business": ("amazon-business", "scrapers.amazon_business_mapping",
                         "scrapers.amazon_business", "AmazonBusinessScraper"),
+    "Best Buy": ("bestbuy", None, None, None),
 }
 
+SUPERSEDED = "superseded"
+#: The only statuses a dead row may hold to be marked: a live lifecycle state, or delivered under the
+#: dead label before the re-label was noticed. paid/return/cancelled mean a group (or the retailer)
+#: already acted on the row, and that is a hand decision.
+_MARKABLE_STATUSES = ("ordered", "shipped", "delivered")
+#: Money from a BUYING GROUP on the dead number. Blanking it would erase a real settlement.
+_SETTLED_COLUMNS = ("Payout Amount", "Payout Date", "Insurance")
+#: The money cells a marked / restored row loses, by sheet header name.
+_BLANKED_COLUMNS = tuple(HEADER[FIELDNAMES.index(f)] for f in _SUPERSEDED_BLANK_FIELDS)
+_SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)
 
-def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: dict) -> dict:
-    """Read-only: which rows would be deleted and which renumbered. Pure — no network, no sheet.
 
-    `live_by_order` maps an order id to the tracking numbers the page currently shows, IN PAGE ORDER.
-    An order missing from it is skipped entirely (nothing was read for it), which is what keeps a
-    failed page load from ever looking like "every row is superseded".
-    """
+def _shipment_int(text) -> int:
+    m = _SHIPMENT_NUMBER.match(str(text or "").strip())
+    return int(m.group(1)) if m else 0
+
+
+def _cell_reader(header: list[str]):
     idx = {name: header.index(name) for name in header}
 
     def cell(row, name):
         i = idx.get(name)
         return str(row[i]).strip() if i is not None and i < len(row) else ""
 
-    deletions, renumbers, blanks = [], [], []
+    return cell
+
+
+def _refusal(cell, row) -> str | None:
+    """Why this dead row must NOT be marked, or None."""
+    status = cell(row, "Status").lower()
+    if status not in _MARKABLE_STATUSES:
+        return f"status {status or '(blank)'!r} is not one of {_MARKABLE_STATUSES}"
+    for column in _SETTLED_COLUMNS:
+        value = cell(row, column)
+        if value not in ("", "0", "0.0"):
+            return f"{column} holds {value!r} -- money from a buying group, a hand decision"
+    return None
+
+
+def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: dict,
+                       mode: str = "mark") -> dict:
+    """Read-only: which rows would be marked (or deleted) and which renumbered. Pure — no network.
+
+    `live_by_order` maps an order id to the tracking numbers the page currently shows, IN PAGE ORDER.
+    An order missing from it is skipped entirely (nothing was read for it), which is what keeps a
+    failed page load from ever looking like "every row is superseded".
+
+    `mode` is "mark" (keep the dead row as `superseded`, the default) or "delete" (the old repair).
+    A dead row that is ALREADY superseded is reported and never touched in either mode; a dead row
+    the mark rule refuses (see _refusal) is reported under "refused" and blocks an --apply.
+    """
+    cell = _cell_reader(header)
+    marks, deletions, renumbers, blanks, refused, already = [], [], [], [], [], []
+
+    # A second re-label of the same order must number PAST the row the first one retired.
+    taken: dict[str, int] = {}
+    for row in data_rows:
+        if cell(row, "Order ID") in live_by_order and cell(row, "Status").lower() == SUPERSEDED:
+            taken[cell(row, "Order ID")] = max(taken.get(cell(row, "Order ID"), 0),
+                                              _shipment_int(cell(row, "Shipment")))
+    assigned: dict[tuple[str, str], str] = {}  # one new number per dead carton, however many SKUs
+
     for offset, row in enumerate(data_rows):
         order_id = cell(row, "Order ID")
         if order_id not in live_by_order:
@@ -74,24 +158,81 @@ def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: 
         live = live_by_order[order_id]
         row_number = offset + 2  # +1 header, +1 for 1-based sheet rows
         tracking = cell(row, "Tracking Number")
+        shipment = cell(row, "Shipment")
         item = cell(row, "Item Name")
         if not tracking:
-            # Unmatchable, so never deleted: it may be a not-yet-shipped box.
-            blanks.append((row_number, order_id, cell(row, "Shipment"), item))
+            # Unmatchable, so never touched: it may be a not-yet-shipped box.
+            blanks.append((row_number, order_id, shipment, item))
+            continue
+        if cell(row, "Status").lower() == SUPERSEDED:
+            already.append((row_number, order_id, shipment, tracking))
             continue
         if tracking not in live:
-            deletions.append((row_number, order_id, cell(row, "Shipment"), tracking, item))
+            if mode == "delete":
+                deletions.append((row_number, order_id, shipment, tracking, item))
+                continue
+            reason = _refusal(cell, row)
+            if reason:
+                refused.append((row_number, order_id, tracking, reason))
+                continue
+            if (order_id, tracking) not in assigned:
+                taken[order_id] = max(len(live), taken.get(order_id, 0)) + 1
+                assigned[(order_id, tracking)] = shipment_label(taken[order_id])
+            marks.append((row_number, order_id, shipment, tracking, item, assigned[(order_id, tracking)]))
             continue
         want = shipment_label(live.index(tracking) + 1)
-        if cell(row, "Shipment") != want:
-            renumbers.append((row_number, order_id, cell(row, "Shipment"), want))
+        if shipment != want:
+            renumbers.append((row_number, order_id, shipment, want))
 
     return {
+        "marks": marks,
         "deletions": deletions,
         "renumbers": renumbers,
         "blank_tracking": blanks,
-        "orders": sorted({d[1] for d in deletions} | {r[1] for r in renumbers}),
+        "refused": refused,
+        "already_superseded": already,
+        "orders": sorted({m[1] for m in marks} | {d[1] for d in deletions} | {r[1] for r in renumbers}),
     }
+
+
+def plan_restore(header: list[str], data_rows: list[list], backup_header: list[str],
+                 backup_rows: list[list], order_id: str) -> dict:
+    """Read-only: the backup rows of `order_id` whose tracking number is no longer on the sheet,
+    rebuilt as superseded rows in today's column order. Pure — no network, no sheet.
+
+    Remapped by column NAME, so a backup taken before a column was appended still restores (the
+    missing cells come back blank). Money cells are blanked and the Shipment is numbered after
+    every number the order already holds, exactly as a fresh mark would be.
+    """
+    cell, bcell = _cell_reader(header), _cell_reader(backup_header)
+    present, highest = set(), 0
+    for row in data_rows:
+        if cell(row, "Order ID") == order_id:
+            present.add(cell(row, "Tracking Number"))
+            highest = max(highest, _shipment_int(cell(row, "Shipment")))
+    appends, skipped = [], []
+    assigned: dict[str, str] = {}
+    for brow in backup_rows:
+        if bcell(brow, "Order ID") != order_id:
+            continue
+        tracking = bcell(brow, "Tracking Number")
+        if not tracking:
+            skipped.append((tracking, "no tracking number in the backup row"))
+            continue
+        if tracking in present:
+            skipped.append((tracking, "already on the sheet"))
+            continue
+        if tracking not in assigned:
+            highest += 1
+            assigned[tracking] = shipment_label(highest)
+        new = [bcell(brow, name) if name in backup_header else "" for name in header]
+        new[header.index("Status")] = SUPERSEDED
+        new[header.index("Shipment")] = assigned[tracking]
+        for column in _BLANKED_COLUMNS:
+            new[header.index(column)] = ""
+        new = [_coerce(field, value) for field, value in zip(FIELDNAMES, new)]
+        appends.append((tracking, new))
+    return {"appends": appends, "skipped": skipped}
 
 
 def read_live_shipments(retailer: str, profile_label: str, order_ids: list[str]) -> dict:
@@ -107,13 +248,16 @@ def read_live_shipments(retailer: str, profile_label: str, order_ids: list[str])
     from scrapers.cdp import CdpBrowser
 
     retailer_key, mapping_path, scraper_path, scraper_name = RETAILERS[retailer]
-    parse_shipment_targets = import_module(mapping_path).parse_shipment_targets
 
     profiles = [p for p in load_profiles_for_retailer(retailer_key)
                 if not profile_label or p.label == profile_label]
     if not profiles:
         raise SystemExit(f"No profile in profiles.json handles {retailer!r} (label={profile_label!r}).")
     profile = profiles[0]
+    if retailer == "Best Buy":
+        return _read_live_bestbuy(profile, order_ids)
+
+    parse_shipment_targets = import_module(mapping_path).parse_shipment_targets
     reader = getattr(import_module(scraper_path), scraper_name)(profile).read_tracking_page
 
     live: dict = {}
@@ -142,30 +286,65 @@ def read_live_shipments(retailer: str, profile_label: str, order_ids: list[str])
     return live
 
 
+def _read_live_bestbuy(profile, order_ids: list[str]) -> dict:
+    """{order_id: [tracking number, ...]} for Best Buy, straight from the ss-api payloads.
+
+    The production client fetches "every order since `since_date` plus every still-open id", so
+    asking for today plus the wanted ids returns exactly those orders (and any placed today, which
+    the planner ignores as unrequested). The mapping then names every package's number in row order —
+    the same rows a scrape would write — and an order the API did not return stays out of the
+    result, so the planner leaves it alone.
+    """
+    from datetime import date
+
+    from scrapers.bestbuy_api import BestBuyApiClient
+    from scrapers.bestbuy_mapping import build_order_items
+
+    payloads = BestBuyApiClient(profile).fetch_order_payloads(
+        date.today().isoformat(), open_ids=set(order_ids), terminal_ids=set(),
+    )
+    rows = build_order_items(payloads, profile.label, known_open_ids=frozenset(order_ids))
+    live: dict = {}
+    for oid in order_ids:
+        numbers = [r.tracking_number for r in rows if r.order_id == oid and r.tracking_number]
+        if any(r.order_id == oid for r in rows):
+            live[oid] = list(dict.fromkeys(numbers))
+            log.info("Best Buy %s: API shows %d package(s) -> %s", oid, len(live[oid]), live[oid])
+    return live
+
+
 def _print_plan(plan: dict, apply: bool) -> None:
-    if not plan["deletions"] and not plan["renumbers"]:
+    if not (plan["marks"] or plan["deletions"] or plan["renumbers"] or plan["refused"]):
         print("\nNothing to change — every row matches a shipment the order still shows.")
+    for row_number, oid, shipment, tracking, item, new in plan["marks"]:
+        print(f"  MARK     row {row_number:>4}  {oid}  shipment {shipment} -> {new}  {tracking}  "
+              f"{item[:30]}  -> status superseded, money blanked")
     for row_number, oid, shipment, tracking, item in plan["deletions"]:
         print(f"  DELETE   row {row_number:>4}  {oid}  shipment {shipment}  {tracking}  {item[:36]}")
     for row_number, oid, old, new in plan["renumbers"]:
         print(f"  RENUMBER row {row_number:>4}  {oid}  shipment {old} -> {new}")
+    for row_number, oid, tracking, reason in plan["refused"]:
+        print(f"  REFUSED  row {row_number:>4}  {oid}  {tracking}: {reason}")
+    for row_number, oid, shipment, tracking in plan["already_superseded"]:
+        print(f"  (already superseded: row {row_number} {oid} shipment {shipment} {tracking})")
     for row_number, oid, shipment, item in plan["blank_tracking"]:
         print(f"  (left alone: row {row_number} {oid} shipment {shipment} has no tracking number)")
     if not apply:
         print("\nDry run only — nothing written. Re-run with --apply to make these changes.")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument("--order", action="append", required=True,
-                        help="Order id to reconcile (repeatable)")
-    parser.add_argument("--apply", action="store_true",
-                        help="Actually write/delete on the live sheet (default: dry run, read-only)")
-    args = parser.parse_args()
+def _backup(existing: list[list]) -> Path:
+    backup_dir = Path("data")
+    backup_dir.mkdir(exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_path = backup_dir / f"sheet_backup_{stamp}.csv"
+    with backup_path.open("w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows(existing)
+    print(f"\nBacked the whole sheet up -> {backup_path}")
+    return backup_path
 
-    worksheet = _get_worksheet()
+
+def _read_sheet(worksheet) -> tuple[list[str], list[list]]:
     existing = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
     if not existing or not any(str(c).strip() for c in existing[0]):
         raise SystemExit("Sheet is empty — nothing to fix.")
@@ -176,6 +355,97 @@ def main() -> None:
             f"Run `python -m scripts.reorder_sheet` first.\n  sheet:    {header}\n"
             f"  expected: {list(HEADER)}"
         )
+    return header, existing
+
+
+def _apply_marks(worksheet, header: list[str], plan: dict) -> None:
+    """Status first, then Shipment, then the money — so a partial failure leaves a row the audit's
+    superseded_rows_carry_no_money check flags, never a quiet `shipped` row with no cost."""
+    status_col = _col_letter(header.index("Status"))
+    shipment_col = _col_letter(header.index("Shipment"))
+    rows = [m[0] for m in plan["marks"]]
+    for row_number, _oid, _old, _tracking, _item, new in plan["marks"]:
+        worksheet.update(range_name=f"{status_col}{row_number}", values=[[SUPERSEDED]],
+                         value_input_option=ValueInputOption.raw)
+        worksheet.update(range_name=f"{shipment_col}{row_number}", values=[[int(new)]],
+                         value_input_option=ValueInputOption.raw)
+    _clear_cells(worksheet, rows, _SUPERSEDED_BLANK_FIELDS)  # raises: a half-marked row must be loud
+    # The dropdown tripwire: a Status data-validation rule that rejects unknown values would leave
+    # the old status in place while the money is already gone. Read back and refuse to stay quiet.
+    wrong = [n for n in rows if str(worksheet.acell(f"{status_col}{n}").value or "").strip().lower()
+             != SUPERSEDED]
+    if wrong:
+        raise SystemExit(
+            f"Status did not stick on row(s) {wrong} -- add `superseded` to the Status column's "
+            "data-validation dropdown and re-run; their money cells are ALREADY blank, which "
+            "`python -m scripts.audit_sheet` will report until the status lands."
+        )
+    print(f"Marked {len(rows)} row(s) superseded (money blanked, renumbered after the live boxes).")
+
+
+def _restore(args, worksheet, header: list[str], existing: list[list]) -> None:
+    backup_path = Path(args.restore_from)
+    with backup_path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    if not rows:
+        raise SystemExit(f"{backup_path} is empty.")
+    backup_header, backup_rows = [str(c) for c in rows[0]], rows[1:]
+    appends: list[list] = []
+    for order_id in args.order:
+        plan = plan_restore(header, existing[1:], backup_header, backup_rows, order_id)
+        for tracking, reason in plan["skipped"]:
+            print(f"  (skipped {order_id} {tracking or '(blank)'}: {reason})")
+        for tracking, new in plan["appends"]:
+            print(f"  RESTORE  {order_id}  {tracking}  as shipment {new[header.index('Shipment')]}  "
+                  f"-> status superseded, money blank")
+            appends.append(new)
+    if not appends:
+        print("\nNothing to restore.")
+        return
+    if not args.apply:
+        print("\nDry run only — nothing written. Re-run with --apply to append these rows.")
+        return
+    _backup(existing)
+    start_row = _last_occupied_row(existing) + 1
+    _ensure_grid_rows(worksheet, start_row + len(appends) - 1)
+    worksheet.update(range_name=f"A{start_row}", values=appends,
+                     value_input_option=ValueInputOption.raw)
+    new_rows = list(range(start_row, start_row + len(appends)))
+    _write_profit_formulas(worksheet, new_rows)
+    status_col = _col_letter(header.index("Status"))
+    wrong = [n for n in new_rows if str(worksheet.acell(f"{status_col}{n}").value or "").strip().lower()
+             != SUPERSEDED]
+    if wrong:  # the same dropdown tripwire as _apply_marks
+        raise SystemExit(
+            f"Status did not stick on restored row(s) {wrong} -- add `superseded` to the Status "
+            "column's data-validation dropdown, fix those cells by hand, and re-run the audit."
+        )
+    print(f"\nRestored {len(appends)} row(s) at row(s) {new_rows} and stamped their formulas. "
+          "They sit at the bottom: run `python -m scripts.sort_ledger --apply`, then "
+          "`python -m scripts.audit_sheet`.")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--order", action="append", required=True,
+                        help="Order id to reconcile (repeatable)")
+    parser.add_argument("--apply", action="store_true",
+                        help="Actually write on the live sheet (default: dry run, read-only)")
+    parser.add_argument("--delete", action="store_true",
+                        help="Delete the dead row instead of marking it superseded (the old repair)")
+    parser.add_argument("--restore-from", metavar="BACKUP_CSV",
+                        help="Put a row an earlier --delete removed back as a superseded row, from "
+                             "that run's data/sheet_backup_<ts>.csv (no browser needed)")
+    args = parser.parse_args()
+
+    worksheet = _get_worksheet()
+    header, existing = _read_sheet(worksheet)
+
+    if args.restore_from:
+        _restore(args, worksheet, header, existing)
+        return
 
     idx = {name: header.index(name) for name in header}
     wanted = set(args.order)
@@ -185,25 +455,25 @@ def main() -> None:
         if get("Order ID") in wanted and get("Retailer") in RETAILERS:
             groups.setdefault((get("Retailer"), get("Profile")), set()).add(get("Order ID"))
     if not groups:
-        raise SystemExit(f"None of {sorted(wanted)} are Amazon / Amazon Business rows on the sheet.")
+        raise SystemExit(f"None of {sorted(wanted)} are Amazon / Amazon Business / Best Buy rows on the sheet.")
 
     live_by_order: dict = {}
     for (retailer, profile_label), ids in sorted(groups.items()):
         print(f"Re-reading {len(ids)} {retailer} order(s) on profile {profile_label or '(any)'}...")
         live_by_order.update(read_live_shipments(retailer, profile_label, sorted(ids)))
 
-    plan = plan_supersede_fix(header, existing[1:], live_by_order)
+    mode = "delete" if args.delete else "mark"
+    plan = plan_supersede_fix(header, existing[1:], live_by_order, mode=mode)
     _print_plan(plan, args.apply)
-    if not args.apply or not (plan["deletions"] or plan["renumbers"]):
+    if not args.apply or not (plan["marks"] or plan["deletions"] or plan["renumbers"]):
         return
+    if plan["refused"]:
+        raise SystemExit(
+            f"{len(plan['refused'])} dead row(s) carry money from a buying group or a settled status "
+            "(REFUSED above) -- nothing was written. Resolve them by hand first."
+        )
 
-    backup_dir = Path("data")
-    backup_dir.mkdir(exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup_path = backup_dir / f"sheet_backup_{stamp}.csv"
-    with backup_path.open("w", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerows(existing)
-    print(f"\nBacked the whole sheet up -> {backup_path}")
+    _backup(existing)
 
     # RENUMBERS FIRST: a cell write never moves a row, so the original row numbers stay valid no matter
     # what is deleted afterwards. Deleting first would invalidate any renumber below a deleted row.
@@ -213,6 +483,10 @@ def main() -> None:
             worksheet.update(range_name=f"{col}{row_number}", values=[[int(new)]],
                              value_input_option=ValueInputOption.raw)
         print(f"Renumbered {len(plan['renumbers'])} shipment cell(s).")
+
+    if plan["marks"]:
+        # No formula re-stamp: nothing moves, and the formula columns are not written.
+        _apply_marks(worksheet, header, plan)
 
     if plan["deletions"]:
         # Bottom-to-top by original row number: deleting the highest row only shifts rows below it,

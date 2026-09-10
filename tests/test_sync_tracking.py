@@ -379,6 +379,39 @@ class TestStatusOnlyMovesForward:
         "paid" and "return" were silently demoted before this was noticed."""
         assert all(_status_rank(s) >= 0 for s in STATUSES)
 
+    def test_superseded_outranks_delivered_but_not_paid(self):
+        assert _status_rank("delivered") < _status_rank("superseded") < _status_rank("paid")
+
+
+class TestSupersededRowsAreRetired:
+    """A superseded row holds a dead tracking number the groups already have. It must
+    never be re-posted, insured, or handed a payout — and it must not feed the cancelled alert."""
+
+    def _plan(self):
+        return plan_tracking_submissions(
+            HEADER_LIST,
+            [shipped("O1", "DEAD", group="MOD", **{"Status": "superseded", "Quantity": "",
+                                                    "Total Cost": ""})],
+        )
+
+    def test_it_is_never_submitted_insured_or_paid(self):
+        plan = self._plan()
+        assert not plan["by_group"]
+        assert "DEAD" not in plan["rows_by_tracking"]
+        assert 2 not in plan["costs_by_row"] and 2 not in plan["status_by_row"]
+        assert plan["skipped_superseded"] == 1
+        assert plan["superseded_rows"] == [(2, "O1", "DEAD")]
+        # Even a group reporting the dead number finds no row to put money on.
+        writes = allocate_payouts(
+            [PayoutRecord("DEAD", payout_amount=100.0, status="paid")],
+            plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
+        )
+        assert writes == {}
+
+    def test_it_is_not_a_cancelled_alert_candidate(self):
+        plan = self._plan()
+        assert plan["skipped_cancelled"] == 0 and plan["cancelled_by_group"] == {}
+
 
 class TestTrackingSubmittedCheckbox:
     def _plan(self, **overrides):

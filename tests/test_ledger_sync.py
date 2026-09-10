@@ -1775,9 +1775,234 @@ class TestCancelledRowsCarryNoMoney:
         original = row(order_id="A1", status="cancelled", total_cost="398.00")
         before = list(original)
 
-        ledger_sync._blank_money_for_cancelled(original)
+        ledger_sync._blank_money_for_status(original)
 
         assert original == before
+
+
+class TestAReLabelledSingleUnitIsNotASplit:
+    """A changed tracking number on a Quantity-1 row. One unit is one box, so it
+    cannot have split: the carrier re-issued the label. The live row takes the new number and keeps
+    its cost; the dead number becomes a superseded row. Quantity > 1 stays the split path."""
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    def _seed(self, sheet, quantity="1"):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
+                status="shipped", tracking_number="OLD", quantity=quantity, cost_per_item="1349.00",
+                total_cost="1349.00", tracking_submitted="TRUE", cashback_rate="0.04"),
+        ]
+
+    def test_the_live_row_takes_the_new_number_and_the_dead_one_is_retired(self, sheet, tmp_path, alerts):
+        self._seed(sheet)
+        path = write_csv_file(tmp_path, dict(
+            order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
+            status="shipped", tracking_number="NEW", quantity="1", cost_per_item="1349.00",
+            total_cost="1349.00",
+        ))
+
+        result = sync_csv_to_sheet(path)
+
+        assert result["updated"] == 1 and result["appended"] == 1
+        live, retired = sheet.data_rows()
+        f = FIELDNAMES.index
+        assert live[f("tracking_number")] == "NEW" and live[f("total_cost")] == 1349.0
+        assert live[f("tracking_submitted")] is False, "the new number has not been posted yet"
+        assert retired[f("status")] == "superseded"
+        assert retired[f("tracking_number")] == "OLD" and retired[f("shipment")] == 2
+        assert retired[f("tracking_submitted")] is True, "the record that OLD was posted"
+        assert retired[f("cashback_rate")] == 0.04
+        for field in ledger_sync._SUPERSEDED_BLANK_FIELDS:
+            assert retired[f(field)] == "", field
+        assert len(alerts) == 1 and "Re-labelled" in alerts[0][0]
+
+    def test_the_next_run_is_a_plain_update(self, sheet, tmp_path, alerts):
+        self._seed(sheet)
+        path = write_csv_file(tmp_path, dict(
+            order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
+            status="shipped", tracking_number="NEW", quantity="1", total_cost="1349.00",
+        ))
+        sync_csv_to_sheet(path)
+        sync_csv_to_sheet(path)  # the API keeps reporting NEW against shipment 1
+
+        assert len(sheet.data_rows()) == 2, "no second superseded row, no duplicate live row"
+        assert len(alerts) == 1
+
+    def test_a_multi_unit_row_still_takes_the_split_path(self, sheet, tmp_path, alerts):
+        self._seed(sheet, quantity="15")
+        path = write_csv_file(tmp_path, dict(
+            order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
+            status="shipped", tracking_number="NEW", quantity="15",
+        ))
+
+        sync_csv_to_sheet(path)
+
+        rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
+        assert rows["1"][FIELDNAMES.index("tracking_number")] == "OLD"
+        assert rows[2][FIELDNAMES.index("quantity")] == "*"
+        assert "Split shipment" in alerts[0][0]
+
+    def test_an_incoming_quantity_that_is_not_one_is_still_a_split(self, sheet, tmp_path, alerts):
+        self._seed(sheet, quantity="1")
+        path = write_csv_file(tmp_path, dict(
+            order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
+            status="shipped", tracking_number="NEW", quantity="2",
+        ))
+
+        sync_csv_to_sheet(path)
+
+        assert "Split shipment" in alerts[0][0]
+
+
+class TestSupersededRows:
+    """A `superseded` row is a retired, money-free, terminal record of a tracking
+    number Amazon re-issued. Every layer of the sync has to treat it as closed."""
+
+    def _superseded(self, **overrides):
+        base = dict(order_id="A1", order_date="2026-08-08", item_name="W", shipment="2",
+                    status="superseded", tracking_number="DEAD", profile_label="p1",
+                    retailer="Amazon Business")
+        base.update(overrides)
+        return row(**base)
+
+    # --- rank -------------------------------------------------------------------------------
+    def test_it_outranks_the_live_lifecycle_but_not_the_group_outcomes(self):
+        assert ledger_sync._rank_of("superseded") > ledger_sync._rank_of("delivered")
+        assert ledger_sync._rank_of("superseded") < ledger_sync._rank_of("paid")
+
+    def test_a_re_scrape_cannot_walk_it_back(self):
+        i = FIELDNAMES.index("status")
+        existing = self._superseded()
+        incoming = row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="2",
+                       status="shipped", tracking_number="DEAD")
+        assert ledger_sync._merge_row(existing, incoming)[i] == "superseded"
+
+    # --- rollup / open-vs-terminal ----------------------------------------------------------
+    def test_rollup(self):
+        assert ledger_sync._rollup_status(["superseded"]) == "superseded"
+        assert ledger_sync._rollup_status(["superseded", "delivered"]) == "delivered"
+        assert ledger_sync._rollup_status(["superseded", "shipped"]) == "shipped"
+
+    def test_a_retired_shipment_beside_a_paid_one_closes_the_order(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1", status="paid",
+                tracking_number="LIVE", profile_label="p1"),
+            self._superseded(),
+        ]
+        state = load_order_state("p1")
+        assert state["delivered_ids"] == ["A1"] and state["open_orders"] == []
+
+    def test_a_retired_shipment_beside_a_live_one_keeps_the_order_open_without_a_re_read(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1", status="shipped",
+                tracking_number="LIVE", profile_label="p1"),
+            self._superseded(),
+        ]
+        state = load_order_state("p1")
+        assert [o["order_id"] for o in state["open_orders"]] == ["A1"]
+        assert state["open_orders"][0]["needs_agent"] is False
+        assert len(state["open_orders"][0]["shipments"]) == 2
+
+    # --- never a merge target ----------------------------------------------------------------
+    def _seed(self, sheet):
+        sheet.rows = [
+            list(HEADER),
+            self._superseded(),
+            row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1", status="shipped",
+                tracking_number="LIVE", cost_per_item="100.00", total_cost="100.00"),
+        ]
+        return list(sheet.rows[1])
+
+    def test_an_incoming_row_with_its_exact_key_appends_instead_of_merging(self, sheet, tmp_path):
+        """A future genuine box N+1 must never land ON the retired row -- the money-blanking would
+        then erase the new box's cost. It appends (and the duplicate-key audit is the loud alarm)."""
+        retired_before = self._seed(sheet)
+        path = write_csv_file(tmp_path, dict(
+            order_id="A1", order_date="2026-08-08", item_name="W", shipment="2", status="shipped",
+            tracking_number="NEW", quantity="1", cost_per_item="100.00", total_cost="100.00",
+        ))
+        result = sync_csv_to_sheet(path)
+        assert result["appended"] == 1
+        assert sheet.data_rows()[0] == retired_before
+        assert sheet.data_rows()[-1][FIELDNAMES.index("total_cost")] == 100.0
+
+    def test_the_shipment_line_deferral_does_not_target_it_either(self, sheet, tmp_path):
+        retired_before = self._seed(sheet)
+        path = write_csv_file(tmp_path, dict(
+            order_id="A1", order_date="2026-08-08", item_name="W (re-worded)", shipment="2",
+            status="ordered", quantity="1", cost_per_item="100.00", total_cost="100.00",
+        ))
+        result = sync_csv_to_sheet(path)
+        assert result["appended"] == 1
+        assert sheet.data_rows()[0] == retired_before
+
+    def test_the_tracking_deferral_does_not_target_it_either(self, sheet, tmp_path):
+        retired_before = self._seed(sheet)
+        path = write_csv_file(tmp_path, dict(
+            order_id="A1", order_date="2026-08-08", item_name="W (re-worded)", shipment="3",
+            status="shipped", tracking_number="DEAD", quantity="1", cost_per_item="100.00",
+            total_cost="100.00",
+        ))
+        result = sync_csv_to_sheet(path)
+        assert result["appended"] == 1
+        assert sheet.data_rows()[0] == retired_before
+
+    # --- money-free -------------------------------------------------------------------------
+    def test_blanking_takes_quantity_too_but_keeps_the_card_and_tracking(self):
+        out = ledger_sync._blank_money_for_status(self._superseded(quantity="3", total_cost="2847",
+                                                                   cashback_rate="0.05"))
+        assert out[FIELDNAMES.index("quantity")] == ""
+        assert out[FIELDNAMES.index("total_cost")] == ""
+        assert out[FIELDNAMES.index("cashback_rate")] == "0.05"
+        assert out[FIELDNAMES.index("tracking_number")] == "DEAD"
+        # cancelled still keeps Quantity -- the two field sets differ on purpose
+        kept = ledger_sync._blank_money_for_status(row(status="cancelled", quantity="3", total_cost="9"))
+        assert kept[FIELDNAMES.index("quantity")] == "3" and kept[FIELDNAMES.index("total_cost")] == ""
+
+    def test_reproration_never_refills_a_retired_row(self, sheet, tmp_path):
+        self._seed(sheet)
+        path = write_csv_file(tmp_path, dict(
+            order_id="A1", order_date="2026-08-08", item_name="W", shipment="1", status="shipped",
+            tracking_number="LIVE", quantity="1", cost_per_item="100.00", total_cost="100.00",
+            shipping="40.00",
+        ))
+        sync_csv_to_sheet(path)
+        rows = sheet.data_rows()
+        assert rows[0][FIELDNAMES.index("shipping")] == ""      # the retired row stays blank
+        assert rows[1][FIELDNAMES.index("shipping")] == 40.0    # the live row takes the whole total
+
+    def test_clear_cells_issues_user_entered_blanks_and_raises(self):
+        class Fake:
+            calls = []
+
+            def batch_update(self, data, value_input_option=None):
+                self.calls.append((data, value_input_option))
+
+        ws = Fake()
+        ledger_sync._clear_cells(ws, [5], ledger_sync._SUPERSEDED_BLANK_FIELDS)
+        data, option = ws.calls[0]
+        assert option == "USER_ENTERED"
+        assert {d["range"] for d in data} >= {f"{ledger_sync._COL['quantity']}5",
+                                             f"{ledger_sync._COL['total_cost']}5"}
+        assert all(d["values"] == [[""]] for d in data)
+
+        class Broken:
+            def batch_update(self, data, value_input_option=None):
+                raise RuntimeError("quota")
+
+        import pytest
+        with pytest.raises(RuntimeError):
+            ledger_sync._clear_cells(Broken(), [5], ledger_sync._SUPERSEDED_BLANK_FIELDS)
+        # ...while the sync's own wrapper stays fail-soft (the row is already written)
+        ledger_sync._clear_money_for_status(Broken(), "superseded", [5])
 
 
 class TestGiftCardTagIsSticky:
@@ -1967,3 +2192,56 @@ class TestTerminalOrdersAreSkippedAcrossProfiles:
         ]
         state = load_order_state("profile-bravo", retailer="Amazon")
         assert [o["order_id"] for o in state["open_orders"]] == ["A1"] and state["delivered_ids"] == ["B2"]
+
+
+class TestAProperPerPackageSplitNeverHitsTheSafetyNet:
+    """BBY01-809900000010: Best Buy's ss-api reported the 3 MacBooks as two
+    packages, 2 + 1, each with its own number. The MAPPING builds one row per package, so the
+    upsert sees two distinct keys (Shipment 1 / Shipment 2) with two distinct numbers -- it never
+    enters the changed-tracking branch, so neither the '*' split nor the re-label rule can fire."""
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    _A = dict(order_id="BBY01-809900000010", order_date="2026-09-08", item_name="MacBook Air 15",
+              shipment="1", status="shipped", tracking_number="529900000011", quantity="2",
+              cost_per_item="1349.00", total_cost="2698.00")
+    _B = dict(order_id="BBY01-809900000010", order_date="2026-09-08", item_name="MacBook Air 15",
+              shipment="2", status="shipped", tracking_number="529900000012", quantity="1",
+              cost_per_item="1349.00", total_cost="1349.00")
+
+    def test_two_packages_land_as_two_rows_with_their_own_quantities(self, sheet, tmp_path, alerts):
+        sheet.rows = [list(HEADER)]
+        sync_csv_to_sheet(write_csv_file(tmp_path, self._A, self._B))
+
+        rows = {str(r[FIELDNAMES.index("shipment")]): r for r in sheet.data_rows()}
+        assert rows["1"][FIELDNAMES.index("quantity")] == 2 and rows["1"][FIELDNAMES.index("total_cost")] == 2698.0
+        assert rows["2"][FIELDNAMES.index("quantity")] == 1 and rows["2"][FIELDNAMES.index("total_cost")] == 1349.0
+        assert all(r[FIELDNAMES.index("status")] == "shipped" for r in rows.values())
+        assert alerts == []
+
+    def test_a_later_read_updates_both_in_place(self, sheet, tmp_path, alerts):
+        sheet.rows = [list(HEADER)]
+        sync_csv_to_sheet(write_csv_file(tmp_path, self._A, self._B))
+        delivered = [dict(self._A, status="delivered"), dict(self._B, status="delivered")]
+
+        result = sync_csv_to_sheet(write_csv_file(tmp_path, *delivered))
+
+        assert result == dict(result, updated=2, appended=0, split_rows=0)
+        assert len(sheet.data_rows()) == 2 and alerts == []
+
+    def test_a_split_first_seen_as_one_package_grows_a_second_row_not_a_star(self, sheet, tmp_path, alerts):
+        """The API first showed all 3 under one number; the next read shows 2 + 1 with the FIRST
+        number unchanged on package 1 -- an exact-key update plus a clean append, no '*'."""
+        sheet.rows = [list(HEADER), row(**dict(self._A, quantity="3", total_cost="4047.00"))]
+
+        sync_csv_to_sheet(write_csv_file(tmp_path, self._A, self._B))
+
+        rows = {str(r[FIELDNAMES.index("shipment")]): r for r in sheet.data_rows()}
+        assert rows["1"][FIELDNAMES.index("quantity")] == 2 and rows["1"][FIELDNAMES.index("tracking_number")] == "529900000011"
+        assert rows["2"][FIELDNAMES.index("quantity")] == 1 and rows["2"][FIELDNAMES.index("tracking_number")] == "529900000012"
+        assert "*" not in [r[FIELDNAMES.index("quantity")] for r in rows.values()]
+        assert alerts == []

@@ -674,7 +674,8 @@ def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
         f"order whose subtotal is ${subtotal:.2f} — the hallmark of a delayed package that was "
         f"re-issued a new tracking number while the old card was still on the page.\n\n"
         f"{len(survivors)} card(s) worth ${after:.2f} were kept.{tail}\n\n"
-        f"If a row for the superseded tracking number is already on the sheet, clear it with:\n"
+        f"If a row for the superseded tracking number is already on the sheet, mark it superseded "
+        f"(the row stays, its money is blanked) with:\n"
         f"  python -m scripts.fix_superseded_shipments --order {order_id}",
     )
     return survivors

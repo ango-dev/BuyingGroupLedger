@@ -309,9 +309,15 @@ def is_capturable(statuses, include_settled: bool = False) -> bool:
     seen = [(s or "").strip().lower() for s in statuses if (s or "").strip()]
     if not seen:
         return False
-    if any(s not in good + ("cancelled",) for s in seen):
+    if any(s not in good + _IGNORED_BESIDE_SHIPPED for s in seen):
         return False
     return any(s in good for s in seen)
+
+
+# Tolerated ALONGSIDE shipped rows, never sufficient on their own: a partial cancellation is still a
+# completed purchase for what did ship, and a superseded row (a re-labelled package's dead tracking
+# number, the design notes) is the same completed purchase as the live row it sits beside.
+_IGNORED_BESIDE_SHIPPED = ("cancelled", "superseded")
 
 
 # Extensions a stored receipt can carry, newest-preferred first: PDF is what we try to render, PNG is

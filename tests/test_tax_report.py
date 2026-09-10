@@ -47,6 +47,10 @@ class TestTheTwoDates:
         r = build_report(build(_row(2, order_date="2026-03-01", status="cancelled", cogs="")), 2026)
         assert r["totals"]["rows"] == 0 and r["totals"]["cogs"] == 0
 
+    def test_a_superseded_row_carries_no_cost(self):
+        r = build_report(build(_row(2, order_date="2026-03-01", status="superseded", cogs="")), 2026)
+        assert r["totals"]["rows"] == 0 and r["totals"]["cogs"] == 0
+
     def test_net_is_payouts_minus_cogs_minus_insurance_and_cashback_is_shown(self):
         sheet = build(_row(2, order_date="2026-03-01", payout_date="2026-04-01", payout=900.0,
                            insurance=7.4, cogs=766.08))   # (798 + 0) * (1 - 0.04)

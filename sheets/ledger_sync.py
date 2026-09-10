@@ -10,7 +10,9 @@ from google.oauth2.service_account import Credentials
 from alerts.notifier import alert
 from config.settings import settings
 from config.warehouses import classify_address, is_deliberately_unrouted, is_personal
-from models.order import FIELDNAMES, TERMINAL_STATUSES, shipment_label
+from models.order import (
+    FIELDNAMES, MONEY_FREE_STATUSES, RETIRED_STATUSES, TERMINAL_STATUSES, shipment_label,
+)
 
 log = logging.getLogger(__name__)
 
@@ -237,7 +239,14 @@ def _profit_formula(row_number: int) -> str:
 # "return" outranks "paid" because a return REVERSES a payment: when a single sync somehow carries
 # both, the reversal is the one the user needs to see. "cancelled" stays on top as the order-level
 # override it has always been.
-_STATUS_RANK = {"ordered": 0, "shipped": 1, "delivered": 2, "paid": 3, "return": 4, "cancelled": 5}
+#
+# "superseded" sits ABOVE delivered so no re-scrape can ever walk a retired row back to a live
+# status, and BELOW the buying-group outcomes so "a group's money outcome is never walked back"
+# stays literally true. Only the relative order matters -- nothing pins the numbers.
+_STATUS_RANK = {
+    "ordered": 0, "shipped": 1, "delivered": 2, "superseded": 3, "paid": 4, "return": 5,
+    "cancelled": 6,
+}
 
 
 def _collapse_records(records: list[dict]) -> list[dict]:
@@ -453,6 +462,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     qty_field_idx = FIELDNAMES.index("quantity")
     total_field_idx = FIELDNAMES.index("total_cost")
     tracking_field_idx = FIELDNAMES.index("tracking_number")
+    submitted_field_idx = FIELDNAMES.index("tracking_submitted")
     # Tracking-number index for the tracking-based deferral (Order ID + Tracking Number). The carrier
     # tracking number is an identity BOTH the API and the agent read identically, so it reconciles rows
     # even when their synthetic Shipment numbers diverge (e.g. Costco: the API numbers shipments by
@@ -473,10 +483,19 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     key_to_existing: dict[tuple, tuple[int, list]] = {}
     shipment_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     tracking_to_existing: dict[tuple, list[tuple[int, list]]] = {}
+    status_hdr_idx = header.index("Status") if "Status" in header else None
     for row_number, row in enumerate(existing[1:], start=2):
         # Rows written before Shipment existed are shorter than key_idx; read missing cells as ""
         # (never skip them, or pre-migration rows would fail to match and duplicate on re-check).
         if oid_idx >= len(row) or not row[oid_idx].strip():
+            continue
+        # A RETIRED row (superseded, the design notes) is never a merge target: it is a closed record of a
+        # dead tracking number. Left in these indices, a future genuine box carrying its Shipment
+        # number -- or, for the tracking index, its number -- would merge onto it, and the
+        # money-blanking below would then erase that box's cost. _next_shipment_number still scans
+        # `existing`, so a split-box append can never reuse the retired row's number either.
+        if status_hdr_idx is not None and status_hdr_idx < len(row) \
+                and str(row[status_hdr_idx]).strip().lower() in RETIRED_STATUSES:
             continue
         key = tuple(row[i] if i < len(row) else "" for i in key_idx)
         key_to_existing[key] = (row_number, row)
@@ -540,10 +559,11 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
 
     updates = 0
     appends: list[list] = []
-    cancelled_rows: list[int] = []
+    money_free_rows: dict[str, list[int]] = {}  # status -> updated rows whose money must be cleared
     claimed_rows: set[int] = set()
     written_rows: list[int] = []  # every row touched this sync -> gets its Total Profit formula
     split_events: list[dict] = []
+    relabel_events: list[dict] = []
     skipped_blank = 0
     # Every order this sync touched, and the raw order-level figures (shipping / gift card / sales
     # tax) it sent for that order (every row of one order carries the same number) — fed to
@@ -626,7 +646,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                     if name_hdr_idx < len(match[1]) and str(match[1][name_hdr_idx]).strip():
                         sheet_row[name_field_idx] = match[1][name_hdr_idx]  # keep recorded name
             if match is None:
-                appends.append(_blank_money_for_cancelled(sheet_row))
+                appends.append(_blank_money_for_status(sheet_row))
                 continue
             row_number, existing_row = match
 
@@ -658,29 +678,58 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                         record["order_id"], existing, oid_idx, shipment_hdr_idx,
                         appends, oid_field_idx, shipment_field_idx,
                     ))
-                    split_row = list(sheet_row)
-                    split_row[shipment_field_idx] = _coerce("shipment", label)
-                    split_row[qty_field_idx] = "*"      # unknown per-box split — user fills it in
-                    split_row[total_field_idx] = ""     # can't compute Total Cost without a quantity
-                    appends.append(_blank_money_for_cancelled(split_row))
-                    split_events.append({
-                        "order_id": record["order_id"],
-                        "item_name": (existing_row[name_hdr_idx] if name_hdr_idx < len(existing_row)
-                                      else record.get("item_name", "")),
-                        "existing_tracking": existing_trk,
-                        "new_tracking": incoming_trk,
-                        "new_shipment": label,
-                    })
-                    continue  # leave the existing box's row untouched
+                    existing_qty = (_parse_display_number(existing_row[qty_field_idx])
+                                    if qty_field_idx < len(existing_row) else None)
+                    incoming_qty = _parse_display_number(str(record.get("quantity", "")))
+                    if existing_qty == 1 and incoming_qty == 1:
+                        # A RE-LABEL, not a split. One unit is one box,
+                        # so a changed number on a Quantity-1 row can only be the carrier re-issuing
+                        # the label — a split and a re-label look identical by number alone, and this
+                        # is the one case the quantity settles. The LIVE row takes the new number and
+                        # keeps its cost (it falls through to the update below); the DEAD number is
+                        # kept as a `superseded` row — money blank, numbered after the live boxes —
+                        # because it really was posted to the buying group. The live row's Tracking
+                        # Submitted tick is cleared: the new number has not been posted yet.
+                        retired = _preserve_from_stored(existing_row, raw_grid, row_number)
+                        retired = [_coerce(field, val) for field, val in zip(FIELDNAMES, retired)]
+                        retired[_STATUS_FIELD_IDX] = "superseded"
+                        retired[shipment_field_idx] = _coerce("shipment", label)
+                        retired[tracking_field_idx] = existing_trk
+                        appends.append(_blank_money_for_status(retired))
+                        sheet_row[submitted_field_idx] = False
+                        relabel_events.append({
+                            "order_id": record["order_id"],
+                            "item_name": (existing_row[name_hdr_idx] if name_hdr_idx < len(existing_row)
+                                          else record.get("item_name", "")),
+                            "old_tracking": existing_trk,
+                            "new_tracking": incoming_trk,
+                            "retired_shipment": label,
+                        })
+                    else:
+                        split_row = list(sheet_row)
+                        split_row[shipment_field_idx] = _coerce("shipment", label)
+                        split_row[qty_field_idx] = "*"      # unknown per-box split — user fills it in
+                        split_row[total_field_idx] = ""     # can't compute Total Cost without a quantity
+                        appends.append(_blank_money_for_status(split_row))
+                        split_events.append({
+                            "order_id": record["order_id"],
+                            "item_name": (existing_row[name_hdr_idx] if name_hdr_idx < len(existing_row)
+                                          else record.get("item_name", "")),
+                            "existing_tracking": existing_trk,
+                            "new_tracking": incoming_trk,
+                            "new_shipment": label,
+                        })
+                        continue  # leave the existing box's row untouched
 
         merged = _merge_row(_preserve_from_stored(existing_row, raw_grid, row_number), sheet_row)
         # Preserved cells come back as strings from get_all_values(); re-coerce so a kept numeric
         # (e.g. a quantity carried over from a prior run) is written as a number, not text —
         # otherwise Sheets stores it as text and shows a leading-apostrophe '1.
         merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
-        merged = _blank_money_for_cancelled(merged)
-        if str(merged[_STATUS_FIELD_IDX] or "").strip().lower() == "cancelled":
-            cancelled_rows.append(row_number)
+        merged = _blank_money_for_status(merged)
+        merged_status = str(merged[_STATUS_FIELD_IDX] or "").strip().lower()
+        if merged_status in MONEY_FREE_STATUSES:
+            money_free_rows.setdefault(merged_status, []).append(row_number)
         worksheet.update(range_name=f"A{row_number}", values=[_blank_to_none(merged)])
         claimed_rows.add(row_number)
         written_rows.append(row_number)
@@ -700,7 +749,8 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         written_rows.extend(range(start_row, start_row + len(appends)))
 
     _reprorate_order_level(worksheet, touched_order_ids, raw_totals_by_order)
-    _clear_cancelled_money(worksheet, cancelled_rows)
+    for money_free_status, rows_to_clear in money_free_rows.items():
+        _clear_money_for_status(worksheet, money_free_status, rows_to_clear)
     _write_profit_formulas(worksheet, written_rows)
 
     if split_events:
@@ -718,6 +768,23 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             "in more than one box while the retailer reports only one tracking number at a time. A new "
             "row was added per new box with Quantity '*'. Set the per-box quantities (and adjust the "
             "ORIGINAL row's quantity to match), then verify each tracking number:\n\n" + "\n".join(lines),
+        )
+
+    if relabel_events:
+        lines = [
+            f"- Order {e['order_id']} / {e['item_name']}: {e['old_tracking']} -> {e['new_tracking']}; "
+            f"the dead number is kept as shipment {e['retired_shipment']} (superseded, no money)"
+            for e in relabel_events
+        ]
+        from alerts.notifier import alert
+
+        alert(
+            f"Re-labelled package on {len(relabel_events)} row(s) — new tracking number recorded",
+            "A single-unit shipment's tracking number changed. One unit cannot split, so the carrier "
+            "re-issued the label. The row now carries the NEW number (the buying-group sync submits it "
+            "on its next run) and the old number is kept as a `superseded` row that carries no money. "
+            "Nothing to set by hand — but if the buying group already holds the old number, tell them "
+            "the new one:\n\n" + "\n".join(lines),
         )
 
     if suspect_tracking:
@@ -857,19 +924,29 @@ _CANCELLED_BLANK_FIELDS = (
     "cost_per_item", "total_cost", "shipping", "insurance", "payout_amount", "payout_date",
     "gift_card", "sales_tax", "rewards_used",
 )
+# A SUPERSEDED row blanks Quantity as well: it is the multiplier that booked the
+# re-labelled package's cost twice, and "how many were ordered" is already told by the live row.
+_SUPERSEDED_BLANK_FIELDS = ("quantity",) + _CANCELLED_BLANK_FIELDS
+_BLANK_FIELDS_BY_STATUS = {
+    "cancelled": _CANCELLED_BLANK_FIELDS,
+    "superseded": _SUPERSEDED_BLANK_FIELDS,
+}
 
 
-def _blank_money_for_cancelled(row: list) -> list:
-    """Empty the money cells on a CANCELLED row, keeping the row itself for bookkeeping.
+def _blank_money_for_status(row: list) -> list:
+    """Empty the money cells on a CANCELLED or SUPERSEDED row, keeping the row for bookkeeping.
 
     A cancelled order was refunded, so no money ever moved: leaving the scraped cost on the row makes
     it look like a real purchase to anything that sums the column, and at year end that is an
     overstated cost of goods. The row still says what was ordered, from whom, and that it was
-    cancelled — which is the bookkeeping part worth keeping.
+    cancelled — which is the bookkeeping part worth keeping. A superseded row is
+    the same shape for a different reason: its package was re-labelled and lives on under the live
+    row, so any money here would be counted twice (see _BLANK_FIELDS_BY_STATUS for the one
+    difference between the two field sets).
 
     Applied at WRITE time (here and in scripts/reorder_sheet.py) rather than by a one-off cleanup,
-    because a cleanup only fixes the rows that exist when it runs. Cancelled is terminal, so a row
-    blanked here is never re-scraped and never re-populated.
+    because a cleanup only fixes the rows that exist when it runs. Both statuses are terminal, so a
+    row blanked here is never re-scraped and never re-populated.
 
     Returns a new list; the input is not mutated.
     """
@@ -877,44 +954,54 @@ def _blank_money_for_cancelled(row: list) -> list:
         status = str(row[FIELDNAMES.index("status")] or "").strip().lower()
     except (IndexError, ValueError):
         return list(row)
-    if status != "cancelled":
+    fields = _BLANK_FIELDS_BY_STATUS.get(status)
+    if not fields:
         return list(row)
     out = list(row)
-    for field in _CANCELLED_BLANK_FIELDS:
+    for field in fields:
         i = FIELDNAMES.index(field)
         if i < len(out):
             out[i] = ""
     return out
 
 
-def _clear_cancelled_money(worksheet, row_numbers: list[int]) -> None:
-    """Actually EMPTY the money cells on rows that just became cancelled.
-
-    _blank_money_for_cancelled puts "" in the row, which is enough for an APPEND (the cell was never
-    populated) but not for an UPDATE: _blank_to_none turns "" into None on the way out, and None means
-    "leave this cell alone", not "clear it". So a row that carried a real cost before it was cancelled
-    would keep that cost forever — and cancelled is terminal, so nothing would ever come back for it.
+def _clear_cells(worksheet, row_numbers: list[int], fields: tuple[str, ...]) -> None:
+    """Actually EMPTY the given cells on the given rows. RAISES on failure — the callers decide.
 
     Uses USER_ENTERED with "", which _blank_to_none's own measurements record as the one combination
     that clears the VALUE while preserving the cell's number format (RAW "" strips the format; RAW
     None doesn't write at all). Same reason _write_profit_formulas is a separate USER_ENTERED batch.
-
-    Fails soft: the row data is already written, and the next sync re-clears.
     """
     if not row_numbers:
         return
     data = [
         {"range": f"{_COL[field]}{n}", "values": [[""]]}
         for n in sorted(set(row_numbers))
-        for field in _CANCELLED_BLANK_FIELDS
+        for field in fields
     ]
+    worksheet.batch_update(data, value_input_option="USER_ENTERED")
+
+
+def _clear_money_for_status(worksheet, status: str, row_numbers: list[int]) -> None:
+    """Actually EMPTY the money cells on rows that just became cancelled / superseded.
+
+    _blank_money_for_status puts "" in the row, which is enough for an APPEND (the cell was never
+    populated) but not for an UPDATE: _blank_to_none turns "" into None on the way out, and None means
+    "leave this cell alone", not "clear it". So a row that carried a real cost before it was cancelled
+    would keep that cost forever — and both statuses are terminal, so nothing would ever come back.
+
+    Fails soft: the row data is already written, and the next sync re-clears.
+    """
+    fields = _BLANK_FIELDS_BY_STATUS.get(status)
+    if not row_numbers or not fields:
+        return
     try:
-        worksheet.batch_update(data, value_input_option="USER_ENTERED")
-        log.info("Cleared the money cells on %d cancelled row(s).", len(set(row_numbers)))
+        _clear_cells(worksheet, row_numbers, fields)
+        log.info("Cleared the money cells on %d %s row(s).", len(set(row_numbers)), status)
     except Exception:
         log.exception(
-            "Could not clear the money cells on %d cancelled row(s); they may still show a refunded "
-            "cost until the next sync.", len(set(row_numbers)),
+            "Could not clear the money cells on %d %s row(s); they may still show a cost until the "
+            "next sync.", len(set(row_numbers)), status,
         )
 
 
@@ -1022,11 +1109,11 @@ def _reprorate_order_level(worksheet, order_ids: set, raw_totals: dict) -> None:
                  for n in row_numbers}
         cost_sum = sum(c for c in costs.values() if c)
         for n in row_numbers:
-            # A CANCELLED row carries no money (see _blank_money_for_cancelled), and this runs AFTER
-            # the row write — so without this it would put a freshly-computed 0.0 back into a cell the
-            # write had just emptied, undoing the blanking every single sync.
+            # A CANCELLED or SUPERSEDED row carries no money (see _blank_money_for_status), and this
+            # runs AFTER the row write — so without this it would put a freshly-computed 0.0 back into
+            # a cell the write had just emptied, undoing the blanking every single sync.
             row_status = grid[n - 1][status_i] if status_i < len(grid[n - 1]) else ""
-            if str(row_status).strip().lower() == "cancelled":
+            if str(row_status).strip().lower() in MONEY_FREE_STATUSES:
                 continue
             weight = (costs[n] or 0) / cost_sum if cost_sum else 0.0
             for field, total in totals.items():

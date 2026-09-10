@@ -55,6 +55,12 @@ def test_cancelled_rows_never_count():
     assert collect_candidates(g, None, set()) == {}
 
 
+def test_superseded_rows_never_count():
+    # A retired row's blank Gift Card cell is not a gap to fill -- it carries no money at all.
+    g = grid(row(**{**BASE, "Status": "superseded"}, **{"Order ID": "A1", "Total Cost": ""}))
+    assert collect_candidates(g, None, set()) == {}
+
+
 def test_retailer_and_order_filters():
     g = grid(
         row(**BASE, **{"Order ID": "A1", "Total Cost": "100"}),

@@ -35,7 +35,7 @@ from models.order import FIELDNAMES, normalize_shipment
 from scripts.apply_sheet_formats import neutralise_coercing_types_request
 from sheets.ledger_sync import (
     HEADER,
-    _blank_money_for_cancelled,
+    _blank_money_for_status,
     _last_occupied_row,
     _coerce,
     _get_worksheet,
@@ -86,11 +86,11 @@ def plan_reorder(header: list[str], data_rows: list[list]) -> dict:
         # invisible until something like audit_sheet's shipment_is_int check goes looking for it.
         # No-op on non-numeric fields (card_last4, item_name, the Total Profit formula column, ...).
         new_row = [_coerce(_FIELD_FOR_HEADER[name], value) for name, value in zip(HEADER, new_row)]
-        # A CANCELLED order carries no money: the same rule sync_csv_to_sheet applies on every write,
-        # applied here so the rows ALREADY on the sheet get cleaned by this migration too. Cancelled is
-        # terminal, so those rows are never re-scraped and would otherwise keep their refunded costs
+        # A CANCELLED or SUPERSEDED row carries no money: the same rule sync_csv_to_sheet applies on
+        # every write, applied here so the rows ALREADY on the sheet get cleaned by this migration too.
+        # Both are terminal, so those rows are never re-scraped and would otherwise keep their costs
         # forever — and at year end that is an overstated cost of goods.
-        new_row = _blank_money_for_cancelled(new_row)
+        new_row = _blank_money_for_status(new_row)
         # Any OTHER formula the user added by hand would be rewritten as literal text by the RAW write
         # below (Total Profit is re-stamped afterwards, so it's exempt). Flag rather than clobber.
         for i, value in enumerate(new_row):

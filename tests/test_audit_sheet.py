@@ -665,6 +665,54 @@ class TestOpenRowStaleness:
         sheet = build(row_cells(2, Status=Cell("ordered"), **{"Last Scraped At": Cell(_iso_days_ago(0))}))
         assert result_for(sheet, "open_row_staleness").status == "PASS"
 
+    def test_a_superseded_row_is_terminal_and_never_stale(self):
+        sheet = build(row_cells(2, Status=Cell("superseded"), **{"Last Scraped At": Cell(_iso_days_ago(400))}))
+        assert result_for(sheet, "open_row_staleness").status == "PASS"
+        assert result_for(sheet, "column_shape").status == "PASS"  # a known status
+
+
+_SUPERSEDED_MONEY_BLANKS = {
+    "Quantity": Cell(""), "Cost Per Item": Cell(""), "Total Cost": Cell(""), "Shipping": Cell(""),
+    "Insurance": Cell(""), "Payout Amount": Cell(""), "Payout Date": Cell(""), "Gift Card": Cell(""),
+    "Sales Tax": Cell(""), "Rewards Used": Cell(""),
+}
+
+
+class TestSupersededRowsCarryNoMoney:
+    """The one non-negotiable of a kept superseded row: every money cell blank."""
+
+    def _retired(self, n=2, **overrides):
+        from sheets.ledger_sync import _cogs_formula, _profit_formula
+        cells = dict(_SUPERSEDED_MONEY_BLANKS)
+        cells.update({
+            "Status": Cell("superseded"), "Shipment": Cell(2), "Tracking Number": Cell("DEAD"),
+            "COGS": Cell("", formula=_cogs_formula(n)), "Total Profit": Cell("", formula=_profit_formula(n)),
+        })
+        cells.update(overrides)
+        return row_cells(n, **cells)
+
+    def test_a_clean_superseded_row_passes(self):
+        result = result_for(build(self._retired()), "superseded_rows_carry_no_money")
+        assert result.status == "PASS" and "1 superseded row(s)" in result.summary
+
+    def test_a_cost_on_a_superseded_row_fails(self):
+        result = result_for(build(self._retired(**{"Total Cost": Cell(2847.0)})),
+                            "superseded_rows_carry_no_money")
+        assert result.status == "FAIL" and "Total Cost holds 2847.0" in result.details[0]
+
+    def test_a_quantity_on_a_superseded_row_fails(self):
+        result = result_for(build(self._retired(Quantity=Cell(3))), "superseded_rows_carry_no_money")
+        assert result.status == "FAIL" and "Quantity" in result.details[0]
+
+    def test_a_live_row_with_money_is_not_this_checks_business(self):
+        result = result_for(build(row_cells(2)), "superseded_rows_carry_no_money")
+        assert result.status == "PASS" and "0 superseded" in result.summary
+
+    def test_the_retired_row_numbered_after_the_live_box_keeps_shipments_contiguous(self):
+        sheet = build(row_cells(2, Shipment=Cell(1), **{"Order ID": Cell("A"), "Tracking Number": Cell("LIVE")}),
+                      self._retired(3, **{"Order ID": Cell("A")}))
+        assert result_for(sheet, "shipment_numbers_contiguous").status == "PASS"
+
 
 class TestMergedCells:
     def test_a_merge_is_a_failure(self):
@@ -985,6 +1033,13 @@ class TestCogsInputsComplete:
 
         assert result_for(sheet, "cogs_inputs_complete").status == "PASS"
 
+    def test_a_superseded_row_is_exempt(self):
+        sheet = build(row_cells(2, Status=Cell("superseded"), **{
+            "COGS": Cell(""), "Total Cost": Cell(""), "Payout Amount": Cell(""),
+        }))
+
+        assert result_for(sheet, "cogs_inputs_complete").status == "PASS"
+
     def test_a_gift_card_row_is_not_counted_as_an_unpaid_straddle(self):
         """A gift card will NEVER have a payout of its own -- the income arrives through the order it
         funded, whose cost was netted down by the card. Counting it as a straddle would misreport the
@@ -1242,6 +1297,23 @@ class TestCompareEmitsResults:
         after = [self._row(2, Status=Cell("delivered"), **{"Total Cost": Cell(700.0)})]
         r = self._classify(before, after)
         assert r["compare_terminal_money_changed"].status == "WARN"
+
+    def test_marking_a_row_superseded_is_the_expected_transition(self):
+        """The repair blanks a terminal row's money and moves its status UP: neither a regression
+        nor a hand edit."""
+        before = [self._row(2, Status=Cell("delivered"), **{"Total Cost": Cell(798.0), "Quantity": Cell(3)})]
+        after = [self._row(2, Status=Cell("superseded"), **{"Total Cost": Cell(""), "Quantity": Cell("")})]
+        r = self._classify(before, after)
+        assert "compare_terminal_money_changed" not in r and "compare_status_regressed" not in r
+        assert r["compare_updated"].status == "PASS"
+
+    def test_the_repairs_renumber_of_a_retired_row_is_info_not_an_identity_failure(self):
+        before = [self._row(2, Status=Cell("delivered"), Shipment=Cell(1), **{"Tracking Number": Cell("DEAD")})]
+        after = [self._row(2, Status=Cell("superseded"), Shipment=Cell(2), **{"Tracking Number": Cell("DEAD"),
+                                                                              "Total Cost": Cell("")})]
+        r = self._classify(before, after)
+        assert r["compare_rows_retired"].status == "INFO"
+        assert "compare_identity_changed" not in r and "compare_rows_removed" not in r
 
     def test_a_payout_landing_on_a_delivered_row_is_the_normal_sync(self):
         before = [self._row(2, Status=Cell("delivered"), **{"Payout Amount": Cell("", fmt="currency")})]

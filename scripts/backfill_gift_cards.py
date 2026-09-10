@@ -51,6 +51,7 @@ from collections import defaultdict
 from bs4 import BeautifulSoup
 
 import config.settings  # noqa: F401  -- loads config.json so the cloud-browser API key reaches the SDK
+from models.order import MONEY_FREE_STATUSES
 from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet, _parse_display_number
 
 #: retailer display name on the sheet -> (retailer_key, mapping module name, api module name)
@@ -81,8 +82,8 @@ def collect_candidates(grid: list[list], only_retailer: str | None,
             continue
         if only_orders and order_id not in only_orders:
             continue
-        if cell(row, "Status").lower() == "cancelled":
-            continue
+        if cell(row, "Status").lower() in MONEY_FREE_STATUSES:
+            continue  # cancelled / superseded rows carry no money and need no share
         quantity = _parse_display_number(cell(row, "Quantity"))
         gc_blank = not cell(row, "Gift Card")
         rw_blank = not cell(row, "Rewards Used")

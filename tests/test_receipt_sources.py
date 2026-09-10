@@ -222,6 +222,9 @@ class TestSplitOrdersWaitForEveryShipment:
         (["cancelled"], False),
         (["cancelled", "cancelled"], False),
         (["shipped", "cancelled"], True),     # partial cancellation, rest shipped
+        (["shipped", "superseded"], True),    # a re-labelled box's dead row beside the live one
+        (["delivered", "superseded"], True),
+        (["superseded"], False),              # never sufficient on its own
         ([], False),
     ])
     def test_the_truth_table(self, statuses, capturable):

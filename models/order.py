@@ -52,8 +52,23 @@ def normalize_shipment(value: str) -> str:
 # NOTE "paid" overlaps the Payout Amount column, which records the same fact more precisely. Prefer
 # filling Payout Amount when you have it. Setting Status to "paid" on a row that has NOT been
 # delivered also discards its shipment state, so only use it on an order that already finished.
-STATUSES = ("ordered", "shipped", "delivered", "cancelled", "paid", "return")
-TERMINAL_STATUSES = ("delivered", "cancelled", "paid", "return")
+#
+# "superseded" (2026-09-09, the design notes) is a shipment row whose tracking number Amazon RE-ISSUED
+# for the same delayed package: the dead label was really posted to a buying group, so the row is
+# kept as the record of that instead of being deleted. Only scripts/fix_superseded_shipments.py
+# ever writes it. It is TERMINAL for the usual reason (a non-terminal status re-opens the order
+# forever), RETIRED (never a merge target for a future box, never submitted, insured or handed a
+# payout — sync_tracking and ledger_sync's upsert both skip it) and MONEY-FREE (every amount cell
+# blank, Quantity included, so the re-labelled package's cost can never be counted twice; the audit's
+# superseded_rows_carry_no_money check enforces it).
+STATUSES = ("ordered", "shipped", "delivered", "cancelled", "paid", "return", "superseded")
+TERMINAL_STATUSES = ("delivered", "cancelled", "paid", "return", "superseded")
+# Never a merge target and never touched by the buying-group sync: the row is a closed record.
+RETIRED_STATUSES = ("superseded",)
+# Every amount cell blank -- see sheets/ledger_sync._BLANK_FIELDS_BY_STATUS for which cells, since
+# the two differ (a cancelled row keeps Quantity as "how many were ordered"; a superseded row does
+# not, because Quantity is the multiplier that double-counted the re-labelled package).
+MONEY_FREE_STATUSES = ("cancelled", "superseded")
 
 # CSV/Sheet column order — keep in sync with output/csv_writer.py and sheets/ledger_sync.py HEADER,
 # which is this same list in display-name form, positionally 1:1. tests/test_schema.py pins BOTH.
@@ -195,7 +210,7 @@ class OrderItem(BaseModel):
     profile_label: str = ""
     order_id: str
     order_date: str  # YYYY-MM-DD, the date the order was placed
-    status: str = "ordered"  # ordered | shipped | delivered | cancelled
+    status: str = "ordered"  # one of STATUSES above
     order_url: str = ""  # direct URL to the order details page (for fast re-visits)
     tracking_number: str = ""
     tracking_url: str = ""  # direct URL to the tracking page (for fast re-visits)

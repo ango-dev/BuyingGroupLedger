@@ -31,7 +31,7 @@ class TestBlankToNone:
 
 
 class TestStatusNormalization:
-    @pytest.mark.parametrize("value", ["ordered", "shipped", "delivered", "cancelled"])
+    @pytest.mark.parametrize("value", ["ordered", "shipped", "delivered", "cancelled", "superseded"])
     def test_known_statuses_pass_through(self, value):
         # tracking_number present so 'shipped' survives _shipped_requires_tracking (see that class).
         assert _item(status=value, tracking_number="1Z999").status == value

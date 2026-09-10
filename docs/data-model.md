@@ -71,9 +71,13 @@ too, but the buying-group sync fills them in once the group pays (it never blank
 figure for, so a value you typed only changes if the group reports a different one). A note or spacer row belongs *below* the last order, where the sort leaves it alone; put one
 inside the block and it gets shuffled in among the orders. `scripts/audit_sheet.py` flags all of this.
 
-**Status** is one of `ordered`, `shipped`, `delivered`, `cancelled`, `paid`, `return`. The first two are
-the live lifecycle the scrapers maintain; the other four are **terminal** — the order drops out of
-future runs. `paid` and `return` come from the **buying group**, not the retailer (see [Buying groups](buying-groups.md)): BFMR reports both, MOD confirms `paid` by listing a package as received but has no
+**Status** is one of `ordered`, `shipped`, `delivered`, `cancelled`, `paid`, `return`, `superseded`. The first two are
+the live lifecycle the scrapers maintain; the other five are **terminal** — the order drops out of
+future runs. `superseded` is a shipment row whose tracking number Amazon re-issued for the same
+delayed package: only `scripts/fix_superseded_shipments.py` writes it, the dead number stays as the
+record of what was posted to the buying group, the row is renumbered after the live boxes, every
+money cell (Quantity included) is blank, and nothing ever submits, insures, pays or re-scrapes it
+(`superseded_rows_carry_no_money` in the audit enforces the blank money). `paid` and `return` come from the **buying group**, not the retailer (see [Buying groups](buying-groups.md)): BFMR reports both, MOD confirms `paid` by listing a package as received but has no
 return signal, so a MOD return is typed in by hand. A status only ever moves forward, so that
 hand-typed `return` survives every later run. Anything outside this vocabulary keeps the order **open forever**, so it
 gets re-read on every run indefinitely — wasted work on an order that is already finished. `audit_sheet`'s `column_shape` fails an unknown status for exactly that
@@ -238,11 +242,21 @@ no return signal. A FULLY returned order keeps status `return` (Return Qty = Qua
 to zero). The `return_columns_consistent` audit check guards the pair, and the single netted row
 equals the old two-row bookkeeping to the cent (a pinned test proves the algebra).
 
-**A cancelled order carries no money.** Cost, Shipping, Insurance, Payout and both formula columns
+**A cancelled or superseded row carries no money.** Cost, Shipping, Insurance, Payout and both formula columns
 are emptied on any row whose Status is `cancelled` — the order was refunded, so leaving the scraped
 cost there makes it look like a real purchase to anything summing the column, and at year end that is
 an overstated cost of goods. The row itself stays: what was ordered, from whom, and that it was
 cancelled is worth keeping. This is applied on every write, so future cancellations clean themselves.
+A `superseded` row additionally blanks Quantity — it is the multiplier that booked a re-labelled
+package's cost twice — and the sync's order-level proration skips both statuses so it never
+re-fills them.
+
+**A re-labelled single unit is not a split.** When an existing row's tracking number changes to a
+different number, the upsert normally treats it as an undisclosed split (a second box the retailer
+surfaces one number at a time for) and appends a Quantity `*` row for you to resolve. But a
+Quantity-1 row cannot split — one unit is one box — so on a qty-1 row the change is the carrier
+re-issuing the label: the row takes the new number (its Tracking Submitted tick is cleared so the
+sync posts it), keeps its cost, and the old number is kept as a `superseded` row. Any retailer.
 
 **Buying Group** classifies each row's `Delivery Address`: which buying group's warehouse the order
 shipped to, or `Unclassified` when the address matches no configured warehouse. It's derived at run time

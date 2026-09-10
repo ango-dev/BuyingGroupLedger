@@ -32,6 +32,7 @@ import sys
 from collections import defaultdict
 from datetime import date, timedelta
 
+from models.order import MONEY_FREE_STATUSES
 from scripts.audit_sheet import (
     Grids,
     Sheet,
@@ -92,7 +93,7 @@ def build_report(sheet: Sheet, year: int) -> dict:
         group = str(cell("Buying Group", f)).strip() or "(untagged)"
         order_id = str(cell("Order ID", f)).strip()
 
-        cost_side = order_year == year and status != "cancelled"
+        cost_side = order_year == year and status not in MONEY_FREE_STATUSES
         income_side = payout_year == year and payout
 
         if cost_side:

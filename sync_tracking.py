@@ -65,6 +65,7 @@ from alerts.notifier import alert
 from buying_groups.base import BuyingGroupError, PayoutRecord, TrackingSubmission
 from config.warehouses import is_deliberately_unrouted
 from buying_groups.registry import PROVIDERS, get_client, resolve_group
+from models.order import RETIRED_STATUSES
 from sheets.ledger_sync import (
     HEADER,
     _col_letter,
@@ -155,6 +156,8 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     skipped_unroutable: dict[str, int] = {}
     skipped_no_tracking = 0
     skipped_cancelled = 0
+    skipped_superseded = 0
+    superseded_rows: list[tuple[int, str, str]] = []
     settled_keys: set[tuple[str, str]] = set()
     corrupted_tracking: list[tuple[int, str, str]] = []
     item_of_row: dict[int, str] = {}
@@ -175,6 +178,17 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         order_id = cell("Order ID")
         if not order_id:
             continue  # same rule as sync_csv_to_sheet: a blank Order ID is not a real row
+
+        # A RETIRED row (superseded, the design notes) holds a tracking number Amazon re-issued. That dead
+        # number really was posted, and the groups hold it -- but it will never move, so it must
+        # never be re-posted (MOD's already_submitted is empty by design, so it would go out on
+        # every run), never insured, and never handed a payout. Skipping BEFORE rows_by_tracking /
+        # costs_by_row are filled is what makes allocate_payouts unable to find the row even if a
+        # group reports the number: a zero-cost row would otherwise take an equal share at :434.
+        if cell("Status").lower() in RETIRED_STATUSES:
+            skipped_superseded += 1
+            superseded_rows.append((row_number, order_id, cell("Tracking Number")))
+            continue
 
         if cell("Status").lower() in _UNPOSTABLE_STATUSES:
             skipped_cancelled += 1
@@ -297,6 +311,8 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "skipped_no_tracking": skipped_no_tracking,
         "skipped_unroutable": skipped_unroutable,
         "skipped_cancelled": skipped_cancelled,
+        "skipped_superseded": skipped_superseded,
+        "superseded_rows": superseded_rows,
         "cancelled_by_group": cancelled_by_group,
         "awaiting_by_group": awaiting_by_group,
         "settled_keys": settled_keys,
@@ -952,6 +968,9 @@ def _report_plan(plan: dict, apply: bool) -> None:
         print(f"  {plan['skipped_no_tracking']} row(s) have no tracking number yet")
     if plan["skipped_cancelled"]:
         print(f"  {plan['skipped_cancelled']} cancelled row(s) skipped")
+    if plan.get("skipped_superseded"):
+        print(f"  {plan['skipped_superseded']} superseded row(s) skipped -- re-labelled packages; "
+              "their dead numbers are never submitted, insured or paid")
     for label, count in sorted(plan["skipped_unroutable"].items()):
         print(f"  {count} row(s) tagged {label!r} route to no configured buying group")
     if plan["unresolved_split"]:

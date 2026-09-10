@@ -71,7 +71,31 @@ def test_csv_writer_emits_exactly_fieldnames(tmp_path):
 
 def test_statuses_vocabulary_is_what_the_rollup_expects():
     # load_order_state's rollup keys off these exact lowercase strings.
-    assert STATUSES == ("ordered", "shipped", "delivered", "cancelled", "paid", "return")
+    assert STATUSES == ("ordered", "shipped", "delivered", "cancelled", "paid", "return", "superseded")
+
+
+def test_retired_and_money_free_statuses_are_terminal():
+    """A retired row is a closed record and a money-free row must never be re-read: both sets
+    only make sense inside TERMINAL_STATUSES. `superseded` is both; `cancelled` is money-free but
+    not retired (a cancelled row still feeds the open-purchase alert)."""
+    from models.order import MONEY_FREE_STATUSES, RETIRED_STATUSES
+
+    assert set(RETIRED_STATUSES) <= set(TERMINAL_STATUSES)
+    assert set(MONEY_FREE_STATUSES) <= set(TERMINAL_STATUSES)
+    assert "superseded" in RETIRED_STATUSES and "superseded" in MONEY_FREE_STATUSES
+    assert "cancelled" in MONEY_FREE_STATUSES and "cancelled" not in RETIRED_STATUSES
+
+
+def test_every_money_free_status_has_a_blank_field_list():
+    """The vocabulary and the blanking table must stay in step, and a superseded row blanks
+    strictly MORE than a cancelled one (Quantity, the multiplier that double-counted the box)."""
+    from models.order import MONEY_FREE_STATUSES
+    from sheets.ledger_sync import _BLANK_FIELDS_BY_STATUS
+
+    assert set(_BLANK_FIELDS_BY_STATUS) == set(MONEY_FREE_STATUSES)
+    assert set(_BLANK_FIELDS_BY_STATUS["superseded"]) > set(_BLANK_FIELDS_BY_STATUS["cancelled"])
+    assert "quantity" in _BLANK_FIELDS_BY_STATUS["superseded"]
+    assert "quantity" not in _BLANK_FIELDS_BY_STATUS["cancelled"]
 
 
 def test_every_status_is_either_terminal_or_a_scraped_lifecycle_state():

@@ -41,12 +41,16 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from models.order import FIELDNAMES, STATUSES, TERMINAL_STATUSES, normalize_shipment
+from models.order import (
+    FIELDNAMES, MONEY_FREE_STATUSES, RETIRED_STATUSES, STATUSES, TERMINAL_STATUSES,
+    normalize_shipment,
+)
 from sheets.ledger_sync import (
     HEADER,
     _INT_FIELDS,
     _NUMERIC_FIELDS,
     _STATUS_RANK,
+    _SUPERSEDED_BLANK_FIELDS,
     _coerce,
     _cogs_formula,
     _parse_display_number,
@@ -821,7 +825,7 @@ def check_profit_value_matches_inputs(sheet: Sheet, opts: Options) -> Result:
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
         payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount"))
-        if status == "cancelled" or payout is None:
+        if status in MONEY_FREE_STATUSES or payout is None:
             continue
         shown = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Total Profit"))
         if shown is None:
@@ -1677,8 +1681,8 @@ def check_cogs_inputs_complete(sheet: Sheet, opts: Options) -> Result:
     no_rate, no_cogs, unpaid, gift = [], [], [], 0
     for row_number, _ in sheet.ledger_rows(grid):
         status = str(sheet.cell(grid, row_number, "Status")).strip().lower()
-        if status == "cancelled":
-            continue  # carries no money by design -- see ledger_sync._blank_money_for_cancelled
+        if status in MONEY_FREE_STATUSES:
+            continue  # carries no money by design -- see ledger_sync._blank_money_for_status
         cogs = _parse_display_number(sheet.cell(unf, row_number, "COGS"))
         rate = _parse_display_number(sheet.cell(unf, row_number, "Cashback Rate"))
         payout = _parse_display_number(sheet.cell(unf, row_number, "Payout Amount"))
@@ -1716,6 +1720,39 @@ def check_cogs_inputs_complete(sheet: Sheet, opts: Options) -> Result:
     return Result("cogs_inputs_complete", "PASS",
                   "every row's COGS has its cost and rate" + (f"; {note[0]}" if note else ""),
                   tuple(note[1:]) if len(note) > 1 else ())
+
+
+@check("superseded_rows_carry_no_money")
+def check_superseded_rows_carry_no_money(sheet: Sheet, opts: Options) -> Result:
+    """THE one non-negotiable of a kept superseded row: it carries NO money.
+
+    A superseded row records a tracking number Amazon re-issued for a package that lives on under
+    its live row. Keeping it is only safe while every amount cell is blank -- Quantity included,
+    since it is the multiplier that booked the re-labelled package's cost twice in the first place.
+    COGS and Total Profit blank themselves ONLY because Total Cost and Payout are blank, so those two
+    are checked as well: a value in either means an input crept back in.
+    """
+    columns = [HEADER[FIELDNAMES.index(f)] for f in _SUPERSEDED_BLANK_FIELDS] + ["COGS", "Total Profit"]
+    offenders, count = [], 0
+    grid, unf = sheet.grids.formatted, sheet.grids.unformatted
+    for row_number, _ in sheet.ledger_rows(grid):
+        if str(sheet.cell(grid, row_number, "Status")).strip().lower() not in RETIRED_STATUSES:
+            continue
+        count += 1
+        order_id = sheet.cell(grid, row_number, "Order ID")
+        for column in columns:
+            value = sheet.cell(unf, row_number, column)
+            if value not in ("", None):
+                offenders.append(f"row {row_number}: order {order_id} -- {column} holds {value!r}")
+    if offenders:
+        return Result(
+            "superseded_rows_carry_no_money", "FAIL",
+            f"{len(offenders)} money cell(s) on superseded row(s) are not blank -- the re-labelled "
+            "package's cost or payout is being counted twice",
+            _truncate(offenders, opts.max_detail),
+        )
+    return Result("superseded_rows_carry_no_money", "PASS",
+                  f"{count} superseded row(s), every money cell blank")
 
 
 @check("cashback_rate_sane")
@@ -1942,13 +1979,19 @@ def classify_diff(diff: dict, opts: Options) -> list[Result]:
     removed_by_id = {}
     for r in removed:
         removed_by_id.setdefault(identity(r), []).append(r)
-    renamed, real_added, real_removed = [], [], []
+    renamed, retired, real_added, real_removed = [], [], [], []
     for r in added:
         twins = removed_by_id.get(identity(r))
         if twins:
             old = twins.pop(0)
-            renamed.append(f"{r['order_id']} ship {r['shipment']}: key changed -- was {old['item'][:35]!r} "
-                           f"(row {old['row']}), now {r['item'][:35]!r} (row {r['row']})")
+            if r["status"] in RETIRED_STATUSES:
+                # The ONE key change the system makes on purpose: fix_superseded_shipments renumbers
+                # a dead row after the live boxes while marking it superseded.
+                retired.append(f"{r['order_id']}: row {r['row']} marked superseded, shipment "
+                               f"{old['shipment']} -> {r['shipment']} ({r['tracking']})")
+            else:
+                renamed.append(f"{r['order_id']} ship {r['shipment']}: key changed -- was {old['item'][:35]!r} "
+                               f"(row {old['row']}), now {r['item'][:35]!r} (row {r['row']})")
         else:
             real_added.append(r)
     for rs in removed_by_id.values():
@@ -1957,6 +2000,10 @@ def classify_diff(diff: dict, opts: Options) -> list[Result]:
         out.append(Result("compare_identity_changed", "FAIL",
                           f"{len(renamed)} row(s) had a KEY cell edited -- future re-checks will append beside them",
                           _truncate(renamed, opts.max_detail)))
+    if retired:
+        out.append(Result("compare_rows_retired", "INFO",
+                          f"{len(retired)} row(s) marked superseded (key changed by the repair, as designed)",
+                          _truncate(retired, opts.max_detail)))
 
     # --- removed rows: nothing in the system deletes ------------------------------------------
     if real_removed:
@@ -1995,16 +2042,21 @@ def classify_diff(diff: dict, opts: Options) -> list[Result]:
         out.append(Result("compare_status_regressed", "FAIL",
                           f"{len(regressed)} row(s) moved BACKWARDS in status -- a hand correction was undone",
                           _truncate(regressed, opts.max_detail)))
+    # A terminal row's cost changing is a hand edit or a writer bug -- EXCEPT the repair that retires
+    # it: marking a row superseded blanks its money by design, so an after-status in
+    # RETIRED_STATUSES is the expected transition, not an anomaly.
     terminal_money = [f"row {r['row']}: {r['order_id']} ship {r['shipment']} [{before}] {col}: {was!r} -> {now!r}"
                       for r, col, was, now, before in changed
-                      if col in _SCRAPED_MONEY_COLUMNS and before in TERMINAL_STATUSES]
+                      if col in _SCRAPED_MONEY_COLUMNS and before in TERMINAL_STATUSES
+                      and r["status"] not in RETIRED_STATUSES]
     if terminal_money:
         out.append(Result("compare_terminal_money_changed", "WARN",
                           f"{len(terminal_money)} scraped cost cell(s) changed on TERMINAL row(s) -- no scraper "
                           "re-reads those, so this is a hand edit or a writer bug",
                           _truncate(terminal_money, opts.max_detail)))
     ordinary = [c for c in changed if not (c[1] == "Status" and _STATUS_RANK.get(c[3].lower(), -1) < _STATUS_RANK.get(c[2].lower(), -1))
-                and not (c[1] in _SCRAPED_MONEY_COLUMNS and c[4] in TERMINAL_STATUSES)]
+                and not (c[1] in _SCRAPED_MONEY_COLUMNS and c[4] in TERMINAL_STATUSES
+                         and c[0]["status"] not in RETIRED_STATUSES)]
     touched = {c[0]["key"] for c in ordinary}
     out.append(Result("compare_updated", "PASS",
                       f"{len(ordinary)} cell(s) updated in place across {len(touched)} row(s); "
