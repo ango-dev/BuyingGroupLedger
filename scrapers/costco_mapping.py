@@ -333,6 +333,9 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids,
                 pkg_key = _package_key(package)
                 entry = {
                     "package_key": pkg_key,
+                    # The carton id ALONE for the Package ID column — not package_key, whose
+                    # tracking-number fallback would make a re-label change the id as well.
+                    "package_number": (package.get("packageNumber") or "").strip(),
                     "tracking_number": tracking,
                     "tracking_url": (package.get("trackingSiteUrl") or "").strip(),
                     "status": _shipment_status(package),
@@ -496,6 +499,7 @@ def _rows_for_group(
                 sales_tax=sales_tax_total,
                 card_last4=card_last4,
                 shipment=shipment_label(shipment_number[package["package_key"]]),
+                package_id=package["package_number"],
             )
         )
     return rows

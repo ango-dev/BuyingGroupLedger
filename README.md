@@ -33,7 +33,7 @@ This page is the overview. Each topic has its own page under [`docs/`](docs/):
 |---|---|
 | [Architecture](docs/architecture.md) | The run loop, the four deterministic paths, the cost model, a shipment's lifecycle |
 | [Retailers](docs/retailers.md) | Running a scrape; how each retailer's path works; Costco token setup |
-| [Data model](docs/data-model.md) | The 33 columns, the upsert key, column order as a migration, profit accounting (COGS, cashback, gift cards, pro-rata shipping), the year-end tax report |
+| [Data model](docs/data-model.md) | The 34 columns, the upsert key, column order as a migration, profit accounting (COGS, cashback, gift cards, pro-rata shipping), the year-end tax report |
 | [Configuration](docs/configuration.md) | `config.json`, the environment override layer and every variable, warehouse jigs, card cashback rates |
 | [Profiles and sign-in](docs/profiles-and-auth.md) | Creating a cloud-browser profile, auto-auth with an authenticator app, where secrets go |
 | [Buying groups](docs/buying-groups.md) | Posting tracking to BFMR and MaxOutDeals, insurance filing, payouts and `paid`/`return` |

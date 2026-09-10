@@ -36,7 +36,7 @@ def test_column_order_is_pinned():
         "total_cost", "shipping", "sales_tax", "gift_card", "rewards_used", "card_name",
         "cashback_rate", "cogs", "insurance", "payout_amount", "payout_date", "return_quantity",
         "return_date", "total_profit", "profile_label", "order_url", "tracking_url",
-        "receipt_url", "delivery_address", "card_last4", "last_scraped_at",
+        "receipt_url", "delivery_address", "card_last4", "package_id", "last_scraped_at",
     ]
     assert HEADER == [
         "Order Date", "Status", "Retailer", "Item Name", "Shipment", "Quantity", "Order ID",
@@ -44,7 +44,7 @@ def test_column_order_is_pinned():
         "Total Cost", "Shipping", "Sales Tax", "Gift Card", "Rewards Used", "Card",
         "Cashback Rate", "COGS", "Insurance", "Payout Amount", "Payout Date", "Return Qty",
         "Return Date", "Total Profit", "Profile", "Order Link", "Tracking Link", "Receipt Link",
-        "Delivery Address", "Card Last 4", "Last Scraped At",
+        "Delivery Address", "Card Last 4", "Package ID", "Last Scraped At",
     ]
 
 
@@ -127,3 +127,21 @@ def test_rewards_used_defaults_to_a_real_zero():
     assert item.rewards_used == 0.0
     assert OrderItem(retailer="Amazon", order_id="1", order_date="2026-09-08", item_name="Thing",
                      rewards_used="").rewards_used is None  # a blank CSV cell stays "unknown"
+
+
+def test_package_id_defaults_blank_and_stays_text():
+    """Package ID (2026-09-09; beside Card Last 4 since 2026-09-10): blank means unknown and never blocks a match, and the value is TEXT —
+    a Costco packageNumber keeps its leading zeros through the model and through the sheet
+    coercion, or the id on the sheet would no longer equal what the mapping emits."""
+    from sheets.ledger_sync import _coerce
+
+    item = OrderItem(retailer="Costco", order_id="1", order_date="2026-09-09", item_name="Thing")
+    assert item.package_id == ""
+    carton = "00009999990206101794"
+    kept = OrderItem(retailer="Costco", order_id="1", order_date="2026-09-09", item_name="Thing",
+                     package_id=carton)
+    assert kept.package_id == carton
+    assert kept.model_dump()["package_id"] == carton
+    assert _coerce("package_id", carton) == carton
+    assert FIELDNAMES.index("package_id") == FIELDNAMES.index("card_last4") + 1
+    assert HEADER.index("Package ID") == HEADER.index("Card Last 4") + 1

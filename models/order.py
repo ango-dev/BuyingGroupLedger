@@ -201,6 +201,16 @@ FIELDNAMES = [
     # classification looks wrong.
     "delivery_address",
     "card_last4",
+    # Added 2026-09-09 (history §1f follow-up), moved beside Card Last 4 on 2026-09-10. The retailer's OWN identity for the physical
+    # package this row is part of — Amazon's `shipmentId` (from the card's track link, or the
+    # /your-orders/pop link once the track link has expired), Costco's `packageNumber` (the carton's
+    # SSCC-style id, not the carrier label), Best Buy's `fulfillmentGroups[].groupId` (a per-order
+    # ordinal, unique only within the order). Text, never a number: Costco ids carry leading zeros.
+    # ledger_sync matches on (Order ID, Package ID) BEFORE the tracking number, so a package lands on
+    # its own row regardless of where its card sits on the page (Shipment is a DOM ordinal there).
+    # Blank means unknown (an unshipped line, an old order whose links expired) and never blocks a
+    # match.
+    "package_id",
     "last_scraped_at",
 ]
 
@@ -260,6 +270,9 @@ class OrderItem(BaseModel):
     # mappings ever emit None, and only when the amount could not be read (a blank never
     # overwrites, so the cell stays whatever it was until a run can price it).
     rewards_used: float | None = 0.0
+    # The retailer's own per-package identity (see FIELDNAMES). Plain text — "00009999990206101794"
+    # must round-trip with its zeros — and blank when the mapping has none for this row.
+    package_id: str = ""
 
     # TRANSIENT, Amazon only: a per-order promo the order page advertises under the payment method
     # ("... plus an extra 1% back ..."), which config.cards.tag_cards ADDS to the card's own rate when

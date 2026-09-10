@@ -118,7 +118,7 @@ changed.) Exit code is `0` when nothing failed, `1` on a failure (or on a warnin
 so it can gate a scheduled run.
 
 What it checks, and why each one matters: the header matches `HEADER` **exactly** (right names in the
-wrong order is the one failure that scrambles every row with no error — see the column-order warning in [Data model](data-model.md)); no duplicate upsert keys, on all three of the keys `sync_csv_to_sheet` uses; every row's
+wrong order is the one failure that scrambles every row with no error — see the column-order warning in [Data model](data-model.md)); no duplicate upsert keys, on all four of the keys `sync_csv_to_sheet` uses (a package id under two Shipment numbers of one order is the re-tracked-shipment double-count); every row's
 `Total Profit` still holds the *live formula* rather than a number frozen from a past read, and that
 formula still points at the current columns; and that the cell **types** are intact — `Shipment` an
 int, `Card Last 4` text with its leading zeros, the money columns numeric rather than `"$1,299.00"`

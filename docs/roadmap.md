@@ -19,9 +19,6 @@ instead of running a paid agent (retired 2026-08-29).
   `Payout Date`, costs on `Order Date`, so a December order paid in January belongs to different
   years on the two sides. Insurance sums separately as a Schedule C expense, never inside COGS.
   `scripts/tax_report.py` already computes all of it read-only.
-- **A durable per-package identity for Amazon.** The mapping parses Amazon's `shipmentId` and
-  throws it away; persisting it (an appended column, matched on) is the sturdier fix that today's
-  subtotal guard approximates for re-issued tracking numbers.
 - **Fail loudly on a same-key collision from one order's parse.** Three silent row losses came
   from the sync's same-key collapse; every known page shape is now handled in the mappings, so a
   residual collision is an unknown shape and should end the run with a dossier problem.

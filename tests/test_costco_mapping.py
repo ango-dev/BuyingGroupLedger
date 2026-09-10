@@ -431,3 +431,48 @@ def test_rewards_used_is_a_real_zero_on_every_row(details):
     # Costco has no rewards tender: "checked, none", never a blank.
     rows = build_order_items(details, "p")
     assert rows and all(r.rewards_used == 0.0 for r in rows)
+
+
+def _package_numbers(node) -> set[str]:
+    """Every packageNumber anywhere in the fixture payload."""
+    found: set[str] = set()
+    if isinstance(node, dict):
+        if node.get("packageNumber"):
+            found.add(str(node["packageNumber"]).strip())
+        for value in node.values():
+            found |= _package_numbers(value)
+    elif isinstance(node, list):
+        for value in node:
+            found |= _package_numbers(value)
+    return found
+
+
+def test_package_id_is_the_carton_number_on_every_shipped_row(details):
+    """Column 34 (2026-09-09): a shipped row carries the package's OWN packageNumber as text -- the
+    SSCC carton id with its leading zeros, never the carrier label -- and an unshipped row is blank."""
+    rows = build_order_items(details, "p")
+    numbers = _package_numbers(details)
+    assert numbers, "fixture lost its packageNumbers"
+    shipped = [r for r in rows if r.tracking_number]
+    assert shipped
+    for r in shipped:
+        assert r.package_id in numbers, (r.item_name, r.package_id)
+        assert isinstance(r.package_id, str)
+    assert any(r.package_id.startswith("0000") for r in shipped), "leading zeros must survive"
+    for r in rows:
+        if not r.tracking_number:
+            assert r.package_id == ""
+
+
+def test_package_id_is_shared_by_rows_boxed_together_and_distinct_across_boxes(details):
+    rows = build_order_items(details, "p")
+    by_order: dict[str, dict[str, set[str]]] = {}
+    for r in rows:
+        if r.package_id:
+            by_order.setdefault(r.order_id, {}).setdefault(r.shipment, set()).add(r.package_id)
+    assert by_order
+    for order_id, shipments in by_order.items():
+        for shipment, ids in shipments.items():
+            assert len(ids) == 1, (order_id, shipment, ids)  # one carton per Shipment number
+        all_ids = [next(iter(ids)) for ids in shipments.values()]
+        assert len(all_ids) == len(set(all_ids)), (order_id, all_ids)  # one Shipment number per carton

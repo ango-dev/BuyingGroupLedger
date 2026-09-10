@@ -2300,3 +2300,210 @@ class TestAProperPerPackageSplitNeverHitsTheSafetyNet:
         assert rows["2"][FIELDNAMES.index("quantity")] == 1 and rows["2"][FIELDNAMES.index("tracking_number")] == "529900000012"
         assert "*" not in [r[FIELDNAMES.index("quantity")] for r in rows.values()]
         assert alerts == []
+
+
+_F = {name: i for i, name in enumerate(FIELDNAMES)}
+
+
+class TestPackageIdDeferral:
+    """Column 34 (2026-09-09, history 1f): (Order ID, Package ID) is matched BEFORE the tracking
+    number, so a package lands on its own row wherever its card sits on the page. A blank id on
+    either side changes nothing; a retired row is never a target; a multi-SKU carton (one id, several
+    rows) is told apart by item name; an exact-key hit on a DIFFERENT package is re-routed."""
+
+    OID, DATE = "111-9990021-9990021", "2026-08-12"
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    def _existing(self, **values):
+        base = dict(retailer="Amazon", order_id=self.OID, order_date=self.DATE, item_name="iPad",
+                    status="shipped", quantity="1", cost_per_item="949", total_cost="949")
+        base.update(values)
+        return row(**base)
+
+    def _incoming(self, **values):
+        base = dict(retailer="Amazon", order_id=self.OID, order_date=self.DATE, item_name="iPad",
+                    status="shipped", quantity=1, cost_per_item=949, total_cost=949)
+        base.update(values)
+        return base
+
+    def _by_shipment(self, sheet):
+        return {str(r[_F["shipment"]]): r for r in sheet.data_rows()}
+
+    def test_re_ordered_cards_land_on_their_old_rows(self, sheet, tmp_path, alerts):
+        """Same item on both cards, so the exact key would have matched the WRONG row: the ordinal
+        now points at the other package. The id re-routes each record to its own row, which keeps
+        its recorded Shipment number; nothing is appended."""
+        sheet.rows = [
+            list(HEADER),
+            self._existing(shipment="1", tracking_number="TBA-A", package_id="AAA"),
+            self._existing(shipment="2", tracking_number="TBA-B", package_id="BBB"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            self._incoming(shipment="1", tracking_number="TBA-B", package_id="BBB",
+                           status="delivered", delivery_date="2026-08-20"),
+            self._incoming(shipment="2", tracking_number="TBA-A", package_id="AAA"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = self._by_shipment(sheet)
+        assert len(sheet.data_rows()) == 2 and set(rows) == {"1", "2"}
+        assert (rows["1"][_F["tracking_number"]], rows["1"][_F["package_id"]]) == ("TBA-A", "AAA")
+        assert (rows["2"][_F["tracking_number"]], rows["2"][_F["package_id"]]) == ("TBA-B", "BBB")
+        assert rows["2"][_F["status"]] == "delivered" and rows["2"][_F["delivery_date"]] == "2026-08-20"
+        assert alerts == []
+
+    def test_a_re_issued_label_with_the_same_id_takes_the_old_row(self, sheet, tmp_path, alerts):
+        """The qty-1 re-label rule still fires on an id match: the live row takes the new number,
+        the dead number is kept as a superseded row after the live boxes."""
+        sheet.rows = [list(HEADER),
+                      self._existing(shipment="1", tracking_number="TBA-OLD", package_id="P1")]
+        # The card moved to position 2 on the page, so the exact key misses; the id finds it.
+        path = write_csv_file(tmp_path, self._incoming(shipment="2", tracking_number="TBA-NEW", package_id="P1"))
+
+        sync_csv_to_sheet(path)
+
+        rows = self._by_shipment(sheet)
+        assert rows["1"][_F["tracking_number"]] == "TBA-NEW" and rows["1"][_F["package_id"]] == "P1"
+        assert rows["1"][_F["total_cost"]] == 949
+        assert rows["2"][_F["status"]] == "superseded" and rows["2"][_F["tracking_number"]] == "TBA-OLD"
+        assert len(alerts) == 1 and "Re-label" in alerts[0][0]
+
+    def test_a_blank_id_falls_through_to_the_tracking_rule(self, sheet, tmp_path, alerts):
+        """A row written before the column existed has no id; today's tracking deferral still
+        reconciles it, and the id fills in on the way."""
+        sheet.rows = [list(HEADER), self._existing(shipment="1", tracking_number="TBA-A", package_id="")]
+        path = write_csv_file(tmp_path, self._incoming(shipment="2", tracking_number="TBA-A", package_id="NEW"))
+
+        sync_csv_to_sheet(path)
+
+        rows = self._by_shipment(sheet)
+        assert list(rows) == ["1"] and rows["1"][_F["package_id"]] == "NEW"
+        assert alerts == []
+
+    def test_an_incoming_blank_id_never_displaces_an_exact_key_hit(self, sheet, tmp_path, alerts):
+        sheet.rows = [list(HEADER), self._existing(shipment="1", tracking_number="TBA-A", package_id="AAA")]
+        path = write_csv_file(tmp_path, self._incoming(shipment="1", tracking_number="TBA-A", package_id="",
+                                                       status="delivered"))
+
+        sync_csv_to_sheet(path)
+
+        rows = self._by_shipment(sheet)
+        assert list(rows) == ["1"]
+        assert rows["1"][_F["status"]] == "delivered" and rows["1"][_F["package_id"]] == "AAA"
+
+    def test_a_multi_sku_carton_is_resolved_by_item_name(self, sheet, tmp_path, alerts):
+        """Two rows behind one id: neither side is 1:1, so the name decides — and a THIRD SKU the
+        carton did not have before is appended, never merged onto one of them."""
+        sheet.rows = [
+            list(HEADER),
+            self._existing(item_name="Case", shipment="1", tracking_number="TBA-C", package_id="CART", cost_per_item="20", total_cost="20"),
+            self._existing(item_name="Pencil", shipment="1", tracking_number="TBA-C", package_id="CART", cost_per_item="99", total_cost="99"),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            self._incoming(item_name="Case", shipment="2", tracking_number="TBA-C", package_id="CART",
+                           cost_per_item=20, total_cost=20, status="delivered"),
+            self._incoming(item_name="Pencil", shipment="2", tracking_number="TBA-C", package_id="CART",
+                           cost_per_item=99, total_cost=99, status="delivered"),
+            self._incoming(item_name="Sleeve", shipment="2", tracking_number="TBA-C", package_id="CART",
+                           cost_per_item=15, total_cost=15),
+        )
+
+        sync_csv_to_sheet(path)
+
+        by_name = {r[_F["item_name"]]: r for r in sheet.data_rows()}
+        assert set(by_name) == {"Case", "Pencil", "Sleeve"}
+        assert by_name["Case"][_F["shipment"]] == 1 and by_name["Case"][_F["status"]] == "delivered"
+        assert by_name["Pencil"][_F["shipment"]] == 1 and by_name["Pencil"][_F["status"]] == "delivered"
+        assert by_name["Sleeve"][_F["shipment"]] == 2 and by_name["Sleeve"][_F["package_id"]] == "CART"
+        assert alerts == []
+
+    def test_a_retired_row_is_never_a_target(self, sheet, tmp_path, alerts):
+        sheet.rows = [
+            list(HEADER),
+            self._existing(shipment="1", tracking_number="TBA-OLD", package_id="P1", status="superseded",
+                           quantity="", cost_per_item="", total_cost=""),
+        ]
+        path = write_csv_file(tmp_path, self._incoming(shipment="2", tracking_number="TBA-NEW", package_id="P1"))
+
+        sync_csv_to_sheet(path)
+
+        rows = self._by_shipment(sheet)
+        assert rows["1"][_F["status"]] == "superseded" and rows["1"][_F["tracking_number"]] == "TBA-OLD"
+        assert rows["2"][_F["tracking_number"]] == "TBA-NEW" and rows["2"][_F["total_cost"]] == 949
+
+    def test_a_new_package_at_an_old_ordinal_appends_under_a_free_number_when_the_old_one_is_still_there(
+            self, sheet, tmp_path, alerts):
+        """Package B now sits first, A second, and B has no row yet. B must not overwrite A's row
+        nor collide with A's key: appended as the next free Shipment number while A keeps row 1."""
+        sheet.rows = [list(HEADER), self._existing(shipment="1", tracking_number="TBA-A", package_id="AAA")]
+        path = write_csv_file(
+            tmp_path,
+            self._incoming(shipment="1", tracking_number="TBA-B", package_id="BBB"),
+            self._incoming(shipment="2", tracking_number="TBA-A", package_id="AAA", status="delivered"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        rows = self._by_shipment(sheet)
+        assert set(rows) == {"1", "2"}
+        assert (rows["1"][_F["tracking_number"]], rows["1"][_F["package_id"]], rows["1"][_F["status"]]) == ("TBA-A", "AAA", "delivered")
+        assert (rows["2"][_F["tracking_number"]], rows["2"][_F["package_id"]]) == ("TBA-B", "BBB")
+        assert alerts == []  # a log line, not a split alert: nothing changed on A's row
+
+    def test_a_re_label_that_mints_a_new_id_never_books_the_cost_twice(self, sheet, tmp_path, alerts):
+        """THE AMAZON CASE (2026-08-22: NWfgPHR2F -> NxWmqLBj2). The old package is gone from the
+        page and the new id sits at its ordinal. That is NOT a re-ordered page: the record falls back
+        to the row it keyed to, and the changed-tracking branch does what it always did -- a qty-3
+        row gets a '*' split row with NO cost and an alert, never a second full-cost row."""
+        sheet.rows = [list(HEADER),
+                      self._existing(shipment="1", tracking_number="TBA-OLD", package_id="NWfgPHR2F",
+                                     quantity="3", total_cost="2847")]
+        path = write_csv_file(tmp_path, self._incoming(shipment="1", tracking_number="TBA-NEW",
+                                                       package_id="NxWmqLBj2", quantity=3, total_cost=2847))
+
+        sync_csv_to_sheet(path)
+
+        rows = self._by_shipment(sheet)
+        assert set(rows) == {"1", "2"}
+        # The split path leaves the existing row UNTOUCHED (it keeps the seeded text), and the new
+        # box row carries no cost at all -- so the order still books $2,847 exactly once.
+        assert rows["1"][_F["tracking_number"]] == "TBA-OLD" and str(rows["1"][_F["total_cost"]]) == "2847"
+        assert rows["1"][_F["package_id"]] == "NWfgPHR2F"
+        assert rows["2"][_F["tracking_number"]] == "TBA-NEW" and rows["2"][_F["quantity"]] == "*"
+        assert rows["2"][_F["total_cost"]] in ("", None) and rows["2"][_F["package_id"]] == "NxWmqLBj2"
+        assert len(alerts) == 1 and "Split shipment" in alerts[0][0]
+
+    def test_a_qty_1_re_label_with_a_new_id_takes_the_row_and_the_new_id(self, sheet, tmp_path, alerts):
+        sheet.rows = [list(HEADER), self._existing(shipment="1", tracking_number="TBA-OLD", package_id="OLD-ID")]
+        path = write_csv_file(tmp_path, self._incoming(shipment="1", tracking_number="TBA-NEW", package_id="NEW-ID"))
+
+        sync_csv_to_sheet(path)
+
+        rows = self._by_shipment(sheet)
+        assert (rows["1"][_F["tracking_number"]], rows["1"][_F["package_id"]], rows["1"][_F["total_cost"]]) == ("TBA-NEW", "NEW-ID", 949)
+        assert rows["2"][_F["status"]] == "superseded" and rows["2"][_F["tracking_number"]] == "TBA-OLD"
+        assert len(alerts) == 1 and "Re-label" in alerts[0][0]
+
+    def test_an_older_csv_without_the_column_still_syncs(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER), self._existing(shipment="1", tracking_number="TBA-A", package_id="AAA")]
+        path = tmp_path / "old.csv"
+        old_fields = [f for f in FIELDNAMES if f != "package_id"]
+        with path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=old_fields)
+            writer.writeheader()
+            writer.writerow({k: v for k, v in self._incoming(shipment="1", tracking_number="TBA-A",
+                                                             status="delivered").items() if k in old_fields})
+
+        sync_csv_to_sheet(path)
+
+        rows = self._by_shipment(sheet)
+        assert list(rows) == ["1"]
+        assert rows["1"][_F["status"]] == "delivered" and rows["1"][_F["package_id"]] == "AAA"

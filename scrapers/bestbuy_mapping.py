@@ -222,18 +222,22 @@ def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[
 
     # Physical shipments = fulfillment groups that hold at least one non-digital item. Number them
     # 1..N by groupId (digital-only groups are skipped and don't consume a shipment number).
-    physical_groups: list[tuple[int, str, list[dict]]] = []
+    physical_groups: list[tuple[int, str, list[dict], str]] = []
     for group in (order.get("groups") or {}).get("fulfillmentGroups") or []:
         gtype = (group.get("grouping") or {}).get("type", "").strip().lower()
         members = [items_by_id.get(m.get("itemKey")) for m in group.get("members") or []]
         members = [m for m in members if m]
         physical = [m for m in members if not _is_digital(m)]
         if physical:
-            physical_groups.append((_int(group.get("groupId")), gtype, physical))
+            # The raw groupId string rides along as the row's Package ID: assigned at order time,
+            # a per-order ordinal ("1", "2", ...), so it is unique only WITHIN the order — which is
+            # all ledger_sync's (Order ID, Package ID) index needs.
+            physical_groups.append((_int(group.get("groupId")), gtype, physical,
+                                    str(group.get("groupId") or "").strip()))
     physical_groups.sort(key=lambda t: t[0])
 
     rows: list[OrderItem] = []
-    for index, (_group_id, gtype, physical_items) in enumerate(physical_groups):
+    for index, (_group_id, gtype, physical_items, package_id) in enumerate(physical_groups):
         shipment = shipment_label(index + 1)
         cancelled = gtype == "canceled"
 
@@ -281,6 +285,7 @@ def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[
                     sales_tax=sales_tax_total,
                     card_last4=card_last4,
                     shipment=shipment,
+                    package_id=package_id,
                 )
             )
 

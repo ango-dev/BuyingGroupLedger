@@ -226,3 +226,25 @@ def test_the_live_confirmed_gift_tender_shape(payloads):
     assert rows, "a BBY03- order id must map like any BBY01- one"
     assert rows[0].gift_card == 5.0
     assert rows[0].card_last4 == "4341"
+
+
+def test_package_id_is_the_fulfillment_group_id(payloads):
+    """Column 34 (2026-09-09): every physical row carries its fulfillmentGroups[].groupId as text -- a
+    per-order ordinal, so it only has to be unique WITHIN the order -- one id per Shipment number."""
+    rows = build_order_items(payloads, "profile-alpha")
+    assert rows
+    known: set[str] = set()
+    for payload in payloads:
+        for group in ((payload.get("order") or {}).get("groups") or {}).get("fulfillmentGroups") or []:
+            known.add(str(group.get("groupId")))
+    assert known, "fixture lost its groupIds"
+    for r in rows:
+        assert r.package_id and r.package_id in known, (r.order_id, r.shipment, r.package_id)
+        assert isinstance(r.package_id, str)
+    ids_by_shipment: dict[tuple[str, str], set[str]] = {}
+    for r in rows:
+        ids_by_shipment.setdefault((r.order_id, r.shipment), set()).add(r.package_id)
+    assert all(len(ids) == 1 for ids in ids_by_shipment.values())
+    for oid in {r.order_id for r in rows}:
+        ids = [next(iter(v)) for (o, _s), v in ids_by_shipment.items() if o == oid]
+        assert len(ids) == len(set(ids)), (oid, ids)

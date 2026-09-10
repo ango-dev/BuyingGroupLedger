@@ -12,9 +12,13 @@ be worth more than its subtotal). This script repairs rows written before that g
 behind by a re-label the guard could not see (the dead card had already left the page).
 
 HOW IT DECIDES: it re-reads the order's page and its tracking pages, which together are the only
-authority on what packages actually exist, and matches sheet rows on TRACKING NUMBER — the one durable
-identity a row has (the Shipment number is a DOM ordinal that is recomputed every scrape). A row whose
-tracking number no longer appears on the order is superseded. Survivors are renumbered to the page's own
+authority on what packages actually exist, and matches sheet rows on the PACKAGE ID when the row has
+one (Amazon's shipmentId / Best Buy's groupId — column 33 since 2026-09-10, beside Card Last 4), then on TRACKING NUMBER
+(the Shipment number is a DOM ordinal that is recomputed every scrape). A row whose tracking number no
+longer appears on the order AND whose package id (if any) is not on the page either is superseded.
+A row whose number is gone but whose package id is still on the page is a RE-LABELLED package, not a
+dead one: it is reported (`RELABELLED`) and never marked or deleted — the sync's own re-label rule
+owns that row and will carry the new number onto it. Survivors are renumbered to the page's own
 ordering so future scrapes match them. A row with a BLANK tracking number is never touched — it cannot
 be matched, so it is reported and left alone.
 
@@ -128,20 +132,45 @@ def _refusal(cell, row) -> str | None:
     return None
 
 
+def _live_entries(entries: list) -> list[dict]:
+    """Normalise one order's live packages to [{"tracking", "package_id"}, ...] in page order.
+
+    Accepts the original shape (a list of tracking-number strings) and the current one (dicts that
+    also carry the page's package id). An entry with neither a number nor an id is unreadable and is
+    dropped, exactly as blank numbers always were.
+    """
+    out = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            tracking = str(entry.get("tracking", "") or "").strip()
+            package_id = str(entry.get("package_id", "") or "").strip()
+        else:
+            tracking, package_id = str(entry or "").strip(), ""
+        if tracking or package_id:
+            out.append({"tracking": tracking, "package_id": package_id})
+    return out
+
+
 def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: dict,
                        mode: str = "mark") -> dict:
     """Read-only: which rows would be marked (or deleted) and which renumbered. Pure — no network.
 
-    `live_by_order` maps an order id to the tracking numbers the page currently shows, IN PAGE ORDER.
-    An order missing from it is skipped entirely (nothing was read for it), which is what keeps a
-    failed page load from ever looking like "every row is superseded".
+    `live_by_order` maps an order id to the packages the page currently shows, IN PAGE ORDER — either
+    plain tracking numbers or `{"tracking", "package_id"}` dicts (see _live_entries). An order missing
+    from it is skipped entirely (nothing was read for it), which is what keeps a failed page load
+    from ever looking like "every row is superseded".
+
+    A row is LIVE when its tracking number is on the page, or — failing that — when its Package ID
+    is. The second case is a re-labelled package (same id, new number): it is reported under
+    "relabelled", renumbered to its page position like any live row, and never marked or deleted.
 
     `mode` is "mark" (keep the dead row as `superseded`, the default) or "delete" (the old repair).
     A dead row that is ALREADY superseded is reported and never touched in either mode; a dead row
     the mark rule refuses (see _refusal) is reported under "refused" and blocks an --apply.
     """
     cell = _cell_reader(header)
-    marks, deletions, renumbers, blanks, refused, already = [], [], [], [], [], []
+    marks, deletions, renumbers, blanks, refused, already, relabelled = [], [], [], [], [], [], []
+    live_entries = {oid: _live_entries(entries) for oid, entries in live_by_order.items()}
 
     # A second re-label of the same order must number PAST the row the first one retired.
     taken: dict[str, int] = {}
@@ -155,9 +184,12 @@ def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: 
         order_id = cell(row, "Order ID")
         if order_id not in live_by_order:
             continue
-        live = live_by_order[order_id]
+        live = live_entries[order_id]
+        live_numbers = [e["tracking"] for e in live]
+        live_ids = [e["package_id"] for e in live]
         row_number = offset + 2  # +1 header, +1 for 1-based sheet rows
         tracking = cell(row, "Tracking Number")
+        package_id = cell(row, "Package ID")
         shipment = cell(row, "Shipment")
         item = cell(row, "Item Name")
         if not tracking:
@@ -167,7 +199,12 @@ def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: 
         if cell(row, "Status").lower() == SUPERSEDED:
             already.append((row_number, order_id, shipment, tracking))
             continue
-        if tracking not in live:
+        if tracking in live_numbers:
+            position = live_numbers.index(tracking)
+        elif package_id and package_id in live_ids:
+            position = live_ids.index(package_id)
+            relabelled.append((row_number, order_id, shipment, tracking, live[position]["tracking"]))
+        else:
             if mode == "delete":
                 deletions.append((row_number, order_id, shipment, tracking, item))
                 continue
@@ -180,7 +217,7 @@ def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: 
                 assigned[(order_id, tracking)] = shipment_label(taken[order_id])
             marks.append((row_number, order_id, shipment, tracking, item, assigned[(order_id, tracking)]))
             continue
-        want = shipment_label(live.index(tracking) + 1)
+        want = shipment_label(position + 1)
         if shipment != want:
             renumbers.append((row_number, order_id, shipment, want))
 
@@ -191,6 +228,7 @@ def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: 
         "blank_tracking": blanks,
         "refused": refused,
         "already_superseded": already,
+        "relabelled": relabelled,
         "orders": sorted({m[1] for m in marks} | {d[1] for d in deletions} | {r[1] for r in renumbers}),
     }
 
@@ -236,7 +274,9 @@ def plan_restore(header: list[str], data_rows: list[list], backup_header: list[s
 
 
 def read_live_shipments(retailer: str, profile_label: str, order_ids: list[str]) -> dict:
-    """{order_id: [tracking number, ...]} in page order, read from the live order + tracking pages.
+    """{order_id: [{"tracking", "package_id"}, ...]} in page order, read from the live order + tracking
+    pages. `package_id` is the card's shipmentId (see parse_shipment_targets), blank when the card has
+    none; `tracking` is blank when the card has no track link or its pt page could not be read.
 
     Imports are local so the module stays importable — and plan_supersede_fix stays testable — without
     playwright or a browser.
@@ -271,23 +311,24 @@ def read_live_shipments(retailer: str, profile_label: str, order_ids: list[str])
                     "profile and re-run; this script never attempts a login."
                 )
             targets = parse_shipment_targets(page.content())
-            numbers = []
+            entries = []
             for target in targets:
-                if not target.get("tracking_url"):
-                    numbers.append("")
-                    continue
-                page.goto(target["tracking_url"], wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(2500)
-                info = reader(page)
-                numbers.append((info or {}).get("tracking_number", ""))
+                number = ""
+                if target.get("tracking_url"):
+                    page.goto(target["tracking_url"], wait_until="domcontentloaded", timeout=60000)
+                    page.wait_for_timeout(2500)
+                    info = reader(page)
+                    number = (info or {}).get("tracking_number", "")
+                entries.append({"tracking": number, "package_id": target.get("shipmentId", "")})
             # Only orders we could actually read get an entry — see plan_supersede_fix.
-            live[oid] = [n for n in numbers if n]
-            log.info("%s %s: page shows %d shipment(s) -> %s", retailer, oid, len(targets), live[oid])
+            live[oid] = [e for e in entries if e["tracking"] or e["package_id"]]
+            log.info("%s %s: page shows %d shipment(s) -> %s", retailer, oid, len(targets),
+                     [(e["tracking"], e["package_id"]) for e in live[oid]])
     return live
 
 
 def _read_live_bestbuy(profile, order_ids: list[str]) -> dict:
-    """{order_id: [tracking number, ...]} for Best Buy, straight from the ss-api payloads.
+    """{order_id: [{"tracking", "package_id"}, ...]} for Best Buy, straight from the ss-api payloads.
 
     The production client fetches "every order since `since_date` plus every still-open id", so
     asking for today plus the wanted ids returns exactly those orders (and any placed today, which
@@ -306,10 +347,14 @@ def _read_live_bestbuy(profile, order_ids: list[str]) -> dict:
     rows = build_order_items(payloads, profile.label, known_open_ids=frozenset(order_ids))
     live: dict = {}
     for oid in order_ids:
-        numbers = [r.tracking_number for r in rows if r.order_id == oid and r.tracking_number]
+        # One entry per package (a multi-SKU carton is several rows sharing number AND groupId).
+        packages = dict.fromkeys(
+            (r.tracking_number, r.package_id) for r in rows
+            if r.order_id == oid and (r.tracking_number or r.package_id)
+        )
         if any(r.order_id == oid for r in rows):
-            live[oid] = list(dict.fromkeys(numbers))
-            log.info("Best Buy %s: API shows %d package(s) -> %s", oid, len(live[oid]), live[oid])
+            live[oid] = [{"tracking": t, "package_id": p} for t, p in packages]
+            log.info("Best Buy %s: API shows %d package(s) -> %s", oid, len(live[oid]), list(packages))
     return live
 
 
@@ -327,6 +372,10 @@ def _print_plan(plan: dict, apply: bool) -> None:
         print(f"  REFUSED  row {row_number:>4}  {oid}  {tracking}: {reason}")
     for row_number, oid, shipment, tracking in plan["already_superseded"]:
         print(f"  (already superseded: row {row_number} {oid} shipment {shipment} {tracking})")
+    for row_number, oid, shipment, tracking, live_number in plan.get("relabelled", []):
+        print(f"  RELABELLED row {row_number:>4}  {oid}  shipment {shipment}  {tracking} -> "
+              f"{live_number or '(number not read)'}: same package id, new number -- left to the "
+              f"sync's re-label rule, not marked")
     for row_number, oid, shipment, item in plan["blank_tracking"]:
         print(f"  (left alone: row {row_number} {oid} shipment {shipment} has no tracking number)")
     if not apply:

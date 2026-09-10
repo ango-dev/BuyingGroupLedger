@@ -158,3 +158,50 @@ class TestRestore:
         backup = [self._backup_row("X", "1", order_id="OTHER")]
         p = plan_restore(list(HEADER), [], self.OLD_HEADER, backup, OID)
         assert p["appends"] == [] and p["skipped"] == []
+
+
+class TestPackageIdMatching:
+    """Column 34 (2026-09-09): a row is live by tracking number OR by package id. Live only by id =
+    a re-labelled package (same id, new number) -- reported, renumbered, never marked or deleted."""
+
+    def test_a_dead_number_whose_package_id_is_still_on_the_page_is_relabelled_not_marked(self):
+        p = plan([row(DEAD, 1, **{"Package ID": "NxWmqLBj2"})],
+                 {OID: [{"tracking": LIVE, "package_id": "NxWmqLBj2"}]})
+
+        assert p["marks"] == [] and p["deletions"] == [] and p["refused"] == []
+        assert p["relabelled"] == [(2, OID, "1", DEAD, LIVE)]
+        assert p["orders"] == []
+
+    def test_relabelled_is_never_deleted_either(self):
+        p = plan([row(DEAD, 1, **{"Package ID": "P1"})],
+                 {OID: [{"tracking": LIVE, "package_id": "P1"}]}, mode="delete")
+        assert p["deletions"] == [] and p["relabelled"] == [(2, OID, "1", DEAD, LIVE)]
+
+    def test_dead_by_number_and_by_id_is_marked(self):
+        p = plan([row(DEAD, 1, **{"Package ID": "NWfgPHR2F"}), row(LIVE, 2, **{"Package ID": "NxWmqLBj2"})],
+                 {OID: [{"tracking": LIVE, "package_id": "NxWmqLBj2"}]})
+
+        assert p["marks"] == [(2, OID, "1", DEAD, "iPad Pro", "2")]
+        assert p["relabelled"] == []
+        assert [(r[0], r[2], r[3]) for r in p["renumbers"]] == [(3, "2", "1")]
+
+    def test_a_row_without_a_package_id_falls_back_to_the_tracking_number(self):
+        p = plan([row(DEAD, 1), row(LIVE, 2)], {OID: [{"tracking": LIVE, "package_id": "P9"}]})
+        assert p["marks"] == [(2, OID, "1", DEAD, "iPad Pro", "2")]
+
+    def test_the_old_list_of_strings_live_shape_still_works_with_the_column_present(self):
+        p = plan([row(DEAD, 1, **{"Package ID": "P1"}), row(LIVE, 2, **{"Package ID": "P2"})], {OID: [LIVE]})
+        assert p["marks"] == [(2, OID, "1", DEAD, "iPad Pro", "2")]
+        assert [(r[0], r[2], r[3]) for r in p["renumbers"]] == [(3, "2", "1")]
+
+    def test_a_relabelled_row_is_renumbered_to_its_page_position(self):
+        p = plan([row(DEAD, 2, **{"Package ID": "P1"}), row("T2", 1, **{"Package ID": "P2"})],
+                 {OID: [{"tracking": "T1-NEW", "package_id": "P1"}, {"tracking": "T2", "package_id": "P2"}]})
+
+        assert p["relabelled"] == [(2, OID, "2", DEAD, "T1-NEW")]
+        assert [(r[0], r[2], r[3]) for r in p["renumbers"]] == [(2, "2", "1"), (3, "1", "2")]
+
+    def test_a_live_entry_with_an_unread_number_still_counts_by_id(self):
+        """The pt page could not be read, but the card and its shipmentId are on the page."""
+        p = plan([row(DEAD, 1, **{"Package ID": "P1"})], {OID: [{"tracking": "", "package_id": "P1"}]})
+        assert p["marks"] == [] and p["relabelled"] == [(2, OID, "1", DEAD, "")]

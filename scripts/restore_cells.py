@@ -25,7 +25,10 @@ import json
 import sys
 from pathlib import Path
 
-from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet, _parse_display_number
+from models.order import FIELDNAMES
+from sheets.ledger_sync import (
+    _BOOL_FIELDS, _NUMERIC_FIELDS, HEADER, _col_letter, _get_worksheet, _parse_display_number,
+)
 
 
 def _same(a, b) -> bool:
@@ -36,8 +39,16 @@ def _same(a, b) -> bool:
     return str(a if a is not None else "").strip() == str(b if b is not None else "").strip()
 
 
-def _typed(value):
-    """A plan value as the type the sheet should store: int for a whole number, float otherwise."""
+def _typed(value, column: str | None = None):
+    """A plan value as the type the sheet should store: int for a whole number, float otherwise --
+    but ONLY for a numeric or checkbox column. A TEXT column keeps its text verbatim: "0315" (Card
+    Last 4) and "00009999990206101794" (a Costco carton id in Package ID) are digit strings whose
+    leading zeros are the data, and a 20-digit id does not even survive the float round trip.
+    """
+    if column in HEADER:
+        field = FIELDNAMES[HEADER.index(column)]
+        if field not in _NUMERIC_FIELDS and field not in _BOOL_FIELDS:
+            return "" if value is None else str(value)
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -84,7 +95,7 @@ def main(argv=None) -> int:
             skipped.append(f"  {col[column]}{row} {column:<14} holds {live!r}, not the expected {expected_now!r} -- "
                            f"edited since the plan; left alone")
         else:
-            todo.append((row, column, _typed(value), live, note))
+            todo.append((row, column, _typed(value, column), live, note))
 
     for row, column, value, live, note in todo:
         print(f"  {col[column]}{row} {column:<14} {live!r:<12} -> {value!r:<12} {note}")

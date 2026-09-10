@@ -686,6 +686,88 @@ def _refuse_shared_keys(rows: list[OrderItem], order_id: str) -> None:
         seen.add(key)
 
 
+def _collapse_same_package_cards(rows: list[OrderItem], subtotal: float | None,
+                                 order_id: str) -> list[OrderItem]:
+    """Twin of scrapers/amazon_mapping._collapse_same_package_cards — keep the two in step.
+
+    Two shipment cards of ONE parse carrying the SAME shipmentId are one package — keep one. The
+    structural twin of _reconcile_against_subtotal below (which runs after this and stays as the
+    backstop). On the re-labelled order of 2026-08-22 (111-9990021-9990021, this retailer) the
+    ledger's two duplicate rows both carried the NEW shipmentId in their Tracking Link, which is what
+    the double render most likely looked like. A healthy page never repeats a shipmentId across cards,
+    so this only ever fires on a duplicate — and needs no `Item(s) Subtotal` line to do so.
+
+    Only IDENTICAL CARDS collapse: two DIFFERENT cards (distinct Shipment labels) sharing one id whose
+    item blocks match line for line on (item, quantity, unit price). Two identical blocks INSIDE one
+    card are the split-quantity shape (_sum_split_quantity_lines) and are never touched here; two
+    same-id cards with different contents are an unknown shape and are left for the subtotal guard.
+    Prefer the card that carries a tracking number, tie-break to the LAST (Amazon appends the
+    re-issue). Survivors are renumbered 1..N by card. Logged and alerted, never silent (CLAUDE.md).
+
+    THE SUBTOTAL IS A VETO. When `Item(s) Subtotal` is readable and the cards do NOT exceed it, the
+    order really contains that much and two same-id cards are not a duplicate this code
+    understands -- they are left alone (collapsing would under-count a paid-for unit). So this
+    adds protection only where the subtotal guard is blind (no subtotal line) and can never
+    remove a unit the order paid for.
+    """
+    if subtotal is not None and round(sum(r.total_cost or 0.0 for r in rows), 2) <= subtotal + 0.01:
+        return rows
+    cards: dict[tuple[str, str], list[OrderItem]] = {}  # (package id, shipment label) -> its rows
+    for row in rows:
+        if row.package_id:
+            cards.setdefault((row.package_id, row.shipment), []).append(row)
+    by_id: dict[str, list[tuple[str, list[OrderItem]]]] = {}
+    for (pid, label), card_rows in cards.items():
+        by_id.setdefault(pid, []).append((label, card_rows))
+    dropped: set[int] = set()
+    for card_list in by_id.values():
+        if len(card_list) < 2:
+            continue
+        by_sig: dict[tuple, list[list[OrderItem]]] = {}
+        for _label, card_rows in card_list:
+            sig = tuple(sorted((r.item_name, r.quantity, r.cost_per_item) for r in card_rows))
+            by_sig.setdefault(sig, []).append(card_rows)
+        for dupes in by_sig.values():
+            if len(dupes) < 2:
+                continue
+            keep = dupes[0]
+            for card_rows in dupes[1:]:
+                if any(r.tracking_number for r in card_rows) >= any(r.tracking_number for r in keep):
+                    keep = card_rows
+            for card_rows in dupes:
+                if card_rows is not keep:
+                    dropped.update(id(r) for r in card_rows)
+    if not dropped:
+        return rows
+
+    survivors = [r for r in rows if id(r) not in dropped]
+    # Renumber by CARD, not by row: a multi-SKU card keeps one Shipment number across its rows.
+    renumbered: dict[str, str] = {}
+    for row in survivors:
+        if row.shipment not in renumbered:
+            renumbered[row.shipment] = shipment_label(len(renumbered) + 1)
+        row.shipment = renumbered[row.shipment]
+
+    ids = sorted({r.package_id for r in rows if id(r) in dropped})
+    log.warning(
+        "%s: order-details rendered the same package twice (shipmentId %s) — kept %d of %d row(s).",
+        order_id, ", ".join(ids), len(survivors), len(rows),
+    )
+    from alerts.notifier import alert  # local: keeps this module importable without the alert stack
+
+    alert(
+        f"{RETAILER} {order_id}: a package was rendered twice",
+        f"Two shipment cards on the order-details page carried the same shipmentId "
+        f"({', '.join(ids)}) with identical items — a delayed package re-issued a tracking number "
+        f"while its old card was still on the page. {len(rows) - len(survivors)} duplicate row(s) "
+        f"dropped; the card carrying a tracking number was kept.\n\n"
+        f"If a row for the superseded tracking number is already on the sheet, mark it superseded "
+        f"(the row stays, its money is blanked) with:\n"
+        f"  python -m scripts.fix_superseded_shipments --order {order_id}",
+    )
+    return survivors
+
+
 def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
                                 order_id: str) -> list[OrderItem]:
     """Twin of scrapers/amazon_mapping._reconcile_against_subtotal — keep the two in step.
@@ -917,6 +999,7 @@ def build_order_items(
                     sales_tax=sales_tax,
                     card_last4=card_last4,
                     shipment=shipment,
+                    package_id=shipment_id,
                 )
             )
             rows[-1]._seller = seller
@@ -928,7 +1011,9 @@ def build_order_items(
 
     # A duplicated shipment card inflates the Total Cost basis the sync's cost-weighted proration
     # (and the COGS netting that reads it) divides over, so the collapse still has to run.
-    rows = _reconcile_against_subtotal(rows, _order_subtotal(summary_el), order_id)
+    subtotal = _order_subtotal(summary_el)
+    rows = _collapse_same_package_cards(rows, subtotal, order_id)
+    rows = _reconcile_against_subtotal(rows, subtotal, order_id)
     rows = _sum_split_quantity_lines(rows)
     rows = _disambiguate_same_named_lines(rows)
     _refuse_shared_keys(rows, order_id)

@@ -160,6 +160,7 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
         "Gift Card": Cell("", fmt="currency"),
         "Sales Tax": Cell("", fmt="currency"),
         "Rewards Used": Cell("", fmt="currency"),
+        "Package ID": Cell(""),
         "Receipt Link": Cell(
             "https://objectstorage.us-ashburn-1.oraclecloud.com/p/tok/n/ns/b/bkt/o/"
             f"receipts/bestbuy/2026-08/BBY01-{row_number:09d}.pdf"
@@ -1454,3 +1455,46 @@ class TestReturnColumnsConsistent:
         sheet = build(row_cells(2, **{"Status": Cell("return"), "Quantity": Cell(2),
                                      "Return Qty": Cell(2), "Return Date": Cell("2026-06-05")}))
         assert result_for(sheet, "return_columns_consistent").status == "PASS"
+
+
+class TestPackageIdPerShipment:
+    """Column 34 (2026-09-09): one package id under ONE Shipment number per order. Mirrors
+    duplicate_tracking_keys: a multi-SKU carton is INFO, one id under two numbers is the 1f bug."""
+
+    def _row(self, n, order="111-9990021-9990021", package_id="NxWmqLBj2", shipment=1, **extra):
+        cells = {"Order ID": Cell(order), "Package ID": Cell(package_id), "Shipment": Cell(shipment)}
+        cells.update(extra)
+        return row_cells(n, **cells)
+
+    def test_distinct_packages_pass(self):
+        sheet = build(self._row(2, package_id="A"), self._row(3, package_id="B", shipment=2),
+                      self._row(4, order="OTHER", package_id="A"))
+        r = result_for(sheet, "package_id_per_shipment")
+        assert r.status == "PASS" and "3 package id(s)" in r.summary
+
+    def test_blank_ids_are_ignored(self):
+        sheet = build(self._row(2, package_id=""), self._row(3, package_id="", shipment=2))
+        assert result_for(sheet, "package_id_per_shipment").status == "PASS"
+
+    def test_a_multi_sku_carton_is_info(self):
+        sheet = build(self._row(2, **{"Item Name": Cell("A")}), self._row(3, **{"Item Name": Cell("B")}))
+        r = result_for(sheet, "package_id_per_shipment")
+        assert r.status == "INFO" and "covers rows [2, 3]" in r.details[0]
+
+    def test_one_id_under_two_shipment_numbers_fails(self):
+        """The exact 2026-08-22 shape: the same package booked as Shipment 1 AND Shipment 2."""
+        sheet = build(self._row(2, shipment=1), self._row(3, shipment=2))
+        r = result_for(sheet, "package_id_per_shipment")
+        assert r.status == "FAIL"
+        assert "package NxWmqLBj2 sits under shipments ['1', '2']" in r.details[0]
+
+    def test_a_retired_row_keeps_its_id_under_another_number_without_failing(self):
+        sheet = build(self._row(2, shipment=1),
+                      self._row(3, shipment=2, Status=Cell("superseded"), **_SUPERSEDED_MONEY_BLANKS))
+        assert result_for(sheet, "package_id_per_shipment").status == "PASS"
+
+    def test_a_numeric_cell_fails(self):
+        """A Costco id stored as a number has lost its leading zeros and no longer matches the mapping."""
+        sheet = build(self._row(2, package_id=9999990206101794))
+        r = result_for(sheet, "package_id_per_shipment")
+        assert r.status == "FAIL" and "stored as int" in r.details[0]

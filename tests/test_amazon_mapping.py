@@ -34,7 +34,11 @@ def _item(title: str, price: str, qty: int | None = None, asin: str = "B00000000
 
 
 def _shipment(order_id: str, index: int, status_text: str, items: list[str],
-              shipment_id: str = "SHIP", track: bool = True) -> str:
+              shipment_id: str | None = None, track: bool = True) -> str:
+    # One shipmentId PER CARD by default, as on a real page (76 captured tokens, one per package):
+    # two cards sharing an id is the double-render shape _collapse_same_package_cards exists for,
+    # so a test wanting that passes the same shipment_id explicitly.
+    shipment_id = shipment_id or f"SHIP{index}"
     track_html = ""
     if track:
         href = (f"/gp/your-account/ship-track?orderId={order_id}&shipmentId={shipment_id}"
@@ -956,3 +960,137 @@ def test_a_residual_same_key_collision_fails_loudly_instead_of_merging(monkeypat
     )
     with pytest.raises(OrderPageShapeError, match="share the ledger key"):
         build_order_items(html)
+
+
+# --------------------------------------------------------------------------------------------------
+# Package ID (column 33, 2026-09-09): the card's shipmentId rides onto every row of the card, and two
+# cards sharing one id in a single parse are the re-label double render — collapsed to one.
+# --------------------------------------------------------------------------------------------------
+
+PKG_OID = "111-9990021-9990021"
+
+
+def _no_alerts(monkeypatch):
+    calls = []
+    monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+    return calls
+
+
+def test_package_id_is_the_cards_shipment_id_on_every_row():
+    html = _details(
+        PKG_OID, "August 12, 2026",
+        [_shipment(PKG_OID, 0, "Delivered August 14", [_item("iPad", "$949.00", qty=3)], shipment_id="NWfgPHR2F"),
+         _shipment(PKG_OID, 1, "Arriving Monday", [_item("Case", "$20.00"), _item("Pencil", "$99.00")],
+                   shipment_id="NxWmqLBj2")],
+        subtotal="$2,966.00",
+    )
+    rows = build_order_items(html)
+    assert [(r.shipment, r.item_name, r.package_id) for r in rows] == [
+        ("1", "iPad", "NWfgPHR2F"), ("2", "Case", "NxWmqLBj2"), ("2", "Pencil", "NxWmqLBj2"),
+    ]
+
+
+def test_a_card_with_no_links_has_a_blank_package_id():
+    html = _details(PKG_OID, "August 12, 2026",
+                    [_shipment(PKG_OID, 0, "Arriving Monday", [_item("iPad", "$949.00")], track=False)])
+    assert build_order_items(html)[0].package_id == ""
+
+
+def test_two_identical_cards_sharing_a_shipment_id_collapse_to_the_tracked_one(monkeypatch):
+    """The 2026-08-22 double render: the superseded card and its replacement, one shipmentId. The
+    card whose pt page gave a number survives, as Shipment 1, and the cost is booked once."""
+    calls = _no_alerts(monkeypatch)
+    html = _details(
+        PKG_OID, "August 12, 2026",
+        [_shipment(PKG_OID, 0, "Arriving Monday", [_item("iPad", "$949.00", qty=3)], shipment_id="NxWmqLBj2"),
+         _shipment(PKG_OID, 1, "Arriving Monday", [_item("iPad", "$949.00", qty=3)], shipment_id="NxWmqLBj2")],
+        subtotal="$2,847.00",
+    )
+    rows = build_order_items(html, tracking_by_shipment={"2": "TBA999000000009"})
+    assert [(r.shipment, r.quantity, r.tracking_number, r.package_id) for r in rows] == [
+        ("1", 3, "TBA999000000009", "NxWmqLBj2"),
+    ]
+    assert sum(r.total_cost for r in rows) == 2847.0
+    assert len(calls) == 1 and "rendered twice" in calls[0][0]
+
+
+def test_same_id_cards_prefer_the_last_when_neither_has_a_number(monkeypatch):
+    """Amazon appends the re-issue, so with no number to prefer the LAST card is the live one."""
+    _no_alerts(monkeypatch)
+    first = _shipment(PKG_OID, 0, "Arriving Monday", [_item("iPad", "$949.00", qty=3)], shipment_id="SAME")
+    second = _shipment(PKG_OID, 1, "Arriving Tuesday", [_item("iPad", "$949.00", qty=3)], shipment_id="SAME")
+    rows = build_order_items(_details(PKG_OID, "August 12, 2026", [first, second]))
+    only_second = build_order_items(_details(PKG_OID, "August 12, 2026", [second]))
+    assert len(rows) == 1 and rows[0].shipment == "1"
+    assert rows[0].delivery_date == only_second[0].delivery_date != build_order_items(
+        _details(PKG_OID, "August 12, 2026", [first]))[0].delivery_date
+
+
+def test_distinct_shipment_ids_never_collapse_a_genuine_split(monkeypatch):
+    calls = _no_alerts(monkeypatch)
+    html = _details(
+        PKG_OID, "August 12, 2026",
+        [_shipment(PKG_OID, 0, "Arriving Monday", [_item("iPad", "$949.00", qty=1)], shipment_id="AAA"),
+         _shipment(PKG_OID, 1, "Arriving Monday", [_item("iPad", "$949.00", qty=1)], shipment_id="BBB")],
+        subtotal="$1,898.00",
+    )
+    rows = build_order_items(html)
+    assert [(r.shipment, r.package_id) for r in rows] == [("1", "AAA"), ("2", "BBB")]
+    assert calls == []
+
+
+def test_same_id_identical_cards_that_fit_the_subtotal_are_not_collapsed(monkeypatch):
+    """The subtotal is a veto: if the order really is worth two of these boxes, two same-id cards
+    are not a duplicate this code understands, and collapsing would lose a paid-for unit."""
+    calls = _no_alerts(monkeypatch)
+    html = _details(
+        PKG_OID, "August 12, 2026",
+        [_shipment(PKG_OID, 0, "Arriving Monday", [_item("iPad", "$949.00", qty=1)], shipment_id="SAME"),
+         _shipment(PKG_OID, 1, "Arriving Monday", [_item("iPad", "$949.00", qty=1)], shipment_id="SAME")],
+        subtotal="$1,898.00",
+    )
+    rows = build_order_items(html)
+    assert [(r.shipment, r.quantity) for r in rows] == [("1", 1), ("2", 1)]
+    assert calls == []
+
+
+def test_same_id_identical_cards_collapse_when_the_subtotal_is_unreadable(monkeypatch):
+    """Where the subtotal guard is blind, the id is the only protection -- and it works."""
+    calls = _no_alerts(monkeypatch)
+    html = _details(
+        PKG_OID, "August 12, 2026",
+        [_shipment(PKG_OID, 0, "Arriving Monday", [_item("iPad", "$949.00", qty=3)], shipment_id="SAME"),
+         _shipment(PKG_OID, 1, "Arriving Monday", [_item("iPad", "$949.00", qty=3)], shipment_id="SAME")],
+    )
+    rows = build_order_items(html)
+    assert [(r.shipment, r.quantity) for r in rows] == [("1", 3)]
+    assert len(calls) == 1
+
+
+def test_same_id_cards_with_different_contents_are_left_alone(monkeypatch):
+    """Not a duplicate we understand: two cards, one id, different items. Left for the subtotal guard."""
+    calls = _no_alerts(monkeypatch)
+    html = _details(
+        PKG_OID, "August 12, 2026",
+        [_shipment(PKG_OID, 0, "Arriving Monday", [_item("iPad", "$949.00")], shipment_id="SAME"),
+         _shipment(PKG_OID, 1, "Arriving Monday", [_item("Case", "$20.00")], shipment_id="SAME")],
+        subtotal="$969.00",
+    )
+    rows = build_order_items(html)
+    assert [(r.shipment, r.item_name) for r in rows] == [("1", "iPad"), ("2", "Case")]
+    assert calls == []
+
+
+def test_collapse_renumbers_by_card_so_a_multi_sku_card_keeps_one_number(monkeypatch):
+    _no_alerts(monkeypatch)
+    html = _details(
+        PKG_OID, "August 12, 2026",
+        [_shipment(PKG_OID, 0, "Arriving Monday", [_item("iPad", "$949.00")], shipment_id="DUP"),
+         _shipment(PKG_OID, 1, "Arriving Monday", [_item("iPad", "$949.00")], shipment_id="DUP"),
+         _shipment(PKG_OID, 2, "Arriving Monday", [_item("Case", "$20.00"), _item("Pencil", "$99.00")],
+                   shipment_id="OTHER")],
+    )
+    rows = build_order_items(html, tracking_by_shipment={"1": "TBA1", "3": "TBA3"})
+    assert [(r.shipment, r.item_name, r.tracking_number) for r in rows] == [
+        ("1", "iPad", "TBA1"), ("2", "Case", "TBA3"), ("2", "Pencil", "TBA3"),
+    ]

@@ -74,6 +74,9 @@ HEADER = [
     "Receipt Link",  # the order's captured receipt in object storage (receipts/capture.py)
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
+    "Package ID",  # the retailer's own per-package identity (Amazon shipmentId / Costco packageNumber /
+                   # Best Buy groupId): matched on before the tracking number. TEXT, never typed.
+                   # Added 2026-09-09, moved before Last Scraped At 2026-09-10 — see models/order.py.
     "Last Scraped At",
 ]
 
@@ -457,6 +460,13 @@ def _next_shipment_number(order_id, existing, oid_hdr_idx, shipment_hdr_idx,
     return max(nums) + 1
 
 
+def _package_id_of(row: list, package_hdr_idx: int | None) -> str:
+    """The row's Package ID cell as stripped text, "" when the column or the cell is absent."""
+    if package_hdr_idx is None or package_hdr_idx >= len(row):
+        return ""
+    return str(row[package_hdr_idx] if row[package_hdr_idx] is not None else "").strip()
+
+
 def _ensure_grid_cols(worksheet) -> None:
     """Grow the grid to len(HEADER) columns before anything writes a full-width row.
 
@@ -533,6 +543,11 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     # even when their synthetic Shipment numbers diverge (e.g. Costco: the API numbers shipments by
     # tracking sort, the agent numbers top-to-bottom).
     tracking_hdr_idx = header.index("Tracking Number") if "Tracking Number" in header else None
+    # Package-id index for the package deferral (Order ID + Package ID) — the retailer's OWN identity
+    # for the physical package (Amazon shipmentId, Costco packageNumber, Best Buy groupId), which is
+    # what the Shipment ordinal only approximates. Tried before the tracking number: a re-issued
+    # label changes the number but, on Costco and Best Buy at least, not the package id.
+    package_hdr_idx = header.index("Package ID") if "Package ID" in header else None
 
     # THE PRESERVED CELLS MUST COME FROM THE UNFORMATTED READ. `existing` is the FORMATTED grid --
     # what a human sees -- and it is the right thing to build the upsert key from (that key must be
@@ -548,6 +563,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     key_to_existing: dict[tuple, tuple[int, list]] = {}
     shipment_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     tracking_to_existing: dict[tuple, list[tuple[int, list]]] = {}
+    package_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     status_hdr_idx = header.index("Status") if "Status" in header else None
     for row_number, row in enumerate(existing[1:], start=2):
         # Rows written before Shipment existed are shorter than key_idx; read missing cells as ""
@@ -570,6 +586,9 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             trk = row[tracking_hdr_idx].strip() if tracking_hdr_idx < len(row) else ""
             if trk:
                 tracking_to_existing.setdefault((row[oid_idx], trk), []).append((row_number, row))
+        pid = _package_id_of(row, package_hdr_idx)
+        if pid:
+            package_to_existing.setdefault((row[oid_idx], pid), []).append((row_number, row))
 
     with csv_path.open(newline="", encoding="utf-8") as f:
         records = list(csv.DictReader(f))
@@ -590,6 +609,9 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     # 1:1 case (see below), so a shipment carrying two distinct products doesn't mis-merge.
     incoming_skey_count: dict[tuple, int] = {}
     incoming_tkey_count: dict[tuple, int] = {}
+    incoming_pkey_count: dict[tuple, int] = {}   # (order, package id)
+    incoming_pname_count: dict[tuple, int] = {}  # (order, package id, item name) — a multi-SKU carton
+    incoming_pids_by_order: dict[str, set] = {}  # which packages this batch says are ON THE PAGE
     # Which SHIPMENTS each incoming tracking number claims, per order — the mis-read detector below.
     incoming_tracking_shipments: dict[tuple, set] = {}
     for rec in collapsed:
@@ -602,6 +624,13 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                 tk = (rec.get("order_id", ""), trk)
                 incoming_tkey_count[tk] = incoming_tkey_count.get(tk, 0) + 1
                 incoming_tracking_shipments.setdefault(tk, set()).add(rec.get("shipment", ""))
+            pid = str(rec.get("package_id", "")).strip()
+            if pid:
+                pk = (rec.get("order_id", ""), pid)
+                incoming_pkey_count[pk] = incoming_pkey_count.get(pk, 0) + 1
+                pn = (rec.get("order_id", ""), pid, rec.get("item_name", ""))
+                incoming_pname_count[pn] = incoming_pname_count.get(pn, 0) + 1
+                incoming_pids_by_order.setdefault(rec.get("order_id", ""), set()).add(pid)
 
     # ONE TRACKING NUMBER ON TWO DIFFERENT BOXES OF ONE ORDER IS A SCRAPER MIS-READ, NOT A SPLIT.
     # Two SKUs sharing a carton legitimately share both a tracking number AND a Shipment number
@@ -682,23 +711,77 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             record["item_name"],
             record.get("shipment", ""),
         )
-        if key in key_to_existing:
-            row_number, existing_row = key_to_existing[key]
+        # The incoming package id, and the one test every match below must pass: a row whose OWN
+        # non-blank package id differs from the incoming one is a different physical package, however
+        # well its key or Shipment number lines up. Blank on either side is compatible with anything,
+        # so nothing changes for rows written before the column existed.
+        incoming_pid = str(record.get("package_id", "")).strip()
+
+        def same_package(candidate: tuple[int, list]) -> bool:
+            existing_pid = _package_id_of(candidate[1], package_hdr_idx)
+            return not (existing_pid and incoming_pid and existing_pid != incoming_pid)
+
+        # The exact key hit a row belonging to ANOTHER package. That means one of two things, and
+        # only the batch can tell them apart:
+        #  - the page RE-ORDERED its cards (the row's own package is still on the page — some record
+        #    of this batch carries its id): this ordinal now names a different box, so resolve the
+        #    record by identity below and, if that box has no row yet, append it under a FREE
+        #    Shipment number rather than the occupied one;
+        #  - the row's package has VANISHED from the page (no record carries its id): Amazon re-issued
+        #    the label AND minted a new shipmentId (the one witnessed re-label, 2026-08-22, did
+        #    exactly that). Treat it as the same row — the changed-tracking branch below then does what
+        #    it always did (qty-1: re-label; otherwise a '*' split row with NO cost) — because
+        #    appending the "new" package here would book the order's full cost a second time, which
+        #    is history 1f all over again.
+        hit = key_to_existing.get(key)
+        displaced = (
+            hit is not None and not same_package(hit)
+            and _package_id_of(hit[1], package_hdr_idx) in incoming_pids_by_order.get(record["order_id"], set())
+        )
+        if hit is not None and not displaced:
+            row_number, existing_row = hit
         else:
             match: tuple[int, list] | None = None
-            # DEFER (1) BY TRACKING NUMBER — the strongest cross-path identity, tried FIRST. The
-            # carrier tracking number is read identically by the API and the agent even when their
-            # synthetic Shipment numbers diverge (Costco: the API numbers shipments by tracking sort,
-            # the agent top-to-bottom, so they can be swapped). An incoming row uniquely sharing
+            # DEFER (0) BY PACKAGE ID — the retailer's own per-package identity (2026-09-09, history
+            # §1f). An incoming row uniquely sharing (Order ID, Package ID) with one existing row is
+            # the same physical package wherever its card now sits: update it in place, keeping its
+            # recorded item name and Shipment number. A multi-SKU carton puts several rows behind one
+            # id, so when either side is not 1:1 the rows are told apart by ITEM NAME instead (still
+            # keeping the recorded Shipment number); anything still ambiguous falls through.
+            if package_hdr_idx is not None and incoming_pid:
+                pkey = (record["order_id"], incoming_pid)
+                pcandidates = [c for c in package_to_existing.get(pkey, []) if c[0] not in claimed_rows]
+                if pcandidates:
+                    if incoming_pkey_count.get(pkey, 0) == 1 and len(pcandidates) == 1:
+                        match = pcandidates[0]
+                        er = match[1]
+                        if name_hdr_idx < len(er) and str(er[name_hdr_idx]).strip():
+                            sheet_row[name_field_idx] = er[name_hdr_idx]  # keep recorded name
+                        if shipment_hdr_idx < len(er) and str(er[shipment_hdr_idx]).strip():
+                            sheet_row[shipment_field_idx] = er[shipment_hdr_idx]  # keep recorded shipment
+                    else:
+                        pname = (record["order_id"], incoming_pid, record["item_name"])
+                        named = [c for c in pcandidates
+                                 if name_hdr_idx < len(c[1]) and c[1][name_hdr_idx] == record["item_name"]]
+                        if incoming_pname_count.get(pname, 0) == 1 and len(named) == 1:
+                            match = named[0]
+                            er = match[1]
+                            if shipment_hdr_idx < len(er) and str(er[shipment_hdr_idx]).strip():
+                                sheet_row[shipment_field_idx] = er[shipment_hdr_idx]
+            # DEFER (1) BY TRACKING NUMBER — the strongest cross-path identity after the package id.
+            # The carrier tracking number is read identically by the API and the agent even when
+            # their synthetic Shipment numbers diverge (Costco: the API numbers shipments by tracking
+            # sort, the agent top-to-bottom, so they can be swapped). An incoming row uniquely sharing
             # (Order ID, Tracking Number) with one existing row is the same physical line: update it in
             # place, keeping BOTH its recorded item name and Shipment number so the paths converge on
             # one row. Tried before the shipment-line rule below so a swapped Shipment number can't
             # mis-merge onto the wrong box. Only the unambiguous 1:1 case (one incoming, one existing
             # for that tracking number) — a box holding two distinct SKUs is left to append.
-            if tracking_hdr_idx is not None:
+            if match is None and tracking_hdr_idx is not None:
                 trk = str(record.get("tracking_number", "")).strip()
                 tkey = (record["order_id"], trk)
-                tcandidates = [c for c in tracking_to_existing.get(tkey, []) if c[0] not in claimed_rows]
+                tcandidates = [c for c in tracking_to_existing.get(tkey, [])
+                               if c[0] not in claimed_rows and same_package(c)]
                 if trk and incoming_tkey_count.get(tkey, 0) == 1 and len(tcandidates) == 1:
                     match = tcandidates[0]
                     er = match[1]
@@ -714,12 +797,25 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             # Unambiguous 1:1 only — a shipment with two distinct products is left to append.
             if match is None:
                 skey = (record["order_id"], record["order_date"], record.get("shipment", ""))
-                candidates = [c for c in shipment_to_existing.get(skey, []) if c[0] not in claimed_rows]
+                candidates = [c for c in shipment_to_existing.get(skey, [])
+                              if c[0] not in claimed_rows and same_package(c)]
                 if incoming_skey_count.get(skey, 0) == 1 and len(candidates) == 1:
                     match = candidates[0]
                     if name_hdr_idx < len(match[1]) and str(match[1][name_hdr_idx]).strip():
                         sheet_row[name_field_idx] = match[1][name_hdr_idx]  # keep recorded name
             if match is None:
+                if displaced:
+                    label = shipment_label(_next_shipment_number(
+                        record["order_id"], existing, oid_idx, shipment_hdr_idx,
+                        appends, oid_field_idx, shipment_field_idx,
+                    ))
+                    log.warning(
+                        "Order %s / %r: shipment %s is already the row of package %s (still on the "
+                        "page), and package %s has no row of its own — appending it as shipment %s.",
+                        record["order_id"], record.get("item_name", ""), record.get("shipment", ""),
+                        _package_id_of(hit[1], package_hdr_idx), incoming_pid, label,
+                    )
+                    sheet_row[shipment_field_idx] = _coerce("shipment", label)
                 appends.append(_blank_money_for_status(sheet_row))
                 continue
             row_number, existing_row = match
@@ -739,7 +835,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
             incoming_trk = str(record.get("tracking_number", "")).strip()
             if existing_trk and incoming_trk and existing_trk != incoming_trk:
                 owners = [c for c in tracking_to_existing.get((record["order_id"], incoming_trk), [])
-                          if c[0] not in claimed_rows]
+                          if c[0] not in claimed_rows and same_package(c)]
                 if len(owners) == 1:
                     # The new number already has a home row → update that one (keeping its identity).
                     row_number, existing_row = owners[0]

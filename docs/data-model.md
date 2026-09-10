@@ -16,10 +16,20 @@ rarely-scanned reference/audit columns parked at the end:
 
 `Order Date · Status · Retailer · Item Name · Shipment · Quantity ·
 Order ID · Tracking Number · Tracking Submitted · Delivery Date · Buying Group ·
-Cost Per Item · Total Cost · Shipping · Sales Tax · Gift Card · Card · Cashback Rate · COGS ·
+Cost Per Item · Total Cost · Shipping · Sales Tax · Gift Card · Rewards Used · Card · Cashback Rate · COGS ·
 Insurance · Payout Amount · Payout Date · Return Qty · Return Date · Total Profit ·
-Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Last Scraped At ·
-Rewards Used`
+Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Package ID · Last Scraped At`
+
+**Package ID** (column 33, beside Card Last 4) is the retailer's *own* identity for the physical package a row belongs
+to: Amazon's `shipmentId` (read from the card's "Track package" link, or from the "View your item"
+link once the track link has expired), Costco's `packageNumber` (the carton's SSCC-style id, not the
+carrier label), Best Buy's fulfillment `groupId` (a per-order ordinal, unique only within the order).
+It is plain text — Costco ids carry leading zeros — and blank when unknown (an unshipped line, an old
+order whose links are gone). The sync matches an incoming row on **(Order ID, Package ID) before the
+tracking number**, keeping the row's recorded Shipment number and item name, so a package lands on
+its own row however Amazon re-orders its cards; a multi-SKU carton shares one id across its rows and
+is told apart by item name. A blank id never blocks a match. `audit_sheet`'s
+`package_id_per_shipment` fails if one id ever sits under two Shipment numbers of one order.
 
 > **Changing the column order is a MIGRATION, not an edit**, and it takes two steps.
 > `python -m scripts.reorder_sheet --apply` moves the row *values*; `python -m

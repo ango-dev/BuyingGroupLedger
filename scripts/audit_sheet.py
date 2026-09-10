@@ -530,6 +530,58 @@ def check_duplicate_tracking_keys(sheet: Sheet, opts: Options) -> Result:
     )
 
 
+@check("package_id_per_shipment")
+def check_package_id_per_shipment(sheet: Sheet, opts: Options) -> Result:
+    """One package id under ONE Shipment number per order -- the exact shape of the 2026-08-22 bug.
+
+    Package ID (column 33, beside Card Last 4) is the retailer's own identity for a physical package, and
+    sync_csv_to_sheet matches on (Order ID, Package ID) before anything else. A multi-SKU carton is
+    several rows sharing one id AND one Shipment number (fine, INFO). One id under TWO Shipment
+    numbers is the same package booked twice (history 1f) -- FAIL. Retired rows are skipped: a
+    superseded row keeps its id under an N+1 number by design. A cell stored as a NUMBER is a FAIL
+    too: the mapping emits text (Costco ids carry leading zeros), so a numeric cell no longer equals
+    what the next scrape sends and the match silently stops working.
+    """
+    grid = sheet.grids.formatted
+    shipments_by_id: dict[tuple, dict[str, list[int]]] = {}
+    numeric: list[str] = []
+    for row_number, _ in sheet.ledger_rows(grid):
+        stored = sheet.cell(sheet.grids.unformatted, row_number, "Package ID")
+        if isinstance(stored, (int, float)) and not isinstance(stored, bool):
+            numeric.append(f"row {row_number}: Package ID stored as {type(stored).__name__} {stored!r} -- text expected")
+        package_id = str(sheet.cell(grid, row_number, "Package ID")).strip()
+        if not package_id:
+            continue
+        if str(sheet.cell(grid, row_number, "Status")).strip().lower() in RETIRED_STATUSES:
+            continue
+        key = (str(sheet.cell(grid, row_number, "Order ID")), package_id)
+        shipment = str(sheet.cell(grid, row_number, "Shipment")).strip()
+        shipments_by_id.setdefault(key, {}).setdefault(shipment, []).append(row_number)
+    split = [
+        f"order {k[0]} package {k[1]} sits under shipments {sorted(v)}: rows "
+        f"{sorted(n for rows in v.values() for n in rows)}"
+        for k, v in shipments_by_id.items() if len(v) > 1
+    ]
+    cartons = [
+        f"order {k[0]} package {k[1]} covers rows {rows}"
+        for k, v in shipments_by_id.items() if len(v) == 1
+        for rows in v.values() if len(rows) > 1
+    ]
+    if split or numeric:
+        return Result(
+            "package_id_per_shipment", "FAIL",
+            f"{len(split)} package id(s) under several Shipment numbers, {len(numeric)} numeric cell(s)",
+            _truncate(split + numeric + cartons, opts.max_detail),
+        )
+    if cartons:
+        return Result(
+            "package_id_per_shipment", "INFO",
+            f"{len(shipments_by_id)} package id(s); {len(cartons)} cover several rows (multi-SKU cartons)",
+            _truncate(cartons, opts.max_detail),
+        )
+    return Result("package_id_per_shipment", "PASS", f"{len(shipments_by_id)} package id(s), one Shipment number each")
+
+
 @check("blank_order_id_rows")
 def check_blank_order_id_rows(sheet: Sheet, opts: Options) -> Result:
     """A row with no Order ID can never be updated again -- both ledger_sync.py:317 and :360 skip it.
