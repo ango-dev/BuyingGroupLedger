@@ -37,16 +37,6 @@ unhealthy() {  # $1 = reason
     exit 1
 }
 
-healthy() {  # $1 = reason
-    echo "$1"
-    if [ ! -f "$MARKER" ]; then
-        if (cd /app 2>/dev/null || true; $NOTIFY "Ledger container UNHEALTHY -- scheduler is not producing runs"                 "$1. The container is up but no run has completed in time: check \`docker compose logs --tail=200\`, \`cat logs/.last_run\`, and the run lock (logs/.run.lock). This alert is sent once; an all-clear follows when a run completes."                 >/dev/null 2>&1); then
-            date -u +%FT%TZ > "$MARKER"
-        fi
-    fi
-    exit 1
-}
-
 healthy() {  # $1 = status line
     echo "$1"
     if [ -f "$MARKER" ]; then

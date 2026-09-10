@@ -938,3 +938,21 @@ def test_same_seller_same_price_blocks_still_sum_not_suffix():
     )
     rows = build_order_items(html)
     assert [(r.item_name, r.quantity) for r in rows] == [("MacBook", 6)]
+
+
+def test_a_residual_same_key_collision_fails_loudly_instead_of_merging(monkeypatch):
+    """The tripwire behind the three known same-key shapes: with the sum and the seller/price
+    disambiguation neutralised, two same-titled blocks in one shipment must raise -- so the page
+    lands in a failure dossier -- rather than reach the ledger's collapse and lose a row's money."""
+    import scrapers.amazon_mapping as M
+    from scrapers.amazon_mapping import OrderPageShapeError
+
+    monkeypatch.setattr(M, "_sum_split_quantity_lines", lambda rows: rows)
+    monkeypatch.setattr(M, "_disambiguate_same_named_lines", lambda rows: rows)
+    html = _details(
+        "114-9990029-9990029", "September 7, 2026",
+        [_shipment("114-9990029-9990029", 0, "Arriving tomorrow",
+                   [_item("iPad Air", "$626.29"), _item("iPad Air", "$649.00")])],
+    )
+    with pytest.raises(OrderPageShapeError, match="share the ledger key"):
+        build_order_items(html)

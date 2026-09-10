@@ -1860,6 +1860,61 @@ class TestAReLabelledSingleUnitIsNotASplit:
         assert "Split shipment" in alerts[0][0]
 
 
+class TestConflictingSameKeyRowsAreNeverMerged:
+    """Two records on one upsert key that CONTRADICT each other are two real rows the mapping could
+    not tell apart -- merging them silently loses one row's money (three times, 2026-09-04/08).
+    Neither is written, the rest of the batch is, and the alert names them. Half-rows (blank versus
+    value) and status disagreements still merge exactly as before."""
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    _KEY = dict(order_id="A1", order_date="2026-09-07", item_name="iPad Air", shipment="1")
+
+    def test_contradicting_rows_are_skipped_and_alerted_while_the_rest_of_the_run_lands(self, sheet, tmp_path, alerts):
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(self._KEY, status="shipped", tracking_number="T", quantity="1", cost_per_item="626.29", total_cost="626.29"),
+            dict(self._KEY, status="shipped", tracking_number="T", quantity="1", cost_per_item="649.00", total_cost="649.00"),
+            dict(order_id="B2", order_date="2026-09-07", item_name="Widget", shipment="1", status="shipped",
+                 tracking_number="U", quantity="1", cost_per_item="10.00", total_cost="10.00"),
+        )
+
+        result = sync_csv_to_sheet(path)
+
+        assert result["skipped_conflicts"] == 1 and result["appended"] == 1
+        assert [r[FIELDNAMES.index("order_id")] for r in sheet.data_rows()] == ["B2"]
+        assert len(alerts) == 1 and "NOT recorded" in alerts[0][0]
+        assert "A1" in alerts[0][1] and "cost_per_item '626.29' vs '649.00'" in alerts[0][1]
+
+    def test_half_rows_still_merge(self, sheet, tmp_path, alerts):
+        # The case the collapse exists for: one read knows the number, the other the delivery date.
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(self._KEY, status="shipped", tracking_number="T", quantity="1", total_cost="626.29"),
+            dict(self._KEY, status="delivered", delivery_date="2026-09-09", quantity="1", total_cost="626.29"),
+        )
+
+        result = sync_csv_to_sheet(path)
+
+        assert result["skipped_conflicts"] == 0 and result["appended"] == 1
+        written = sheet.data_rows()[0]
+        assert written[FIELDNAMES.index("tracking_number")] == "T"
+        assert written[FIELDNAMES.index("delivery_date")] == "2026-09-09"
+        assert written[FIELDNAMES.index("status")] == "delivered"
+        assert alerts == []
+
+    def test_a_formatting_difference_is_not_a_contradiction(self):
+        records = [dict(self._KEY, total_cost="626.29", last_scraped_at="a"),
+                   dict(self._KEY, total_cost="$626.29", last_scraped_at="b")]
+        assert ledger_sync._find_key_conflicts(records) == []
+
+
 class TestSupersededRows:
     """A `superseded` row is a retired, money-free, terminal record of a tracking
     number Amazon re-issued. Every layer of the sync has to treat it as closed."""

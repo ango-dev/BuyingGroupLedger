@@ -249,6 +249,71 @@ _STATUS_RANK = {
 }
 
 
+def _record_key(rec: dict) -> tuple:
+    return (rec.get("order_id", ""), rec.get("order_date", ""), rec.get("item_name", ""),
+            rec.get("shipment", ""))
+
+
+# The two fields same-key records may legitimately disagree on: status is resolved by rank in
+# _collapse_records, and the scrape timestamp is per read.
+_COLLAPSE_FREE_FIELDS = {"status", "last_scraped_at"}
+
+
+def _same_value(a: str, b: str) -> bool:
+    na, nb = _parse_display_number(a), _parse_display_number(b)
+    if na is not None and nb is not None:
+        return abs(na - nb) < 1e-9
+    return a == b
+
+
+def _find_key_conflicts(records: list[dict]) -> list[dict]:
+    """Same-key records that CONTRADICT each other -- two real rows, not two half-rows.
+
+    _collapse_records exists for half-rows: two reads of ONE shipment that each know part of it
+    (blank versus value), which merge cleanly. Two records that both carry a value for the same
+    field and DISAGREE are something else entirely -- two distinct lines the mapping failed to tell
+    apart -- and merging them keeps one and silently loses the other's money. That is exactly what
+    happened three times (a split quantity, two badged qty-3 blocks, the same item from two sellers
+    at two prices; the design notes-09-04/08): every producer is now a single deterministic
+    mapping that parses each order once, so a contradiction on one key can only be an unknown page
+    shape. Returns one entry per conflicting key: {"key", "fields": [(field, first, other), ...]}.
+    """
+    first_by_key: dict[tuple, dict] = {}
+    conflicts: dict[tuple, list] = {}
+    for rec in records:
+        key = _record_key(rec)
+        first = first_by_key.setdefault(key, rec)
+        if first is rec:
+            continue
+        for field, val in rec.items():
+            if field in _COLLAPSE_FREE_FIELDS:
+                continue
+            a, b = str(first.get(field, "") or "").strip(), str(val or "").strip()
+            if a and b and not _same_value(a, b):
+                conflicts.setdefault(key, []).append((field, a, b))
+    return [{"key": key, "fields": fields} for key, fields in conflicts.items()]
+
+
+def _alert_key_conflicts(conflicts: list[dict]) -> None:
+    lines = [
+        f"- Order {c['key'][0]} / {str(c['key'][2])[:40]!r} shipment {c['key'][3]}: "
+        + "; ".join(f"{field} {a!r} vs {b!r}" for field, a, b in c["fields"])
+        for c in conflicts
+    ]
+    log.error("Same-key conflict on %d order line(s) -- NOT written: %s", len(conflicts), lines)
+    from alerts.notifier import alert  # lazy: keeps ledger_sync free of an alerts dependency at load
+
+    alert(
+        f"Same-key conflict on {len(conflicts)} order line(s) — NOT recorded",
+        "Two rows from one scrape landed on the same ledger key (Order ID + Order Date + Item Name + "
+        "Shipment) with DIFFERENT values, which means the page holds two lines the parser could not "
+        "tell apart -- an unknown page shape. Merging them would silently drop one line's money "
+        "(this is how a $649 iPad once vanished), so NEITHER row was written; every other row in the "
+        "run was. Fix the mapping from the failure dossier, then the next run records the order:\n\n"
+        + "\n".join(lines),
+    )
+
+
 def _collapse_records(records: list[dict]) -> list[dict]:
     """Collapse CSV records that share an upsert key into one row before upserting.
 
@@ -508,6 +573,15 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
 
     with csv_path.open(newline="", encoding="utf-8") as f:
         records = list(csv.DictReader(f))
+
+    # Two records on ONE key that contradict each other are two real rows the mapping could not
+    # tell apart (see _find_key_conflicts). Neither is written -- a merge would silently lose one
+    # line's money -- the rest of the batch is, and the alert names them.
+    conflicts = _find_key_conflicts(records)
+    if conflicts:
+        bad_keys = {c["key"] for c in conflicts}
+        records = [r for r in records if _record_key(r) not in bad_keys]
+        _alert_key_conflicts(conflicts)
 
     # Collapse same-key rows (CDP read + agent re-read of one shipment) before upserting, so the
     # two half-rows merge into one instead of the later overwriting the earlier's tracking number.
@@ -824,6 +898,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         "split_rows": len(split_events),
         "suspect_tracking": suspect_tracking,
         "skipped_blank": skipped_blank,
+        "skipped_conflicts": len(conflicts),
     }
 
 

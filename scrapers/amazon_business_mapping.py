@@ -670,6 +670,22 @@ def _disambiguate_same_named_lines(rows: list[OrderItem]) -> list[OrderItem]:
     return rows
 
 
+def _refuse_shared_keys(rows: list[OrderItem], order_id: str) -> None:
+    """Twin of scrapers/amazon_mapping._refuse_shared_keys -- keep the two in step: after every
+    known same-key shape is handled, two rows of one order sharing (shipment, item name) is an
+    unknown page shape, and raising puts the page in the dossier instead of losing a row's money."""
+    seen: set[tuple] = set()
+    for row in rows:
+        key = (row.shipment, row.item_name)
+        if key in seen:
+            raise OrderPageShapeError(
+                f"order {order_id}: two lines share the ledger key (shipment {row.shipment}, "
+                f"{row.item_name[:60]!r}) after every known shape was handled — an unknown page "
+                f"shape; nothing recorded for this order"
+            )
+        seen.add(key)
+
+
 def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
                                 order_id: str) -> list[OrderItem]:
     """Twin of scrapers/amazon_mapping._reconcile_against_subtotal — keep the two in step.
@@ -915,6 +931,7 @@ def build_order_items(
     rows = _reconcile_against_subtotal(rows, _order_subtotal(summary_el), order_id)
     rows = _sum_split_quantity_lines(rows)
     rows = _disambiguate_same_named_lines(rows)
+    _refuse_shared_keys(rows, order_id)
     # Rides to config.cards.tag_cards, which folds it into cashback_rate (see OrderItem). The
     # AMAZON_PROMO_CASHBACK_ENABLED toggle already gates BOTH Amazons at the tag_cards call site.
     promo = _promo_cashback_rate(region)
