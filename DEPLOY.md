@@ -153,7 +153,7 @@ checking before you go editing anything. If it differs, add it under the **firew
 profile. Re-check whenever your ISP rotates your address.
 
 BFMR has no allowlist. Costco routes through the profile's own static ISP proxy (not the host IP), so
-it's unaffected — see the design notes about that having been fixed deliberately.
+it's unaffected — see the design notes (the engineering journal) about that having been fixed deliberately.
 
 ---
 

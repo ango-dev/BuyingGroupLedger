@@ -62,11 +62,13 @@ The parts worth reading if you're here to look at the engineering rather than to
 | Refuse to store a sign-in page | `receipts/sources.py` `looks_logged_out` | A login wall renders and uploads perfectly. Storing one would mark the order as having a receipt *forever*, because the object exists and no later run retries. |
 | Catch silent misconfiguration at boot | `scripts/preflight.py`, `docker/healthcheck.sh` | A missing dependency fails three retailers without raising; a dead scheduler produces no signal at all. Both now announce themselves. |
 
-> **A note on `the design notes §N` references.** Code and test comments cite section numbers in `the design notes`, an
+> **A note on `the design notes §N` references.** Code and test comments cite section numbers from the
 > internal engineering journal that records why each of these decisions was made and what live run
-> proved it. That file is not published — it contains real order and payout data. The reasoning it
-> holds is summarized across these docs; the citations are left in place because they're accurate in
-> the private repository the code is developed in.
+> proved it. Since 2026-09-09 that journal is `the design notes` (the numbering is frozen, so the
+> citations still resolve) and `the design notes` holds only pending work. Neither file is published — they
+> contain real order and payout data. The reasoning they hold is summarized across these docs; the
+> citations are left in place because they're accurate in the private repository the code is
+> developed in.
 
 ---
 
