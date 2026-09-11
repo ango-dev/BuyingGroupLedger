@@ -46,7 +46,13 @@
       "api_key": "",
       "api_secret": "",
       "// min_insurance_value": "BFMR_MIN_INSURANCE_VALUE — only insure shipments worth at least this. BFMR charges ~0.45% with a $2.00 MINIMUM, so below roughly $450 the floor dominates and the effective rate passes 1%. 0 insures everything.",
-      "min_insurance_value": 0
+      "min_insurance_value": 0,
+      "// email_autoreply_enabled": "BFMR_EMAIL_AUTOREPLY_ENABLED — SENDS REAL MAIL to BFMR. On, every scheduled run answers their combined-package emails (serials + receipt PDF) unattended. Leave off until a dry run and a supervised first send have both been done. `python -m respond_bfmr` ignores this.",
+      "email_autoreply_enabled": false,
+      "// email_sender_domains": "BFMR_EMAIL_SENDER_DOMAINS — From-domains that count as BFMR when scanning the inbox, comma-separated.",
+      "email_sender_domains": "buyformeretail.com,bfmr.com",
+      "// email_reply_cc": "BFMR_EMAIL_REPLY_CC — optional Cc on every auto-reply (an audit copy). Blank = none.",
+      "email_reply_cc": ""
     },
     "mod": {
       "// ": "MaxOutDeals needs a bearer token AND an IP allowlist — add this machine under the firewall tab in your MOD profile, or every call is rejected however valid the token. user_id and email are required in the BODY of every request.",

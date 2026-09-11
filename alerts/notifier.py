@@ -26,6 +26,28 @@ def send_email(subject: str, body: str) -> None:
         server.sendmail(settings.gmail_address, [settings.alert_email_to], msg.as_string())
 
 
+def send_message(msg, recipients: list[str]) -> None:
+    """Send a PREBUILT MIME message — attachments, threading headers and all.
+
+    `send_email` above deliberately stays a two-string function for alerts; this exists for the
+    one caller that needs a real message (respond_bfmr.py replies with PDF attachments and
+    In-Reply-To headers). Same account, same SMTP_SSL boundary — and conftest.py's
+    _block_real_alerts patches THIS name for every test, which is why the mechanics live in
+    _smtp_send below: the boundary test exercises them while this name stays safely stubbed.
+    """
+    _smtp_send(msg, recipients)
+
+
+def _smtp_send(msg, recipients: list[str]) -> None:
+    if not settings.gmail_address or not settings.gmail_app_password:
+        raise RuntimeError("Gmail is not configured (alerts.gmail_address / gmail_app_password).")
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+        server.login(settings.gmail_address, settings.gmail_app_password)
+        server.sendmail(settings.gmail_address, recipients, msg.as_string())
+
+
 def send_discord(message: str) -> None:
     if not settings.discord_webhook_url:
         log.warning("Discord webhook not configured, skipping alert")

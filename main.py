@@ -259,6 +259,8 @@ def main(retailers: list[str]) -> None:
     # Deliberately outside the loop AND reached even if every retailer failed: the sync submits
     # tracking for rows already on the sheet from earlier runs, so it has work to do regardless.
     run_buying_group_sync()
+    # After the sync, so the sheet it resolves against is this run's freshest state.
+    run_bfmr_email_autoreply()
 
 
 def run_buying_group_sync() -> None:
@@ -294,6 +296,34 @@ def run_buying_group_sync() -> None:
         log.exception("Buying-group sync failed")
         alert("Buying-group sync failed",
               "Tracking numbers may not have been submitted. Check logs/run.log.")
+
+
+def run_bfmr_email_autoreply() -> None:
+    """Answer BFMR's combined-package emails (serials + receipt PDF) from the scheduled run.
+
+    Same shape and same reasons as run_buying_group_sync above: after the scrapers, inside the
+    same run lock, isolated so a failure here never fails the run, and OFF BY DEFAULT — it sends
+    outward-facing mail to a third party unattended, so it stays inert until the manual
+    validation has been done:
+
+        python -m respond_bfmr                      # dry run; prints the reply it would send
+        python -m respond_bfmr --apply --limit 1    # supervised first send
+    """
+    if not settings.bfmr_email_autoreply_enabled:
+        log.info(
+            "BFMR email auto-reply is disabled (set buying_groups.bfmr.email_autoreply_enabled "
+            "to true in config.json — or BFMR_EMAIL_AUTOREPLY_ENABLED=true for one run — once "
+            "you've validated it manually; see `python -m respond_bfmr --help`)."
+        )
+        return
+    try:
+        from respond_bfmr import run as run_email_autoreply  # local: keeps `import main` cheap
+
+        run_email_autoreply(apply=True)
+    except Exception:
+        log.exception("BFMR email auto-reply failed")
+        alert("BFMR email auto-reply failed",
+              "BFMR's combined-package emails may still be unanswered. Check logs/run.log.")
 
 
 if __name__ == "__main__":

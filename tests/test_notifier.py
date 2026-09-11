@@ -22,3 +22,44 @@ def test_a_failing_channel_still_leaves_the_log_line(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger="alerts.notifier"):
         notifier.alert("subject", "the links")
     assert "ALERT: subject" in caplog.text and "the links" in caplog.text
+
+
+def test_send_message_sends_the_prebuilt_mime_through_smtp_ssl(monkeypatch):
+    """send_message must ship the message VERBATIM (attachments, threading headers) from the
+    configured account to exactly the recipients given -- it is the boundary respond_bfmr
+    replies through, and conftest stubs it for every other test."""
+    import dataclasses
+    from email.message import EmailMessage
+
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, context=None):
+            sent["endpoint"] = (host, port)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def login(self, user, password):
+            sent["login"] = user
+
+        def sendmail(self, from_addr, recipients, body):
+            sent["from"], sent["recipients"], sent["body"] = from_addr, recipients, body
+
+    monkeypatch.setattr(notifier.smtplib, "SMTP_SSL", FakeSMTP)
+    monkeypatch.setattr(notifier, "settings", dataclasses.replace(
+        notifier.settings, gmail_address="me@example.com", gmail_app_password="pw"))
+
+    msg = EmailMessage()
+    msg["Subject"] = "Re: Combined Package"
+    msg["In-Reply-To"] = "<original@example.com>"
+    msg.set_content("serials inside")
+    notifier._smtp_send(msg, ["support@example.com", "audit@example.com"])
+
+    assert sent["endpoint"] == ("smtp.gmail.com", 465)
+    assert sent["login"] == "me@example.com"
+    assert sent["recipients"] == ["support@example.com", "audit@example.com"]
+    assert "In-Reply-To: <original@example.com>" in sent["body"]

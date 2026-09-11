@@ -56,6 +56,9 @@ fails closed on a typo rather than turning itself on.
 | `BFMR_API_KEY` | `buying_groups.bfmr.api_key` |
 | `BFMR_API_SECRET` | `buying_groups.bfmr.api_secret` |
 | `BFMR_MIN_INSURANCE_VALUE` | `buying_groups.bfmr.min_insurance_value` |
+| `BFMR_EMAIL_AUTOREPLY_ENABLED` † | `buying_groups.bfmr.email_autoreply_enabled` |
+| `BFMR_EMAIL_SENDER_DOMAINS` | `buying_groups.bfmr.email_sender_domains` |
+| `BFMR_EMAIL_REPLY_CC` | `buying_groups.bfmr.email_reply_cc` |
 | `MAXOUTDEALS_API_BASE_URL` | `buying_groups.mod.api_base_url` |
 | `MAXOUTDEALS_API_KEY` | `buying_groups.mod.api_key` |
 | `MAXOUTDEALS_EMAIL` | `buying_groups.mod.email` |

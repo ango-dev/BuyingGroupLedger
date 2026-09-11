@@ -82,6 +82,9 @@ ENV_TO_CONFIG = {
     "BFMR_API_KEY": "buying_groups.bfmr.api_key",
     "BFMR_API_SECRET": "buying_groups.bfmr.api_secret",
     "BFMR_MIN_INSURANCE_VALUE": "buying_groups.bfmr.min_insurance_value",
+    "BFMR_EMAIL_AUTOREPLY_ENABLED": "buying_groups.bfmr.email_autoreply_enabled",
+    "BFMR_EMAIL_SENDER_DOMAINS": "buying_groups.bfmr.email_sender_domains",
+    "BFMR_EMAIL_REPLY_CC": "buying_groups.bfmr.email_reply_cc",
     "MAXOUTDEALS_API_BASE_URL": "buying_groups.mod.api_base_url",
     "MAXOUTDEALS_API_KEY": "buying_groups.mod.api_key",
     "MAXOUTDEALS_USER_ID": "buying_groups.mod.user_id",
@@ -253,6 +256,21 @@ class Settings:
     # code change, since filing costs a real premium on every unattended run.
     bfmr_min_insurance_value: float = _get_float(
         "BFMR_MIN_INSURANCE_VALUE", 0.0)
+    # Master switch for the scheduled BFMR combined-package auto-reply (main.py ->
+    # respond_bfmr.run). OFF by default for the same reason as sync_enabled: it sends outward-
+    # facing mail to a third party unattended, and should only run after a manual dry run and a
+    # supervised first send. `python -m respond_bfmr` ignores this — an explicit command is
+    # already an explicit decision.
+    bfmr_email_autoreply_enabled: bool = _get_bool(
+        "BFMR_EMAIL_AUTOREPLY_ENABLED", False)
+    # Which From-domains count as BFMR when scanning the inbox. Their combined-package requests
+    # arrive from support@buyformeretail.com (observed 2026-09-11); bfmr.com is kept as the
+    # brand's other domain. Comma-separated. Never matched on subject — this repo's own
+    # "ACTION NEEDED" alerts land in the same inbox.
+    bfmr_email_sender_domains: str = _get_str(
+        "BFMR_EMAIL_SENDER_DOMAINS", "buyformeretail.com,bfmr.com")
+    # Optional Cc on every auto-reply (e.g. your own address for an audit copy). Blank = none.
+    bfmr_email_reply_cc: str = _get_str("BFMR_EMAIL_REPLY_CC", "")
 
     # MaxOutDeals authenticates with a bearer token AND an IP allowlist (its profile has a firewall
     # tab). `user` and `email` are required in the BODY of every request, not just the headers.

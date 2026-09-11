@@ -2507,3 +2507,4 @@ class TestPackageIdDeferral:
         rows = self._by_shipment(sheet)
         assert list(rows) == ["1"]
         assert rows["1"][_F["status"]] == "delivered" and rows["1"][_F["package_id"]] == "AAA"
+
