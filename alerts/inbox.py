@@ -31,17 +31,24 @@ IMAP_PORT = 993
 
 
 class Mailbox:
-    """The live IMAP mailbox. Construct only when credentials exist; tests inject a fake."""
+    """The live IMAP mailbox. Construct only when credentials exist; tests inject a fake.
 
-    def __init__(self, conn=None):
+    `address`/`password` default to the alerts account; a caller whose feature may use its own
+    mailbox (respond_bfmr via settings.bfmr_reply_account()) passes them explicitly, so the
+    account choice is made in ONE place there rather than re-derived here.
+    """
+
+    def __init__(self, conn=None, address: str | None = None, password: str | None = None):
         if conn is None:
-            if not settings.gmail_address or not settings.gmail_app_password:
+            address = address if address is not None else settings.gmail_address
+            password = password if password is not None else settings.gmail_app_password
+            if not address or not password:
                 raise RuntimeError(
                     "Gmail is not configured (alerts.gmail_address / gmail_app_password) — "
                     "the inbox cannot be read."
                 )
             conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
-            conn.login(settings.gmail_address, settings.gmail_app_password)
+            conn.login(address, password)
         self._conn = conn
         # readonly=False: mark_answered STOREs a flag. Nothing here ever deletes or moves mail.
         self._conn.select("INBOX")

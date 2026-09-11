@@ -82,9 +82,11 @@ ENV_TO_CONFIG = {
     "BFMR_API_KEY": "buying_groups.bfmr.api_key",
     "BFMR_API_SECRET": "buying_groups.bfmr.api_secret",
     "BFMR_MIN_INSURANCE_VALUE": "buying_groups.bfmr.min_insurance_value",
-    "BFMR_EMAIL_AUTOREPLY_ENABLED": "buying_groups.bfmr.email_autoreply_enabled",
-    "BFMR_EMAIL_SENDER_DOMAINS": "buying_groups.bfmr.email_sender_domains",
-    "BFMR_EMAIL_REPLY_CC": "buying_groups.bfmr.email_reply_cc",
+    "BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED": "buying_groups.bfmr.combined_package_autoreply_enabled",
+    "BFMR_COMBINED_PACKAGE_SENDER_DOMAINS": "buying_groups.bfmr.combined_package_sender_domains",
+    "BFMR_COMBINED_PACKAGE_REPLY_CC": "buying_groups.bfmr.combined_package_reply_cc",
+    "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS": "buying_groups.bfmr.combined_package_gmail_address",
+    "BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD": "buying_groups.bfmr.combined_package_gmail_app_password",
     "MAXOUTDEALS_API_BASE_URL": "buying_groups.mod.api_base_url",
     "MAXOUTDEALS_API_KEY": "buying_groups.mod.api_key",
     "MAXOUTDEALS_USER_ID": "buying_groups.mod.user_id",
@@ -256,21 +258,57 @@ class Settings:
     # code change, since filing costs a real premium on every unattended run.
     bfmr_min_insurance_value: float = _get_float(
         "BFMR_MIN_INSURANCE_VALUE", 0.0)
-    # Master switch for the scheduled BFMR combined-package auto-reply (main.py ->
-    # respond_bfmr.run). OFF by default for the same reason as sync_enabled: it sends outward-
-    # facing mail to a third party unattended, and should only run after a manual dry run and a
-    # supervised first send. `python -m respond_bfmr` ignores this — an explicit command is
-    # already an explicit decision.
-    bfmr_email_autoreply_enabled: bool = _get_bool(
-        "BFMR_EMAIL_AUTOREPLY_ENABLED", False)
-    # Which From-domains count as BFMR when scanning the inbox. Their combined-package requests
-    # arrive from support@buyformeretail.com (observed 2026-09-11); bfmr.com is kept as the
-    # brand's other domain. Comma-separated. Never matched on subject — this repo's own
+    # --- BFMR combined-package auto-reply (respond_bfmr.py) -------------------------------------
+    # Answers ONE kind of email: BFMR's "Combined Best Buy Package <tracking>" request for the
+    # units' serial numbers and the receipt PDF. THE MAILBOX DEFAULTS TO THE ALERTS GMAIL
+    # ACCOUNT (alerts.gmail_address / gmail_app_password above) — requests are read over IMAP
+    # and replies sent over SMTP with those credentials. To give the feature ITS OWN account
+    # instead, set BOTH combined_package_gmail_address and combined_package_gmail_app_password
+    # below; `bfmr_reply_account()` is the one place that choice is resolved.
+    #
+    # Master switch for the scheduled run (main.py -> respond_bfmr.run). OFF by default for the
+    # same reason as sync_enabled: it sends outward-facing mail to a third party unattended, and
+    # should only run after a manual dry run and a supervised first send. `python -m
+    # respond_bfmr` ignores this — an explicit command is already an explicit decision.
+    bfmr_combined_package_autoreply_enabled: bool = _get_bool(
+        "BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED", False)
+    # Which From-domains count as BFMR when scanning that inbox for combined-package requests.
+    # They arrive from support@/deals@buyformeretail.com (observed 2026-09-11); bfmr.com is kept
+    # as the brand's other domain. Comma-separated. Never matched on subject — this repo's own
     # "ACTION NEEDED" alerts land in the same inbox.
-    bfmr_email_sender_domains: str = _get_str(
-        "BFMR_EMAIL_SENDER_DOMAINS", "buyformeretail.com,bfmr.com")
-    # Optional Cc on every auto-reply (e.g. your own address for an audit copy). Blank = none.
-    bfmr_email_reply_cc: str = _get_str("BFMR_EMAIL_REPLY_CC", "")
+    bfmr_combined_package_sender_domains: str = _get_str(
+        "BFMR_COMBINED_PACKAGE_SENDER_DOMAINS", "buyformeretail.com,bfmr.com")
+    # Optional Cc on every combined-package reply. Useful when BFMR addresses the requests to a
+    # DIFFERENT account than the alerts Gmail that answers them (live case: requests go to the
+    # main address and forward to the track/alerts inbox) — without the Cc, the reply is only
+    # visible in the alerts account's Sent Mail. Blank = none.
+    bfmr_combined_package_reply_cc: str = _get_str("BFMR_COMBINED_PACKAGE_REPLY_CC", "")
+    # Optional SEPARATE Gmail account for the combined-package mailbox, in case the replies
+    # shouldn't ride the alerts account. BOTH blank (the default) = use the alerts account.
+    # BOTH set = read requests from and send replies as this account instead (it needs its own
+    # app password, and it must be the inbox BFMR's requests actually arrive in). Setting only
+    # ONE of the pair is a loud error — mixing one account's address with another's password
+    # can never be what was meant.
+    bfmr_combined_package_gmail_address: str = _get_str(
+        "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS", "")
+    bfmr_combined_package_gmail_app_password: str = field(
+        default=_get_str("BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD", ""), repr=False)
+
+    def bfmr_reply_account(self) -> tuple[str, str]:
+        """(address, app password) the combined-package auto-reply signs in with — the ONE
+        place the alerts-account-or-own-account choice is resolved, so IMAP reading and SMTP
+        sending can never disagree about which mailbox they are using."""
+        address = self.bfmr_combined_package_gmail_address.strip()
+        password = self.bfmr_combined_package_gmail_app_password.strip()
+        if address and password:
+            return address, password
+        if address or password:
+            raise RuntimeError(
+                "buying_groups.bfmr.combined_package_gmail_address and _app_password must be "
+                "set TOGETHER (or both left blank to use the alerts account) — one without "
+                "the other would mix two accounts' credentials."
+            )
+        return self.gmail_address, self.gmail_app_password
 
     # MaxOutDeals authenticates with a bearer token AND an IP allowlist (its profile has a firewall
     # tab). `user` and `email` are required in the BODY of every request, not just the headers.

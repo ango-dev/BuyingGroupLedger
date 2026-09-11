@@ -24,7 +24,8 @@ def _block_real_alerts(monkeypatch):
     monkeypatch.setattr("alerts.notifier.send_discord", lambda message: None)
     # The third sender (2026-09-11): respond_bfmr replies to BFMR with a real MIME message
     # through this name. Same rule, same boundary.
-    monkeypatch.setattr("alerts.notifier.send_message", lambda msg, recipients: None)
+    monkeypatch.setattr("alerts.notifier.send_message",
+                        lambda msg, recipients, account=None: None)
 
 
 @pytest.fixture(autouse=True)

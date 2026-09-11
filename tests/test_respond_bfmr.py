@@ -81,8 +81,11 @@ def _pin_mail_settings(monkeypatch):
 
     monkeypatch.setattr(respond_bfmr, "settings",
                         dataclasses.replace(respond_bfmr.settings,
-                                            bfmr_email_reply_cc="",
-                                            gmail_address="jane.fixture@example.com"))
+                                            bfmr_combined_package_reply_cc="",
+                                            bfmr_combined_package_gmail_address="",
+                                            bfmr_combined_package_gmail_app_password="",
+                                            gmail_address="jane.fixture@example.com",
+                                            gmail_app_password="fixture-pw"))
 
 
 @pytest.fixture
@@ -90,7 +93,7 @@ def sent(monkeypatch):
     """Records every reply that would leave the machine (on top of conftest's global stub)."""
     calls = []
     monkeypatch.setattr("alerts.notifier.send_message",
-                        lambda msg, recipients: calls.append((msg, recipients)))
+                        lambda msg, recipients, account=None: calls.append((msg, recipients, account)))
     return calls
 
 
@@ -134,8 +137,10 @@ def test_apply_fetches_serials_sends_marks_answered_and_records_state(sent, aler
     assert outcome["replied"] == [TRACKING]
     assert fetch.calls == [("profile-a", ["BBY01-1"])]
     assert len(sent) == 1
-    msg, recipients = sent[0]
+    msg, recipients, account = sent[0]
     assert recipients == ["support@buyformeretail.com"]
+    assert account == ("jane.fixture@example.com", "fixture-pw")  # the alerts account, by default
+    assert msg["From"] == "jane.fixture@example.com"
     assert msg["In-Reply-To"] == MESSAGE_ID
     body = msg.get_body(("plain",)).get_content()
     assert "SERIAL01" in body and "SERIAL02" in body
@@ -266,7 +271,7 @@ def test_disabled_master_switch_is_inert(monkeypatch):
                         lambda **kwargs: pytest.fail("run() called with the switch off"))
     monkeypatch.setattr(main_module, "settings",
                         dataclasses.replace(main_module.settings,
-                                            bfmr_email_autoreply_enabled=False))
+                                            bfmr_combined_package_autoreply_enabled=False))
 
     main_module.run_bfmr_email_autoreply()
 
@@ -278,8 +283,51 @@ def test_enabled_master_switch_runs_with_apply(monkeypatch):
     monkeypatch.setattr("respond_bfmr.run", lambda apply: calls.append(apply))
     monkeypatch.setattr(main_module, "settings",
                         dataclasses.replace(main_module.settings,
-                                            bfmr_email_autoreply_enabled=True))
+                                            bfmr_combined_package_autoreply_enabled=True))
 
     main_module.run_bfmr_email_autoreply()
 
     assert calls == [True]
+
+
+class TestReplyAccountChoice:
+    """The mailbox is the alerts account UNLESS the feature's own pair is set — resolved in one
+    place (settings.bfmr_reply_account) so IMAP and SMTP can never use different accounts."""
+
+    @staticmethod
+    def _settings(**overrides):
+        import dataclasses
+        return dataclasses.replace(respond_bfmr.settings, **overrides)
+
+    def test_both_blank_falls_back_to_the_alerts_account(self):
+        s = self._settings(gmail_address="alerts@example.com", gmail_app_password="alerts-pw",
+                           bfmr_combined_package_gmail_address="",
+                           bfmr_combined_package_gmail_app_password="")
+        assert s.bfmr_reply_account() == ("alerts@example.com", "alerts-pw")
+
+    def test_both_set_uses_the_separate_account(self):
+        s = self._settings(gmail_address="alerts@example.com", gmail_app_password="alerts-pw",
+                           bfmr_combined_package_gmail_address="replies@example.com",
+                           bfmr_combined_package_gmail_app_password="replies-pw")
+        assert s.bfmr_reply_account() == ("replies@example.com", "replies-pw")
+
+    def test_half_a_pair_is_refused_never_mixed(self):
+        s = self._settings(bfmr_combined_package_gmail_address="replies@example.com",
+                           bfmr_combined_package_gmail_app_password="")
+        with pytest.raises(RuntimeError, match="TOGETHER"):
+            s.bfmr_reply_account()
+
+    def test_a_configured_separate_account_reads_and_sends_as_itself(self, monkeypatch, sent):
+        import dataclasses
+        monkeypatch.setattr(respond_bfmr, "settings",
+                            dataclasses.replace(respond_bfmr.settings,
+                                                bfmr_combined_package_gmail_address="replies@example.com",
+                                                bfmr_combined_package_gmail_app_password="replies-pw"))
+        mailbox = FakeMailbox({"1": _email()})
+
+        outcome = _run(mailbox, apply=True)
+
+        assert outcome["replied"] == [TRACKING]
+        msg, _recipients, account = sent[0]
+        assert account == ("replies@example.com", "replies-pw")
+        assert msg["From"] == "replies@example.com"

@@ -2,9 +2,11 @@
 
 BFMR receives a combined Best Buy box and emails asking for the units' serial numbers and the
 Best Buy receipt in PDF — and their email says "please reply to this email", so a reply is the
-sanctioned channel (their API has no serials or upload endpoint). This module reads the inbox
-the alerts already send from (same Gmail app password, IMAP this time), matches each request to
-the ledger rows sharing its tracking number, PULLS THE SERIALS OFF THE BEST BUY SITE for the
+sanctioned channel (their API has no serials or upload endpoint). This module reads the request
+mailbox over IMAP — BY DEFAULT the alerts Gmail account (same app password), or its own account
+when buying_groups.bfmr.combined_package_gmail_address/_app_password are BOTH set
+(settings.bfmr_reply_account() resolves the choice once, so reading and replying can never use
+different mailboxes) — matches each request to the ledger rows sharing its tracking number, PULLS THE SERIALS OFF THE BEST BUY SITE for the
 box's order ids at that moment (scrapers/bestbuy_serials.py — there is no serial column; only
 Best Buy has the combined-package issue), and replies with the orders' captured receipts
 attached.
@@ -30,7 +32,7 @@ Apply for real:
     python -m respond_bfmr --apply --serials "SN1,SN2"       # skip the live fetch; refused
                                                              # unless exactly ONE order matches
 
-`run()` is also called from main.py (behind BFMR_EMAIL_AUTOREPLY_ENABLED, default off) so a
+`run()` is also called from main.py (behind BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED, default off) so a
 scheduled run answers inside the same run lock, after the scrape has refreshed the sheet.
 """
 
@@ -93,7 +95,7 @@ def _fetch_serials_live(profile_label: str,
 
 
 def _sender_domains() -> list[str]:
-    return [d.strip() for d in settings.bfmr_email_sender_domains.split(",") if d.strip()]
+    return [d.strip() for d in settings.bfmr_combined_package_sender_domains.split(",") if d.strip()]
 
 
 def _preview(msg, serials_pending: bool) -> str:
@@ -125,9 +127,13 @@ def run(apply: bool = False, limit: int | None = None, tracking: str | None = No
     fetch_pdf = fetch_pdf or _fetch_pdf
     fetch_serials = fetch_serials or _fetch_serials_live
 
+    # The mailbox choice (alerts account, or the feature's own) is resolved ONCE, up front —
+    # a half-configured pair raises here, loudly, before anything is read or sent.
+    reply_address, reply_password = settings.bfmr_reply_account()
+
     if mailbox is None:
         from alerts.inbox import Mailbox  # local: imaplib/SSL only when actually reading mail
-        mailbox = Mailbox()
+        mailbox = Mailbox(address=reply_address, password=reply_password)
 
     domains = _sender_domains()
     requests = []
@@ -220,8 +226,8 @@ def run(apply: bool = False, limit: int | None = None, tracking: str | None = No
                                      f"({len(pdf)} bytes)")
                 pdf_of_order[order.order_id] = pdf
             msg = build_reply(request, resolution, pdf_of_order, serials_of_order or {},
-                              from_addr=settings.gmail_address,
-                              cc=settings.bfmr_email_reply_cc)
+                              from_addr=reply_address,
+                              cc=settings.bfmr_combined_package_reply_cc)
         except Exception as exc:
             log.exception("Building the reply for %s failed", label)
             outcome["failed"].append((label, str(exc)))
@@ -237,9 +243,9 @@ def run(apply: bool = False, limit: int | None = None, tracking: str | None = No
 
         try:
             recipients = [request.reply_to] + (
-                [settings.bfmr_email_reply_cc] if settings.bfmr_email_reply_cc else [])
+                [settings.bfmr_combined_package_reply_cc] if settings.bfmr_combined_package_reply_cc else [])
             # Via the module, not a bound name, so conftest's network-boundary patch covers it.
-            notifier.send_message(msg, recipients)
+            notifier.send_message(msg, recipients, account=(reply_address, reply_password))
         except Exception as exc:
             log.exception("Sending the reply for %s failed", label)
             outcome["failed"].append((label, str(exc)))

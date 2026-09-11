@@ -26,26 +26,29 @@ def send_email(subject: str, body: str) -> None:
         server.sendmail(settings.gmail_address, [settings.alert_email_to], msg.as_string())
 
 
-def send_message(msg, recipients: list[str]) -> None:
+def send_message(msg, recipients: list[str], account: tuple[str, str] | None = None) -> None:
     """Send a PREBUILT MIME message — attachments, threading headers and all.
 
     `send_email` above deliberately stays a two-string function for alerts; this exists for the
     one caller that needs a real message (respond_bfmr.py replies with PDF attachments and
-    In-Reply-To headers). Same account, same SMTP_SSL boundary — and conftest.py's
-    _block_real_alerts patches THIS name for every test, which is why the mechanics live in
-    _smtp_send below: the boundary test exercises them while this name stays safely stubbed.
+    In-Reply-To headers). `account` is an (address, app password) pair for a caller whose
+    feature may use its own mailbox (settings.bfmr_reply_account()); None = the alerts account.
+    Same SMTP_SSL boundary either way — and conftest.py's _block_real_alerts patches THIS name
+    for every test, which is why the mechanics live in _smtp_send below: the boundary test
+    exercises them while this name stays safely stubbed.
     """
-    _smtp_send(msg, recipients)
+    _smtp_send(msg, recipients, account)
 
 
-def _smtp_send(msg, recipients: list[str]) -> None:
-    if not settings.gmail_address or not settings.gmail_app_password:
+def _smtp_send(msg, recipients: list[str], account: tuple[str, str] | None = None) -> None:
+    address, password = account or (settings.gmail_address, settings.gmail_app_password)
+    if not address or not password:
         raise RuntimeError("Gmail is not configured (alerts.gmail_address / gmail_app_password).")
 
     context = ssl.create_default_context()
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-        server.login(settings.gmail_address, settings.gmail_app_password)
-        server.sendmail(settings.gmail_address, recipients, msg.as_string())
+        server.login(address, password)
+        server.sendmail(address, recipients, msg.as_string())
 
 
 def send_discord(message: str) -> None:

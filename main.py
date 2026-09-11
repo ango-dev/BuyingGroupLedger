@@ -309,10 +309,10 @@ def run_bfmr_email_autoreply() -> None:
         python -m respond_bfmr                      # dry run; prints the reply it would send
         python -m respond_bfmr --apply --limit 1    # supervised first send
     """
-    if not settings.bfmr_email_autoreply_enabled:
+    if not settings.bfmr_combined_package_autoreply_enabled:
         log.info(
-            "BFMR email auto-reply is disabled (set buying_groups.bfmr.email_autoreply_enabled "
-            "to true in config.json — or BFMR_EMAIL_AUTOREPLY_ENABLED=true for one run — once "
+            "BFMR email auto-reply is disabled (set buying_groups.bfmr.combined_package_autoreply_enabled "
+            "to true in config.json — or BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED=true for one run — once "
             "you've validated it manually; see `python -m respond_bfmr --help`)."
         )
         return

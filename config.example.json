@@ -47,12 +47,16 @@
       "api_secret": "",
       "// min_insurance_value": "BFMR_MIN_INSURANCE_VALUE — only insure shipments worth at least this. BFMR charges ~0.45% with a $2.00 MINIMUM, so below roughly $450 the floor dominates and the effective rate passes 1%. 0 insures everything.",
       "min_insurance_value": 0,
-      "// email_autoreply_enabled": "BFMR_EMAIL_AUTOREPLY_ENABLED — SENDS REAL MAIL to BFMR. On, every scheduled run answers their combined-package emails (serials + receipt PDF) unattended. Leave off until a dry run and a supervised first send have both been done. `python -m respond_bfmr` ignores this.",
-      "email_autoreply_enabled": false,
-      "// email_sender_domains": "BFMR_EMAIL_SENDER_DOMAINS — From-domains that count as BFMR when scanning the inbox, comma-separated.",
-      "email_sender_domains": "buyformeretail.com,bfmr.com",
-      "// email_reply_cc": "BFMR_EMAIL_REPLY_CC — optional Cc on every auto-reply (an audit copy). Blank = none.",
-      "email_reply_cc": ""
+      "// combined_package": "The next five settings drive ONE feature: auto-answering BFMR's 'Combined Best Buy Package' emails (their request for the units' serial numbers + the receipt PDF). THE MAILBOX DEFAULTS TO THE ALERTS GMAIL ACCOUNT above (alerts.gmail_address / gmail_app_password) — requests read and replies sent with those credentials. To give the feature its own account instead, set BOTH combined_package_gmail_* keys below.",
+      "// combined_package_autoreply_enabled": "BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED — SENDS REAL MAIL to BFMR. On, every scheduled run answers their combined-package emails unattended. Leave off until a dry run and a supervised first send have both been done. `python -m respond_bfmr` ignores this.",
+      "combined_package_autoreply_enabled": false,
+      "// combined_package_sender_domains": "BFMR_COMBINED_PACKAGE_SENDER_DOMAINS — From-domains that count as BFMR when scanning the alerts inbox for combined-package requests, comma-separated.",
+      "combined_package_sender_domains": "buyformeretail.com,bfmr.com",
+      "// combined_package_reply_cc": "BFMR_COMBINED_PACKAGE_REPLY_CC — optional Cc on every combined-package reply. Set it to the address BFMR emails if that is NOT the replying account (e.g. requests arrive at your main address and forward to the reply inbox) — otherwise the reply is only visible in the replying account's Sent Mail. Blank = none.",
+      "combined_package_reply_cc": "",
+      "// combined_package_gmail_address": "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS / _APP_PASSWORD — a SEPARATE Gmail account for this feature's mailbox, in case replies shouldn't ride the alerts account. Both blank (default) = use the alerts account. Both set = read BFMR's requests from and reply as THIS account (it needs its own app password, and it must be the inbox the requests actually arrive in). Setting only one of the pair is refused.",
+      "combined_package_gmail_address": "",
+      "combined_package_gmail_app_password": ""
     },
     "mod": {
       "// ": "MaxOutDeals needs a bearer token AND an IP allowlist — add this machine under the firewall tab in your MOD profile, or every call is rejected however valid the token. user_id and email are required in the BODY of every request.",
