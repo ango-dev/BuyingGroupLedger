@@ -263,6 +263,30 @@ def test_abbreviated_month_estimate_parsed():
     assert build_order_items(html, today="2026-08-11")[0].delivery_date == "2026-08-14"
 
 
+def test_moved_up_delivery_ignores_the_previously_expected_date():
+    """A moved-up delivery renders the STALE estimate under the live one -- "Now arriving Monday" in
+    the h4, "Previously expected September 15" in a second row (live capture 2026-09-11, order
+    111-9990013-9990013 on profile-charlie; the Business twin's case is 111-9990012-9990012). The
+    explicit-date scan used to prefer the stale date over the bare weekday, so the sheet kept the
+    old estimate while Amazon said next Monday. 2026-09-11 is a Friday."""
+    oid = "111-9990013-9990013"
+    card = ('<h4 class="a-color-base od-status-message"><span>Now arriving Monday</span></h4>'
+            '<div class="a-row od-status-message"><span>Previously expected September 15</span></div>')
+    html = _details(oid, "September 7, 2026",
+                    [_shipment(oid, 0, card, [_item("Apple 2026 MacBook Air 13-inch", "$1,499.00")])])
+    rows = build_order_items(html, today="2026-09-11")
+    assert rows[0].delivery_date == "2026-09-14"   # next Monday, not the stale September 15
+
+
+def test_moved_up_delivery_with_an_explicit_new_date_takes_the_new_one():
+    oid = "111-9990012-9990012"
+    card = ("<h4><span>Now arriving October 3</span></h4>"
+            "<div><span>Previously expected October 19</span></div>")
+    html = _details(oid, "September 4, 2026",
+                    [_shipment(oid, 0, card, [_item("Thing", "$5.00")])])
+    assert build_order_items(html, today="2026-09-08")[0].delivery_date == "2026-10-03"
+
+
 def test_delivered_weekday_resolves_to_past_occurrence():
     oid = "111-2223334-5556667"
     html = _details(oid, "August 7, 2026",

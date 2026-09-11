@@ -152,6 +152,12 @@ _MONTHS = {
 _WEEKDAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4,
              "saturday": 5, "sunday": 6}
 
+# A MOVED-UP delivery renders the stale estimate UNDER the live one — "Now arriving Monday" in
+# the h4, "Previously expected October 19" in a second .od-status-message row. Both land in one status text, and the explicit "<Month> <Day>" scan
+# below used to prefer the STALE date over the bare weekday, so the sheet kept October while
+# Amazon said next week. Everything from "previously" onward is history, never the answer.
+_PREVIOUS_ETA_RE = re.compile(r"(?<![A-Za-z])previously(?![A-Za-z]).*", re.IGNORECASE | re.DOTALL)
+
 # Digital line markers, matched against a SHIPMENT'S STATUS TEXT. A shipment whose status says it was
 # delivered electronically has no physical package, so it is never a reimbursable order line.
 # "balance is added to your account" is what Amazon prints for a Gift Card Balance Reload — captured
@@ -203,7 +209,8 @@ def _parse_status_date(status_text: str, order_date: str, today: str) -> str:
     """Best-effort YYYY-MM-DD from a shipment status card. Works for BOTH the actual delivery date
     ('Delivered <Month> <Day>' / 'Delivered today|yesterday') and the estimated arrival of a
     not-yet-delivered shipment ('Arriving <Month> <Day>', 'Now arriving <Month> <Day>', a
-    '… - <Month> <Day>' range — the first date is taken). This keeps the deterministic path's
+    '… - <Month> <Day>' range — the first date is taken; a trailing 'Previously expected <date>'
+    is discarded, see _PREVIOUS_ETA_RE). This keeps the deterministic path's
     delivery_date identical to the agent's, which records the ETA while ordered/shipped and the real
     date once delivered; a later re-check simply overwrites the estimate (a non-blank value overwrites
     in ledger_sync._merge_row), so a delayed ETA updates and the actual date lands on delivery.
@@ -213,6 +220,9 @@ def _parse_status_date(status_text: str, order_date: str, today: str) -> str:
     shipment', 'Not yet shipped')."""
     from datetime import date, timedelta
 
+    # Drop the "Previously expected <date>" tail first: on a moved-up delivery it is the only
+    # explicit date on the card, and it is the wrong one.
+    status_text = _PREVIOUS_ETA_RE.sub("", status_text)
     low = status_text.lower()
     # A self-receipt "…items marked as received" card is a PAST event just like "Delivered", so a
     # bare weekday on it must resolve backwards, not to the next occurrence.
