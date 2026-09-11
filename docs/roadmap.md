@@ -15,23 +15,21 @@ instead of running a paid agent (retired 2026-08-29).
 
 **Worth building, none urgent**
 
-- **A Tax Summary tab.** Two `SUMIFS` over two *different* date columns: receipts count on
-  `Payout Date`, costs on `Order Date`, so a December order paid in January belongs to different
-  years on the two sides. Insurance sums separately as a Schedule C expense, never inside COGS.
-  `scripts/tax_report.py` already computes all of it read-only.
-- **Fail loudly on a same-key collision from one order's parse.** Three silent row losses came
-  from the sync's same-key collapse; every known page shape is now handled in the mappings, so a
-  residual collision is an unknown shape and should end the run with a dossier problem.
-- **Auditor hardening leftovers.** A display-round-trip check across every numeric column,
-  cross-row order-level consistency, a locale-proof formula compare, profit recomputed in Python,
-  strict ISO date parsing.
-- **Docker unhealthy → notify.** An unhealthy container currently shows only in `docker ps`.
 - **Best Buy rewards** into the `Rewards Used` column (only Amazon prices rewards today).
 
 **Built and live-validated; still accumulating evidence**
 
 These ride real orders and close on their own schedule rather than being work items.
 
+- **Package ID.** Every row now carries the retailer's own per-package identity (Amazon's
+  `shipmentId`, Costco's `packageNumber`, Best Buy's `groupId`), matched on before the tracking
+  number so a package lands on the same row whatever position its card takes. Live-proven as
+  "fills in and updates in place"; the re-order and re-label cases wait for a real one.
+- **`superseded` rows.** A re-issued tracking number keeps its row as a retired, money-free
+  record instead of being deleted; the sync never re-posts, insures or pays it. Restored the one
+  historical case; the first new one is unobserved.
+- **Loud same-key collisions.** Two lines one parse could not tell apart now end in a failure
+  dossier and an alert rather than a silent merge. Built against three past incidents; no new one yet.
 - **Amazon multi-shipment split.** Shipment `1` must update in place while `2`/`3` append, and
   the order must stay open until the last box delivers. Validated on Costco and Best Buy; the
   Amazons share the code path but have not yet had an order split mid-run.
