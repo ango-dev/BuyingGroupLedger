@@ -1211,3 +1211,89 @@ def test_a_card_merely_named_rewards_is_not_a_points_tender():
               _widget(_widget_card("Amazon Rewards Visa", "1234")))
     assert order_uses_points(html) is False
     assert build_order_items(html)[0].card_last4 == "1234"
+
+
+# --- missing_card_reason: the loud tripwire for a silently blank card ----------------------------
+def test_blank_card_with_no_explanation_returns_a_reason():
+    from scrapers.amazon_mapping import missing_card_reason
+    html = _details(
+        "111-9990024-9990024", "September 11, 2026",
+        [_shipment("111-9990024-9990024", 0, "Arriving September 20", [_item("MacBook", "$1,249.00")])],
+    ).replace("<div>Payment method Visa ending in 1234</div>", "")
+    reason = missing_card_reason(html)
+    assert reason and "no card last-4" in reason and "$10.00" in reason
+
+
+def test_a_readable_card_in_either_shape_is_quiet():
+    from scrapers.amazon_mapping import missing_card_reason
+    shipments = [_shipment("111-2223334-5556667", 0, "Arriving Monday", [_item("Widget", "$10.00")])]
+    old = _details("111-2223334-5556667", "September 11, 2026", shipments)
+    new = old.replace("<div>Payment method Visa ending in 1234</div>", _widget(_widget_card()))
+    assert missing_card_reason(old) is None
+    assert missing_card_reason(new) is None
+
+
+def test_points_gift_card_cash_back_and_cancelled_orders_are_legitimately_cardless():
+    from scrapers.amazon_mapping import missing_card_reason
+    oid = "111-2223334-5556667"
+    shipments = [_shipment(oid, 0, "Arriving Monday", [_item("Widget", "$10.00")])]
+    base = _details(oid, "September 11, 2026", shipments)
+
+    points = base.replace("<div>Payment method Visa ending in 1234</div>", _widget(_WIDGET_POINTS_ROW))
+    assert missing_card_reason(points) is None
+
+    covered = _details(oid, "September 11, 2026", shipments, gift_card="$10.00") \
+        .replace("<div>Payment method Visa ending in 1234</div>", "")
+    assert missing_card_reason(covered) is None
+
+    partial = _details(oid, "September 11, 2026", shipments, gift_card="$4.00") \
+        .replace("<div>Payment method Visa ending in 1234</div>", "")
+    assert missing_card_reason(partial) is not None
+
+    cash = base.replace("<div>Payment method Visa ending in 1234</div>", "") \
+        .replace("Grand Total: $10.00", "Prime for Young Adults cash back: -$10.00\nGrand Total: $10.00")
+    assert missing_card_reason(cash) is None
+
+    cancelled = _details(oid, "September 11, 2026",
+                         [_shipment(oid, 0, "Cancelled", [_item("Widget", "$10.00")])]) \
+        .replace("<div>Payment method Visa ending in 1234</div>", "")
+    assert missing_card_reason(cancelled) is None
+
+
+# --- unknown_tender_reason: any instrument the parser can't classify alerts ----------------------
+def test_known_tenders_in_both_shapes_are_quiet():
+    from scrapers.amazon_mapping import unknown_tender_reason
+    oid = "111-2223334-5556667"
+    shipments = [_shipment(oid, 0, "Arriving Monday", [_item("Widget", "$10.00")])]
+    old = _details(oid, "September 12, 2026", shipments).replace(
+        "<div>Payment method Visa ending in 1234</div>",
+        '<ul><li class="pmts-payments-instrument-detail-box-paystationpaymentmethod">Visa ending in 1234</li>'
+        '<li class="pmts-payments-instrument-detail-box-paystationpaymentmethod">Amazon point</li>'
+        '<li class="pmts-payments-instrument-detail-box-paystationpaymentmethod">Amazon gift card balance</li>'
+        '<li class="pmts-payments-instrument-detail-box-paystationpaymentmethod">Prime for Young Adults cash back</li></ul>')
+    new = _details(oid, "September 12, 2026", shipments).replace(
+        "<div>Payment method Visa ending in 1234</div>",
+        _widget(_widget_card(), _WIDGET_POINTS_ROW, _WIDGET_CASH_BACK_ROW))
+    assert unknown_tender_reason(old) is None
+    assert unknown_tender_reason(new) is None
+    # A plain card-only order has nothing to fire on.
+    assert unknown_tender_reason(_details(oid, "September 12, 2026", shipments)) is None
+
+
+def test_an_unclassifiable_instrument_alerts_in_either_shape():
+    from scrapers.amazon_mapping import unknown_tender_reason
+    oid = "111-2223334-5556667"
+    shipments = [_shipment(oid, 0, "Arriving Monday", [_item("Widget", "$10.00")])]
+    base = _details(oid, "September 12, 2026", shipments)
+    old = base.replace(
+        "<div>Payment method Visa ending in 1234</div>",
+        '<div>Payment method Visa ending in 1234'
+        '<li class="pmts-payments-instrument-detail-box-paystationpaymentmethod">Affirm Monthly Payments</li></div>')
+    new = base.replace(
+        "<div>Payment method Visa ending in 1234</div>",
+        _widget(_widget_card(),
+                '<div data-testid="payment-instrument">'
+                '<span data-testid="payment-instrument-name">Prime Flex Balance</span></div>'))
+    for html, expect in ((old, "Affirm Monthly Payments"), (new, "Prime Flex Balance")):
+        reason = unknown_tender_reason(html)
+        assert reason and expect in reason and "cannot price" in reason

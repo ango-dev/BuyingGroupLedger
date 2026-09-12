@@ -157,6 +157,9 @@ _POINTS_PER_DOLLAR = 100
 _TAX_RE = re.compile(r"Estimated tax to be collected:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 # What the order is actually worth — the ceiling its shipment cards may not exceed.
 _SUBTOTAL_RE = re.compile(r"Item\(s\) Subtotal:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
+# What the buyer owed — the number the non-card tenders must cover for a card-less order to be
+# legitimate (see missing_card_reason).
+_GRAND_TOTAL_RE = re.compile(r"Grand Total:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7,
@@ -568,6 +571,90 @@ def order_uses_points(order_details_html: str) -> bool:
     """`uses_points` straight off the page HTML — what the API client asks before spending a page
     load on the related-transactions page. False for every order that paid by card alone."""
     return uses_points(_order_region(BeautifulSoup(order_details_html or "", "html.parser")))
+
+
+def missing_card_reason(order_details_html: str) -> str | None:
+    """Why a parsed order with NO readable card is suspicious — or None when the page explains it.
+
+    An unmatched card is exactly how the rebuilt payment widget silently blanked Card Last 4 for a
+    run: the parse "succeeded", so no
+    dossier was written and nothing alerted until the sheet audit. The API client calls this after
+    a successful build whose rows all carry a blank card and, given a reason, files a dossier
+    problem WITH the page attached while still RECORDING the rows — one unreadable field must
+    alert, not drop reimbursement money (the blank fills itself once the parser is fixed).
+
+    A card-less order is legitimate — and stays quiet — when every shipment is cancelled (what such
+    a page renders for payment is unobserved, so no guessing), when points are a tender (their
+    amount lives off-page), or when the gift-card + cash-back lines cover the Grand Total.
+    An unreadable Grand Total does NOT excuse it: that is a summary-shape change of its own.
+    """
+    soup = BeautifulSoup(order_details_html or "", "html.parser")
+    region = _order_region(soup)
+    if _ENDING_IN_RE.search(region.get_text(" ", strip=True)) or _card_last4_from_widget(region):
+        return None
+    statuses = [_status_from_text(el.get_text(" ", strip=True))
+                for el in region.select("[data-component='shipmentStatus']")]
+    if statuses and all(s == "cancelled" for s in statuses):
+        return None
+    if uses_points(region):
+        return None
+    summary_el = region.select_one("[data-component='orderSummary']")
+    gift = _gift_card_amount(summary_el) or 0.0
+    cash = _cash_back_used(summary_el) or 0.0
+    m = _GRAND_TOTAL_RE.search(summary_el.get_text("\n", strip=True)) if summary_el else None
+    total = _num(m.group(1)) if m else None
+    if total is not None and gift + cash >= total - 0.005:
+        return None
+    return (
+        "no card last-4 on the page ('ending in NNNN' and the payment-instrument-number span "
+        f"both missing), and the non-card tenders (gift card ${gift:.2f} + cash back ${cash:.2f}) "
+        "do not cover the Grand Total "
+        f"({f'${total:.2f}' if total is not None else 'unreadable'}) — payment shape changed again?"
+    )
+
+
+# The wordings that mark a NON-CARD instrument row as a tender the money columns can price:
+# points/rewards go through Rewards Used, these two through Gift Card. A row matching none of the
+# known kinds is what unknown_tender_reason exists for.
+_CASH_BACK_TENDER_HINT = "cash back"
+_GIFT_CARD_TENDER_HINT = "gift card"
+
+
+def unknown_tender_reason(order_details_html: str) -> str | None:
+    """A payment instrument the parser cannot classify — or None when every tender is a known kind.
+
+    The known kinds are the ones the money columns can price: the paying card (a last-4 in either
+    shape), Amazon points/rewards, a spent cash-back balance, and a gift-card balance. Anything
+    else in the payment list — a renamed points row, a reworded gift-card tender, a tender type
+    never seen before — would otherwise become a silent wrong 0 in Gift Card / Rewards Used, so it
+    must alert instead. A benign new wording costs one false alarm and
+    one hint added beside the ones above; a card-only order has nothing here to fire on.
+    """
+    soup = BeautifulSoup(order_details_html or "", "html.parser")
+    region = _order_region(soup)
+    unknown: list[str] = []
+    for el in region.select(_PAYMENT_INSTRUMENT_SELECTOR):
+        text = el.get_text(" ", strip=True)
+        low = text.lower()
+        if not text or _ENDING_IN_RE.search(text) or _POINTS_INSTRUMENT_RE.match(text) \
+                or _CASH_BACK_TENDER_HINT in low or _GIFT_CARD_TENDER_HINT in low:
+            continue
+        unknown.append(text)
+    for inst in region.select(_WIDGET_INSTRUMENT_SELECTOR):
+        if inst.select_one(_CARD_LAST4_SELECTOR) is not None:
+            continue  # the paying card (a malformed number is missing_card_reason's job)
+        name_el = inst.select_one(_WIDGET_INSTRUMENT_NAME_SELECTOR)
+        name = name_el.get_text(" ", strip=True) if name_el else inst.get_text(" ", strip=True)
+        low = name.lower()
+        if not name or _WIDGET_POINTS_NAME_RE.search(name) \
+                or _CASH_BACK_TENDER_HINT in low or _GIFT_CARD_TENDER_HINT in low:
+            continue
+        unknown.append(name)
+    if not unknown:
+        return None
+    names = ", ".join(f"'{u[:80]}'" for u in dict.fromkeys(unknown))
+    return (f"unrecognized payment instrument(s) {names} — a tender the parser cannot price; "
+            "if it paid part of the order, Gift Card / Rewards Used and COGS are wrong for it")
 
 
 def points_used_from_transactions(transactions_html: str, order_id: str) -> float | None:

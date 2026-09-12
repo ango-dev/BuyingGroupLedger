@@ -28,8 +28,9 @@ import diagnostics
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
 from scrapers.amazon_mapping import (RETAILER, TRANSACTIONS_URL, OrderPageShapeError, build_order_items,
-                                     discover_orders, history_rendered, order_uses_points,
-                                     parse_shipment_targets, points_used_from_transactions)
+                                     discover_orders, history_rendered, missing_card_reason,
+                                     order_uses_points, parse_shipment_targets,
+                                     points_used_from_transactions, unknown_tender_reason)
 from scrapers.amazon_signin import deterministic_login, looks_logged_out
 from scrapers.base import ApiLoginError
 from scrapers.cdp import CdpBrowser
@@ -181,6 +182,20 @@ class AmazonApiClient:
                 diagnostics.snapshot_html(html, f"order-details for {oid}: {exc}",
                                           url=ORDER_DETAILS_URL.format(oid))
                 raise AmazonApiError(str(exc)) from exc
+            # Loud tender checks on the successfully parsed page (the rows are STILL recorded —
+            # an unpriceable field must alert, never drop reimbursement money): a blank card no
+            # tender explains (2026-09-11's silent blank), and any payment instrument the parser
+            # cannot classify, which would otherwise become a silent wrong 0 in Gift Card /
+            # Rewards Used.
+            reasons = [r for r in (
+                missing_card_reason(html) if built and not any(b.card_last4 for b in built) else None,
+                unknown_tender_reason(html),
+            ) if r]
+            for reason in reasons:
+                diagnostics.problem(f"order {oid}: {reason}")
+            if reasons:
+                diagnostics.snapshot_html(html, f"order-details for {oid}: " + "; ".join(reasons),
+                                          url=ORDER_DETAILS_URL.format(oid))
             rows.extend(built)
 
         # Final keep filter using the authoritative per-order date already parsed into the rows.

@@ -409,3 +409,66 @@ class TestAmazonPoints:
             rows = AmazonBusinessApiClient(_Profile()).fetch_order_items("2026-09-01", set(), set(), today="2026-09-07")
         assert rows[0].rewards_used is None
         assert d.problems and "rewards ledger" in d.problems[0] and pts in d.problems[0]
+
+
+def test_a_blank_unexplained_card_files_a_dossier_problem_but_keeps_the_rows(monkeypatch):
+    # The 2026-09-11 silent blank, made loud: the page parses fine but no shape yields a card and
+    # no tender explains a card-less order -> diagnostics.problem + the page attached, and the
+    # rows STILL record (the blank fills itself once the parser is fixed).
+    oid = "111-9990024-9990024"
+    cardless = _details(oid, "August 9, 2026",
+                        [_shipment(oid, 0, "Arriving Monday", [_item("MacBook", "$10.00")])]) \
+        .replace("<div>Payment method Prime Business Card ending in 1234 5% back</div>", "")
+    _install_fake(monkeypatch, [_history(_order_card(oid, "August 9, 2026"))], {oid: cardless})
+    problems, snaps = [], []
+    monkeypatch.setattr(api.diagnostics, "problem", lambda msg: problems.append(msg))
+    monkeypatch.setattr(api.diagnostics, "snapshot_html",
+                        lambda html, label, url="": snaps.append(label))
+
+    client = AmazonBusinessApiClient(_Profile())
+    rows = client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+    assert rows and rows[0].card_last4 == ""          # the order is NOT dropped
+    assert problems and oid in problems[0] and "no card last-4" in problems[0]
+    assert any(oid in label for label in snaps)
+
+
+def test_a_cardless_order_the_page_explains_stays_quiet(monkeypatch):
+    oid = "111-4444444-4444444"
+    covered = _details(oid, "August 9, 2026",
+                       [_shipment(oid, 0, "Arriving Monday", [_item("Thing", "$5.00")])],
+                       gift_card="$10.87") \
+        .replace("<div>Payment method Prime Business Card ending in 1234 5% back</div>", "")
+    _install_fake(monkeypatch, [_history(_order_card(oid, "August 9, 2026"))], {oid: covered})
+    problems = []
+    monkeypatch.setattr(api.diagnostics, "problem", lambda msg: problems.append(msg))
+
+    client = AmazonBusinessApiClient(_Profile())
+    rows = client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+    assert rows and rows[0].card_last4 == ""
+    assert problems == []
+
+
+def test_an_unrecognized_tender_files_a_dossier_problem_but_keeps_the_rows(monkeypatch):
+    # The 2026-09-12 ruling: an instrument the parser can't classify would otherwise become a
+    # silent wrong 0 in Gift Card / Rewards Used -> problem + page attached, rows still recorded.
+    oid = "111-5555555-5555555"
+    html_page = _details(oid, "August 9, 2026",
+                         [_shipment(oid, 0, "Arriving Monday", [_item("Thing", "$5.00")])]) \
+        .replace("<div>Payment method Prime Business Card ending in 1234 5% back</div>",
+                 '<div>Payment method Prime Business Card ending in 1234'
+                 '<li class="pmts-payments-instrument-detail-box-paystationpaymentmethod">'
+                 "Pay by Invoice</li></div>")
+    _install_fake(monkeypatch, [_history(_order_card(oid, "August 9, 2026"))], {oid: html_page})
+    problems, snaps = [], []
+    monkeypatch.setattr(api.diagnostics, "problem", lambda msg: problems.append(msg))
+    monkeypatch.setattr(api.diagnostics, "snapshot_html",
+                        lambda html, label, url="": snaps.append(label))
+
+    client = AmazonBusinessApiClient(_Profile())
+    rows = client.fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+
+    assert rows and rows[0].card_last4 == "1234"      # the order is NOT dropped, card intact
+    assert problems and "Pay by Invoice" in problems[0]
+    assert any(oid in label for label in snaps)
