@@ -992,3 +992,98 @@ def test_same_id_cards_with_different_contents_are_left_alone(monkeypatch):
     rows = build_order_items(html)
     assert [(r.shipment, r.item_name) for r in rows] == [("1", "iPad"), ("2", "Case")]
     assert calls == []
+
+
+# --- the rebuilt payment widget ------
+# Amazon replaced the pmts-* payment-method list with a server-rendered Next.js "ViewPurchase"
+# widget: the card renders as three spans (name / mask dots / last 4) and the words "ending in"
+# are gone from the page, so _ENDING_IN_RE alone left Card Last 4 blank on the sheet. Twin of the
+# consumer test; the widget was captured on this Business order.
+def _widget(*rows: str) -> str:
+    return (
+        '<div data-component="viewPaymentPlanSummaryWidget"><div id="__next">'
+        '<div aria-label="payment method list">' + "".join(
+            f'<div aria-label="payment method">{r}</div>' for r in rows
+        ) + "</div></div></div>"
+    )
+
+
+def _widget_card(name: str = "Prime Business Card", last4: str = "0315") -> str:
+    return (
+        '<div data-testid="payment-instrument">'
+        f'<span data-testid="payment-instrument-name">{name}</span>'
+        '<span data-testid="payment-instrument-prefix">\u2022\u2022\u2022\u2022</span>'
+        f'<span data-testid="payment-instrument-number">{last4}</span></div>'
+    )
+
+
+# The numberless tender rows, as captured live: the points instrument
+# (111-9990010-9990010, THIS retailer) and a spent cash-back balance (111-9990008-9990008).
+_WIDGET_POINTS_ROW = ('<div data-testid="payment-instrument">'
+                      '<span data-testid="payment-instrument-name">Prime Business Rewards</span></div>')
+_WIDGET_CASH_BACK_ROW = ('<div data-testid="payment-instrument">'
+                         '<span data-testid="payment-instrument-name">Prime Young Adults cash back</span>'
+                         "<span>$15.98 applied</span></div>")
+
+_NEW_PAYMENT_WIDGET = _widget(_widget_card())
+
+
+def test_rebuilt_payment_widget_yields_card_last4():
+    html = _details(
+        "111-9990024-9990024", "September 11, 2026",
+        [_shipment("111-9990024-9990024", 0, "Arriving September 20",
+                   [_item("MacBook Air", "$1,249.00", qty=3)])],
+    ).replace("<div>Payment method Prime Business Card ending in 1234 5% back</div>",
+              _NEW_PAYMENT_WIDGET)
+    assert "ending in" not in html
+    rows = build_order_items(html, today="2026-09-11")
+    assert rows[0].card_last4 == "0315"
+
+
+def test_rebuilt_payment_widget_without_a_number_span_leaves_the_card_blank():
+    html = _details(
+        "111-9990024-9990024", "September 11, 2026",
+        [_shipment("111-9990024-9990024", 0, "Arriving September 20",
+                   [_item("MacBook Air", "$1,249.00")])],
+    ).replace(
+        "<div>Payment method Prime Business Card ending in 1234 5% back</div>",
+        # A tender with no card digits (e.g. a gift-card instrument) renders name-only.
+        '<div data-testid="payment-instrument">'
+        '<span data-testid="payment-instrument-name">Amazon Gift Card</span></div>',
+    )
+    rows = build_order_items(html, today="2026-09-11")
+    assert rows[0].card_last4 == ""
+
+
+def test_rebuilt_widget_points_instrument_gates_the_transactions_read():
+    from scrapers.amazon_business_mapping import order_uses_points
+    html = _details(
+        "111-9990010-9990010", "September 7, 2026",
+        [_shipment("111-9990010-9990010", 0, "Delivered September 9", [_item("Filament", "$48.28")])],
+    ).replace("<div>Payment method Prime Business Card ending in 1234 5% back</div>",
+              _widget(_widget_card(), _WIDGET_POINTS_ROW))
+    assert order_uses_points(html) is True
+    # The amount still comes from the rewards ledger / transactions page; unknown stays blank.
+    assert build_order_items(html, points_used=48.28)[0].rewards_used == 48.28
+    assert build_order_items(html)[0].rewards_used is None
+
+
+def test_rebuilt_widget_cash_back_row_is_not_a_points_tender():
+    from scrapers.amazon_business_mapping import order_uses_points
+    html = _details(
+        "111-9990008-9990008", "September 5, 2026",
+        [_shipment("111-9990008-9990008", 0, "Delivered September 7", [_item("Charger", "$15.98")])],
+    ).replace("<div>Payment method Prime Business Card ending in 1234 5% back</div>",
+              _widget(_widget_card("Prime Visa", "4345"), _WIDGET_CASH_BACK_ROW))
+    assert order_uses_points(html) is False
+
+
+def test_a_card_merely_named_rewards_is_not_a_points_tender():
+    from scrapers.amazon_business_mapping import order_uses_points
+    html = _details(
+        "111-2223334-5556667", "September 7, 2026",
+        [_shipment("111-2223334-5556667", 0, "Arriving Monday", [_item("Widget", "$10.00")])],
+    ).replace("<div>Payment method Prime Business Card ending in 1234 5% back</div>",
+              _widget(_widget_card("Amazon Rewards Visa", "1234")))
+    assert order_uses_points(html) is False
+    assert build_order_items(html)[0].card_last4 == "1234"

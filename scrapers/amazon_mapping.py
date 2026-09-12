@@ -42,6 +42,20 @@ _BASE = "https://www.amazon.com"
 ORDER_ID_RE = re.compile(r"\d{3}-\d{7}-\d{7}")
 _ORDER_DETAILS_ID_RE = re.compile(r"order-details\?orderID=(\d{3}-\d{7}-\d{7})", re.IGNORECASE)
 _ENDING_IN_RE = re.compile(r"ending in\s+(\d{4})", re.IGNORECASE)
+# Amazon's rebuilt payment widget (a server-rendered Next.js "ViewPurchase" block, first seen live
+# 2026-09-11 on order 111-9990024-9990024) renders the card as separate spans — name / "••••" /
+# "0315" — with NO "ending in" text anywhere, so the last 4 must be read from this span instead.
+# It is an A/B rollout mid-flight: the same day, profile-bravo's pages still carried the old pmts-*
+# list, and the widget also rewrote OLD orders' pages — so both shapes stay supported for good.
+_CARD_LAST4_SELECTOR = "[data-testid='payment-instrument-number']"
+# The widget's instrument rows. Only the paying card carries a number span; the points instrument
+# is renamed ("Amazon point" → "Prime Business Rewards", live on 111-9990010-9990010)
+# and a spent cash-back balance renders as its own numberless row ("Prime Young Adults cash back" +
+# "$15.98 applied") — that one is priced by the order-summary line, which survived the widget, and
+# must NOT gate a transactions-page read.
+_WIDGET_INSTRUMENT_SELECTOR = "[data-testid='payment-instrument']"
+_WIDGET_INSTRUMENT_NAME_SELECTOR = "[data-testid='payment-instrument-name']"
+_WIDGET_POINTS_NAME_RE = re.compile(r"\b(?:points?|rewards)\b", re.IGNORECASE)
 _SHIPMENT_ID_RE = re.compile(r"shipmentId=([A-Za-z0-9]+)")
 _ASIN_RE = re.compile(r"asin=([A-Z0-9]{10})|/dp/([A-Z0-9]{10})")
 _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
@@ -83,6 +97,9 @@ SELECTORS: dict[str, str] = {
     "item_merchant": "[data-component='orderedMerchant']",
     "card_earn_line": _EARN_LINE_SELECTOR,
     "payment_instrument": _PAYMENT_INSTRUMENT_SELECTOR,
+    "payment_card_last4": _CARD_LAST4_SELECTOR,
+    "payment_instrument_widget": _WIDGET_INSTRUMENT_SELECTOR,
+    "payment_instrument_widget_name": _WIDGET_INSTRUMENT_NAME_SELECTOR,
     # Matches only on the related-transactions page (TRANSACTIONS_URL), so it audits at 0 on an
     # order-details snapshot — the same way the pt-page selectors do.
     "transactions_line_item": _TRANSACTION_LINE_SELECTOR,
@@ -475,9 +492,26 @@ def _cash_back_used(summary_el) -> float | None:
 
 
 def uses_points(region) -> bool:
-    """True when the payment-method list names Amazon points as one of the order's tenders."""
-    return any(_POINTS_INSTRUMENT_RE.match(el.get_text(" ", strip=True) or "")
-               for el in region.select(_PAYMENT_INSTRUMENT_SELECTOR))
+    """True when the payment-method list names Amazon points as one of the order's tenders.
+
+    Both shapes are checked: the old pmts-* instrument list ("Amazon point"), and the rebuilt
+    widget, where the points tender is a numberless instrument row whose name says points/rewards
+    ("Prime Business Rewards"). The no-number-span guard is what keeps a card NAMED "rewards"
+    (e.g. "Amazon Rewards Visa") from counting, and a cash-back row is its own tender.
+    """
+    if any(_POINTS_INSTRUMENT_RE.match(el.get_text(" ", strip=True) or "")
+           for el in region.select(_PAYMENT_INSTRUMENT_SELECTOR)):
+        return True
+    for inst in region.select(_WIDGET_INSTRUMENT_SELECTOR):
+        if inst.select_one(_CARD_LAST4_SELECTOR) is not None:
+            continue
+        name_el = inst.select_one(_WIDGET_INSTRUMENT_NAME_SELECTOR)
+        name = name_el.get_text(" ", strip=True) if name_el else ""
+        if "cash back" in name.lower():
+            continue
+        if _WIDGET_POINTS_NAME_RE.search(name):
+            return True
+    return False
 
 
 def order_uses_points(order_details_html: str) -> bool:
@@ -794,6 +828,19 @@ def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
     return survivors
 
 
+def _card_last4_from_widget(region) -> str:
+    """The paying card's last 4 from the rebuilt payment widget, "" when it isn't on the page.
+
+    The prefix span holds the mask dots and a gift-card instrument row has no number span at all,
+    so only an exactly-4-digit span counts.
+    """
+    for el in region.select(_CARD_LAST4_SELECTOR):
+        digits = el.get_text(strip=True)
+        if re.fullmatch(r"\d{4}", digits):
+            return digits
+    return ""
+
+
 def build_order_items(
     order_details_html: str,
     profile_label: str = "",
@@ -832,7 +879,7 @@ def build_order_items(
     order_date = _parse_full_date(date_el.get_text(" ", strip=True) if date_el else "")
 
     card_m = _ENDING_IN_RE.search(region_text)
-    card_last4 = card_m.group(1) if card_m else ""
+    card_last4 = card_m.group(1) if card_m else _card_last4_from_widget(region)
 
     summary_el = region.select_one("[data-component='orderSummary']")
     shipping = None
