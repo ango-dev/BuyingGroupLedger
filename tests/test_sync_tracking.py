@@ -18,9 +18,11 @@ from sync_tracking import (
     PAYOUT_DATE_COL,
     STATUS_COL,
     SUBMITTED_COL,
+    _expected_payment_mismatches,
     _first_n_packages,
     _tick_submitted,
     _status_rank,
+    allocate_expected_payouts,
     allocate_payouts,
     plan_tracking_submissions,
 )
@@ -1006,3 +1008,228 @@ class TestOrderScopedAllocation:
         ])
         assert writes[4]["Payout Amount"] == round(269.1 * 2392.0 / 2691.0, 2)
         assert writes[5]["Payout Amount"] == round(269.1 * 299.0 / 2691.0, 2)
+
+
+class TestExpectedPayoutPlanning:
+    """The planner's half of the committed-price watch: which rows can carry the commitment.
+
+    The commitment is keyed by ORDER, not tracking — BFMR publishes the price from the moment the
+    user's hand-typed order number creates the purchase, which is before any tracking number
+    exists — so rows still awaiting shipment must already be in the order index. It lands in the
+    existing Payout Amount cell, so the planner also reads the cell as
+    it stands (the baseline the change alert compares against) and the Payout Date (blank = not
+    settled, the gate that keeps the commitment pass off real money).
+    """
+
+    def test_an_awaiting_row_joins_the_order_index_before_any_tracking_exists(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [
+            shipped("O1", "", **{"Status": "ordered", "Total Cost": 250, "Item Name": "MacBook"}),
+        ])
+        assert plan["rows_by_order"]["BFMR"]["O1"] == [2]
+        assert plan["costs_by_row"][2] == 250.0
+        assert plan["item_of_row"][2] == "MacBook"
+        assert plan["payout_by_row"][2] is None
+        assert plan["date_by_row"][2] == ""
+        assert not plan["rows_by_tracking"], "no tracking, so the payout allocation can't reach it"
+
+    def test_a_tracked_row_carries_its_recorded_commitment_and_settlement_state(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [
+            shipped("O1", "T1", **{PAYOUT_AMOUNT_COL: 500}),
+            shipped("O2", "T2", **{PAYOUT_AMOUNT_COL: 97, PAYOUT_DATE_COL: "2026-09-01"}),
+        ])
+        assert plan["payout_by_row"][2] == 500.0, "the recorded commitment is the baseline"
+        assert plan["date_by_row"][2] == ""
+        assert plan["date_by_row"][3] == "2026-09-01", "a dated payout is settled money"
+
+    def test_retired_and_cancelled_rows_stay_out_of_the_order_index(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [
+            shipped("O1", "T1", **{"Status": "superseded"}),
+            shipped("O2", "T2", **{"Status": "cancelled"}),
+        ])
+        assert plan["rows_by_order"] == {}
+
+    def test_an_unroutable_awaiting_row_is_not_indexed(self):
+        plan = plan_tracking_submissions(HEADER_LIST, [
+            shipped("O1", "", **{"Status": "ordered"}, group="Unclassified"),
+        ])
+        assert plan["rows_by_order"] == {}
+
+
+class TestExpectedPayoutAllocation:
+    """allocate_expected_payouts: prorate the commitment into Payout Amount, notice when it MOVES,
+    and never touch a cell that holds (or is this run receiving) real money."""
+
+    COL = PAYOUT_AMOUNT_COL
+
+    @staticmethod
+    def _alloc(records, rows_by_order, costs, items=None, status=None, expected=None,
+               dates=None, settling=None):
+        return allocate_expected_payouts(
+            [PayoutRecord(**r) for r in records], rows_by_order, costs,
+            items or {}, status or {}, expected or {}, dates or {}, settling or set(),
+        )
+
+    def test_a_first_sighting_prorates_by_cost_and_raises_no_alert(self):
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 1230.0}],
+            {"O1": [2, 3]}, {2: 100.0, 3: 300.0},
+        )
+        assert writes == {2: {self.COL: 307.5}, 3: {self.COL: 922.5}}
+        assert changes == []
+
+    def test_an_unchanged_commitment_queues_no_writes_at_all(self):
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 1230.0}],
+            {"O1": [2, 3]}, {2: 100.0, 3: 300.0},
+            expected={2: 307.5, 3: 922.5},
+        )
+        assert writes == {} and changes == []
+
+    def test_a_moved_price_rewrites_the_cells_and_names_old_and_new(self):
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 1100.0,
+              "item_hint": "MacBook Air 13"}],
+            {"O1": [2, 3]}, {2: 100.0, 3: 300.0},
+            expected={2: 307.5, 3: 922.5},
+        )
+        assert writes == {2: {self.COL: 275.0}, 3: {self.COL: 825.0}}
+        assert len(changes) == 1
+        assert "$1,230.00 -> $1,100.00" in changes[0] and "O1" in changes[0]
+
+    def test_proration_rounding_drift_is_not_a_price_change(self):
+        """Three-way splits round each cell to the cent; the re-read must not see its own rounding
+        as BFMR moving the price, or every run alerts forever."""
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 100.0}],
+            {"O1": [2, 3, 4]}, {2: 1.0, 3: 1.0, 4: 1.0},
+            expected={2: 33.33, 3: 33.33, 4: 33.33},
+        )
+        assert changes == [], "99.99 vs 100.00 is rounding, not a repriced deal"
+
+    def test_paid_and_returned_rows_keep_whatever_they_hold(self):
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 1230.0}],
+            {"O1": [2, 3]}, {2: 100.0, 3: 300.0},
+            status={2: "paid", 3: "return"},
+        )
+        assert writes == {} and changes == []
+
+    def test_a_dated_payout_is_settled_money_and_is_never_touched(self):
+        """MOD-style dateless `paid` rows are covered by status; a dated cell is covered here —
+        real money either way, and the commitment pass must not overwrite or 'correct' it."""
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 1230.0}],
+            {"O1": [2]}, {2: 100.0},
+            expected={2: 905.0}, dates={2: "2026-09-01"},
+        )
+        assert writes == {} and changes == []
+
+    def test_rows_being_settled_this_run_drop_out_without_a_spurious_price_alert(self):
+        """A partial settlement (a 2+1 split, one box paid first): entry A settles — its record
+        has left the commitment read AND its row is in settling_rows — while entry B stays open.
+        The bucket total drops by A's share and A's row leaves the membership in the same run, so
+        the remaining totals still agree: no fake 'price change', no write over the settlement."""
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 1349.0,
+              "item_hint": "MacBook Air"}],  # only B's commitment survives the read
+            {"O1": [2, 3]}, {2: 2000.0, 3: 1000.0},
+            expected={2: 2698.0, 3: 1349.0},  # the cells as the previous run left them
+            settling={2},                     # A's row: allocate_payouts is writing it real money
+        )
+        assert writes == {}, "B's cell already agrees; A's belongs to allocate_payouts this run"
+        assert changes == [], "a settlement is not a repricing"
+
+    def test_a_zero_commitment_is_never_written(self):
+        """Same rule as the settlement path: a literal 0 in Payout Amount makes Total Profit
+        compute a large fictitious loss."""
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 0.0}],
+            {"O1": [2]}, {2: 100.0},
+        )
+        assert writes == {} and changes == []
+
+    def test_a_new_row_under_the_same_commitment_is_filled_quietly(self):
+        """A split appends a row: the total still agrees, so the cells re-prorate with NO alert."""
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 1230.0}],
+            {"O1": [2, 3, 4]}, {2: 100.0, 3: 100.0, 4: 100.0},
+            expected={2: 615.0, 3: 615.0, 4: None},
+        )
+        assert writes == {2: {self.COL: 410.0}, 3: {self.COL: 410.0}, 4: {self.COL: 410.0}}
+        assert changes == []
+
+    def test_two_deals_of_one_order_split_by_item_words(self):
+        writes, _ = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 80.0,
+              "item_hint": "AirTag 4 Pack"},
+             {"tracking_number": "", "order_id": "O1", "expected_amount": 97.0,
+              "item_hint": "Fitbit Versa 4"}],
+            {"O1": [2, 3]}, {2: 79.0, 3: 99.0},
+            items={2: "Apple AirTag 4 Pack", 3: "Fitbit Versa 4 Smartwatch"},
+        )
+        assert writes == {2: {self.COL: 80.0}, 3: {self.COL: 97.0}}
+
+    def test_an_unclean_partition_falls_back_to_the_order_level(self):
+        writes, _ = self._alloc(
+            [{"tracking_number": "", "order_id": "O1", "expected_amount": 80.0,
+              "item_hint": "Mystery Deal"},
+             {"tracking_number": "", "order_id": "O1", "expected_amount": 100.0,
+              "item_hint": "Other Mystery"}],
+            {"O1": [2, 3]}, {2: 100.0, 3: 100.0},
+            items={2: "Widget", 3: "Widget"},
+        )
+        assert writes == {2: {self.COL: 90.0}, 3: {self.COL: 90.0}}, (
+            "who-gets-what is unknowable, but the order's TOTAL commitment still is not")
+
+    def test_an_order_the_sheet_does_not_know_waits_for_the_next_run(self):
+        writes, changes = self._alloc(
+            [{"tracking_number": "", "order_id": "NOT-SCRAPED-YET", "expected_amount": 500.0}],
+            {"O1": [2]}, {2: 100.0},
+        )
+        assert writes == {} and changes == []
+
+    def test_records_without_a_commitment_or_an_order_are_ignored(self):
+        writes, changes = self._alloc(
+            [{"tracking_number": "T1", "order_id": "O1"},               # no expected_amount
+             {"tracking_number": "T1", "expected_amount": 500.0}],     # no order_id
+            {"O1": [2]}, {2: 100.0},
+        )
+        assert writes == {} and changes == []
+
+
+class TestExpectedPaymentMismatch:
+    """The settlement-time half: BFMR paid a different figure than it committed to."""
+
+    @staticmethod
+    def _lines(record_kwargs, date_by_row=None, rows=(2,)):
+        plan = {
+            "rows_by_tracking": {"T1": list(rows)},
+            "date_by_row": date_by_row if date_by_row is not None else {2: ""},
+        }
+        return _expected_payment_mismatches(
+            [PayoutRecord(tracking_number="T1", **record_kwargs)], plan)
+
+    def test_a_short_pay_is_reported_with_both_figures(self):
+        lines = self._lines({"order_id": "O1", "payout_amount": 900.0, "expected_amount": 905.0,
+                             "item_hint": "MacBook Air"})
+        assert len(lines) == 1
+        assert "$900.00" in lines[0] and "$905.00" in lines[0] and "O1" in lines[0]
+
+    def test_a_payment_matching_the_commitment_is_silent(self):
+        assert self._lines({"payout_amount": 905.0, "expected_amount": 905.0}) == []
+
+    def test_a_cent_of_rounding_is_not_a_short_pay(self):
+        assert self._lines({"payout_amount": 905.0, "expected_amount": 905.02}) == []
+
+    def test_it_fires_only_while_the_payout_date_is_still_unwritten(self):
+        """The run that first writes the settlement alerts; every later run sees the DATE filled
+        and stays quiet — a mismatch repeated forever is a mismatch that gets muted. The amount
+        cell can't be the gate: it holds the commitment long before settlement."""
+        assert self._lines({"payout_amount": 900.0, "expected_amount": 905.0},
+                           date_by_row={2: "2026-09-10"}) == []
+
+    def test_a_package_the_sheet_does_not_know_is_silent(self):
+        assert self._lines({"payout_amount": 900.0, "expected_amount": 905.0}, rows=()) == []
+
+    def test_a_record_with_no_commitment_is_silent(self):
+        assert self._lines({"payout_amount": 900.0}) == []

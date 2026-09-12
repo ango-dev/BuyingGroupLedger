@@ -698,16 +698,21 @@ class BFMRClient(HttpClient):
             records.append(PayoutRecord(
                 tracking_number=number,
                 # `amount_paid`, not `total_payout`: the latter is what the deal is WORTH and is
-                # populated from the moment a purchase exists, so writing it would fill Payout Amount
-                # — and light up Total Profit — for money that has not arrived. `amount_paid` reads
-                # "0.00" until BFMR actually pays. And only when BFMR says paid at all: a `returned`
-                # package's figures are ambiguous, and a blank cell correctly reads "not paid out"
-                # where a wrong number would quietly overstate profit.
+                # populated from the moment a purchase exists — that figure travels separately as
+                # `expected_amount` below, and reaches Payout Amount only through the deliberate
+                # commitment path (fetch_expected_payouts + sync_tracking), which never stamps a
+                # Payout Date. THIS field is the settlement: `amount_paid` reads "0.00" until BFMR
+                # actually pays, and it lands together with the date and the `paid` status. And
+                # only when BFMR says paid at all: a `returned` package's figures are ambiguous,
+                # and a wrong number here would quietly overstate profit.
                 payout_amount=settled,
                 payout_date=_bfmr_date_to_iso(entry.get("date_paid")) if paid else "",
                 insurance=None,
                 order_id=_order_id_of(entry),
                 status=status,
+                # The committed figure rides along so the settlement can be compared against it —
+                # sync_tracking alerts when BFMR pays a different amount than it committed to.
+                expected_amount=_expected_of(entry),
                 # Both of BFMR's names for the item, so allocate_payouts can tell two deals of one
                 # order apart when their outcomes diverge inside one box (deal_title is the deal's
                 # own wording, item_name their catalog line — either can carry the matching words).
@@ -756,6 +761,52 @@ class BFMRClient(HttpClient):
                     records[index] = PayoutRecord(tracking_number=number, insurance=premium)
         except Exception as exc:  # noqa: BLE001 — the fee rows already covered this; don't fail a run
             log.info("BFMR: insured list unavailable (%s); premiums came from the fee rows.", exc)
+        return records
+
+    def fetch_expected_payouts(self, order_ids) -> list[PayoutRecord]:
+        """What BFMR has COMMITTED to pay per still-open purchase of these orders, keyed by order.
+
+        The tracker carries `payout_price`/`total_payout` from the moment a purchase exists —
+        before a tracking number, before shipping, long before payment (live capture: a
+        `status: "purchased"` row with no tracking and `amount_paid: null` already reads
+        `payout_price: 1230`). `fetch_payouts` refuses to treat that figure as a SETTLEMENT; this
+        read is how it reaches the sheet as a COMMITMENT instead. Recorded the moment the user's hand-typed order number links the
+        reservation, a later tracker read that disagrees is BFMR moving the committed price —
+        worth an alert, not a surprise at settlement.
+
+        KEYED BY ORDER, NOT TRACKING, deliberately: at purchase time no tracking number exists yet,
+        and the order number is the one identifier the ledger and BFMR already share (it is how the
+        user links the reservation in the first place). `sync_tracking.allocate_expected_payouts`
+        spreads each order's commitment across that order's rows.
+
+        Entries with nothing left to expect are skipped: a cancelled purchase will never pay, a
+        returned one won't either, and a SETTLED one (paid with real money recorded) is owned by
+        the actual figure in Payout Amount from that run onward. A paid-flagged entry whose
+        `amount_paid` still reads "0.00" is NOT settled (BFMR flips the status early — see
+        fetch_payouts) and keeps contributing its commitment.
+        """
+        wanted = {str(o).strip() for o in order_ids if str(o).strip()}
+        records: list[PayoutRecord] = []
+        for entry in self.fetch_tracker():
+            order_id = _order_id_of(entry)
+            if order_id not in wanted or _is_insurance_fee_row(entry):
+                continue
+            raw_status = str(entry.get("status") or "").lower()
+            ledger_status = LEDGER_STATUS_BY_BFMR_STATUS.get(raw_status, "")
+            if raw_status == "cancelled" or ledger_status == "return":
+                continue
+            if ledger_status == "paid" and parse_money(entry.get("amount_paid")):
+                continue
+            expected = _expected_of(entry)
+            if expected is None:
+                continue
+            records.append(PayoutRecord(
+                tracking_number=_tracking_of(entry),  # informational; allocation keys on the order
+                order_id=order_id,
+                expected_amount=expected,
+                item_hint=" ".join(part for part in (
+                    str(entry.get("deal_title") or ""), str(entry.get("item_name") or "")) if part),
+            ))
         return records
 
     def insured_shipments(self) -> dict[str, float | None]:
@@ -1176,6 +1227,27 @@ def _per_unit_payout(entry: dict) -> float | None:
     except ValueError:
         qty = 1
     return total / max(qty, 1)
+
+
+def _expected_of(entry: dict) -> float | None:
+    """The qty-scaled payout BFMR has COMMITTED to for this tracker entry, or None if unreadable.
+
+    `total_payout` is exactly this number ("what the deal is WORTH", populated from the moment a
+    purchase exists — see fetch_payouts, where that very property is why it must never land in
+    Payout Amount). `payout_price × qty` is the fallback for an entry whose total doesn't parse,
+    mirroring `_per_unit_payout` in the other direction.
+    """
+    total = parse_money(entry.get("total_payout"))
+    if total is not None:
+        return total
+    per_unit = parse_money(entry.get("payout_price"))
+    if per_unit is None:
+        return None
+    try:
+        qty = int(str(entry.get("qty") or "").strip() or "1")
+    except ValueError:
+        qty = 1
+    return per_unit * max(qty, 1)
 
 
 def _index_purchases_by_order(tracker: list[dict]) -> dict[str, dict]:

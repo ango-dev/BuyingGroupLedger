@@ -142,6 +142,11 @@ class PayoutRecord:
     #: each record to its own ledger row by word overlap instead of walking the whole order. Blank
     #: means "no item information" (every MOD record) and keeps the order-level behavior.
     item_hint: str = ""
+    #: What the group has COMMITTED to pay for this record's deal, qty-scaled (BFMR's `total_payout`,
+    #: populated from the moment a purchase exists). Distinct from `payout_amount` — which stays
+    #: None until money actually moves — so the commitment can be recorded and watched without ever
+    #: lighting up Total Profit. None for a provider that publishes no price (every MOD record).
+    expected_amount: float | None = None
 
 
 @dataclass

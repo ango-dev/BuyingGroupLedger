@@ -6,6 +6,14 @@ This is the step that turns the ledger from a tracker into a P&L. The scrapers f
 column is inert for any row nobody has typed into. This module fills those three cells from the
 buying group that actually paid.
 
+SINCE 2026-09-11 `Payout Amount` FILLS EARLY, WITH THE COMMITTED PRICE. BFMR publishes the payout price it has committed to from the moment a purchase exists, so
+that lands in Payout Amount as soon as the reservation is linked to an order — with NO Payout Date,
+which together with a non-terminal Status is what now says "committed, not settled". Total Profit
+therefore shows the PROJECTED profit on open BFMR rows, deliberately. A later read that disagrees
+means BFMR moved the price: the cell is updated to the new commitment and an alert names old ->
+new. Settlement always wins — the real amount, date and status overwrite the commitment exactly as
+before — and a settlement that arrives at a different figure than the commitment is alerted once.
+
 ROUTING IS THE `Buying Group` COLUMN, which config/warehouses.py already derives from the delivery
 address. A row goes to exactly one group; `Personal` rows never reach the sheet at all, and
 `Unclassified` is skipped and COUNTED rather than guessed at — an unconfigured warehouse is a real
@@ -77,6 +85,10 @@ from sheets.ledger_sync import (
 log = logging.getLogger("sync_tracking")
 
 #: The three columns this module owns. Everything else on the row belongs to the scrapers.
+#: NB Payout Amount holds two kinds of number now (2026-09-11): the group's COMMITTED price while
+#: the package is open (no Payout Date beside it), and the settled figure once paid (the date and
+#: status land with it). The pair (Payout Date, Status) — never the amount alone — is what tells
+#: them apart, which is why the settled test at plan time requires `paid` status, not just money.
 INSURANCE_COL = "Insurance"
 PAYOUT_AMOUNT_COL = "Payout Amount"
 PAYOUT_DATE_COL = "Payout Date"
@@ -114,10 +126,18 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         {
           "by_group":            {group_key: [TrackingSubmission, ...]},
           "rows_by_tracking":    {tracking_number: [row_number, ...]},
+          "rows_by_order":       {group_key: {order_id: [row_number, ...]}},  # incl. rows with no
+                                                        # tracking yet — the expected-payout write
+                                                        # starts at purchase link, before shipping
           "order_of_row":        {row_number: order_id},   # so a payout scoped to an order lands only there
           "costs_by_row":        {row_number: float},   # for pro-rata payout allocation
           "status_by_row":       {row_number: str},     # so a payout can never DOWNGRADE a status
           "insurance_by_row":    {row_number: str},     # so an inferred 0 can't clobber a typed one
+          "payout_by_row":       {row_number: float | None},  # the cell as it stands — the recorded
+                                                        # COMMITMENT until a settlement overwrites it
+          "date_by_row":         {row_number: str},     # blank = not settled; gates the commitment
+                                                        # writes and makes the paid-vs-committed
+                                                        # mismatch alert fire exactly once
           "submitted_by_row":    {row_number: bool},    # already ticked? don't re-tick
           "unresolved_split":    [(row_number, order_id, tracking_number), ...],   # Quantity "*"
           "corrupted_tracking":  [(row_number, order_id, tracking_number), ...],   # float-ified cell
@@ -132,7 +152,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     idx = {name: header.index(name) for name in (
         "Order ID", "Order Date", "Item Name", "Quantity", "Tracking Number",
         "Shipment", "Status", "Total Cost", "Buying Group", SUBMITTED_COL, INSURANCE_COL,
-        PAYOUT_AMOUNT_COL,
+        PAYOUT_AMOUNT_COL, PAYOUT_DATE_COL,
     )}
     # Columns a sheet may predate, resolved only if present. They still have to be IN `idx` —
     # `optional_cell` looks them up there, so a name missing from this map reads as "" on every row
@@ -161,6 +181,9 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     settled_keys: set[tuple[str, str]] = set()
     corrupted_tracking: list[tuple[int, str, str]] = []
     item_of_row: dict[int, str] = {}
+    rows_by_order: dict[str, dict[str, list[int]]] = {}
+    payout_by_row: dict[int, float | None] = {}
+    date_by_row: dict[int, str] = {}
 
     for offset, row in enumerate(data_rows):
         row_number = offset + 2  # row 1 is the header
@@ -219,6 +242,17 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
             group_key = resolve_group(cell("Buying Group"))
             if group_key:
                 awaiting_by_group.setdefault(group_key, []).append((row_number, order_id))
+                # An awaiting row is exactly where the EXPECTED payout lands first: the purchase
+                # exists at the group (the user types the order number in right after ordering)
+                # while no tracking number does — so these rows join the order index and carry the
+                # maps allocate_expected_payouts prorates and compares with. They stay out of
+                # rows_by_tracking, so the real-payout allocation still can't touch them.
+                costs_by_row[row_number] = _as_float(cell("Total Cost")) or 0.0
+                status_by_row[row_number] = cell("Status").lower()
+                item_of_row[row_number] = cell("Item Name")
+                payout_by_row[row_number] = _as_float(cell(PAYOUT_AMOUNT_COL))
+                date_by_row[row_number] = cell(PAYOUT_DATE_COL)
+                rows_by_order.setdefault(group_key, {}).setdefault(order_id, []).append(row_number)
             continue
 
         group_written = cell("Buying Group")
@@ -258,6 +292,9 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         submitted_by_row[row_number] = _is_ticked(cell(SUBMITTED_COL))
         rows_by_tracking.setdefault(tracking, []).append(row_number)
         order_of_row[row_number] = order_id
+        payout_by_row[row_number] = _as_float(cell(PAYOUT_AMOUNT_COL))
+        date_by_row[row_number] = cell(PAYOUT_DATE_COL)
+        rows_by_order.setdefault(group_key, {}).setdefault(order_id, []).append(row_number)
 
         # SETTLED = paid, with money actually recorded. Such a package needs no further SUBMITTING:
         # being paid for it is proof the group holds the number, which is far stronger evidence than
@@ -299,11 +336,14 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     return {
         "by_group": by_group,
         "rows_by_tracking": rows_by_tracking,
+        "rows_by_order": rows_by_order,
         "order_of_row": order_of_row,
         "item_of_row": item_of_row,
         "costs_by_row": costs_by_row,
         "status_by_row": status_by_row,
         "insurance_by_row": insurance_by_row,
+        "payout_by_row": payout_by_row,
+        "date_by_row": date_by_row,
         "submitted_by_row": submitted_by_row,
         "unresolved_split": unresolved_split,
         "corrupted_tracking": corrupted_tracking,
@@ -527,6 +567,149 @@ def _status_rank(status: str) -> int:
     private ordering here would drift from the collapse rule the moment either changed.
     """
     return _STATUS_RANK.get((status or "").strip().lower(), -1)
+
+
+def allocate_expected_payouts(
+    records: list[PayoutRecord],
+    rows_by_order: dict[str, list[int]],
+    costs_by_row: dict[int, float],
+    item_of_row: dict[int, str],
+    status_by_row: dict[int, str],
+    payout_by_row: dict[int, float | None],
+    date_by_row: dict[int, str] | None = None,
+    settling_rows: set[int] | None = None,
+) -> tuple[dict[int, dict], list[str]]:
+    """Fill Payout Amount with each order's COMMITTED payout, and spot a commitment that moved.
+
+    The forward-looking half of the payout write: BFMR publishes the payout price from the moment a purchase exists, so Payout
+    Amount carries it from purchase link onward — Payout Date stays blank, which is what marks the
+    figure as a commitment rather than a settlement — and a tracker read that disagrees with the
+    cell is BFMR CHANGING the committed price. That is the event this function detects: the cell
+    is updated to the current commitment (the sheet mirrors what BFMR will actually pay) and the
+    change is reported for an alert naming old -> new.
+
+    Same shape as allocate_payouts on purpose: records are bucketed per (order, deal-hint), a
+    multi-deal order's rows are partitioned by `_split_rows_by_deal` (falling back to one order-
+    level bucket when the partition isn't clean), and each bucket's total prorates by the rows'
+    share of Total Cost — the standing rule for every order-level amount. `rows_by_order` is ONE
+    group's index from the plan, so a record about an order the sheet doesn't know yet (purchase
+    typed before the first scrape) simply finds no rows and waits for the next run.
+
+    THREE KINDS OF ROW ARE NEVER TOUCHED, because on them the amount is (or is becoming) real
+    money: a row already `paid` or `return`, a row whose Payout Date is set (settled even if the
+    status write hasn't landed yet — MOD's dateless payouts are covered by their `paid` status
+    instead), and a row in `settling_rows` — the rows THIS run's allocate_payouts is writing a
+    settlement onto, which also keeps a partial settlement from reading as a price drop: the
+    settled entry leaves the commitment records AND its rows leave this allocation in the same
+    run, so the totals still agree.
+
+    The comparison is BETWEEN TOTALS, not per cell — 2dp proration drift can't fake a price
+    change — and a bucket whose total still agrees only rewrites cells when membership shifted
+    (a new row appended, a blank to fill), silently, so an unchanged commitment queues no writes.
+
+    Returns ({row_number: {PAYOUT_AMOUNT_COL: value}}, [change detail lines]).
+    """
+    date_by_row = date_by_row or {}
+    settling_rows = settling_rows or set()
+    totals: dict[str, dict[str, dict]] = {}
+    for record in records:
+        if record.expected_amount is None or not record.order_id:
+            continue
+        deals = totals.setdefault(record.order_id, {})
+        key = " ".join(sorted(_hint_tokens(record.item_hint)))
+        sub = deals.setdefault(key, {"expected": 0.0, "hint": record.item_hint})
+        sub["expected"] += record.expected_amount
+
+    writes: dict[int, dict] = {}
+    changes: list[str] = []
+    for order_id, deals in totals.items():
+        scoped = [n for n in rows_by_order.get(order_id) or []
+                  if status_by_row.get(n, "") not in ("paid", "return")
+                  and not str(date_by_row.get(n, "")).strip()
+                  and n not in settling_rows]
+        if not scoped:
+            continue
+        subs = list(deals.values())
+        if len(subs) == 1:
+            groups = [(scoped, subs[0])]
+        else:
+            partition = _split_rows_by_deal(scoped, subs, item_of_row)
+            if partition is not None:
+                groups = [(rows, sub) for sub, rows in zip(subs, partition)]
+            else:
+                # Can't tell which row is which deal — compare and write at order level rather
+                # than guess. The commitment still sums correctly; only its split is coarse.
+                merged = {"expected": sum(s["expected"] for s in subs), "hint": ""}
+                groups = [(scoped, merged)]
+
+        for group_rows, sub in groups:
+            costs = [costs_by_row.get(n, 0.0) for n in group_rows]
+            total_cost = sum(costs)
+            new_total = round(sub["expected"], 2)
+            if new_total <= 0:
+                # Same rule as the settlement path: never write a 0 into Payout Amount — the
+                # profit formula would compute a large fictitious loss out of it.
+                continue
+            new_values = {
+                n: round(new_total * ((cost / total_cost) if total_cost else (1 / len(group_rows))), 2)
+                for n, cost in zip(group_rows, costs)
+            }
+            old_values = {n: payout_by_row.get(n) for n in group_rows}
+            known = [v for v in old_values.values() if v is not None]
+            if not known:
+                # First sighting: record the commitment, nothing to compare against yet.
+                for n, value in new_values.items():
+                    writes[n] = {PAYOUT_AMOUNT_COL: value}
+                continue
+            old_total = round(sum(known), 2)
+            # Totals, with slack for one rounding step per row, so proration drift never
+            # masquerades as BFMR moving the price.
+            if abs(old_total - new_total) > max(0.02, 0.01 * len(group_rows)):
+                for n, value in new_values.items():
+                    writes[n] = {PAYOUT_AMOUNT_COL: value}
+                label = sub["hint"] or item_of_row.get(group_rows[0], "") or "order"
+                changes.append(
+                    f"  order {order_id} / {label[:60]}: ${old_total:,.2f} -> ${new_total:,.2f}")
+            elif any(old_values[n] is None or abs(old_values[n] - new_values[n]) > 0.01
+                     for n in group_rows):
+                # Same commitment, different split (a row appended, a blank to fill): re-prorate
+                # quietly so the cells sum back to the committed total.
+                for n, value in new_values.items():
+                    writes[n] = {PAYOUT_AMOUNT_COL: value}
+    return writes, changes
+
+
+def _expected_payment_mismatches(records: list[PayoutRecord], plan: dict) -> list[str]:
+    """Settled packages whose PAID amount disagrees with the COMMITTED price — detail lines, or [].
+
+    The second half of the price watch: the first (allocate_expected_payouts) catches a commitment
+    that moves before payment; this catches a settlement that lands at a different figure than the
+    commitment on the same tracker row — a silent short-pay, or a clawback folded into the amount.
+    The paid figure still lands on the sheet exactly as always; this only decides whether a human
+    hears about the difference.
+
+    ALERTED EXACTLY ONCE: only while some row of the package still has a BLANK Payout Date — the
+    run that first writes the settlement. (The AMOUNT cell can't be the gate any more: it holds
+    the commitment long before settlement.) Every later run sees the date filled and stays quiet,
+    because a mismatch repeated forever is a mismatch that gets muted. MOD's dateless payouts
+    can't leak through: every MOD record has no expected_amount and is skipped above.
+    """
+    lines: list[str] = []
+    date_by_row = plan.get("date_by_row") or {}
+    for record in records:
+        if record.payout_amount is None or record.expected_amount is None:
+            continue
+        if abs(record.payout_amount - record.expected_amount) <= 0.02:
+            continue
+        rows = plan["rows_by_tracking"].get(record.tracking_number) or []
+        if not any(not str(date_by_row.get(n, "")).strip() for n in rows):
+            continue
+        label = record.item_hint[:60] or "package"
+        lines.append(
+            f"  order {record.order_id or '?'} / {label} ({record.tracking_number}): "
+            f"paid ${record.payout_amount:,.2f} against a committed "
+            f"${record.expected_amount:,.2f}")
+    return lines
 
 
 # --- the orchestrator ---------------------------------------------------------------------------
@@ -772,11 +955,61 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
             )
 
     payouts = client.fetch_payouts([r.tracking_number for r in rows])
-    _merge_writes(all_writes, allocate_payouts(
+    payout_writes = allocate_payouts(
         payouts, plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
         plan["insurance_by_row"], plan.get("order_of_row"), plan.get("item_of_row"),
-    ))
+    )
+    _merge_writes(all_writes, payout_writes)
     log.info("%s: %d payout record(s) read back", group_key, len(payouts))
+
+    # A settlement that landed at a different figure than the group COMMITTED to. Checked on the
+    # run that first writes the payout date (see _expected_payment_mismatches), so it fires once.
+    mismatches = _expected_payment_mismatches(payouts, plan)
+    if mismatches:
+        _alert(
+            apply,
+            f"ACTION NEEDED — {group_key}: {len(mismatches)} payout(s) disagree with the "
+            "committed price",
+            f"{group_key} settled these packages at a different amount than the payout price it "
+            "committed to. The PAID amount is what landed on the sheet — check the deal terms in "
+            "My Tracker and raise it with them if the shortfall is real:\n"
+            + "\n".join(mismatches),
+        )
+
+    # The committed price, written into Payout Amount (no Payout Date) from the moment the
+    # purchase links the reservation to an order — and watched: a commitment that MOVED is
+    # rewritten to the new figure and alerted old -> new. Rows this run is SETTLING are handed to
+    # the allocator so the commitment pass can never overwrite real money or misread a partial
+    # settlement as a price drop. hasattr-gated like file_insurance: only BFMR publishes a price
+    # (MOD's API has none).
+    orders = (plan.get("rows_by_order") or {}).get(group_key) or {}
+    if orders and hasattr(client, "fetch_expected_payouts"):
+        settling = {
+            n for n, cells in payout_writes.items()
+            if PAYOUT_AMOUNT_COL in cells or PAYOUT_DATE_COL in cells
+            or cells.get(STATUS_COL) in ("paid", "return")
+        }
+        commitments = client.fetch_expected_payouts(list(orders))
+        expected_writes, price_changes = allocate_expected_payouts(
+            commitments, orders, plan["costs_by_row"], plan["item_of_row"],
+            plan["status_by_row"], plan["payout_by_row"], plan.get("date_by_row"),
+            settling_rows=settling,
+        )
+        _merge_writes(all_writes, expected_writes)
+        if expected_writes:
+            log.info("%s: %d committed-price cell(s) planned from %d open commitment(s).",
+                     group_key, len(expected_writes), len(commitments))
+        if price_changes:
+            log.warning("%s: %d committed payout price(s) moved", group_key, len(price_changes))
+            _alert(
+                apply,
+                f"{group_key}: {len(price_changes)} committed payout price(s) changed",
+                f"{group_key} changed the payout price it commits to on these orders. Payout "
+                "Amount now carries the NEW commitment (no Payout Date — nothing has been paid "
+                "yet). If a drop is not one you agreed to, take it up with them before the "
+                "package settles:\n"
+                + "\n".join(price_changes),
+            )
 
     _alert_on_cancelled_orders(group_key, client, plan, apply)
     _alert_on_cancelled_purchases(group_key, client, plan, apply)

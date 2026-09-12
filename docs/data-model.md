@@ -31,6 +31,20 @@ its own row however Amazon re-orders its cards; a multi-SKU carton shares one id
 is told apart by item name. A blank id never blocks a match. `audit_sheet`'s
 `package_id_per_shipment` fails if one id ever sits under two Shipment numbers of one order.
 
+**Payout Amount holds two kinds of number since 2026-09-11.** While a BFMR package is **open**, the
+sync fills the cell with the payout price BFMR has **committed** to (`payout_price`/`total_payout`,
+on its tracker from the moment a purchase exists — before shipping, before payment), prorated by
+Total Cost like a real payout. **Payout Date stays blank**, and the blank date beside a non-terminal
+Status is what marks the figure as a commitment rather than money received — so Total Profit shows
+the *projected* profit on open BFMR rows, deliberately. When BFMR **changes** the committed price,
+the cells are rewritten to the new figure and an alert names old → new; when the package **settles**,
+the real amount, Payout Date and `paid` status overwrite the commitment exactly as before, and a
+settled amount that disagrees with the commitment is alerted once, on the run that writes it. MOD
+publishes no price through its API, so MOD cells stay blank until MOD actually pays. Anything
+keyed on "has this been paid?" reads the **(Payout Date, Status)** pair, never the amount alone —
+the cash-basis tax report already keys income on Payout Date, and the audit's straddle line
+(`cogs_inputs_complete`) counts a dated-or-`paid` payout as settled.
+
 > **Changing the column order is a MIGRATION, not an edit**, and it takes two steps.
 > `python -m scripts.reorder_sheet --apply` moves the row *values*; `python -m
 > scripts.apply_sheet_formats --apply` then puts the presentation back. Both are dry-run by default.

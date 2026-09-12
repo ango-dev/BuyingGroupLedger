@@ -1719,9 +1719,12 @@ def check_cogs_inputs_complete(sheet: Sheet, opts: Options) -> Result:
     - **COGS with no Cashback Rate** -- FAIL. The cost side is overstated by the rebate.
     - **A payout with no COGS** -- FAIL. Income recorded with no cost against it, so profit is
       overstated. Usually a Total Cost that never landed.
-    - **COGS with no payout** -- reported, not failed. It is the NORMAL state of an order that has
-      shipped but not been paid yet, and at a year boundary it is exactly the straddle that makes the
-      cost and income sides fall in different tax years. Worth seeing, never worth failing.
+    - **COGS with no SETTLED payout** -- reported, not failed. It is the NORMAL state of an order
+      that has shipped but not been paid yet, and at a year boundary it is exactly the straddle that
+      makes the cost and income sides fall in different tax years. Worth seeing, never worth
+      failing. "Settled" is a payout WITH its Payout Date or a paid/return status -- not the amount
+      alone, because since 2026-09-11 the sync fills Payout Amount with the group's COMMITTED price
+      while the package is still open (see sync_tracking), and a commitment is not income.
 
     Gift-card rows are exempt from the third shape entirely: a gift card is a real cost that will
     NEVER have a payout of its own, because the income arrives through the order it funded (whose own
@@ -1748,7 +1751,9 @@ def check_cogs_inputs_complete(sheet: Sheet, opts: Options) -> Result:
         # COGS is a genuine 0, and 0 income-with-cost-0 is exactly right at year end.
         if payout and cogs is None:
             no_cogs.append(f"row {row_number}: order {order_id} paid {payout} with no COGS")
-        if cogs and not payout:
+        payout_date = str(sheet.cell(unf, row_number, "Payout Date") or "").strip()
+        settled = bool(payout) and (bool(payout_date) or status in ("paid", "return"))
+        if cogs and not settled:
             if is_deliberately_unrouted(sheet.cell(grid, row_number, "Buying Group")):
                 gift += 1
             else:

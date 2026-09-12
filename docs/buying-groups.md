@@ -115,9 +115,19 @@ about, so the buying group is the authority on them:
 - Everything earlier in the journey (`shipped`, `delivered`) stays the retailer's to report — if both
   sources wrote it, they'd overwrite each other every run.
 
-**A payout is only written once the group has actually paid.** An unpaid package leaves the cell
-blank rather than writing `0` — Total Profit reads a blank as "not paid out yet", but a literal zero
-would make it compute a large fictitious loss.
+**Payout Amount fills early, with BFMR's committed price** (2026-09-11). BFMR's tracker carries the
+payout price it has committed to (`payout_price`/`total_payout`) from the moment a purchase exists —
+before shipping, before payment — so the sync writes it the moment your hand-typed order number
+links the reservation, prorated by Total Cost across the order's rows, with **no Payout Date**. The
+blank date (beside a non-terminal Status) is what says "committed, not settled", and Total Profit
+consequently shows the *projected* profit on open BFMR rows. Two alerts come with it: if a later
+run finds BFMR **changed** the committed price, the cells are updated to the new figure and the
+alert names old → new; and if the **settled** amount disagrees with the commitment, the run that
+writes the settlement says so (the paid figure still lands as-is). The settlement — real amount,
+Payout Date, `paid` status — always overwrites the commitment, and the commitment pass never
+touches a row that is `paid`/`return`, carries a Payout Date, or is being settled in the same run.
+MOD's API publishes no price, so MOD cells stay blank until MOD actually pays; a `0` is still never
+written — an unpayable figure leaves the cell alone rather than fabricating a loss.
 
 **`Tracking Submitted`** is a checkbox: ticked when the buying group holds that package's tracking
 number. Format the column as a checkbox in Sheets and it renders as a tick — the values are real

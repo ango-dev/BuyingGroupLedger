@@ -1862,3 +1862,73 @@ class TestDeliberatelyUnroutedTags:
         from buying_groups.registry import resolve_group
         assert resolve_group("BFMR") == "BFMR"
         assert resolve_group("MOD") == "MOD"
+
+
+class TestBfmrExpectedPayouts:
+    """`fetch_expected_payouts`: the price BFMR COMMITTED to, read per order before any money moves.
+
+    The tracker carries `payout_price`/`total_payout` from the moment a purchase exists (live
+    capture: a `status: "purchased"` row with no tracking number and `amount_paid: null` already
+    reads `payout_price: 1230`), which is what lets the sheet record the commitment at purchase
+    link and alert when it later changes — see sync_tracking.allocate_expected_payouts.
+    """
+
+    def _purchased(self, **extra):
+        return {"order_id": "O1", "purchase_id": "P1", "status": "purchased", "qty": 1,
+                "retail_price": 1259.99, "payout_price": 1230, "total_payout": "1,230.00",
+                "deal_title": "MacBook Air 13", "item_name": "MacBook Air 13 - Midnight",
+                **extra}
+
+    def test_a_purchased_row_with_no_tracking_number_already_carries_the_commitment(self, bfmr, transport):
+        transport.responses = [tracker(self._purchased())]
+        records = bfmr.fetch_expected_payouts(["O1"])
+        assert len(records) == 1
+        record = records[0]
+        assert record.order_id == "O1"
+        assert record.expected_amount == 1230.0, "comma money must parse (the parse_money lesson)"
+        assert record.payout_amount is None, "a commitment is not a payment"
+        assert "MacBook Air 13" in record.item_hint
+
+    def test_the_per_unit_price_times_qty_covers_a_missing_total(self, bfmr, transport):
+        transport.responses = [tracker(self._purchased(total_payout=None, qty=6))]
+        assert bfmr.fetch_expected_payouts(["O1"])[0].expected_amount == 1230.0 * 6
+
+    def test_orders_not_asked_about_are_left_out(self, bfmr, transport):
+        transport.responses = [tracker(self._purchased(order_id="SOMEONE-ELSE"))]
+        assert bfmr.fetch_expected_payouts(["O1"]) == []
+
+    def test_a_cancelled_purchase_expects_nothing(self, bfmr, transport):
+        transport.responses = [tracker(self._purchased(status="cancelled"))]
+        assert bfmr.fetch_expected_payouts(["O1"]) == []
+
+    def test_a_returned_package_expects_nothing(self, bfmr, transport):
+        transport.responses = [tracker(self._purchased(status="returned"))]
+        assert bfmr.fetch_expected_payouts(["O1"]) == []
+
+    def test_a_settled_package_is_owned_by_the_real_figure(self, bfmr, transport):
+        transport.responses = [tracker(self._purchased(status="paid", amount_paid="1,230.00"))]
+        assert bfmr.fetch_expected_payouts(["O1"]) == []
+
+    def test_paid_flagged_but_unsettled_still_expects_its_commitment(self, bfmr, transport):
+        """BFMR flips `status` to paid BEFORE `amount_paid` lands (see fetch_payouts) — the money
+        is still outstanding, so the commitment stays on watch."""
+        transport.responses = [tracker(self._purchased(status="paid", amount_paid="0.00"))]
+        assert bfmr.fetch_expected_payouts(["O1"])[0].expected_amount == 1230.0
+
+    def test_an_insurance_fee_row_is_not_a_commitment(self, bfmr, transport):
+        # The fee-row shape: no order/deal, retail_price 0, a small negative figure.
+        transport.responses = [tracker(
+            {"retail_price": 0, "total_payout": "-10.20", "tracking_number": "TBA1"})]
+        assert bfmr.fetch_expected_payouts(["O1"]) == []
+
+    def test_fetch_payouts_records_now_carry_the_commitment_too(self, bfmr, transport):
+        """So the settlement can be compared against it (sync_tracking's mismatch alert) without
+        a second tracker read."""
+        transport.responses = [tracker({
+            "tracking_number": "TBA1", "shipment_id": "S1", "total_payout": "905.00",
+            "amount_paid": "900.00", "date_paid": "08/10/2026", "status": "paid",
+            "order_id": "O1", "qty": 1,
+        })]
+        record = bfmr.fetch_payouts(["TBA1"])[0]
+        assert record.payout_amount == 900.0
+        assert record.expected_amount == 905.0
