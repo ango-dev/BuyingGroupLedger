@@ -124,6 +124,10 @@ _SUBTOTAL_RE = re.compile(r"Item\(s\) Subtotal:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})"
 # What the buyer owed — the number the non-card tenders must cover for a card-less order to be
 # legitimate (see missing_card_reason).
 _GRAND_TOTAL_RE = re.compile(r"Grand Total:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
+# Amazon's own payment-area error state: the whole
+# order summary rendered as just "Payment method / Unable to display payment details at the
+# moment." — an Amazon-side transient; the same page rendered fully on a later read.
+_PAYMENT_ERROR_RE = re.compile(r"Unable to display payment details", re.IGNORECASE)
 
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7,
@@ -470,6 +474,22 @@ def _promo_cashback_rate(region) -> float | None:
     return None
 
 
+def _summary_parsed(summary_el) -> bool:
+    """False for a summary STUB — present in the DOM but without even a total.
+
+    Amazon rendered the order summary as nothing but
+    "Payment method / Unable to display payment details at the moment.", and the 0-vs-None rule
+    below turned that into real $0 Gift Card / Rewards Used / Sales Tax cells. A summary that
+    cannot show a Grand Total or an Item(s) Subtotal did not parse: its amounts are UNKNOWN, so
+    the caller treats the element as absent and every amount stays blank to fill on the open
+    order's next re-read (the same page rendered fully an hour later).
+    """
+    if summary_el is None:
+        return False
+    text = summary_el.get_text("\n", strip=True)
+    return bool(_GRAND_TOTAL_RE.search(text) or _SUBTOTAL_RE.search(text))
+
+
 def _gift_card_amount(summary_el) -> float | None:
     """"Gift Card Amount: -$14.04" from the order summary, as a POSITIVE number.
 
@@ -492,6 +512,33 @@ def _cash_back_used(summary_el) -> float | None:
     for _label, amount in _CASH_BACK_USED_RE.findall(summary_el.get_text("\n", strip=True)):
         total += abs(_num(amount) or 0.0)
     return round(total, 2)
+
+
+def _cash_back_consumed(summary_el) -> float | None:
+    """`_cash_back_used`, capped at what the order can actually have consumed.
+
+    the summary line showed the whole BALANCE
+    ("Prime for Young Adults cash back: -$89.10") on a $35.93 order whose Grand Total read $0.00 —
+    the line is the balance applied at checkout, not the amount spent. What the order consumed is
+    what the card was not charged: subtotal + shipping + tax − gift card − Grand Total. The cap
+    only applies when every piece parses (the synthetic-fixture summaries usually omit the
+    subtotal, and a healthy line equals the cap anyway — proven on the 09-05/09-07 orders)."""
+    used = _cash_back_used(summary_el)
+    if not used:
+        return used
+    text = summary_el.get_text("\n", strip=True)
+    sub_m = _SUBTOTAL_RE.search(text)
+    ship_m = re.search(r"Shipping\s*&\s*Handling:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", text, re.IGNORECASE)
+    tax_m = _TAX_RE.search(text)
+    grand_m = _GRAND_TOTAL_RE.search(text)
+    if not (sub_m and ship_m and tax_m and grand_m):
+        return used
+    frame = round((_num(sub_m.group(1)) or 0.0) + (_num(ship_m.group(1)) or 0.0)
+                  + (_num(tax_m.group(1)) or 0.0) - (_gift_card_amount(summary_el) or 0.0)
+                  - abs(_num(grand_m.group(1)) or 0.0), 2)
+    if frame < 0:
+        return used
+    return min(used, frame)
 
 
 def uses_points(region) -> bool:
@@ -540,7 +587,8 @@ def missing_card_reason(order_details_html: str) -> str | None:
     """
     soup = BeautifulSoup(order_details_html or "", "html.parser")
     region = _order_region(soup)
-    if _ENDING_IN_RE.search(region.get_text(" ", strip=True)) or _card_last4_from_widget(region):
+    region_text = region.get_text(" ", strip=True)
+    if _ENDING_IN_RE.search(region_text) or _card_last4_from_widget(region):
         return None
     statuses = [_status_from_text(el.get_text(" ", strip=True))
                 for el in region.select("[data-component='shipmentStatus']")]
@@ -548,6 +596,13 @@ def missing_card_reason(order_details_html: str) -> str | None:
         return None
     if uses_points(region):
         return None
+    if _PAYMENT_ERROR_RE.search(region_text):
+        return (
+            "Amazon's payment area failed to render ('Unable to display payment details at the "
+            "moment') — an Amazon-side transient ("
+            "the same page rendered fully on a later read); every amount was left blank to fill "
+            "on the open order's next re-read"
+        )
     summary_el = region.select_one("[data-component='orderSummary']")
     gift = _gift_card_amount(summary_el) or 0.0
     cash = _cash_back_used(summary_el) or 0.0
@@ -639,7 +694,7 @@ def rewards_used_amount(summary_el, region, points_used: float | None, order_id:
     """
     if summary_el is None:
         return None
-    total = _cash_back_used(summary_el) or 0.0
+    total = _cash_back_consumed(summary_el) or 0.0
     if uses_points(region):
         if points_used is None:
             log.warning("Amazon order %s was paid partly with Amazon points but the amount is unknown "
@@ -969,6 +1024,8 @@ def build_order_items(
     card_last4 = card_m.group(1) if card_m else _card_last4_from_widget(region)
 
     summary_el = region.select_one("[data-component='orderSummary']")
+    if not _summary_parsed(summary_el):
+        summary_el = None  # a stub is a missing summary: amounts unknown, never a fake 0
     shipping = None
     if summary_el:
         st = summary_el.get_text("\n", strip=True)

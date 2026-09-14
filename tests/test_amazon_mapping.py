@@ -828,6 +828,9 @@ def test_a_spent_cash_back_balance_is_rewards_used_not_a_gift_card():
                     gift_card="$4.02", subtotal="$15.98")
     html = html.replace("Gift Card Amount: -$4.02\n",
                         "Gift Card Amount: -$4.02\nPrime for Young Adults cash back: -$11.96\n")
+    # The tenders cover the whole order, so the real page's Grand Total is $0.00 (the builder's
+    # $10.00 default would contradict the scenario and trip the consumed-cash-back cap).
+    html = html.replace("Grand Total: $10.00", "Grand Total: $0.00")
     html = html.replace("Payment method Visa ending in 1234",
                         "Payment method Visa ending in 1234 Prime for Young Adults cash back")
     rows = build_order_items(html)
@@ -1297,3 +1300,62 @@ def test_an_unclassifiable_instrument_alerts_in_either_shape():
     for html, expect in ((old, "Affirm Monthly Payments"), (new, "Prime Flex Balance")):
         reason = unknown_tender_reason(html)
         assert reason and expect in reason and "cannot price" in reason
+
+
+# --- the payment-area error stub + the over-applied cash-back balance ----------
+_SUMMARY_STUB = ('<div data-component="orderSummary">Payment method\n'
+                 "Unable to display payment details at the moment.</div>")
+
+
+def _with_stub_summary(html: str) -> str:
+    import re as _re
+    return _re.sub(r'<div data-component="orderSummary">.*?</div>', _SUMMARY_STUB, html, flags=_re.S)
+
+
+def test_a_summary_stub_leaves_every_amount_blank_never_a_fake_zero():
+    oid = "111-9990007-9990007"
+    html = _with_stub_summary(_details(
+        oid, "September 14, 2026",
+        [_shipment(oid, 0, "Arriving Wednesday", [_item("Busy Board", "$15.98")])],
+    ))
+    r = build_order_items(html, "profile-charlie", today="2026-09-14")[0]
+    assert (r.gift_card, r.rewards_used, r.sales_tax, r.shipping) == (None, None, None, None)
+
+
+def test_the_payment_error_state_gets_its_own_precise_reason():
+    from scrapers.amazon_mapping import missing_card_reason
+    oid = "111-9990007-9990007"
+    html = _with_stub_summary(_details(
+        oid, "September 14, 2026",
+        [_shipment(oid, 0, "Arriving Wednesday", [_item("Busy Board", "$15.98")])],
+    )).replace("<div>Payment method Visa ending in 1234</div>", "")
+    reason = missing_card_reason(html)
+    assert reason and "failed to render" in reason and "transient" in reason
+    assert "shape changed" not in reason
+
+
+def test_cash_back_applied_beyond_the_order_total_is_clamped_to_what_it_consumed():
+    # the whole $89.10 balance applied to a $35.93 order, Grand Total $0.00 —
+    # Rewards Used must be the $35.93 the order consumed, not the balance.
+    oid = "111-9990007-9990007"
+    html = _details(
+        oid, "September 14, 2026",
+        [_shipment(oid, 0, "Arriving Wednesday", [_item("Busy Board", "$15.98"),
+                                                  _item("Suction Kupz", "$19.95")])],
+        subtotal="$35.93",
+    ).replace("Grand Total: $10.00",
+              "Prime for Young Adults cash back: -$89.10\nGrand Total: $0.00")
+    r = build_order_items(html, "profile-charlie", today="2026-09-14")[0]
+    assert r.rewards_used == 35.93
+
+
+def test_cash_back_matching_its_frame_is_untouched():
+    oid = "111-2223334-5556667"
+    html = _details(
+        oid, "September 14, 2026",
+        [_shipment(oid, 0, "Arriving Monday", [_item("Charger", "$15.00")])],
+        subtotal="$15.00",
+    ).replace("Grand Total: $10.00",
+              "Prime for Young Adults cash back: -$5.00\nGrand Total: $10.00")
+    r = build_order_items(html, today="2026-09-14")[0]
+    assert r.rewards_used == 5.0
