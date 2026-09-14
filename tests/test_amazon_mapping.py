@@ -1359,3 +1359,42 @@ def test_cash_back_matching_its_frame_is_untouched():
               "Prime for Young Adults cash back: -$5.00\nGrand Total: $10.00")
     r = build_order_items(html, today="2026-09-14")[0]
     assert r.rewards_used == 5.0
+
+
+# --- Free Shipping netting + the Total-before-tax frame ---
+def test_free_shipping_discount_nets_the_shipping_charge():
+    oid = "111-9990025-9990025"
+    html = _details(
+        oid, "September 14, 2026",
+        [_shipment(oid, 0, "Arriving Monday", [_item("Speaker", "$16.99")])],
+        shipping="$2.99",
+    ).replace("Shipping &amp; Handling: $2.99",
+              "Shipping &amp; Handling: $2.99\nFree Shipping: -$2.99")
+    assert build_order_items(html, today="2026-09-14")[0].shipping == 0.0
+    # A partial promo nets to what was actually paid.
+    partial = _details(
+        oid, "September 14, 2026",
+        [_shipment(oid, 0, "Arriving Monday", [_item("Speaker", "$16.99")])],
+        shipping="$5.99",
+    ).replace("Shipping &amp; Handling: $5.99",
+              "Shipping &amp; Handling: $5.99\nFree Shipping: -$2.99")
+    assert build_order_items(partial, today="2026-09-14")[0].shipping == 3.0
+
+
+def test_cash_back_frame_uses_the_pages_total_before_tax():
+    # The real shape: gross shipping charged then discounted to free, the whole balance applied,
+    # Grand Total $0.00 -- the consumed amount is the page's own "Total before tax", not
+    # subtotal + gross shipping (which over-counted by the discount).
+    oid = "111-9990025-9990025"
+    html = _details(
+        oid, "September 14, 2026",
+        [_shipment(oid, 0, "Arriving Monday", [_item("Book", "$16.19"), _item("Speaker", "$16.99"),
+                                               _item("Light Bar", "$19.99")])],
+        shipping="$2.99", subtotal="$53.17",
+    ).replace("Shipping &amp; Handling: $2.99",
+              "Shipping &amp; Handling: $2.99\nFree Shipping: -$2.99\nTotal before tax: $53.17") \
+     .replace("Grand Total: $10.00",
+              "Prime for Young Adults cash back: -$89.10\nGrand Total: $0.00")
+    r = build_order_items(html, today="2026-09-14")[0]
+    assert r.rewards_used == 53.17
+    assert r.shipping == 0.0

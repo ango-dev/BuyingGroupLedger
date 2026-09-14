@@ -1214,8 +1214,38 @@ def test_cash_back_applied_beyond_the_order_total_is_clamped_to_what_it_consumed
         [_shipment(oid, 0, "Arriving Wednesday", [_item("Busy Board", "$15.98"),
                                                   _item("Suction Kupz", "$19.95")])],
         subtotal="$35.93",
-    ).replace("Estimated tax to be collected: $0.87", "Estimated tax to be collected: $0.00") \
+    ).replace("Total before tax: $10.00", "Total before tax: $35.93") \
+     .replace("Estimated tax to be collected: $0.87", "Estimated tax to be collected: $0.00") \
      .replace("Grand Total: $10.87",
               "Prime for Young Adults cash back: -$89.10\nGrand Total: $0.00")
     r = build_order_items(html, "profile-charlie", today="2026-09-14")[0]
     assert r.rewards_used == 35.93
+
+
+def test_free_shipping_discount_nets_the_shipping_charge():
+    oid = "111-9990025-9990025"
+    html = _details(
+        oid, "September 14, 2026",
+        [_shipment(oid, 0, "Arriving Monday", [_item("Speaker", "$16.99")])],
+        shipping="$2.99",
+    ).replace("Shipping &amp; Handling: $2.99",
+              "Shipping &amp; Handling: $2.99\nFree Shipping: -$2.99")
+    assert build_order_items(html, today="2026-09-14")[0].shipping == 0.0
+
+
+def test_cash_back_frame_uses_the_pages_total_before_tax():
+    oid = "111-9990025-9990025"
+    html = _details(
+        oid, "September 14, 2026",
+        [_shipment(oid, 0, "Arriving Monday", [_item("Book", "$16.19"), _item("Speaker", "$16.99"),
+                                               _item("Light Bar", "$19.99")])],
+        shipping="$2.99", subtotal="$53.17",
+    ).replace("Shipping &amp; Handling: $2.99",
+              "Shipping &amp; Handling: $2.99\nFree Shipping: -$2.99") \
+     .replace("Total before tax: $10.00", "Total before tax: $53.17") \
+     .replace("Estimated tax to be collected: $0.87", "Estimated tax to be collected: $0.00") \
+     .replace("Grand Total: $10.87",
+              "Prime for Young Adults cash back: -$89.10\nGrand Total: $0.00")
+    r = build_order_items(html, today="2026-09-14")[0]
+    assert r.rewards_used == 53.17
+    assert r.shipping == 0.0

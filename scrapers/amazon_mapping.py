@@ -128,6 +128,13 @@ _GRAND_TOTAL_RE = re.compile(r"Grand Total:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re
 # order summary rendered as just "Payment method / Unable to display payment details at the
 # moment." — an Amazon-side transient; the same page rendered fully on a later read.
 _PAYMENT_ERROR_RE = re.compile(r"Unable to display payment details", re.IGNORECASE)
+# A shipping promo is its own discount line under Shipping & Handling ("Shipping & Handling: $2.99"
+# then "Free Shipping: -$2.99", live on order 111-9990025-9990025) — the Shipping
+# column records what was PAID, so the discount nets against the charge.
+_FREE_SHIPPING_RE = re.compile(r"Free Shipping:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
+# The page's own net of subtotal + shipping − promo discounts — the exact frame the non-card
+# tenders can consume (see _cash_back_consumed).
+_TOTAL_BEFORE_TAX_RE = re.compile(r"Total before tax:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", re.IGNORECASE)
 
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7,
@@ -517,24 +524,32 @@ def _cash_back_used(summary_el) -> float | None:
 def _cash_back_consumed(summary_el) -> float | None:
     """`_cash_back_used`, capped at what the order can actually have consumed.
 
-    the summary line showed the whole BALANCE
-    ("Prime for Young Adults cash back: -$89.10") on a $35.93 order whose Grand Total read $0.00 —
-    the line is the balance applied at checkout, not the amount spent. What the order consumed is
-    what the card was not charged: subtotal + shipping + tax − gift card − Grand Total. The cap
-    only applies when every piece parses (the synthetic-fixture summaries usually omit the
-    subtotal, and a healthy line equals the cap anyway — proven on the 09-05/09-07 orders)."""
+    Live (orders 111-9990007-9990007 and 111-9990025-9990025, one checkout split in
+    two): each order's summary line showed the whole BALANCE ("Prime for Young Adults cash back:
+    -$89.10"), so the sheet held $89.10 PER ORDER instead of $89.10 split across them. The line is
+    the balance applied at checkout, not the amount spent. What an order consumed is what the card
+    was not charged: "Total before tax" (the page's own net of subtotal + shipping − promo
+    discounts, e.g. Free Shipping) + tax − gift card − Grand Total; when that line is absent
+    (synthetic fixtures), subtotal + shipping stand in. The cap only applies when the pieces
+    parse, and a healthy line equals the cap anyway — proven on the 09-05/09-07 orders."""
     used = _cash_back_used(summary_el)
     if not used:
         return used
     text = summary_el.get_text("\n", strip=True)
-    sub_m = _SUBTOTAL_RE.search(text)
-    ship_m = re.search(r"Shipping\s*&\s*Handling:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", text, re.IGNORECASE)
     tax_m = _TAX_RE.search(text)
     grand_m = _GRAND_TOTAL_RE.search(text)
-    if not (sub_m and ship_m and tax_m and grand_m):
+    if not (tax_m and grand_m):
         return used
-    frame = round((_num(sub_m.group(1)) or 0.0) + (_num(ship_m.group(1)) or 0.0)
-                  + (_num(tax_m.group(1)) or 0.0) - (_gift_card_amount(summary_el) or 0.0)
+    tbt_m = _TOTAL_BEFORE_TAX_RE.search(text)
+    if tbt_m:
+        base = _num(tbt_m.group(1)) or 0.0
+    else:
+        sub_m = _SUBTOTAL_RE.search(text)
+        ship_m = re.search(r"Shipping\s*&\s*Handling:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", text, re.IGNORECASE)
+        if not (sub_m and ship_m):
+            return used
+        base = (_num(sub_m.group(1)) or 0.0) + (_num(ship_m.group(1)) or 0.0)
+    frame = round(base + (_num(tax_m.group(1)) or 0.0) - (_gift_card_amount(summary_el) or 0.0)
                   - abs(_num(grand_m.group(1)) or 0.0), 2)
     if frame < 0:
         return used
@@ -1031,6 +1046,10 @@ def build_order_items(
         st = summary_el.get_text("\n", strip=True)
         sm = re.search(r"Shipping\s*&\s*Handling:?\s*\n?\s*(-?\$\s*[\d,]+\.\d{2})", st, re.IGNORECASE)
         shipping = _num(sm.group(1)) if sm else None
+        if shipping is not None:
+            fm = _FREE_SHIPPING_RE.search(st)
+            if fm:
+                shipping = round(max(0.0, shipping - abs(_num(fm.group(1)) or 0.0)), 2)
     # Both ORDER-LEVEL like shipping: repeated on every row, prorated cost-weighted at sync, and
     # netted by the COGS formula (gift card subtracted — a tender the card never spent, so it earns
     # no cashback; tax added). This replaced _net_gift_card's silent cost-scaling (2026-08-30):
