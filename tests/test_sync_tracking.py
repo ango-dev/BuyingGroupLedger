@@ -766,7 +766,7 @@ class TestPayoutsOnly:
             self.submitted_with = list(rows)
 
             class R:
-                submitted, failed, needs_manual = [], [], []
+                submitted, submitted_for, failed, needs_manual = [], [], [], []
 
                 def summary(self):
                     return "0 submitted"
@@ -836,7 +836,7 @@ class TestDonationShipments:
 
             def submit_tracking(self, rows):
                 class R:
-                    submitted, failed, needs_manual = [], [], []
+                    submitted, submitted_for, failed, needs_manual = [], [], [], []
 
                     def summary(self):
                         return "0 submitted"
@@ -1233,3 +1233,29 @@ class TestExpectedPaymentMismatch:
 
     def test_a_record_with_no_commitment_is_silent(self):
         assert self._lines({"payout_amount": 900.0}) == []
+
+
+class TestRowsHeldByGroupIsPerOrder:
+    """Amazon put two ORDERS in one box (TBA999000000010 -- 3 iPads of one order,
+    2 toys of another). The iPad order's push landed; the toy order had no BFMR purchase and was
+    refused. Keyed on the bare number, the tick marked the toy rows as submitted too."""
+
+    def _row(self, n, order, trk="TBA999000000010"):
+        from types import SimpleNamespace
+        return SimpleNamespace(row_number=n, order_id=order, tracking_number=trk)
+
+    def test_only_the_landed_orders_rows_are_ticked(self):
+        from buying_groups.base import SubmissionResult
+        from sync_tracking import _rows_held_by_group
+        rows = [self._row(8, "111-9990022-9990022"),
+                self._row(3, "111-9990007-9990007"), self._row(4, "111-9990007-9990007")]
+        push = SubmissionResult(submitted=["TBA999000000010"],
+                                submitted_for=[("111-9990022-9990022", "TBA999000000010")])
+        assert _rows_held_by_group(rows, known=set(), push=push) == {8}
+
+    def test_already_known_pairs_tick_alongside_this_runs_pushes(self):
+        from buying_groups.base import SubmissionResult
+        from sync_tracking import _rows_held_by_group
+        rows = [self._row(2, "A", "T1"), self._row(3, "B", "T2"), self._row(4, "C", "T3")]
+        push = SubmissionResult(submitted=["T2"], submitted_for=[("B", "T2")])
+        assert _rows_held_by_group(rows, known={("A", "T1")}, push=push) == {2, 3}

@@ -2508,3 +2508,83 @@ class TestPackageIdDeferral:
         assert list(rows) == ["1"]
         assert rows["1"][_F["status"]] == "delivered" and rows["1"][_F["package_id"]] == "AAA"
 
+
+
+class TestPreShipCardsMergedIntoOnePackage:
+    """DEFER (3), live (order 111-9990007-9990007): two `ordered` cards with no tracking
+    number and no shipmentId merged into ONE package at ship time. The second item's record arrived
+    under Shipment 1 instead of 2, matched nothing, and appended -- leaving the old Shipment 2 row
+    as a permanent $19.95 orphan. A still-`ordered`, untracked, id-less row is a placeholder: the
+    same item's record re-homes onto it and takes the incoming Shipment number."""
+
+    OID, DATE = "111-9990007-9990007", "2026-09-14"
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    def _existing(self, item, shipment, **values):
+        base = dict(retailer="Amazon", order_id=self.OID, order_date=self.DATE, item_name=item,
+                    shipment=shipment, status="ordered", quantity="1", cost_per_item="19.95",
+                    total_cost="19.95", tracking_number="", package_id="")
+        base.update(values)
+        return row(**base)
+
+    def _incoming(self, item, shipment, **values):
+        base = dict(retailer="Amazon", order_id=self.OID, order_date=self.DATE, item_name=item,
+                    shipment=shipment, status="shipped", quantity=1, cost_per_item=19.95,
+                    total_cost=19.95, tracking_number="TBA999000000010", package_id="NWRq4sthQ")
+        base.update(values)
+        return base
+
+    def test_the_merged_items_placeholder_is_re_homed_not_duplicated(self, sheet, tmp_path, alerts):
+        sheet.rows = [list(HEADER),
+                      self._existing("HABA Busy Board", "1"),
+                      self._existing("Fat Brain Kupz", "2")]
+        path = write_csv_file(tmp_path,
+                              self._incoming("HABA Busy Board", "1"),
+                              self._incoming("Fat Brain Kupz", "1"))
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert len(rows) == 2                                   # nothing appended
+        by_name = {r[_F["item_name"]]: r for r in rows}
+        fat = by_name["Fat Brain Kupz"]
+        assert str(fat[_F["shipment"]]) == "1"                  # took the incoming number
+        assert fat[_F["tracking_number"]] == "TBA999000000010" and fat[_F["package_id"]] == "NWRq4sthQ"
+        assert fat[_F["status"]] == "shipped" and fat[_F["total_cost"]] == 19.95
+        assert alerts == []
+
+    def test_a_placeholder_still_on_the_page_is_not_stolen(self, sheet, tmp_path, alerts):
+        """The page still shows the Shipment 2 card, so a Fat Brain record at Shipment 1 is a
+        genuinely new box: the placeholder keeps its own record and the new box appends."""
+        sheet.rows = [list(HEADER),
+                      self._existing("HABA Busy Board", "1"),
+                      self._existing("Fat Brain Kupz", "2")]
+        path = write_csv_file(tmp_path,
+                              self._incoming("HABA Busy Board", "1"),
+                              self._incoming("Fat Brain Kupz", "1", package_id="NEWBOX"),
+                              self._incoming("Fat Brain Kupz", "2", status="ordered",
+                                             tracking_number="", package_id=""))
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert len(rows) == 3
+        fat = sorted(str(r[_F["shipment"]]) for r in rows if r[_F["item_name"]] == "Fat Brain Kupz")
+        assert fat == ["1", "2"]
+
+    def test_a_tracked_or_identified_row_is_never_a_placeholder(self, sheet, tmp_path, alerts):
+        """A row that already has a package id is a real box; the changed-ordinal record for the
+        same item is routed by the id rule (kept Shipment number), never re-homed by name."""
+        sheet.rows = [list(HEADER),
+                      self._existing("Fat Brain Kupz", "2", package_id="PKG2", status="ordered")]
+        path = write_csv_file(tmp_path, self._incoming("Fat Brain Kupz", "1", package_id="PKG2"))
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert len(rows) == 1 and str(rows[0][_F["shipment"]]) == "2"   # id rule: keeps its number

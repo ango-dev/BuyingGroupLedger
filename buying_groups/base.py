@@ -159,6 +159,11 @@ class SubmissionResult:
     """
 
     submitted: list[str] = field(default_factory=list)
+    #: The same successes as `(order_id, tracking_number)` pairs. A combined box puts several ORDERS
+    #: under one number (Amazon: "2 orders in this package"), and the sheet's
+    #: Tracking Submitted tick is per ROW — keyed on the bare number it ticked the second order's
+    #: rows when only the first order's submission had landed.
+    submitted_for: list[tuple[str, str]] = field(default_factory=list)
     skipped: list[tuple[str, str]] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
     #: Rejected in a way NO retry can fix — only a specific human action will. Kept apart from

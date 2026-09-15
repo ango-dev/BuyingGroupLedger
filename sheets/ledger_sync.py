@@ -564,6 +564,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     shipment_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     tracking_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     package_to_existing: dict[tuple, list[tuple[int, list]]] = {}
+    placeholder_to_existing: dict[tuple, list[tuple[int, list]]] = {}  # (order, date, item name)
     status_hdr_idx = header.index("Status") if "Status" in header else None
     for row_number, row in enumerate(existing[1:], start=2):
         # Rows written before Shipment existed are shorter than key_idx; read missing cells as ""
@@ -589,6 +590,15 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         pid = _package_id_of(row, package_hdr_idx)
         if pid:
             package_to_existing.setdefault((row[oid_idx], pid), []).append((row_number, row))
+        # A PRE-SHIP PLACEHOLDER: still `ordered`, with neither a tracking number nor a package id
+        # (Amazon's pre-ship links carry no shipmentId). Its Shipment number is the one thing the
+        # retailer is still free to change — see DEFER (3) below.
+        placeholder_trk = (row[tracking_hdr_idx].strip()
+                           if tracking_hdr_idx is not None and tracking_hdr_idx < len(row) else "")
+        if (status_hdr_idx is not None and status_hdr_idx < len(row)
+                and str(row[status_hdr_idx]).strip().lower() == "ordered"
+                and not placeholder_trk and not pid):
+            placeholder_to_existing.setdefault(key[:3], []).append((row_number, row))
 
     with csv_path.open(newline="", encoding="utf-8") as f:
         records = list(csv.DictReader(f))
@@ -612,6 +622,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     incoming_pkey_count: dict[tuple, int] = {}   # (order, package id)
     incoming_pname_count: dict[tuple, int] = {}  # (order, package id, item name) — a multi-SKU carton
     incoming_pids_by_order: dict[str, set] = {}  # which packages this batch says are ON THE PAGE
+    incoming_keys = {_record_key(rec) for rec in collapsed}  # every exact key this page still shows
     # Which SHIPMENTS each incoming tracking number claims, per order — the mis-read detector below.
     incoming_tracking_shipments: dict[tuple, set] = {}
     for rec in collapsed:
@@ -803,6 +814,30 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                     match = candidates[0]
                     if name_hdr_idx < len(match[1]) and str(match[1][name_hdr_idx]).strip():
                         sheet_row[name_field_idx] = match[1][name_hdr_idx]  # keep recorded name
+            # DEFER (3) TO A PRE-SHIP PLACEHOLDER. two
+            # `ordered` cards with neither a tracking number nor a shipmentId MERGED into one package
+            # at ship time, so the second item's record arrived under a new Shipment number and
+            # nothing above could match it — it appended, and the old row stayed behind as a
+            # permanent $19.95 orphan (history 1f's double-count by another road). A row that is
+            # still `ordered` with no tracking and no package id is a placeholder whose ordinal the
+            # retailer may still change; the same item's record re-homes onto it and TAKES the
+            # incoming Shipment number. Only when the placeholder's own key is not in this batch (a
+            # page still showing that card keeps it), and only for a lone candidate.
+            if match is None and placeholder_to_existing:
+                candidates = [
+                    c for c in placeholder_to_existing.get(key[:3], [])
+                    if c[0] not in claimed_rows
+                    and tuple(c[1][i] if i < len(c[1]) else "" for i in key_idx) not in incoming_keys
+                ]
+                if len(candidates) == 1:
+                    match = candidates[0]
+                    log.info(
+                        "Order %s / %r: pre-ship placeholder at shipment %s re-homed as shipment %s "
+                        "(the cards merged or re-ordered before shipping).",
+                        record["order_id"], record.get("item_name", ""),
+                        match[1][shipment_hdr_idx] if shipment_hdr_idx < len(match[1]) else "",
+                        record.get("shipment", ""),
+                    )
             if match is None:
                 if displaced:
                     label = shipment_label(_next_shipment_number(

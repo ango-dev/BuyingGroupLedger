@@ -348,8 +348,9 @@ class TestMultiplePurchasesPerOrder:
                     {"purchase_id": "P3", "order_id": "C1", "shipment_id": "S1",
                      "tracking_number": "1Z1"}),
         ]
+        # The ledger says the box holds all six units (3 x qty-2 reservations, one box).
         result = bfmr.submit_tracking(
-            [submission(order_id="C1", tracking_number="1Z1", quantity=2)])
+            [submission(order_id="C1", tracking_number="1Z1", quantity=6)])
         body = transport.bodies()[-1]["tracker_data"]
         assert [o["tracking_number"] for o in body] == ["1Z1", "1Z1", "1Z1"]
         assert [o["purchase_id"] for o in body] == ["P1", "P2", "P3"]
@@ -420,6 +421,73 @@ class TestMultiplePurchasesPerOrder:
         transport.responses = [tracker(*entries)]
         held = bfmr.already_submitted([submission(order_id="C1", tracking_number="1Z1")])
         assert held == {("C1", "1Z1")}
+
+
+class TestABoxIsOnlyAttachedToThePurchasesItCanHold:
+    """purchases qty 2 + qty 1, two Amazon
+    boxes). The qty-1 box shipped first; the one-box rule attached it to BOTH purchases, and the
+    qty-2 box then matched nothing, found no purchase waiting, and fell out of the plan silently."""
+
+    def _purchases(self, **overrides):
+        p2 = {"reserve_id": "R2", "purchase_id": "P2", "order_id": "O1", "qty": 2,
+              "status": "purchased", "deal_id": "TOY"}
+        p1 = {"reserve_id": "R1", "purchase_id": "P1", "order_id": "O1", "qty": 1,
+              "status": "purchased", "deal_id": "TOY"}
+        p2.update(overrides.get("p2", {}))
+        p1.update(overrides.get("p1", {}))
+        return [p2, p1]
+
+    def test_a_small_box_serves_only_the_purchase_it_fits(self, bfmr, transport):
+        transport.responses = [
+            tracker(*self._purchases()),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker(*self._purchases(p1={"shipment_id": "S1", "tracking_number": "T513",
+                                         "status": "shipped"})),
+        ]
+        result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="T513", quantity=1)])
+        body = transport.bodies()[-1]["tracker_data"]
+        assert [(o["purchase_id"], o["tracking_number"], o["qty"]) for o in body] == [("P1", "T513", 1)]
+        assert result.submitted == ["T513"] and not result.needs_manual
+
+    def test_a_fully_accounted_box_leaves_the_other_purchase_waiting_quietly(self, bfmr, transport):
+        transport.responses = [tracker(*self._purchases(
+            p1={"shipment_id": "S1", "tracking_number": "T513", "status": "shipped"}))]
+        result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="T513", quantity=1)])
+        assert ("T513", "already recorded with this quantity") in result.skipped
+        assert not result.needs_manual and not result.failed
+        assert len(transport.calls) == 1, "nothing was posted for the purchase still waiting"
+
+    def test_the_second_box_then_pairs_with_the_purchase_still_waiting(self, bfmr, transport):
+        transport.responses = [
+            tracker(*self._purchases(p1={"shipment_id": "S1", "tracking_number": "T513",
+                                         "status": "shipped"})),
+            FakeResponse(payload={"reservations_response": {}}),
+            tracker(*self._purchases(p1={"shipment_id": "S1", "tracking_number": "T513"},
+                                     p2={"shipment_id": "S2", "tracking_number": "T738"})),
+        ]
+        result = bfmr.submit_tracking([
+            submission(order_id="O1", tracking_number="T738", quantity=2),
+            submission(order_id="O1", tracking_number="T513", quantity=1),
+        ])
+        body = transport.bodies()[-1]["tracker_data"]
+        assert [(o["purchase_id"], o["tracking_number"], o["qty"]) for o in body] == [("P2", "T738", 2)]
+        assert result.submitted == ["T738"] and not result.needs_manual
+
+    def test_a_box_with_no_open_purchase_is_reported_never_dropped(self, bfmr, transport):
+        # The live wreckage: both purchases hold T513, and T738 has nowhere to go.
+        transport.responses = [tracker(
+            *self._purchases(p1={"shipment_id": "S1", "tracking_number": "T513"},
+                             p2={"shipment_id": "S1", "tracking_number": "T513"}))]
+        result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="T738", quantity=2)])
+        assert not result.submitted and len(transport.calls) == 1
+        tracking, hint = result.needs_manual[0]
+        assert tracking == "T738" and "no open BFMR purchase" in hint and "T513 x2" in hint
+
+    def test_a_box_that_fits_nothing_goes_to_a_human(self, bfmr, transport):
+        transport.responses = [tracker(*self._purchases())]
+        result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="T9", quantity=5)])
+        assert not result.submitted and len(transport.calls) == 1
+        assert "neither sum to that nor include exactly one purchase" in result.needs_manual[0][1]
 
 
 class TestBfmrSplitOrdering:

@@ -186,6 +186,7 @@ class MaxOutDealsClient(HttpClient):
                 result.failed.append((number, str(failed[number])))
             else:
                 result.submitted.append(number)
+                result.submitted_for.extend((member.order_id, number) for member in groups[number])
 
         # MOD reports how many rows it actually inserted; the rest were duplicates it ignored.
         # Recording that distinction keeps a run that legitimately changed nothing from reading as

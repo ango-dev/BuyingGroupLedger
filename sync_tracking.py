@@ -1014,13 +1014,25 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
     _alert_on_cancelled_orders(group_key, client, plan, apply)
     _alert_on_cancelled_purchases(group_key, client, plan, apply)
 
-    pushed = set(push.submitted)
-    ticked = {
-        row.row_number for row in rows
-        if (row.order_id, row.tracking_number) in known or row.tracking_number in pushed
-    }
+    ticked = _rows_held_by_group(rows, known, push)
     _merge_writes(all_writes, _tick_submitted(ticked, plan, apply))
     return {"push": push, "insurance": insurance, "payouts": payouts}
+
+
+def _rows_held_by_group(rows, known: set[tuple[str, str]], push) -> set[int]:
+    """Row numbers whose package the group now holds: already recorded there, or landed this run.
+
+    Keyed on (order, number) on BOTH sides, never the bare number. Amazon put two ORDERS in one box:
+   the iPad order's
+    push landed, and a bare-number test ticked the toy order's rows too — an order BFMR had no
+    purchase for, whose submission had just been refused in the same run.
+    """
+    pushed = set(push.submitted_for)
+    return {
+        row.row_number for row in rows
+        if (row.order_id, row.tracking_number) in known
+        or (row.order_id, row.tracking_number) in pushed
+    }
 
 
 def _tick_submitted(row_numbers, plan, apply) -> dict[int, dict]:

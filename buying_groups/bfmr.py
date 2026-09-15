@@ -392,6 +392,7 @@ class BFMRClient(HttpClient):
             # shipment, a box mid-attachment reads as a forbidden quantity increase. The reduction
             # object is built from the EXISTING entry, which carries its own purchase ids.
             unmatched: list[tuple[str, int, TrackingSubmission]] = []
+            held_by_tracking: dict[str, int] = {}  # units of each box BFMR already holds
             for tracking, package_rows in packages.items():
                 quantity = sum(r.quantity for r in package_rows)
                 row = package_rows[0]
@@ -421,6 +422,7 @@ class BFMRClient(HttpClient):
                 matching = [p for p in active
                             if _tracking_of(p) and _tracking_of(p) in bfmr_spellings(tracking)]
                 held_total = sum(_as_int(p.get("qty")) for p in matching)
+                held_by_tracking[tracking] = held_total
                 if matching and held_total == quantity:
                     result.skipped.append((tracking, "already recorded with this quantity"))
                 elif held_total > quantity:
@@ -445,22 +447,48 @@ class BFMRClient(HttpClient):
             unshipped = [p for p in active if not p.get("shipment_id")]
             if not unshipped and not unmatched:
                 continue  # every purchase has its shipment and every box is accounted for
+            if unmatched and not unshipped:
+                # NEVER a silent drop. the qty-2 box
+                # shipped after every purchase had already been given the OTHER box's number, so
+                # it matched nothing, found nobody waiting, and simply fell out of the plan — no
+                # object, no failure, nothing in the alert. A box with no home is a human call.
+                for tracking, quantity, row in unmatched:
+                    result.needs_manual.append((tracking, _no_open_purchase_hint(row, quantity, active)))
+                continue
 
             if len(packages) == 1:
-                # ONE box serving several purchases: attach it to EVERY purchase still waiting,
-                # under the BARE number. Probed live (order 1399000016): a create with
-                # the same bare number and the next purchase's ids makes BFMR LINK THE EXISTING
-                # SHIPMENT OBJECT to that purchase — the suffix scheme is for a number shared
-                # across DIFFERENT orders (the Best Buy carton), and a suffixed create here is
-                # accepted-then-silently-dropped. Quantity is the PURCHASE's own reservation qty:
-                # the box holds the sum, each purchase its share.
+                # ONE box on the order so far. Probed live (order 1399000016): a create
+                # with the same bare number and the next purchase's ids makes BFMR LINK THE
+                # EXISTING SHIPMENT OBJECT to that purchase — the suffix scheme is for a number
+                # shared across DIFFERENT orders (the Best Buy carton), and a suffixed create here
+                # is accepted-then-silently-dropped. WHICH purchases it serves is decided by the
+                # LEDGER's count of what the box holds, not assumed to be all of them: live
+                # 2026-09-14 (order 111-9990025-9990025) a qty-1 box shipped first, the old rule
+                # attached it to BOTH the qty-2 and the qty-1 purchase — 3 units claimed against a
+                # 1-unit box — and the qty-2 box then had nowhere to go when it shipped.
                 base = next(iter(packages))
-                for p in unshipped:
+                box_qty = sum(r.quantity for r in packages[base])
+                remaining = box_qty - held_by_tracking.get(base, 0)
+                if remaining <= 0:
+                    continue  # fully accounted for; the other purchases' boxes are still to come
+                waiting = sum(_as_int(p.get("qty")) for p in unshipped)
+                if remaining == waiting:
+                    targets = unshipped  # the box holds every waiting share (2+2+2 under one number)
+                else:
+                    # The box fits ONE of the waiting purchases. Identical reservations of one deal
+                    # are interchangeable, so the first of them; different deals are a human call.
+                    fits = [p for p in unshipped if _as_int(p.get("qty")) == remaining]
+                    deals = {str(p.get("deal_id") or p.get("deal_title") or "") for p in fits}
+                    if not fits or len(deals) > 1:
+                        result.needs_manual.append((base, _box_does_not_fit_hint(
+                            packages[base][0], remaining, unshipped)))
+                        continue
+                    targets = fits[:1]
+                for p in targets:
                     objects.append({
                         "reserve_id": p.get("reserve_id"), "purchase_id": p.get("purchase_id"),
                         "shipment_id": None, "order_no": order_id, "tracking_number": base,
-                        "qty": _as_int(p.get("qty")) or sum(
-                            r.quantity for r in packages[base]) or 1,
+                        "qty": _as_int(p.get("qty")) or remaining or 1,
                         "_is_reduction": False,
                     })
                 continue
@@ -548,6 +576,7 @@ class BFMRClient(HttpClient):
                 # The LEDGER's spelling is what gets recorded as submitted, since that is the key the
                 # checkbox and every later join use; the suffix stays BFMR-side only.
                 result.submitted.append(number)
+                result.submitted_for.append((obj.get("order_no", ""), number))
             elif _is_bestbuy((retailers or {}).get(obj.get("order_no", ""))):
                 # Refused outright (invalid_items) or accepted-then-silently-dropped. For a Best Buy
                 # order both are the duplicate-carton case, and since 2026-08-23 BFMR no longer
@@ -606,6 +635,7 @@ class BFMRClient(HttpClient):
                 log.info("BFMR: %s was refused (Best Buy duplicate carton); accepted as %s.",
                          bare, candidate)
                 result.submitted.append(bare)
+                result.submitted_for.append((obj.get("order_no", ""), bare))
                 return
         result.needs_manual.append(
             (bare, _duplicate_tracking_hint(bare, attempts, rejected=rejected, invalid=invalid))
@@ -1299,6 +1329,30 @@ def _no_purchase_hint(row) -> str:
         f"\n"
         f"Check My Tracker for order {row.order_id}. If the reservation is still live, enter the "
         f"order number and the tracking number by hand — the next run picks it up with no sheet edit."
+    )
+
+
+def _no_open_purchase_hint(row, quantity: int, active: list[dict]) -> str:
+    held = ", ".join(
+        f"{_tracking_of(p) or 'no number'} x{_as_int(p.get('qty'))}" for p in active
+    )
+    return (
+        f"{row.describe()}: box {row.tracking_number} (qty {quantity}) has no open BFMR purchase "
+        f"left on order {row.order_id} — every purchase there already holds a shipment ({held}). "
+        f"If one of them holds the WRONG number, replace it with {row.tracking_number} in BFMR's "
+        f"dashboard; the next run then reads this box as recorded."
+    )
+
+
+def _box_does_not_fit_hint(row, remaining: int, unshipped: list[dict]) -> str:
+    waiting = ", ".join(
+        f"{p.get('deal_title') or p.get('purchase_id')} x{_as_int(p.get('qty'))}" for p in unshipped
+    )
+    return (
+        f"{row.describe()}: box {row.tracking_number} holds {remaining} unit(s) the ledger has not "
+        f"yet attached, but the open BFMR purchase(s) on order {row.order_id} ({waiting}) neither "
+        f"sum to that nor include exactly one purchase of that size — attach the box to its "
+        f"purchase in BFMR's dashboard by hand."
     )
 
 
