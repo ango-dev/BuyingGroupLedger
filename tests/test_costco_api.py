@@ -121,3 +121,41 @@ def test_blank_host_counts_as_no_proxy(stored_token, http):
     client.list_order_numbers("2026-08-01", "2026-08-13")
 
     assert all(c["proxies"] is None for c in http.calls)
+
+
+
+class SequenceHttp(RecordingHttp):
+    """Answers each call with the next payload; the last one repeats."""
+
+    def __init__(self, payloads):
+        super().__init__(payloads[-1])
+        self._payloads = list(payloads)
+
+    def post(self, url, **kwargs):
+        self.calls.append({"url": url, **kwargs})
+        payload = self._payloads.pop(0) if len(self._payloads) > 1 else self._payloads[0]
+        return FakeResponse(payload)
+
+
+_EMPTY = {"data": {"getOnlineOrders": {"bcOrders": [], "totalNumberOfRecords": 0}}}
+_ONE = {"data": {"getOnlineOrders": {"bcOrders": [{"orderNumber": "1399000020"}],
+                                      "totalNumberOfRecords": 1}}}
+
+
+def test_an_empty_order_list_is_asked_again_before_it_is_believed(stored_token, monkeypatch):
+    # the same window answered 0 records once, then 3 orders on five retries.
+    http = SequenceHttp([_EMPTY, _ONE])
+    monkeypatch.setattr(costco_api, "curl_requests", http)
+    monkeypatch.setattr(costco_api, "_sleep", lambda s: None)
+    client = CostcoApiClient("p1", proxy=PROXY)
+    assert client.list_order_numbers("2026-09-13", "2026-09-18") == ["1399000020"]
+    assert len(http.calls) == 2
+
+
+def test_a_truly_empty_window_is_accepted_after_the_retries(stored_token, monkeypatch):
+    http = SequenceHttp([_EMPTY])
+    monkeypatch.setattr(costco_api, "curl_requests", http)
+    monkeypatch.setattr(costco_api, "_sleep", lambda s: None)
+    client = CostcoApiClient("p1", proxy=PROXY)
+    assert client.list_order_numbers("2026-09-13", "2026-09-18") == []
+    assert len(http.calls) == 1 + costco_api.EMPTY_PAGE_RETRIES

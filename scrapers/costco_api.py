@@ -169,6 +169,13 @@ class CostcoAuthError(ApiLoginError):
     rather than a shape change worth a dossier."""
 
 
+#: How many times an EMPTY order-list page is re-asked before "no orders" is believed, and the
+#: pause between asks (see _list_order_numbers_window).
+EMPTY_PAGE_RETRIES = 2
+EMPTY_PAGE_RETRY_DELAY = 1.0
+_sleep = time.sleep
+
+
 class CostcoApiError(Exception):
     """The GraphQL API returned an error or an unexpected shape."""
 
@@ -339,6 +346,7 @@ class CostcoApiClient:
         seen: dict[str, None] = {}
         for warehouse in self.warehouse_numbers:
             page_number = 1
+            attempt = 0
             while True:
                 data = self._post_graphql(
                     QUERY_ONLINE_ORDERS,
@@ -356,6 +364,24 @@ class CostcoApiClient:
                 if not isinstance(payload, dict):
                     break
                 orders = payload.get("bcOrders") or []
+                if not orders and attempt < EMPTY_PAGE_RETRIES:
+                    # AN EMPTY PAGE IS ASKED AGAIN BEFORE IT IS BELIEVED. the very
+                    # same window (2026-09-13..18, warehouse 847) answered totalNumberOfRecords 0
+                    # once and three orders on the next five identical calls — and a run that
+                    # accepts the empty answer discovers nothing and says nothing, which is how a
+                    # new order (1399000020 that day) silently never reaches the ledger. Two extra
+                    # cheap calls only ever happen on an empty page.
+                    attempt += 1
+                    _sleep(EMPTY_PAGE_RETRY_DELAY)
+                    continue
+                if orders and attempt:
+                    log.warning(
+                        "Costco: the order list for %s..%s (warehouse %s, page %d) came back empty "
+                        "%d time(s) before returning %d order(s) — the API answered empty for a real "
+                        "window; discovery would have missed them without the retry.",
+                        start_date, end_date, warehouse, page_number, attempt, len(orders),
+                    )
+                attempt = 0
                 for order in orders:
                     number = order.get("orderNumber") if isinstance(order, dict) else None
                     if number:

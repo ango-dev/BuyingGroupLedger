@@ -252,6 +252,17 @@ _STATUS_RANK = {
 }
 
 
+# The retailer's own item number, as the Costco mapping writes it into the item name
+# ("... (Item #2042809)"). Costco serves DIFFERENT descriptions for one SKU depending on the order's
+# state — the marketing name while open, the terse warehouse name once cancelled — so the name is not a stable identity there, but the item number is.
+_ITEM_NUMBER_RE = re.compile(r"\(Item #(\d+)\)\s*$")
+
+
+def _item_number_of(name) -> str:
+    m = _ITEM_NUMBER_RE.search(str(name or ""))
+    return m.group(1) if m else ""
+
+
 def _record_key(rec: dict) -> tuple:
     return (rec.get("order_id", ""), rec.get("order_date", ""), rec.get("item_name", ""),
             rec.get("shipment", ""))
@@ -565,6 +576,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     tracking_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     package_to_existing: dict[tuple, list[tuple[int, list]]] = {}
     placeholder_to_existing: dict[tuple, list[tuple[int, list]]] = {}  # (order, date, item name)
+    itemno_to_existing: dict[tuple, list[tuple[int, list]]] = {}  # (order, date, shipment, item number)
     status_hdr_idx = header.index("Status") if "Status" in header else None
     for row_number, row in enumerate(existing[1:], start=2):
         # Rows written before Shipment existed are shorter than key_idx; read missing cells as ""
@@ -599,6 +611,9 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                 and str(row[status_hdr_idx]).strip().lower() == "ordered"
                 and not placeholder_trk and not pid):
             placeholder_to_existing.setdefault(key[:3], []).append((row_number, row))
+        item_number = _item_number_of(row[name_hdr_idx] if name_hdr_idx < len(row) else "")
+        if item_number:
+            itemno_to_existing.setdefault((key[0], key[1], key[3], item_number), []).append((row_number, row))
 
     with csv_path.open(newline="", encoding="utf-8") as f:
         records = list(csv.DictReader(f))
@@ -623,6 +638,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     incoming_pname_count: dict[tuple, int] = {}  # (order, package id, item name) — a multi-SKU carton
     incoming_pids_by_order: dict[str, set] = {}  # which packages this batch says are ON THE PAGE
     incoming_keys = {_record_key(rec) for rec in collapsed}  # every exact key this page still shows
+    incoming_itemno_count: dict[tuple, int] = {}  # (order, date, shipment, item number)
     # Which SHIPMENTS each incoming tracking number claims, per order — the mis-read detector below.
     incoming_tracking_shipments: dict[tuple, set] = {}
     for rec in collapsed:
@@ -635,6 +651,10 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                 tk = (rec.get("order_id", ""), trk)
                 incoming_tkey_count[tk] = incoming_tkey_count.get(tk, 0) + 1
                 incoming_tracking_shipments.setdefault(tk, set()).add(rec.get("shipment", ""))
+            item_number = _item_number_of(rec.get("item_name", ""))
+            if item_number:
+                ik = (rec.get("order_id", ""), rec.get("order_date", ""), rec.get("shipment", ""), item_number)
+                incoming_itemno_count[ik] = incoming_itemno_count.get(ik, 0) + 1
             pid = str(rec.get("package_id", "")).strip()
             if pid:
                 pk = (rec.get("order_id", ""), pid)
@@ -838,6 +858,24 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                         match[1][shipment_hdr_idx] if shipment_hdr_idx < len(match[1]) else "",
                         record.get("shipment", ""),
                     )
+            # DEFER (4) BY THE RETAILER'S ITEM NUMBER. the
+            # order was cancelled, and Costco's API renamed every line from its marketing name to the
+            # terse warehouse name — a different Item Name is a different key, so the cancelled
+            # records matched nothing, appended as new rows, and the `ordered` rows stayed open
+            # (which is also what kept the order being re-read and re-appended after the user
+            # deleted the duplicates). The "(Item #N)" suffix the Costco mapping writes is the
+            # stable identity: same order, date, shipment and item number is the same line. The
+            # recorded name is kept, exactly as the tracking rule keeps it. Unambiguous 1:1 only.
+            if match is None:
+                item_number = _item_number_of(record["item_name"])
+                if item_number:
+                    ikey = (record["order_id"], record["order_date"], record.get("shipment", ""), item_number)
+                    candidates = [c for c in itemno_to_existing.get(ikey, [])
+                                  if c[0] not in claimed_rows and same_package(c)]
+                    if incoming_itemno_count.get(ikey, 0) == 1 and len(candidates) == 1:
+                        match = candidates[0]
+                        if name_hdr_idx < len(match[1]) and str(match[1][name_hdr_idx]).strip():
+                            sheet_row[name_field_idx] = match[1][name_hdr_idx]  # keep recorded name
             if match is None:
                 if displaced:
                     label = shipment_label(_next_shipment_number(

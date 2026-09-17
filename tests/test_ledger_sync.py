@@ -2588,3 +2588,79 @@ class TestPreShipCardsMergedIntoOnePackage:
 
         rows = sheet.data_rows()
         assert len(rows) == 1 and str(rows[0][_F["shipment"]]) == "2"   # id rule: keeps its number
+
+
+
+class TestCostcoRenamesLinesWhenAnOrderIsCancelled:
+    """DEFER (4), live (Costco order 1399000017): once cancelled, the API served the terse
+    warehouse description instead of the marketing name for the same SKUs, so the cancelled records
+    missed the `ordered` rows' keys and appended -- two cancelled rows beside two rows still open,
+    and every later run re-appended them after the user deleted the duplicates. The "(Item #N)"
+    suffix is the identity; the recorded name is kept."""
+
+    OID, DATE = "1399000017", "2026-09-16"
+    LONG_P = "iPad Air 11-inch, 256GB Wi-Fi (M4 chip) Built For Apple Intelligence, Purple (Item #2042809)"
+    LONG_B = "iPad Air 11-inch, 256GB Wi-Fi (M4 chip) Built For Apple Intelligence, Blue (Item #2042808)"
+    TERSE_P = "IPAD AIR 11 M4 256GB PURP (Item #2042809)"
+    TERSE_B = "IPAD AIR 11 M4 256GB BLUE (Item #2042808)"
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    def _existing(self, name, qty, **values):
+        base = dict(retailer="Costco", order_id=self.OID, order_date=self.DATE, item_name=name,
+                    shipment="1", status="ordered", quantity=str(qty), cost_per_item="749.99",
+                    total_cost=str(round(749.99 * qty, 2)))
+        base.update(values)
+        return row(**base)
+
+    def _incoming(self, name, qty, **values):
+        base = dict(retailer="Costco", order_id=self.OID, order_date=self.DATE, item_name=name,
+                    shipment="1", status="cancelled", quantity=qty, cost_per_item=749.99,
+                    total_cost=round(749.99 * qty, 2))
+        base.update(values)
+        return base
+
+    def test_the_renamed_cancelled_lines_flip_their_own_rows(self, sheet, tmp_path, alerts):
+        sheet.rows = [list(HEADER), self._existing(self.LONG_P, 2), self._existing(self.LONG_B, 1)]
+        path = write_csv_file(tmp_path, self._incoming(self.TERSE_P, 2), self._incoming(self.TERSE_B, 1))
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert len(rows) == 2                                      # nothing appended
+        by_name = {r[_F["item_name"]]: r for r in rows}
+        assert set(by_name) == {self.LONG_P, self.LONG_B}          # the recorded names survive
+        assert all(r[_F["status"]] == "cancelled" for r in rows)
+        assert all(r[_F["total_cost"]] in ("", None) for r in rows)  # cancelled rows carry no money
+        assert alerts == []
+
+    def test_a_different_item_number_is_a_different_line(self, sheet, tmp_path, alerts):
+        # Two lines on the shipment, so the name-agnostic shipment-line rule cannot fire: the
+        # renamed Purple line finds its row by item number, the brand-new SKU appends.
+        sheet.rows = [list(HEADER), self._existing(self.LONG_P, 2), self._existing(self.LONG_B, 1)]
+        path = write_csv_file(tmp_path,
+                              self._incoming(self.TERSE_P, 2),
+                              self._incoming("IPAD AIR 11 M4 256GB SBLU (Item #2042810)", 1,
+                                             status="ordered"))
+
+        sync_csv_to_sheet(path)
+
+        rows = sheet.data_rows()
+        assert len(rows) == 3
+        by_name = {r[_F["item_name"]]: r for r in rows}
+        assert by_name[self.LONG_P][_F["status"]] == "cancelled"
+        assert "SBLU" in "".join(by_name)
+
+    def test_names_without_an_item_number_have_no_identity_to_match_on(self, sheet, tmp_path, alerts):
+        # Documents the rule's scope: with two renamed lines and no "(Item #N)" on either side,
+        # nothing can pair them, and the pre-fix behaviour (append) is what happens.
+        sheet.rows = [list(HEADER), self._existing("iPad Air Purple", 2), self._existing("iPad Air Blue", 1)]
+        path = write_csv_file(tmp_path, self._incoming("IPAD AIR PURP", 2), self._incoming("IPAD AIR BLUE", 1))
+
+        sync_csv_to_sheet(path)
+
+        assert len(sheet.data_rows()) == 4
