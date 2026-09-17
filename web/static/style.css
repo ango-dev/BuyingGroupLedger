@@ -82,7 +82,10 @@ table.grid th { background: var(--bg); position: sticky; top: 0; z-index: 1; whi
 table.grid th.sorted a { font-weight: 700; }
 table.grid .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.compact { width: auto; min-width: 280px; }
-table.ledger td.item { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The ellipsis lives on the cell's inner span, never on the <td>: `overflow: hidden` on a cell of
+   a collapsed-border table makes Chrome clip the cell's background under its borders, which shows
+   as a white line between coloured rows. */
+table.ledger td.item > span { display: block; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 table.ledger td { white-space: nowrap; }
 .scroll { overflow-x: auto; }
 
@@ -97,7 +100,10 @@ table.ledger td { white-space: nowrap; }
    static/sheet.js, since the bar's height depends on wrapping). */
 body.wide { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 body.wide header.top { flex: 0 0 auto; }
-body.wide main { flex: 1 1 auto; min-height: 0; overflow: auto; max-width: none; padding: 0 0 40px; }
+/* margin 0 + width 100% matter: main's base rule centres it with `margin: 0 auto`, and auto
+   margins on a flex item shrink it to its content -- the table's full width -- so it overflowed
+   the hidden body and nothing could scroll sideways. */
+body.wide main { flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%; margin: 0; overflow: auto; max-width: none; padding: 0 0 40px; }
 body.wide .filters { position: sticky; top: 0; left: 0; z-index: 4; margin: 0; border-radius: 0; border-width: 0 0 1px; }
 body.wide h1 { margin: 8px 8px 6px; }
 body.wide .count { margin: 4px 8px; }
@@ -107,7 +113,7 @@ table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-s
    row -- an opaque grey line reads as a gap between rows. */
 table.sheetlike th, table.sheetlike td { border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); border-bottom: 1px solid rgba(0, 0, 0, 0.12); padding: 3px 6px; }
 table.sheetlike th { position: sticky; top: var(--toolbar-h, 0px); z-index: 2; background: var(--bg); box-shadow: 0 1px 0 var(--line); }
-table.sheetlike td.item { max-width: 420px; }
+table.sheetlike td.item > span { max-width: 420px; }
 table.sheetlike td.rownum, table.sheetlike th.rownum { position: sticky; left: 0; z-index: 1; background: var(--bg); color: var(--muted); text-align: right; font-size: 0.8em; min-width: 34px; }
 table.sheetlike th.rownum { z-index: 3; }
 table.sheetlike tr.status-ordered td    { background: #EA9999; color: #1a1a1a; }

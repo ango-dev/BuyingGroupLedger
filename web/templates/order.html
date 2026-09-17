@@ -52,7 +52,7 @@
     <tbody>
       {% for row in s.rows %}
       <tr class="status-{{ row.status }} payout-{{ row.payout_state }}">
-        <td class="item">{{ row.item_name }}</td>
+        <td class="item"><span title="{{ row.item_name }}">{{ row.item_name }}</span></td>
         <td class="num">{{ row.text('quantity') }}</td>
         <td class="num">{{ row | cell('cost_per_item') }}</td>
         <td class="num">{{ row | cell('total_cost') }}</td>
