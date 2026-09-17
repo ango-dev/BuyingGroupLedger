@@ -100,6 +100,13 @@ ENV_TO_CONFIG = {
     "OCI_PAR_URL_PREFIX": "receipts.oci.par_url_prefix",
     "DOSSIER_UPLOAD_ENABLED": "receipts.dossier_upload_enabled",
     "OCI_FAILURES_PAR_URL_PREFIX": "receipts.oci.failures_par_url_prefix",
+    # The read-only web dashboard (web/). None of these is read by the scheduler; see
+    # docs/operations.md, "The web dashboard".
+    "WEB_LEDGER_SOURCE": "web.ledger_source",
+    "WEB_SNAPSHOT_PATH": "web.snapshot_path",
+    "WEB_SHEET_CACHE_TTL_SECONDS": "web.sheet_cache_ttl_seconds",
+    "WEB_BIND_HOST": "web.bind_host",
+    "WEB_PORT": "web.port",
 }
 
 
@@ -371,6 +378,20 @@ class Settings:
     # Refuse to start when preflight fails, instead of alerting and running degraded.
     container_preflight_strict: bool = _get_bool("PREFLIGHT_STRICT", False)
     container_timezone: str = _get_str("TZ", "UTC")
+
+    # --- the read-only web dashboard (web/; `python -m web` / the `web` compose profile) ----------
+    # Which backend web.ledger_reader serves: "snapshot" (a data/sheet_backup_*.csv -- the newest,
+    # or `web_snapshot_path`) or "sheet" (the live Sheet through the READONLY scope, cached). The
+    # scheduler never reads any of these. Anything else is refused at startup, not defaulted.
+    web_ledger_source: str = _get_str("WEB_LEDGER_SOURCE", "snapshot")
+    web_snapshot_path: str = _get_str("WEB_SNAPSHOT_PATH", "")
+    # How long a live-Sheet read is served from memory before the next request re-reads it. Every
+    # refresh is one Sheets API read; 300 s keeps a page reload from ever becoming an API call.
+    web_sheet_cache_ttl_seconds: int = _get_int("WEB_SHEET_CACHE_TTL_SECONDS", 300)
+    # Loopback by default: phase 1 has no authentication, so reaching it from another machine is
+    # a deliberate choice (0.0.0.0 behind Tailscale, or the compose service's published port).
+    web_bind_host: str = _get_str("WEB_BIND_HOST", "127.0.0.1")
+    web_port: int = _get_int("WEB_PORT", 8765)
 
     def google_credentials(self, scopes):
         """Google service-account credentials, from the config file or a standalone JSON file.

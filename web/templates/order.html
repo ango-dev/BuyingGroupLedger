@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Order {{ order.order_id }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/orders">Orders</a> › <span class="mono">{{ order.order_id }}</span></p>
+<h1>{{ order.retailer }} <span class="mono">{{ order.order_id }}</span></h1>
+
+<section class="facts">
+  <dl>
+    <dt>Order Date</dt><dd>{{ order.order_date }}</dd>
+    <dt>Status</dt><dd>{% for s in order.statuses %}<span class="tag status-{{ s }}">{{ s }}</span> {% endfor %}</dd>
+    <dt>Buying Group</dt><dd>{{ order.buying_group or '(blank)' }}</dd>
+    <dt>Profile</dt><dd>{{ order.profile }}</dd>
+    <dt>Card</dt><dd>{{ order.card }}{% if order.card_last4 %} <span class="mono">…{{ order.card_last4 }}</span>{% endif %}</dd>
+    <dt>Delivery Address</dt><dd>{{ order.delivery_address }}</dd>
+    <dt>Order Link</dt><dd>{% for u in order.order_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">none</span>{% endfor %}</dd>
+    <dt>Receipt Link</dt><dd>{% for u in order.receipt_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">no receipt captured</span>{% endfor %}</dd>
+    <dt>Last Scraped At</dt><dd>{{ order.last_scraped_at }}</dd>
+  </dl>
+</section>
+
+<h2>Payout</h2>
+<section class="tiles">
+  <div class="tile"><div class="label">Total Cost</div><div class="value money">{{ order.totals.total_cost | money }}</div><div class="hint">{{ order.totals.quantity }} unit(s)</div></div>
+  <div class="tile"><div class="label">COGS</div><div class="value money">{{ order.totals.cogs | money }}</div></div>
+  <div class="tile"><div class="label">Insurance</div><div class="value money">{{ order.totals.insurance | money }}</div></div>
+  <div class="tile payout-{{ order.payout_state | replace(' ', '-') }}">
+    <div class="label">Payout Amount</div>
+    <div class="value money">{{ order.totals.payout | money }}</div>
+    <div class="hint">
+      {% if order.payout_state == 'settled' %}settled{% if order.payout_dates %} on {{ order.payout_dates | join(', ') }}{% endif %}
+      {% elif order.payout_state == 'partly settled' %}partly settled ({{ order.payout_dates | join(', ') }}); the rest is a commitment
+      {% elif order.payout_state == 'committed' %}committed by the buying group, not yet paid (Payout Date blank)
+      {% else %}no payout recorded{% endif %}
+    </div>
+  </div>
+  <div class="tile"><div class="label">{{ 'Projected' if order.payout_state == 'committed' else 'Total' }} Profit</div><div class="value money">{{ order.totals.profit | money }}</div></div>
+</section>
+
+<h2>Shipments</h2>
+{% for s in order.shipments %}
+<section class="shipment">
+  <h3>Shipment {{ s.shipment }} <span class="tag status-{{ s.status }}">{{ s.status }}</span></h3>
+  <dl class="inline">
+    <dt>Tracking Number</dt>
+    <dd class="mono">{% if s.tracking_number %}{% if s.tracking_url %}<a href="{{ s.tracking_url }}" rel="noopener">{{ s.tracking_number }}</a>{% else %}{{ s.tracking_number }}{% endif %}{% else %}<span class="muted">none yet</span>{% endif %}</dd>
+    <dt>Tracking Submitted</dt><dd>{{ '✓ submitted to the buying group' if s.tracking_submitted else 'not submitted' }}</dd>
+    <dt>Delivery Date</dt><dd>{{ s.delivery_date or '—' }}</dd>
+    <dt>Package ID</dt><dd class="mono">{{ s.package_id or '—' }}</dd>
+  </dl>
+  <table class="grid compact">
+    <thead><tr><th>Item Name</th><th class="num">Quantity</th><th class="num">Cost Per Item</th><th class="num">Total Cost</th><th class="num">Shipping</th><th class="num">Sales Tax</th><th class="num">Gift Card</th><th class="num">Rewards Used</th><th class="num">Cashback Rate</th><th class="num">COGS</th><th class="num">Insurance</th><th class="num">Payout Amount</th><th>Payout Date</th><th class="num">Return Qty</th><th>Return Date</th><th class="num">Total Profit</th></tr></thead>
+    <tbody>
+      {% for row in s.rows %}
+      <tr class="status-{{ row.status }} payout-{{ row.payout_state }}">
+        <td class="item">{{ row.item_name }}</td>
+        <td class="num">{{ row.text('quantity') }}</td>
+        <td class="num">{{ row | cell('cost_per_item') }}</td>
+        <td class="num">{{ row | cell('total_cost') }}</td>
+        <td class="num">{{ row | cell('shipping') }}</td>
+        <td class="num">{{ row | cell('sales_tax') }}</td>
+        <td class="num">{{ row | cell('gift_card') }}</td>
+        <td class="num">{{ row | cell('rewards_used') }}</td>
+        <td class="num">{{ row | cell('cashback_rate') }}</td>
+        <td class="num">{{ row | cell('cogs') }}</td>
+        <td class="num">{{ row | cell('insurance') }}</td>
+        <td class="num">{{ row | cell('payout_amount') }}{% if row.is_committed %} <span class="tag committed">proj.</span>{% endif %}</td>
+        <td>{{ row.payout_date }}</td>
+        <td class="num">{{ row.text('return_quantity') }}</td>
+        <td>{{ row.text('return_date') }}</td>
+        <td class="num">{{ row | cell('total_profit') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endfor %}
+{% endblock %}

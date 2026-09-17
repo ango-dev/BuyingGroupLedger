@@ -118,3 +118,75 @@ re-install the scheduler on the new host. No re-login or re-sharing needed.
 
 Then run `python -m scripts.preflight` on the new host before trusting it. Moving to a dedicated
 Linux host has its own runbook: **[DEPLOY.md](../DEPLOY.md)**.
+
+## The web dashboard (read-only)
+
+A local web page over the ledger, in `web/`: an overview (open rows by status and buying group,
+projected versus realized profit, the COGS input gaps, the scheduler heartbeat), a filterable and
+sortable ledger table, one page per order, the failure dossiers with each `report.md` rendered, and
+`/health` as JSON. FastAPI + Jinja2 + htmx, no build step; the dependencies are the optional extra
+`requirements-web.txt`, which the scheduler image never installs.
+
+**The read-only guarantee.** The dashboard cannot write the Sheet: its live backend opens the
+worksheet through `scripts.audit_sheet.open_worksheet_readonly`, the `spreadsheets.readonly` scope,
+so Google refuses a write before any code could attempt one. It never calls a retailer or a
+buying-group API, never runs a scrape, and never changes the ledger schema (`FIELDNAMES` / `HEADER`
+are frozen; `tests/test_schema.py` enforces them). Every route is a `GET`; every other method is
+refused; `tests/test_web.py` pins all of it, including that no write method of the worksheet is ever
+named in `web/`. In Docker, `config.json`, `data/` and `logs/` are mounted `:ro` as well.
+
+**Two backends, one adapter** (`web/ledger_reader.py`), chosen in `config.json`'s `web` section or
+by `WEB_LEDGER_SOURCE=snapshot|sheet` (the variable table in [configuration.md](configuration.md)
+lists the five `WEB_*` settings):
+
+| Backend | Reads | For |
+|---|---|---|
+| `snapshot` (default) | the newest `data/sheet_backup_*.csv` (every `--apply` script writes one), or `web.snapshot_path` | development, tests, a look at yesterday's ledger with no credentials |
+| `sheet` | the live worksheet, read-only scope, cached in memory for `web.sheet_cache_ttl_seconds` (300 s) | the deployed dashboard |
+
+Cells are read **by column name**, so a backup written before a column moved still reads correctly;
+`/health` reports `schema_matches: false` (with the missing and extra columns) when a source's header
+is not the current order. A CSV backup stores `COGS` and `Total Profit` as formula text, so for those
+two columns the page computes the same arithmetic as the sheet formula (`web.ledger_reader.cogs_of`,
+pinned against `sheets.ledger_sync._cogs_formula`'s own cell references by a test).
+
+**Projected versus realized.** Since 2026-09-11 a Payout Amount with a blank Payout Date on an open
+row is BFMR's *committed* price, not money received ([data model](data-model.md)). The dashboard
+reads the `(Payout Date, Status)` pair exactly as the audit does: a payout is **settled** when its
+date is set or the status is `paid` / `return` (MOD's paid rows carry no date), and **committed**
+otherwise. Projected profit sums the committed rows, realized profit the settled ones, and a
+committed cell is tagged `proj.` in every table. There is no `Expected Payout` column (parked in
+`the design notes`); this is a view over the existing cell.
+
+**Running it locally** (main PC, against a snapshot; nothing to configure):
+
+```bash
+.venv/Scripts/pip install -r requirements-web.txt      # once (Linux: .venv/bin/pip)
+python -m web                                          # http://127.0.0.1:8765/ over the newest backup
+python -m web --snapshot data/sheet_backup_20260910T105451Z.csv
+python -m web --source sheet                           # the live Sheet, read-only
+```
+
+Flags win over `config.json` and the environment. It binds to loopback unless `--host` (or
+`web.bind_host` / `WEB_BIND_HOST`) says otherwise — there is no authentication in phase 1, so anything
+beyond localhost or Tailscale is a deliberate choice. `?refresh=1` on any page forces the sheet
+backend to re-read before its cache expires (still a read).
+
+**Running it on the host** (Docker; a separate image and a compose *profile*, so a plain
+`docker compose up -d` starts exactly what it always did and the scheduler is untouched):
+
+```bash
+docker compose --profile web up -d --build   # builds web/Dockerfile, publishes 127.0.0.1:8765
+docker compose --profile web logs -f web
+docker compose --profile web down            # stops both; `docker compose stop web` stops just the dashboard
+```
+
+Set `web.ledger_source` to `sheet` in the host's `config.json` for the live ledger (the snapshot
+backend only sees `data/` backups, which the scheduled run does not write). To reach it over
+Tailscale, put `WEB_PUBLISH_HOST=<the host's Tailscale IP>` in `.env`; the default publishes on the
+host's loopback only. `logs/` is the same volume the scheduler writes, so the heartbeat and the
+failure dossiers on the page are the host's own.
+
+**What it cannot do (phase 1, by design):** write anything, edit a row, submit tracking, file
+insurance, run a scrape, or add the `Expected Payout` column. For those, the commands in
+[CLAUDE.md](../CLAUDE.md)'s cost table remain the way.

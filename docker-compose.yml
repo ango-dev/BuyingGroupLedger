@@ -56,3 +56,44 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+
+  # The READ-ONLY web dashboard (web/). Its own image (web/Dockerfile) so the scheduler image never
+  # installs the web extras, and its own compose PROFILE so a plain `docker compose up -d` starts
+  # exactly what it always did. Start it with:
+  #
+  #     docker compose --profile web up -d --build
+  #
+  # Every mount is :ro -- config.json for the sheet credentials (read-only scope), data/ for the
+  # CSV snapshots, logs/ for the heartbeat and the failure dossiers. The scheduler's writes to
+  # data/ and logs/ are visible here; nothing here can write back. .state.json is not mounted:
+  # the dashboard never touches Costco.
+  web:
+    profiles: ["web"]
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    image: buying-group-ledger-web
+    container_name: buying-group-ledger-web
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Pass-through only, like the scheduler's: config.json's `web` section is the home of these,
+      # and an exported variable overrides it (see docs/configuration.md).
+      - WEB_LEDGER_SOURCE
+      - WEB_SNAPSHOT_PATH
+      - WEB_SHEET_CACHE_TTL_SECONDS
+    ports:
+      # Published on the host's LOOPBACK by default -- there is no authentication in phase 1. To
+      # reach it over Tailscale, put WEB_PUBLISH_HOST=<the host's tailscale IP> (or 0.0.0.0) in .env.
+      - "${WEB_PUBLISH_HOST:-127.0.0.1}:${WEB_PUBLISH_PORT:-8765}:8765"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data:ro
+      - ./logs:/app/logs:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

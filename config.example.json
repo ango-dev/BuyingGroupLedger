@@ -98,6 +98,20 @@
     "timezone": "UTC"
   },
 
+  "// web": "The READ-ONLY web dashboard (`python -m web`, or `docker compose --profile web up -d`). The scheduler never reads this section. See docs/operations.md, 'The web dashboard'.",
+  "web": {
+    "// ledger_source": "WEB_LEDGER_SOURCE — `snapshot` serves a data/sheet_backup_*.csv (the newest, or snapshot_path); `sheet` serves the live Sheet through the read-only scope. Anything else is refused at startup.",
+    "ledger_source": "snapshot",
+    "// snapshot_path": "WEB_SNAPSHOT_PATH — a specific CSV for the snapshot backend. Blank = the newest data/sheet_backup_*.csv.",
+    "snapshot_path": "",
+    "// sheet_cache_ttl_seconds": "WEB_SHEET_CACHE_TTL_SECONDS — how long a live-Sheet read is served from memory before the next request re-reads it (one Sheets API read per refresh).",
+    "sheet_cache_ttl_seconds": 300,
+    "// bind_host": "WEB_BIND_HOST — loopback by default; there is no authentication, so bind wider (0.0.0.0 behind Tailscale) deliberately. The compose service publishes on 127.0.0.1 unless WEB_PUBLISH_HOST says otherwise.",
+    "bind_host": "127.0.0.1",
+    "// port": "WEB_PORT",
+    "port": 8765
+  },
+
   "// profiles": "One Browser-Use browser identity per entry, each behind its own proxy. `amazon` and `amazon-business` are separate accounts and MUST NOT share a profile — one identity for both is exactly the linking risk the separate profile exists to avoid. `profile_id` is filled in for you by `python -m scripts.create_profile`.",
   "profiles": [
     {

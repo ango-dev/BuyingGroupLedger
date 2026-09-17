@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+
+<section class="tiles">
+  <div class="tile">
+    <div class="label">Rows / orders</div>
+    <div class="value">{{ summary.rows }} <span class="muted">/ {{ summary.orders }}</span></div>
+  </div>
+  <div class="tile">
+    <div class="label">Open rows</div>
+    <div class="value">{{ summary.open_rows }}</div>
+    <div class="hint">ordered or shipped: still in the retailer lifecycle</div>
+  </div>
+  <div class="tile">
+    <div class="label">Projected profit</div>
+    <div class="value money">{{ summary.projected.profit | money }}</div>
+    <div class="hint">{{ summary.projected.rows }} row(s), {{ summary.projected.orders }} order(s) with a committed payout ({{ summary.projected.payout | money }}) and no Payout Date</div>
+  </div>
+  <div class="tile">
+    <div class="label">Realized profit</div>
+    <div class="value money">{{ summary.realized.profit | money }}</div>
+    <div class="hint">{{ summary.realized.rows }} row(s), {{ summary.realized.orders }} order(s) settled ({{ summary.realized.payout | money }} paid): Payout Date set, or status paid / return</div>
+  </div>
+  <div class="tile {{ 'warn' if heartbeat.stale else '' }}">
+    <div class="label">Scheduler heartbeat</div>
+    <div class="value">{{ heartbeat.age_text or '—' }}</div>
+    <div class="hint">{{ heartbeat.message }}{% if heartbeat.present %}; stale after {{ (heartbeat.threshold_seconds // 3600) }}h{% endif %}</div>
+  </div>
+</section>
+
+<h2>Open rows by status and buying group</h2>
+{% if summary.open_table.total %}
+<table class="grid compact">
+  <thead>
+    <tr><th>Status</th>{% for g in summary.open_table.groups %}<th class="num">{{ g }}</th>{% endfor %}<th class="num">Total</th></tr>
+  </thead>
+  <tbody>
+    {% for r in summary.open_table.rows %}
+    <tr>
+      <td><a href="/orders?status={{ r.status }}">{{ r.status }}</a></td>
+      {% for c in r.cells %}<td class="num">{{ c or '' }}</td>{% endfor %}
+      <td class="num"><strong>{{ r.total }}</strong></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr><th>Total</th>{% for c in summary.open_table.column_totals %}<th class="num">{{ c }}</th>{% endfor %}<th class="num">{{ summary.open_table.total }}</th></tr>
+  </tfoot>
+</table>
+{% else %}
+<p class="muted">No open rows.</p>
+{% endif %}
+
+<div class="columns">
+  <section>
+    <h2>All rows by status</h2>
+    <table class="grid compact">
+      <tbody>
+        {% for status, n in summary.status_counts %}
+        <tr><td><a href="/orders?status={{ status }}">{{ status }}</a></td><td class="num">{{ n }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section>
+    <h2>By retailer</h2>
+    <table class="grid compact">
+      <tbody>
+        {% for name, n in summary.by_retailer %}
+        <tr><td><a href="/orders?retailer={{ name }}">{{ name }}</a></td><td class="num">{{ n }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section>
+    <h2>By buying group</h2>
+    <table class="grid compact">
+      <tbody>
+        {% for name, n in summary.by_group %}
+        <tr><td><a href="/orders?group={{ name }}">{{ name }}</a></td><td class="num">{{ n }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<h2>COGS input gaps</h2>
+<p class="muted">The audit's <code>cogs_inputs_complete</code> gap: a row carrying cost whose COGS
+cannot net a card rebate. Cancelled and superseded rows carry no money and are not counted.</p>
+<div class="columns">
+  {% for key, label in [('card_last4', 'Blank Card Last 4'), ('cashback_rate', 'Blank Cashback Rate')] %}
+  {% set gap = summary.gaps[key] %}
+  <section class="tile {{ 'warn' if gap.rows else '' }}">
+    <div class="label">{{ label }}</div>
+    <div class="value">{{ gap.rows }} <span class="muted">row(s) in {{ gap.orders }} order(s)</span></div>
+    {% if gap.sample %}
+    <ul class="ids">
+      {% for oid in gap.sample %}<li><a href="/orders/{{ oid }}">{{ oid }}</a></li>{% endfor %}
+      {% if gap.more %}<li class="muted">and {{ gap.more }} more</li>{% endif %}
+    </ul>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Failures{% endblock %}
+{% block content %}
+<h1>Failure dossiers</h1>
+<p class="muted">{{ dossiers | length }} dossier(s) under <code>{{ failures_dir }}</code>, newest first.
+A dossier is what a deterministic path writes when it could not complete: nothing was recorded for
+that retailer that run. Read the selector audit and traceback, then <code>page_N.html</code>.</p>
+
+{% for d in dossiers %}
+<details class="dossier" {{ 'open' if loop.first }}>
+  <summary>
+    <span class="mono">{{ d.at_text }}</span>
+    <strong>{{ d.retailer }}</strong> <span class="muted">{{ d.profile }}</span>
+    <span class="muted">— {{ d.files | length }} file(s)</span>
+    {% if not d.has_report %}<span class="tag stale">no report.md</span>{% endif %}
+  </summary>
+  <div class="dossier-body">
+    <p class="muted mono">{{ d.path }}</p>
+    <p class="files">{% for f in d.files %}<code>{{ f }}</code> {% endfor %}</p>
+    {% if d.hosted %}
+    <h4>Hosted copies</h4>
+    <ul class="hosted">
+      {% for name, link in d.hosted %}
+      <li><code>{{ name }}</code>: <a href="{{ link }}" rel="noopener">{{ link }}</a></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if d.has_report %}
+    <div class="report">{{ d.report_html | safe }}</div>
+    {% endif %}
+  </div>
+</details>
+{% else %}
+<p class="ok">No failure dossiers.</p>
+{% endfor %}
+{% endblock %}

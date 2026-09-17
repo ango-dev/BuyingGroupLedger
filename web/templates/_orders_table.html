@@ -1,0 +1,50 @@
+{# The table alone: what htmx swaps into #orders-table, and what orders.html includes on a full load. #}
+<p class="muted count">{{ rows | length }} of {{ total }} row(s)</p>
+<div class="scroll">
+<table class="grid ledger">
+  <thead>
+    <tr>
+      {% for name, heading in columns %}
+      {% set active = filters.sort == name %}
+      {% set next_dir = 'asc' if (active and filters.desc) else 'desc' %}
+      <th class="{{ 'num' if name in ('quantity','shipment','total_cost','cashback_rate','cogs','insurance','payout_amount','total_profit') }} {{ 'sorted' if active }}">
+        <a href="/orders?{{ filters.as_query(sort=name, dir=next_dir) | urlencode }}"
+           hx-get="/orders?{{ filters.as_query(sort=name, dir=next_dir) | urlencode }}"
+           hx-target="#orders-table" hx-push-url="true">{{ heading }}{% if active %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a>
+      </th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr class="status-{{ row.status }} payout-{{ row.payout_state }}">
+      {% for name, heading in columns %}
+        {% if name == 'order_id' %}
+          <td class="mono"><a href="/orders/{{ row.order_id }}">{{ row.order_id }}</a></td>
+        {% elif name == 'item_name' %}
+          <td class="item" title="{{ row.item_name }}">
+            {% if row.text('order_url') %}<a href="{{ row.text('order_url') }}" rel="noopener" class="ext" title="Order Link">↗</a> {% endif %}{{ row.item_name }}
+          </td>
+        {% elif name == 'tracking_number' %}
+          <td class="mono">
+            {% if row.tracking_number and row.text('tracking_url') %}
+              <a href="{{ row.text('tracking_url') }}" rel="noopener" title="Tracking Link">{{ row.tracking_number }}</a>
+            {% else %}{{ row.tracking_number }}{% endif %}
+          </td>
+        {% elif name == 'receipt_url' %}
+          <td>{% if row.text('receipt_url') %}<a href="{{ row.text('receipt_url') }}" rel="noopener" title="Receipt Link">receipt</a>{% endif %}</td>
+        {% elif name == 'payout_amount' %}
+          <td class="num" title="{{ row.payout_state }}">{{ row | cell(name) }}{% if row.is_committed %} <span class="tag committed" title="committed by the buying group, not yet paid">proj.</span>{% endif %}</td>
+        {% elif name in ('quantity','shipment','total_cost','cashback_rate','cogs','insurance','total_profit') %}
+          <td class="num">{{ row | cell(name) }}</td>
+        {% else %}
+          <td>{{ row | cell(name) }}</td>
+        {% endif %}
+      {% endfor %}
+    </tr>
+    {% else %}
+    <tr><td colspan="{{ columns | length }}" class="muted">No rows match.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>

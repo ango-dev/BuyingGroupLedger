@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Orders{% endblock %}
+{% block content %}
+<h1>Orders</h1>
+
+<form id="filters" class="filters" method="get" action="/orders"
+      hx-get="/orders" hx-target="#orders-table" hx-push-url="true"
+      hx-trigger="change, keyup changed delay:300ms from:#q, submit">
+  <label>Retailer
+    <select name="retailer">
+      <option value="">all</option>
+      {% for v in facets.retailers %}<option value="{{ v }}" {{ 'selected' if v == filters.retailer }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Profile
+    <select name="profile">
+      <option value="">all</option>
+      {% for v in facets.profiles %}<option value="{{ v }}" {{ 'selected' if v == filters.profile }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Status
+    <select name="status">
+      <option value="">all</option>
+      {% for v in facets.statuses %}<option value="{{ v }}" {{ 'selected' if v == filters.status }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Buying group
+    <select name="group">
+      <option value="">all</option>
+      {% for v in facets.groups %}<option value="{{ v }}" {{ 'selected' if v == filters.group }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Search
+    <input id="q" type="search" name="q" value="{{ filters.q }}" placeholder="order id, item, tracking, package id, last 4, address">
+  </label>
+  <input type="hidden" name="sort" value="{{ filters.sort }}">
+  <input type="hidden" name="dir" value="{{ 'desc' if filters.desc else 'asc' }}">
+  <noscript><button type="submit">Apply</button></noscript>
+</form>
+
+<div id="orders-table">
+  {% include "_orders_table.html" %}
+</div>
+{% endblock %}

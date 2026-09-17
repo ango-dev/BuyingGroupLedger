@@ -1,0 +1,923 @@
+"""The read-only web dashboard (web/), exercised offline through the snapshot backend.
+
+Every view is driven through FastAPI's TestClient over a CSV written with the ledger's own HEADER
+(the same `row(**fields)` shape tests/test_ledger_sync.py uses), a temporary logs/ directory for
+the heartbeat and a temporary failures/ directory for the dossiers. The sheet backend is tested
+against a fake worksheet that refuses every method but the one read the reader is allowed.
+
+The read-only guarantee is pinned three ways: the worksheet fake raises on any write, the source of
+`web/` is scanned for the write methods and the write scope, and every route refuses every non-GET
+method.
+"""
+
+from __future__ import annotations
+
+import csv
+import dataclasses
+import re
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("fastapi")
+from fastapi.testclient import TestClient  # noqa: E402
+
+from models.order import FIELDNAMES, MONEY_FREE_STATUSES, TERMINAL_STATUSES  # noqa: E402
+from sheets.ledger_sync import HEADER, _COL, _cogs_formula, _profit_formula  # noqa: E402
+from web import ledger_reader  # noqa: E402
+from web.app import ROUTES, create_app, money, percent  # noqa: E402
+from web.failures import hosted_copies, list_dossiers, parse_name  # noqa: E402
+from web.heartbeat import read_heartbeat  # noqa: E402
+from web.ledger_reader import (  # noqa: E402
+    LedgerRow, SheetReader, SnapshotReader, cogs_of, newest_snapshot, profit_of,
+    reader_from_settings, rows_from_grid,
+)
+from web.queries import Filters, filter_rows, order_view, sort_rows  # noqa: E402
+from web.summary import overview  # noqa: E402
+
+NOW = datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc)
+
+
+# --------------------------------------------------------------------------------------------------
+# Fixtures: a ledger snapshot with one row of every kind the views distinguish
+# --------------------------------------------------------------------------------------------------
+
+
+def row(**values) -> list[str]:
+    """Build a full-width sheet row from snake_case field names -- test_ledger_sync's helper."""
+    return [str(values.get(f, "")) for f in FIELDNAMES]
+
+
+def write_snapshot(path: Path, *rows: list[str], header: list[str] = HEADER) -> Path:
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(header)
+        writer.writerows(rows)
+    return path
+
+
+def _formula_cells(row_number: int) -> dict:
+    """What a CSV backup carries in the two formula columns: the formula text itself."""
+    return {"cogs": _cogs_formula(row_number), "total_profit": _profit_formula(row_number)}
+
+
+LEDGER_ROWS = [
+    # sheet row 2: OPEN, ordered, no tracking, no payout -- a plain open BFMR row
+    row(order_date="2026-09-09", status="ordered", retailer="Amazon Business",
+        item_name="MacBook Air 13 M5", shipment="1", quantity="1", order_id="111-0000001-0000001",
+        buying_group="BFMR", cost_per_item="1259.99", total_cost="1259.99", shipping="0",
+        sales_tax="0", gift_card="0", rewards_used="0", card_name="USB Prime Business",
+        cashback_rate="0.05", profile_label="profile-alpha",
+        order_url="https://www.amazon.com/gp/css/order-details?orderID=111-0000001-0000001",
+        delivery_address="BuyForMeRetail B999999, Testville, NH 03050", card_last4="0315",
+        last_scraped_at="2026-09-10T10:48:26+00:00", **_formula_cells(2)),
+    # sheet row 3: OPEN, shipped, COMMITTED payout (amount, no date) -> PROJECTED profit
+    row(order_date="2026-09-08", status="shipped", retailer="Best Buy",
+        item_name="MacBook Air 15 M5 Midnight", shipment="1", quantity="1",
+        order_id="BBY01-800000000001", tracking_number="529900000012", tracking_submitted="True",
+        delivery_date="2026-09-15", buying_group="BFMR", cost_per_item="1000", total_cost="1000",
+        shipping="0", sales_tax="0", gift_card="0", rewards_used="0", card_name="Amex Business Gold",
+        cashback_rate="0.04", insurance="6.4", payout_amount="1230", profile_label="profile-alpha",
+        order_url="https://www.bestbuy.com/profile/ss/orders/order-details/BBY01-800000000001/view",
+        tracking_url="https://www.fedex.com/fedextrack/?trknbr=529900000012",
+        receipt_url="https://objectstorage.example/o/receipts/bestbuy/BBY01-800000000001.pdf",
+        delivery_address="BFMR B999999, Testville, NH 03050", card_last4="4331", package_id="1",
+        **_formula_cells(3)),
+    # sheet row 4: the SAME order, shipment 2, still ordered -- a split order stays together
+    row(order_date="2026-09-08", status="ordered", retailer="Best Buy",
+        item_name="MacBook Air 15 M5 Midnight", shipment="2", quantity="2",
+        order_id="BBY01-800000000001", buying_group="BFMR", cost_per_item="1000", total_cost="2000",
+        shipping="0", sales_tax="0", gift_card="0", rewards_used="0", card_name="Amex Business Gold",
+        cashback_rate="0.04", profile_label="profile-alpha",
+        order_url="https://www.bestbuy.com/profile/ss/orders/order-details/BBY01-800000000001/view",
+        receipt_url="https://objectstorage.example/o/receipts/bestbuy/BBY01-800000000001.pdf",
+        delivery_address="BFMR B999999, Testville, NH 03050", card_last4="4331", package_id="2",
+        **_formula_cells(4)),
+    # sheet row 5: SETTLED -- paid, dated payout -> REALIZED profit. Costco, MOD.
+    row(order_date="2026-08-20", status="paid", retailer="Costco",
+        item_name="iPad Air 11 M4 (Item #2042809)", shipment="1", quantity="2",
+        order_id="1399000017", tracking_number="1Z999AA10000000001", tracking_submitted="True",
+        delivery_date="2026-08-25", buying_group="MOD", cost_per_item="200", total_cost="400",
+        shipping="0", sales_tax="0", gift_card="0", rewards_used="0", card_name="Venmo Visa",
+        cashback_rate="0.09", insurance="0", payout_amount="500", payout_date="2026-09-01",
+        profile_label="profile-bravo", tracking_url="https://www.ups.com/track?tracknum=1Z999AA10000000001",
+        delivery_address="MOD warehouse", card_last4="4351", **_formula_cells(5)),
+    # sheet row 6: SETTLED by STATUS alone -- MOD's dateless paid row
+    row(order_date="2026-08-18", status="paid", retailer="Costco", item_name="Dyson V15 (Item #1)",
+        shipment="1", quantity="1", order_id="1399000018", tracking_number="1Z999AA10000000002",
+        buying_group="MOD", cost_per_item="300", total_cost="300", shipping="0", cashback_rate="0.09",
+        payout_amount="330", profile_label="profile-bravo", card_last4="4351", **_formula_cells(6)),
+    # sheet row 7: CANCELLED -- money-free, never counted anywhere
+    row(order_date="2026-08-15", status="cancelled", retailer="Costco",
+        item_name="IPAD AIR 11 M4 256GB PURP (Item #2042809)", shipment="1", quantity="2",
+        order_id="1399000019", buying_group="BFMR", profile_label="profile-bravo", card_last4="4351",
+        **_formula_cells(7)),
+    # sheet row 8: DELIVERED with a blank card and a blank rate -- the COGS input gap
+    row(order_date="2026-08-10", status="delivered", retailer="Amazon", item_name="Fitbit Charge 6",
+        shipment="1", quantity="1", order_id="111-0000002-0000002", tracking_number="TBA000000000001",
+        delivery_date="2026-08-13", buying_group="BFMR", cost_per_item="100", total_cost="100",
+        shipping="0", profile_label="profile-charlie", **_formula_cells(8)),
+    # sheet row 9: a GIFT CARD row -- kept, routed nowhere
+    row(order_date="2026-08-09", status="delivered", retailer="Amazon", item_name="Amazon Gift Card",
+        shipment="1", quantity="1", order_id="111-0000003-0000003", buying_group="Gift Card",
+        cost_per_item="40", total_cost="40", cashback_rate="0.05", profile_label="profile-charlie",
+        card_last4="0315", **_formula_cells(9)),
+    # sheet row 10: SUPERSEDED -- money-free, quantity blank too
+    row(order_date="2026-08-05", status="superseded", retailer="Amazon", item_name="iPad Pro",
+        shipment="3", order_id="111-0000004-0000004", tracking_number="TBA000000000009",
+        buying_group="BFMR", profile_label="profile-charlie", **_formula_cells(10)),
+]
+
+NOTE_ROW = row(item_name="-- a note below the block, no Order ID --")
+
+
+@pytest.fixture
+def snapshot_path(tmp_path) -> Path:
+    return write_snapshot(tmp_path / "sheet_backup_20260917T000000Z.csv", *LEDGER_ROWS, NOTE_ROW)
+
+
+@pytest.fixture
+def logs_dir(tmp_path) -> Path:
+    directory = tmp_path / "logs"
+    directory.mkdir()
+    return directory
+
+
+@pytest.fixture
+def failures_dir(logs_dir) -> Path:
+    directory = logs_dir / "failures"
+    directory.mkdir()
+    return directory
+
+
+@pytest.fixture
+def client(snapshot_path, logs_dir, failures_dir):
+    (logs_dir / ".last_run").write_text("2026-09-17T09:00:00Z", encoding="utf-8")  # 3 h before NOW
+    app = create_app(SnapshotReader(snapshot_path), logs_dir=logs_dir, failures_dir=failures_dir,
+                     clock=lambda: NOW, settings=_settings())
+    return TestClient(app)
+
+
+def _settings(**overrides):
+    """The live Settings with the values these tests depend on pinned. The run interval decides
+    the heartbeat's stale threshold, and the developer's own .env may set RUN_INTERVAL_HOURS."""
+    from config.settings import settings
+
+    return dataclasses.replace(settings, container_run_interval_hours=6, **overrides)
+
+
+# --------------------------------------------------------------------------------------------------
+# The adapter: snapshot backend
+# --------------------------------------------------------------------------------------------------
+
+
+class TestSnapshotReader:
+    def test_reads_by_header_name_and_skips_rows_without_an_order_id(self, snapshot_path):
+        snapshot = SnapshotReader(snapshot_path).load()
+
+        assert snapshot.backend == "snapshot"
+        assert snapshot.source == str(snapshot_path)
+        assert snapshot.schema_matches
+        assert len(snapshot.rows) == len(LEDGER_ROWS)
+        assert snapshot.skipped_rows == 1
+        assert snapshot.rows[0].order_id == "111-0000001-0000001"
+        assert snapshot.rows[0].row_number == 2  # the header is row 1, as on the sheet
+
+    def test_an_older_column_order_still_reads_correctly(self, tmp_path):
+        """The 2026-09-10 move of Package ID: a backup written before it has the column last.
+        Values are found by name, so nothing lands in the wrong field, and the mismatch is
+        reported rather than hidden."""
+        old_header = [h for h in HEADER if h != "Package ID"] + ["Package ID"]
+        old_index = {h: i for i, h in enumerate(old_header)}
+        record = row(order_id="X1", order_date="2026-09-01", status="shipped", item_name="Thing",
+                     shipment="1", package_id="00009999990206101794", last_scraped_at="2026-09-02")
+        by_name = dict(zip(HEADER, record))
+        shuffled = [""] * len(old_header)
+        for name, value in by_name.items():
+            shuffled[old_index[name]] = value
+        path = write_snapshot(tmp_path / "sheet_backup_old.csv", shuffled, header=old_header)
+
+        snapshot = SnapshotReader(path).load()
+
+        assert not snapshot.schema_matches
+        assert snapshot.missing_columns == ()
+        assert snapshot.extra_columns == ()
+        only = snapshot.rows[0]
+        assert only.text("package_id") == "00009999990206101794"
+        assert only.text("last_scraped_at") == "2026-09-02"
+
+    def test_a_missing_column_reads_blank_and_is_named(self, tmp_path):
+        header = [h for h in HEADER if h != "Rewards Used"]
+        record = [v for h, v in zip(HEADER, row(order_id="X1", order_date="2026-09-01",
+                                                   total_cost="10")) if h != "Rewards Used"]
+        path = write_snapshot(tmp_path / "sheet_backup_short.csv", record, header=header)
+
+        snapshot = SnapshotReader(path).load()
+
+        assert snapshot.missing_columns == ("Rewards Used",)
+        assert snapshot.rows[0].text("rewards_used") == ""
+        assert snapshot.rows[0].number("rewards_used") is None
+
+    def test_newest_backup_is_chosen_by_its_timestamped_name(self, tmp_path):
+        for stamp in ("20260901T000000Z", "20260917T120000Z", "20260910T105451Z"):
+            write_snapshot(tmp_path / f"sheet_backup_{stamp}.csv", row(order_id=stamp))
+        (tmp_path / "before_live.json").write_text("{}", encoding="utf-8")  # not a backup
+
+        assert newest_snapshot(tmp_path).name == "sheet_backup_20260917T120000Z.csv"
+        assert SnapshotReader(data_dir=tmp_path).load().rows[0].order_id == "20260917T120000Z"
+
+    def test_no_backup_is_a_loud_error_not_an_empty_page(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="sheet_backup_"):
+            newest_snapshot(tmp_path)
+
+    def test_a_relative_explicit_path_is_under_the_repo_root(self):
+        reader = SnapshotReader("data/sheet_backup_x.csv")
+
+        assert reader.resolve() == ledger_reader.ROOT / "data" / "sheet_backup_x.csv"
+
+    def test_health_names_the_file(self, snapshot_path):
+        health = SnapshotReader(snapshot_path).health()
+
+        assert health["backend"] == "snapshot"
+        assert health["snapshot_path"] == str(snapshot_path)
+        assert health["snapshot_modified_at"]
+
+
+# --------------------------------------------------------------------------------------------------
+# The adapter: sheet backend, and the read-only guarantee
+# --------------------------------------------------------------------------------------------------
+
+
+class ReadOnlyWorksheet:
+    """A worksheet that allows exactly one method. Anything else -- update, batch_update,
+    append_row, sort, add_rows, clear, get_all_values -- is a test failure, not a silent no-op."""
+
+    title = "Orders"
+
+    def __init__(self, grid):
+        self.grid = grid
+        self.reads: list[str] = []
+
+    def get_values(self, range_name=None, value_render_option=None, **kwargs):
+        assert value_render_option is not None, "the read must say which render it wants"
+        self.reads.append(str(getattr(value_render_option, "value", value_render_option)))
+        return [list(r) for r in self.grid]
+
+    def __getattr__(self, name):
+        raise AssertionError(f"the web reader called worksheet.{name}() -- only get_values is allowed")
+
+
+class FakeClock:
+    def __init__(self, start=0.0):
+        self.now = start
+
+    def __call__(self):
+        return self.now
+
+
+class TestSheetReader:
+    def _reader(self, ttl=300.0):
+        grid = [list(HEADER), row(order_id="S1", order_date="2026-09-01", status="shipped",
+                                  item_name="Thing", shipment="1", total_cost="10")]
+        worksheet = ReadOnlyWorksheet(grid)
+        opens = []
+
+        def opener():
+            opens.append(1)
+            return worksheet, "Ledger 2026"
+
+        clock = FakeClock()
+        return SheetReader(ttl_seconds=ttl, opener=opener, clock=clock), worksheet, opens, clock
+
+    def test_reads_once_formatted_and_only_through_get_values(self):
+        reader, worksheet, opens, _ = self._reader()
+
+        snapshot = reader.load()
+
+        assert snapshot.backend == "sheet"
+        assert snapshot.source == "Ledger 2026 / Orders"
+        assert snapshot.rows[0].order_id == "S1"
+        assert worksheet.reads == ["FORMATTED_VALUE"]
+        assert opens == [1]
+
+    def test_the_cache_serves_reads_inside_the_ttl_and_refreshes_after(self):
+        reader, worksheet, opens, clock = self._reader(ttl=300)
+
+        first = reader.load()
+        clock.now = 299
+        assert reader.load() is first
+        assert opens == [1] and reader.cache_age() == 299
+        clock.now = 301
+        second = reader.load()
+
+        assert second is not first
+        assert opens == [1, 1]
+        assert worksheet.reads == ["FORMATTED_VALUE", "FORMATTED_VALUE"]
+
+    def test_force_refreshes_inside_the_ttl(self):
+        reader, _, opens, clock = self._reader(ttl=300)
+
+        reader.load()
+        clock.now = 10
+        reader.load(force=True)
+
+        assert opens == [1, 1]
+
+    def test_health_reports_the_cache_age(self):
+        reader, _, _, clock = self._reader(ttl=300)
+
+        assert reader.health()["sheet_cache_age_seconds"] is None
+        reader.load()
+        clock.now = 42
+        health = reader.health()
+
+        assert health == {
+            "backend": "sheet", "sheet_cache_ttl_seconds": 300.0, "sheet_cache_age_seconds": 42.0,
+            "sheet_cache_loaded_at": health["sheet_cache_loaded_at"], "source": "Ledger 2026 / Orders",
+        }
+
+    def test_the_default_opener_is_the_audits_read_only_one(self, monkeypatch):
+        """The read-only scope is what makes the guarantee a capability rather than a promise, and
+        scripts.audit_sheet.open_worksheet_readonly is the one function that requests it."""
+        import scripts.audit_sheet as audit
+
+        calls = []
+
+        def fake_open():
+            calls.append(1)
+            return ReadOnlyWorksheet([list(HEADER)]), "T"
+
+        monkeypatch.setattr(audit, "open_worksheet_readonly", fake_open)
+
+        SheetReader().load()
+
+        assert calls == [1]
+        assert audit.READONLY_SCOPES == ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+
+
+class TestReadOnlyGuarantee:
+    WRITE_TOKENS = (
+        "append_row", "batch_update", "add_rows", "add_cols", "delete_rows", "update_cell",
+        "update_acell", "_get_worksheet", "sync_csv_to_sheet", "sort_ledger_by_date_desc",
+        "auth/spreadsheets\"]", "gspread.authorize", "open_by_key",
+    )
+    #: The only two things web/ may do with a worksheet handle: one read, and its title.
+    WORKSHEET_USE = re.compile(r"\bworksheet\.(?!get_values\b|title\b)\w+")
+    FORBIDDEN_IMPORTS = ("scrapers", "buying_groups", "sync_tracking", "respond_bfmr", "receipts",
+                         "main")
+
+    @staticmethod
+    def _sources() -> dict[str, str]:
+        root = Path(__file__).resolve().parents[1] / "web"
+        return {str(p.relative_to(root)): p.read_text(encoding="utf-8")
+                for p in root.rglob("*.py")}
+
+    def test_no_worksheet_write_method_or_write_scope_is_named_in_web(self):
+        for name, text in self._sources().items():
+            for token in self.WRITE_TOKENS:
+                assert token not in text, f"web/{name} mentions {token!r}"
+            assert not self.WORKSHEET_USE.findall(text), (
+                f"web/{name} uses a worksheet method other than get_values: "
+                f"{self.WORKSHEET_USE.findall(text)}")
+
+    def test_web_never_imports_a_scraper_or_a_buying_group_client(self):
+        pattern = re.compile(r"^\s*(?:from|import)\s+([A-Za-z_][\w.]*)", re.M)
+        for name, text in self._sources().items():
+            for module in pattern.findall(text):
+                top = module.split(".")[0]
+                assert top not in self.FORBIDDEN_IMPORTS, f"web/{name} imports {module}"
+
+    @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
+    def test_every_route_refuses_every_non_get_method(self, client, method):
+        for route in ROUTES:
+            path = route.replace("{order_id}", "BBY01-800000000001")
+            response = getattr(client, method)(path)
+            assert response.status_code == 405, f"{method.upper()} {path} -> {response.status_code}"
+
+    def test_the_app_declares_itself_read_only(self, client):
+        assert client.app.state.read_only is True
+        assert client.get("/health").json()["read_only"] is True
+
+
+# --------------------------------------------------------------------------------------------------
+# Money semantics: settled vs committed, and the formulas
+# --------------------------------------------------------------------------------------------------
+
+
+def _row(**values) -> LedgerRow:
+    return LedgerRow(cells=dict(zip(FIELDNAMES, row(**values))), row_number=2)
+
+
+class TestPayoutSemantics:
+    def test_a_dated_payout_is_settled(self):
+        r = _row(status="delivered", payout_amount="100", payout_date="2026-09-01")
+        assert r.is_settled and not r.is_committed and r.payout_state == "settled"
+
+    @pytest.mark.parametrize("status", ["paid", "return"])
+    def test_a_buying_group_outcome_status_settles_a_dateless_payout(self, status):
+        """MOD's paid rows carry no date: the audit's cogs_inputs_complete counts them settled by
+        status, and so does the dashboard."""
+        r = _row(status=status, payout_amount="100")
+        assert r.is_settled and r.payout_state == "settled"
+
+    @pytest.mark.parametrize("status", ["ordered", "shipped", "delivered"])
+    def test_an_undated_payout_on_an_open_or_delivered_row_is_a_commitment(self, status):
+        r = _row(status=status, payout_amount="1230")
+        assert r.is_committed and not r.is_settled and r.payout_state == "committed"
+
+    def test_no_amount_is_no_payout_at_all(self):
+        r = _row(status="delivered", payout_date="2026-09-01")
+        assert r.payout_state == "none"
+
+    @pytest.mark.parametrize("status", MONEY_FREE_STATUSES)
+    def test_money_free_rows_are_never_committed(self, status):
+        r = _row(status=status, payout_amount="5")
+        assert not r.is_committed and r.cogs is None and r.profit is None
+
+    def test_open_follows_terminal_statuses(self):
+        for status in ("ordered", "shipped"):
+            assert _row(status=status).is_open
+        for status in TERMINAL_STATUSES:
+            assert not _row(status=status).is_open
+
+
+class TestFormulasInPython:
+    @staticmethod
+    def _fields_read_by(formula: str) -> set[str]:
+        letters = {v: k for k, v in _COL.items()}
+        return {letters[m] for m in re.findall(r"\b([A-Z]{1,2})2\b", formula)}
+
+    def test_cogs_of_reads_exactly_the_cells_the_sheet_formula_reads(self):
+        """If _cogs_formula ever reads a new cell, this fails until cogs_of reads it too."""
+        assert self._fields_read_by(_cogs_formula(2)) == {
+            "status", "total_cost", "return_quantity", "cost_per_item", "gift_card", "shipping",
+            "sales_tax", "rewards_used", "cashback_rate",
+        }
+
+    def test_profit_of_reads_exactly_the_cells_the_sheet_formula_reads(self):
+        assert self._fields_read_by(_profit_formula(2)) == {
+            "status", "payout_amount", "cogs", "insurance",
+        }
+
+    def test_cogs_arithmetic(self):
+        # (1000 - 1x100 - 50 + 10 + 5 - 20) * (1 - 0.04) + 20 = 845 * 0.96 + 20 = 831.20
+        r = _row(status="delivered", total_cost="1000", return_quantity="1", cost_per_item="100",
+                 gift_card="50", shipping="10", sales_tax="5", rewards_used="20", cashback_rate="0.04")
+        assert cogs_of(r) == 831.20
+
+    def test_blank_cells_count_as_zero_and_no_cost_is_no_cogs(self):
+        assert cogs_of(_row(status="delivered", total_cost="100")) == 100.0
+        assert cogs_of(_row(status="delivered")) is None
+
+    def test_profit_is_payout_minus_cogs_minus_insurance_and_blank_without_a_payout(self):
+        r = _row(status="paid", total_cost="1000", cashback_rate="0.04", insurance="6.4",
+                 payout_amount="1230", payout_date="2026-09-01")
+        assert profit_of(r) == round(1230 - 960 - 6.4, 2)
+        assert profit_of(_row(status="delivered", total_cost="1000")) is None
+
+    def test_a_formula_literal_in_the_cell_is_computed_not_parsed(self):
+        """A CSV backup stores '=IF(B2=...' in COGS; the display-number parser must not scrape the
+        digits out of the cell references."""
+        r = _row(status="delivered", total_cost="100", cashback_rate="0.05",
+                 cogs=_cogs_formula(2), total_profit=_profit_formula(2))
+        assert r.number("cogs") is None
+        assert r.cogs == 95.0
+
+    def test_a_numeric_cell_wins_over_recomputation(self):
+        """A live formatted read hands back the sheet's own result; that is the value shown."""
+        r = _row(status="delivered", total_cost="100", cashback_rate="0.05", cogs="$96.00")
+        assert r.cogs == 96.0
+
+    def test_display_formatting_parses(self):
+        r = _row(status="delivered", total_cost="$1,299.00", cashback_rate="4%",
+                 payout_amount="(12.50)")
+        assert r.total_cost == 1299.0
+        assert r.number("cashback_rate") == 0.04
+        assert r.payout_amount == -12.5
+
+
+class TestTemplateFilters:
+    def test_money(self):
+        assert money(1234.5) == "$1,234.50"
+        assert money(-12) == "-$12.00"
+        assert money(None) == "" and money("") == ""
+        assert money("n/a") == "n/a"
+
+    def test_percent(self):
+        assert percent(0.05) == "5%"
+        assert percent(0.0925) == "9.25%"
+        assert percent(None) == ""
+
+
+# --------------------------------------------------------------------------------------------------
+# The overview numbers
+# --------------------------------------------------------------------------------------------------
+
+
+class TestOverview:
+    @pytest.fixture
+    def summary(self, snapshot_path):
+        return overview(SnapshotReader(snapshot_path).load())
+
+    def test_counts(self, summary):
+        assert summary["rows"] == len(LEDGER_ROWS)
+        assert summary["orders"] == 8
+        assert summary["open_rows"] == 3  # rows 2, 3, 4
+
+    def test_open_rows_by_status_and_group(self, summary):
+        table = summary["open_table"]
+        assert table["groups"] == ["BFMR"]
+        assert [(r["status"], r["cells"], r["total"]) for r in table["rows"]] == [
+            ("ordered", [2], 2), ("shipped", [1], 1),
+        ]
+        assert table["column_totals"] == [3] and table["total"] == 3
+
+    def test_projected_profit_is_the_committed_rows(self, summary):
+        # Row 3 alone: 1230 - 1000*0.96 - 6.4 = 263.60
+        assert summary["projected"] == {"rows": 1, "orders": 1, "payout": 1230.0, "cogs": 960.0,
+                                        "profit": 263.6}
+
+    def test_realized_profit_is_the_settled_rows_including_a_dateless_paid_one(self, summary):
+        # Row 5: 500 - 400*0.91 = 136.00; row 6: 330 - 300*0.91 = 57.00
+        assert summary["realized"] == {"rows": 2, "orders": 2, "payout": 830.0, "cogs": 637.0,
+                                       "profit": 193.0}
+
+    def test_cogs_input_gaps_skip_money_free_rows(self, summary):
+        gaps = summary["gaps"]
+        assert gaps["card_last4"] == {"rows": 1, "orders": 1, "sample": ["111-0000002-0000002"],
+                                      "more": 0}
+        # Row 8 has no rate; the gift-card row and the money-free rows are not gaps.
+        assert gaps["cashback_rate"]["sample"] == ["111-0000002-0000002"]
+
+    def test_status_counts_follow_the_vocabulary_order(self, summary):
+        assert summary["status_counts"] == [("ordered", 2), ("shipped", 1), ("delivered", 2),
+                                            ("cancelled", 1), ("paid", 2), ("superseded", 1)]
+
+
+# --------------------------------------------------------------------------------------------------
+# The heartbeat
+# --------------------------------------------------------------------------------------------------
+
+
+class TestHeartbeat:
+    def test_missing_stamp_is_reported_as_no_run_yet(self, logs_dir):
+        beat = read_heartbeat(logs_dir, now=NOW, interval_hours=6)
+        assert beat["present"] is False and beat["stale"] is True
+        assert "no run has completed" in beat["message"]
+
+    def test_fresh_stamp(self, logs_dir):
+        (logs_dir / ".last_run").write_text("2026-09-17T09:00:00Z", encoding="utf-8")
+        beat = read_heartbeat(logs_dir, now=NOW, interval_hours=6)
+        assert beat == {**beat, "present": True, "stale": False, "age_seconds": 3 * 3600,
+                        "age_text": "3h 0m", "threshold_seconds": 12 * 3600}
+
+    def test_stale_after_two_intervals_like_the_healthcheck(self, logs_dir):
+        (logs_dir / ".last_run").write_text((NOW - timedelta(hours=13)).isoformat(),
+                                            encoding="utf-8")
+        beat = read_heartbeat(logs_dir, now=NOW, interval_hours=6)
+        assert beat["stale"] is True
+        assert "expected one every 6h" in beat["message"]
+
+    def test_an_unparseable_stamp_falls_back_to_the_files_mtime(self, logs_dir):
+        stamp = logs_dir / ".last_run"
+        stamp.write_text("garbage", encoding="utf-8")
+        beat = read_heartbeat(stamp.parent, now=datetime.now(timezone.utc), interval_hours=6)
+        assert beat["present"] is True and beat["stale"] is False
+
+
+# --------------------------------------------------------------------------------------------------
+# Queries: filters, sorting, one order
+# --------------------------------------------------------------------------------------------------
+
+
+class TestQueries:
+    @pytest.fixture
+    def rows(self, snapshot_path):
+        return SnapshotReader(snapshot_path).load().rows
+
+    def test_filters(self, rows):
+        assert {r.order_id for r in filter_rows(rows, Filters(retailer="Costco"))} == {
+            "1399000017", "1399000018", "1399000019"}
+        assert [r.row_number for r in filter_rows(rows, Filters(status="shipped"))] == [3]
+        assert {r.order_id for r in filter_rows(rows, Filters(group="MOD"))} == {
+            "1399000017", "1399000018"}
+        assert {r.order_id for r in filter_rows(rows, Filters(profile="profile-charlie"))} == {
+            "111-0000002-0000002", "111-0000003-0000003", "111-0000004-0000004"}
+        assert [r.row_number for r in filter_rows(rows, Filters(q="529900000012"))] == [3]
+        assert [r.row_number for r in filter_rows(rows, Filters(q="dyson"))] == [6]
+
+    def test_unknown_sort_key_falls_back(self):
+        assert Filters.from_query({"sort": "DROP TABLE"}).sort == "order_date"
+        assert Filters.from_query({"sort": "total_cost"}).desc is False
+        assert Filters.from_query({"sort": "total_cost", "dir": "desc"}).desc is True
+
+    def test_numeric_sort_puts_blanks_last_in_both_directions(self, rows):
+        desc = sort_rows(rows, Filters(sort="total_cost", desc=True))
+        asc = sort_rows(rows, Filters(sort="total_cost", desc=False))
+        assert [r.total_cost for r in desc][:3] == [2000.0, 1259.99, 1000.0]
+        assert [r.total_cost for r in desc][-2:] == [None, None]
+        assert [r.total_cost for r in asc][:2] == [40.0, 100.0]
+        assert [r.total_cost for r in asc][-2:] == [None, None]
+
+    def test_text_sort_keeps_an_orders_rows_together(self, rows):
+        by_date = sort_rows(rows, Filters(sort="order_date", desc=True))
+        assert [(r.order_id, r.shipment) for r in by_date][:3] == [
+            ("111-0000001-0000001", "1"), ("BBY01-800000000001", "1"), ("BBY01-800000000001", "2")]
+
+    def test_order_view_groups_shipments_and_states_the_payout(self, rows):
+        view = order_view([r for r in rows if r.order_id == "BBY01-800000000001"])
+        assert [s["shipment"] for s in view["shipments"]] == ["1", "2"]
+        assert view["shipments"][0]["tracking_number"] == "529900000012"
+        assert view["shipments"][0]["tracking_submitted"] is True
+        assert view["shipments"][1]["tracking_number"] == ""
+        assert view["receipt_urls"] == [
+            "https://objectstorage.example/o/receipts/bestbuy/BBY01-800000000001.pdf"]
+        assert view["payout_state"] == "committed"
+        assert view["totals"]["total_cost"] == 3000.0
+        assert view["totals"]["profit"] == 263.6
+
+    def test_order_view_of_a_settled_order(self, rows):
+        view = order_view([r for r in rows if r.order_id == "1399000017"])
+        assert view["payout_state"] == "settled" and view["payout_dates"] == ["2026-09-01"]
+
+    def test_order_view_of_nothing_is_none(self):
+        assert order_view([]) is None
+
+
+# --------------------------------------------------------------------------------------------------
+# The views, over the snapshot backend
+# --------------------------------------------------------------------------------------------------
+
+
+class TestOverviewPage:
+    def test_renders_the_numbers(self, client):
+        response = client.get("/")
+        assert response.status_code == 200
+        body = response.text
+        assert "Projected profit" in body and "$263.60" in body
+        assert "Realized profit" in body and "$193.00" in body
+        assert "Open rows by status and buying group" in body
+        assert "Blank Card Last 4" in body and "111-0000002-0000002" in body
+        assert "read-only" in body
+
+    def test_heartbeat_shows_fresh(self, client):
+        body = client.get("/").text
+        assert "last run 3h 0m ago" in body
+        assert "pill ok" in body
+
+    def test_heartbeat_warns_when_stale(self, snapshot_path, logs_dir, failures_dir):
+        (logs_dir / ".last_run").write_text("2026-09-15T00:00:00Z", encoding="utf-8")
+        app = create_app(SnapshotReader(snapshot_path), logs_dir=logs_dir,
+                         failures_dir=failures_dir, clock=lambda: NOW, settings=_settings())
+        body = TestClient(app).get("/").text
+        assert "pill stale" in body and "expected one every 6h" in body
+
+    def test_heartbeat_warns_when_absent(self, snapshot_path, logs_dir, failures_dir):
+        app = create_app(SnapshotReader(snapshot_path), logs_dir=logs_dir,
+                         failures_dir=failures_dir, clock=lambda: NOW, settings=_settings())
+        assert "no run has completed yet" in TestClient(app).get("/").text
+
+
+class TestOrdersPage:
+    def test_full_page_lists_every_row_with_links(self, client):
+        response = client.get("/orders")
+        assert response.status_code == 200
+        body = response.text
+        assert "<html" in body and 'id="filters"' in body
+        assert body.count('<tr class="status-') == len(LEDGER_ROWS)
+        # Order Link, Tracking Link and Receipt Link are anchors, verbatim.
+        assert 'href="https://www.bestbuy.com/profile/ss/orders/order-details/BBY01-800000000001/view"' in body
+        assert 'href="https://www.fedex.com/fedextrack/?trknbr=529900000012"' in body
+        assert 'href="https://objectstorage.example/o/receipts/bestbuy/BBY01-800000000001.pdf"' in body
+        assert 'href="/orders/BBY01-800000000001"' in body
+        # A committed payout is tagged as projected.
+        assert "proj." in body
+
+    def test_htmx_request_gets_the_table_alone(self, client):
+        response = client.get("/orders", headers={"HX-Request": "true"})
+        assert response.status_code == 200
+        assert "<html" not in response.text and 'id="filters"' not in response.text
+        assert "<table" in response.text
+
+    def test_filters_and_search(self, client):
+        body = client.get("/orders", params={"retailer": "Costco"}).text
+        assert body.count('<tr class="status-') == 3
+        body = client.get("/orders", params={"status": "shipped", "group": "BFMR"}).text
+        assert body.count('<tr class="status-') == 1 and "529900000012" in body
+        body = client.get("/orders", params={"q": "fitbit"}).text
+        assert body.count('<tr class="status-') == 1 and "111-0000002-0000002" in body
+        body = client.get("/orders", params={"profile": "nobody"}).text
+        assert "No rows match." in body
+
+    def test_sort_links_and_order(self, client):
+        body = client.get("/orders", params={"sort": "total_cost", "dir": "desc"},
+                          headers={"HX-Request": "true"}).text
+        first = body.index("$2,000.00")
+        assert first < body.index("$1,259.99") < body.index("$1,000.00")
+        assert "sort=total_cost&amp;dir=asc" in body or "sort=total_cost&dir=asc" in body
+
+    def test_facets_come_from_the_whole_ledger(self, client):
+        body = client.get("/orders", params={"retailer": "Costco"}).text
+        assert '<option value="Best Buy"' in body and '<option value="Costco" selected' in body
+
+
+class TestOrderPage:
+    def test_one_order_with_its_shipments(self, client):
+        response = client.get("/orders/BBY01-800000000001")
+        assert response.status_code == 200
+        body = response.text
+        assert "Shipment 1" in body and "Shipment 2" in body
+        assert "529900000012" in body and "submitted to the buying group" in body
+        assert "committed by the buying group, not yet paid" in body
+        assert "Projected Profit" in body and "$263.60" in body
+        assert 'href="https://objectstorage.example/o/receipts/bestbuy/BBY01-800000000001.pdf"' in body
+        assert "BFMR B999999, Testville, NH 03050" in body
+
+    def test_a_settled_order(self, client):
+        body = client.get("/orders/1399000017").text
+        assert "settled on 2026-09-01" in body and "$136.00" in body
+
+    def test_unknown_order_is_404(self, client):
+        assert client.get("/orders/nope").status_code == 404
+
+
+class TestFailuresPage:
+    REPORT = (
+        "# Failure dossier — costco [profile-bravo] — 2026-08-30 07:03:04Z\n\n"
+        "## What failed\n\n**CostcoApiError**: order 1399000014: no `orderLineItems`\n\n"
+        "```\nTraceback (most recent call last):\n  boom\n```\n\n"
+        "## Selector audit\n\n| selector | matches |\n|---|---|\n| `#a` | 0 |\n\n"
+        "<script>alert(1)</script>\n\n"
+        "## Hosted copies\n\n"
+        "- `response_1.txt`: https://objectstorage.example/p/TOKEN/o/failures/costco_profile-bravo_20260830T070304Z/response_1.txt\n"
+    )
+
+    def _dossier(self, root: Path, name: str, report: str | None):
+        directory = root / name
+        directory.mkdir()
+        (directory / "response_1.txt").write_text("{}", encoding="utf-8")
+        if report is not None:
+            (directory / "report.md").write_text(report, encoding="utf-8")
+        return directory
+
+    def test_newest_first_with_reports_rendered_and_hosted_links_verbatim(self, client, failures_dir):
+        self._dossier(failures_dir, "costco_profile-bravo_20260830T070304Z", self.REPORT)
+        self._dossier(failures_dir, "amazon_profile-charlie_20260914T160056Z", "# Newer\n\ntext\n")
+        self._dossier(failures_dir, "bestbuy_profile-bravo_20260901T000000Z", None)
+
+        response = client.get("/failures")
+        assert response.status_code == 200
+        body = response.text
+        newest = body.index("amazon_profile-charlie_20260914T160056Z")
+        middle = body.index("bestbuy_profile-bravo_20260901T000000Z")
+        oldest = body.index("costco_profile-bravo_20260830T070304Z")
+        assert newest < middle < oldest
+        assert "<h2>What failed</h2>" in body and "<strong>CostcoApiError</strong>" in body
+        assert "<table>" in body and "<td><code>#a</code></td>" in body
+        link = ("https://objectstorage.example/p/TOKEN/o/failures/"
+                "costco_profile-bravo_20260830T070304Z/response_1.txt")
+        assert f'<a href="{link}" rel="noopener">{link}</a>' in body
+        assert "no report.md" in body
+
+    def test_raw_html_in_a_report_is_escaped(self, client, failures_dir):
+        self._dossier(failures_dir, "costco_profile-bravo_20260830T070304Z", self.REPORT)
+        body = client.get("/failures").text
+        assert "<script>alert(1)</script>" not in body
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+
+    def test_empty_directory(self, client):
+        assert "No failure dossiers." in client.get("/failures").text
+
+    def test_missing_directory(self, snapshot_path, logs_dir, tmp_path):
+        app = create_app(SnapshotReader(snapshot_path), logs_dir=logs_dir,
+                         failures_dir=tmp_path / "nowhere", clock=lambda: NOW, settings=_settings())
+        assert TestClient(app).get("/failures").status_code == 200
+
+    def test_helpers(self):
+        assert parse_name("costco_profile-bravo_20260830T070304Z") == (
+            "costco", "profile-bravo", datetime(2026, 8, 30, 7, 3, 4, tzinfo=timezone.utc))
+        assert parse_name("odd") == ("odd", "", None)
+        assert hosted_copies(self.REPORT) == [(
+            "response_1.txt",
+            "https://objectstorage.example/p/TOKEN/o/failures/costco_profile-bravo_20260830T070304Z/response_1.txt",
+        )]
+        assert hosted_copies("# no section") == []
+        assert list_dossiers(Path("does/not/exist")) == []
+
+
+class TestHealth:
+    def test_snapshot_backend(self, client, snapshot_path):
+        response = client.get("/health")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is True and body["read_only"] is True
+        assert body["backend"] == "snapshot"
+        assert body["snapshot_path"] == str(snapshot_path)
+        assert body["rows"] == len(LEDGER_ROWS) and body["schema_matches"] is True
+        assert body["heartbeat"]["present"] is True and body["heartbeat"]["stale"] is False
+        assert body["heartbeat"]["age_seconds"] == 3 * 3600
+
+    def test_sheet_backend_reports_its_cache_age(self, logs_dir, failures_dir):
+        grid = [list(HEADER), row(order_id="S1", order_date="2026-09-01", status="shipped")]
+        clock = FakeClock()
+        reader = SheetReader(ttl_seconds=300, opener=lambda: (ReadOnlyWorksheet(grid), "T"),
+                             clock=clock)
+        app = create_app(reader, logs_dir=logs_dir, failures_dir=failures_dir,
+                         clock=lambda: NOW, settings=_settings())
+        test_client = TestClient(app)
+
+        body = test_client.get("/health").json()
+        assert body["backend"] == "sheet" and body["rows"] == 1
+        assert body["sheet_cache_age_seconds"] == 0.0
+        clock.now = 120
+        assert test_client.get("/health").json()["sheet_cache_age_seconds"] == 120.0
+
+    def test_a_missing_snapshot_is_503_with_the_reason(self, tmp_path, logs_dir, failures_dir):
+        app = create_app(SnapshotReader(data_dir=tmp_path), logs_dir=logs_dir,
+                         failures_dir=failures_dir, clock=lambda: NOW, settings=_settings())
+        test_client = TestClient(app)
+
+        health = test_client.get("/health")
+        assert health.status_code == 503 and "sheet_backup_" in health.json()["error"]
+        assert test_client.get("/").status_code == 503
+        assert test_client.get("/orders").status_code == 503
+
+
+# --------------------------------------------------------------------------------------------------
+# Choosing the backend from config
+# --------------------------------------------------------------------------------------------------
+
+
+class TestReaderFromSettings:
+    def test_default_is_the_newest_snapshot(self):
+        reader = reader_from_settings(_settings(web_ledger_source="snapshot", web_snapshot_path=""))
+        assert isinstance(reader, SnapshotReader) and reader._explicit is None
+
+    def test_snapshot_path_from_config(self):
+        reader = reader_from_settings(_settings(web_ledger_source="snapshot",
+                                                web_snapshot_path="data/sheet_backup_x.csv"))
+        assert reader.resolve().name == "sheet_backup_x.csv"
+
+    def test_sheet_with_its_ttl(self):
+        reader = reader_from_settings(_settings(web_ledger_source="sheet",
+                                                web_sheet_cache_ttl_seconds=42))
+        assert isinstance(reader, SheetReader) and reader.ttl_seconds == 42.0
+
+    def test_explicit_arguments_win(self):
+        reader = reader_from_settings(_settings(web_ledger_source="sheet"), source="snapshot",
+                                      snapshot_path="x.csv")
+        assert isinstance(reader, SnapshotReader)
+
+    def test_a_typo_is_refused_not_defaulted(self):
+        with pytest.raises(ValueError, match="WEB_LEDGER_SOURCE"):
+            reader_from_settings(_settings(web_ledger_source="sheets"))
+
+    def test_the_settings_have_their_config_home(self):
+        from config.settings import ENV_TO_CONFIG
+
+        assert ENV_TO_CONFIG["WEB_LEDGER_SOURCE"] == "web.ledger_source"
+        assert ENV_TO_CONFIG["WEB_SNAPSHOT_PATH"] == "web.snapshot_path"
+        assert ENV_TO_CONFIG["WEB_SHEET_CACHE_TTL_SECONDS"] == "web.sheet_cache_ttl_seconds"
+        assert ENV_TO_CONFIG["WEB_BIND_HOST"] == "web.bind_host"
+        assert ENV_TO_CONFIG["WEB_PORT"] == "web.port"
+        defaults = _settings()
+        assert defaults.web_sheet_cache_ttl_seconds == 300 or defaults.web_sheet_cache_ttl_seconds > 0
+
+
+# --------------------------------------------------------------------------------------------------
+# Packaging: the scheduler stays untouched
+# --------------------------------------------------------------------------------------------------
+
+
+class TestPackaging:
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_the_web_extras_are_not_in_the_scheduler_requirements(self):
+        runtime = (self.ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+        for package in ("fastapi", "jinja2", "uvicorn", "markdown-it-py"):
+            assert package not in runtime, f"{package} must stay out of the scheduler image"
+        extras = (self.ROOT / "requirements-web.txt").read_text(encoding="utf-8")
+        assert re.search(r"^fastapi==\d", extras, re.M) and re.search(r"^jinja2==\d", extras, re.M)
+
+    def test_the_compose_service_is_behind_the_web_profile_and_mounts_read_only(self):
+        compose = (self.ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        web = compose[compose.index("\n  web:\n"):]
+        ledger = compose[: compose.index("\n  web:\n")]
+        assert 'profiles: ["web"]' in web
+        assert "profiles:" not in ledger, "the scheduler service must not be behind a profile"
+        assert "dockerfile: web/Dockerfile" in web
+        for mount in ("./config.json:/app/config.json:ro", "./data:/app/data:ro",
+                      "./logs:/app/logs:ro"):
+            assert mount in web
+        assert ".state.json" not in web
+
+    def test_operations_doc_says_how_to_run_it(self):
+        doc = (self.ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+        assert "docker compose --profile web up -d" in doc
+        assert "python -m web" in doc
+        assert "read-only" in doc.lower()
+
+    def test_static_assets_are_vendored(self):
+        assert (self.ROOT / "web" / "static" / "htmx.min.js").stat().st_size > 10_000
+        assert (self.ROOT / "web" / "static" / "style.css").is_file()
