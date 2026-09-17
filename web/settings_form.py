@@ -127,6 +127,38 @@ def schema() -> list[Setting]:
     return out
 
 
+def container_restart_envs() -> set[str]:
+    """The settings docker/entrypoint.sh resolves ONCE at container start (the schedule, the
+    timezone, whether the dashboard runs) -- derived from scripts.container_settings.EXPORTS, the
+    list the entrypoint sources, so a knob added there is prompted for here without a second list."""
+    from scripts.container_settings import EXPORTS
+
+    return {name for name, _read in EXPORTS}
+
+
+def restart_scope(setting: Setting) -> str:
+    """What has to happen for a saved value to take effect:
+    "container"  docker compose restart (the entrypoint reads it once)
+    "dashboard"  the Restart-dashboard button (the web process reads settings once)
+    "next run"   nothing -- every scheduled run is a fresh process that reads the file"""
+    if setting.env in container_restart_envs():
+        return "container"
+    if setting.section in ("web", "database"):
+        return "dashboard"
+    return "next run"
+
+
+def restart_needed(changes: Mapping[str, Any]) -> str:
+    """The strongest restart the changed paths call for: "container" > "dashboard" > ""."""
+    by_path = {s.path: s for s in schema()}
+    scopes = {restart_scope(by_path[p]) for p in changes if p in by_path}
+    if "container" in scopes:
+        return "container"
+    if "dashboard" in scopes:
+        return "dashboard"
+    return ""
+
+
 def sections_in_order(settings: list[Setting]) -> list[str]:
     seen: list[str] = []
     for s in settings:
@@ -161,6 +193,7 @@ def view(settings: list[Setting], environ: Mapping[str, str]) -> list[dict]:
             "value": "" if value is None else value,
             "secret_set": bool(config_value(s.path)) if s.secret else False,
             "overridden": is_overridden(s, environ),
+            "restart": restart_scope(s),
         })
     return rows
 

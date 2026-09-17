@@ -246,11 +246,16 @@ written. Your `//` comment keys survive, because the write goes through the same
 exported in the environment is marked *env override*: the file is saved, but the environment still
 wins for the running process, as everywhere else.
 
-**When a change takes effect.** The scheduled run is a fresh process every time, so it reads the
-saved file on its next start with no restart. The dashboard reads settings once at start, so after
-changing a `web` or `database` value press *Restart dashboard*: in the container the entrypoint's
-loop brings it back within seconds; on a desktop, run `python -m web` again. In Docker the
-`config.json` mount is writable for exactly this page (nothing in a scheduled run writes it).
+**When a change takes effect.** Three scopes, and the page tells you which one a save touched:
+
+| Setting | Applies | The page |
+|---|---|---|
+| everything else | on the next scheduled run — each run is a fresh process that reads the file on start | nothing to do |
+| `web.*`, `database.*` | after the dashboard restarts — it reads settings once at start | prompts for *Restart dashboard* (the entrypoint's loop brings it back within seconds; on a desktop, run `python -m web` again) |
+| what the entrypoint resolves at container start: `container.*` and `web.enabled` (derived from `scripts/container_settings.py`'s export list, so a new knob there is prompted for automatically) | after `docker compose restart` on the host | prompts with the command; the fields carry a *container restart* tag. Do it between runs: a restart mid-run aborts that run |
+
+In Docker the `config.json` mount is writable for exactly this page (nothing in a scheduled run
+writes it).
 
 **The page is derived, not hand-built.** `web/settings_form.py` reads `ENV_TO_CONFIG`, the
 `Settings` fields (type, and `repr=False` for secrets) and `config.example.json`'s `"// key"`

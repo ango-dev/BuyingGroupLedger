@@ -3,6 +3,22 @@
 {% block content %}
 <h1>Settings</h1>
 {% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
+{% if restart == 'container' %}
+<div class="banner warn restart-prompt">
+  <strong>Restart the container to apply this change.</strong> You changed a setting the container
+  reads once at start (the schedule, the timezone, whether the dashboard runs). It is saved, but it
+  takes effect only after, on the host:
+  <pre>docker compose restart</pre>
+  Do it between runs: a restart mid-run aborts that run (the heartbeat shows the last run's age
+  above; <code>logs/.run.lock</code> exists while one is in progress).
+</div>
+{% elif restart == 'dashboard' %}
+<div class="banner warn restart-prompt">
+  <strong>Restart the dashboard to apply this change.</strong> It is saved; the web process reads
+  settings once at start. Use <em>Restart dashboard</em> at the bottom of this page (the scheduler is
+  untouched).
+</div>
+{% endif %}
 {% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
 
 <p class="muted">Edits <code>{{ config_path }}</code> in place (your <code>//</code> comment keys are kept).
@@ -28,6 +44,8 @@ credential here. Keep the dashboard on loopback or your own network.</p>
               <label for="f-{{ s.env }}" class="mono">{{ s.key }}</label>
               <div class="muted mono small">{{ s.env }}</div>
               {% if row.overridden %}<span class="tag stale" title="exported in the environment; the file value is saved but does not reach the running process">env override</span>{% endif %}
+              {% if row.restart == 'container' %}<span class="tag" title="the container reads this once at start: docker compose restart to apply">container restart</span>
+              {% elif row.restart == 'dashboard' %}<span class="tag" title="the dashboard reads this once at start: Restart dashboard to apply">dashboard restart</span>{% endif %}
             </th>
             <td class="input">
               {% if s.kind == 'bool' %}

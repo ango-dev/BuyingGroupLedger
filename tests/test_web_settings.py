@@ -267,3 +267,68 @@ class TestSettingsPage:
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
         assert "- ./config.json:/app/config.json\n" in compose
         assert "config.json:/app/config.json:ro" not in compose
+
+
+class TestRestartPrompts:
+    """A save says what has to happen for it to take effect -- derived from the entrypoint's own
+    export list, so a container knob added there is prompted for without a second list."""
+
+    @staticmethod
+    def _form():
+        form = {}
+        for row in settings_form.view(settings_form.schema(), {}):
+            s = row["setting"]
+            if s.kind == "bool":
+                if row["value"] is True:
+                    form[s.env] = "on"
+            elif not s.secret:
+                form[s.env] = str(row["value"])
+        return form
+
+    def test_scopes_are_derived_from_the_entrypoints_exports(self):
+        from scripts.container_settings import EXPORTS
+
+        by_env = {s.env: s for s in settings_form.schema()}
+        for name, _read in EXPORTS:
+            assert settings_form.restart_scope(by_env[name]) == "container", name
+        assert settings_form.restart_scope(by_env["WEB_PORT"]) == "dashboard"
+        assert settings_form.restart_scope(by_env["LEDGER_DB_PATH"]) == "dashboard"
+        assert settings_form.restart_scope(by_env["LOOKBACK_DAYS"]) == "next run"
+        assert settings_form.restart_scope(by_env["BFMR_API_KEY"]) == "next run"
+
+    def test_restart_needed_picks_the_strongest_scope(self):
+        assert settings_form.restart_needed({"scraping.lookback_days": 2}) == ""
+        assert settings_form.restart_needed({"web.port": 1, "scraping.lookback_days": 2}) == "dashboard"
+        assert settings_form.restart_needed({"web.port": 1, "container.timezone": "UTC"}) == "container"
+
+    def test_changing_the_schedule_prompts_for_a_container_restart(self, client):
+        form = {**self._form(), "RUN_INTERVAL_HOURS": "4"}
+        response = client.post("/settings", data=form, follow_redirects=False)
+        assert response.status_code == 303 and "restart=container" in response.headers["location"]
+        body = client.get(response.headers["location"]).text
+        assert "Restart the container to apply this change" in body
+        assert "docker compose restart" in body
+
+    def test_changing_a_dashboard_setting_prompts_for_the_button(self, client):
+        form = {**self._form(), "WEB_PORT": "9000"}
+        response = client.post("/settings", data=form, follow_redirects=False)
+        assert "restart=dashboard" in response.headers["location"]
+        body = client.get(response.headers["location"]).text
+        assert "Restart the dashboard to apply this change" in body
+        assert "Restart the container to apply" not in body
+
+    def test_an_ordinary_setting_prompts_for_nothing(self, client):
+        form = {**self._form(), "LOOKBACK_DAYS": "5"}
+        response = client.post("/settings", data=form, follow_redirects=False)
+        assert "restart=" not in response.headers["location"]
+        body = client.get(response.headers["location"]).text
+        assert "restart-prompt" not in body
+
+    def test_fields_carry_their_scope(self, client):
+        body = client.get("/settings").text
+        row = body[body.index('for="f-RUN_INTERVAL_HOURS"'):body.index('for="f-RUN_ON_START"')]
+        assert "container restart" in row
+        row = body[body.index('for="f-WEB_PORT"'):body.index('for="f-LEDGER_DB_PATH"')]
+        assert "dashboard restart" in row
+        row = body[body.index('for="f-LOOKBACK_DAYS"'):body.index('for="f-DEFAULT_CASHBACK_RATE"')]
+        assert "restart" not in row

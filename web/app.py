@@ -244,7 +244,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     from web import settings_form
 
     def settings_page(request: Request, *, message: str = "", errors: list[str] | None = None,
-                      open_section: str = "", section_texts: dict | None = None, status: int = 200):
+                      open_section: str = "", section_texts: dict | None = None, status: int = 200,
+                      restart: str = ""):
         rows_schema = settings_form.schema()
         texts = section_texts or {}
         forms = [(path, shape, help_text, texts.get(path, settings_form.section_text(path)))
@@ -253,13 +254,15 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             request, "settings.html", message=message, errors=errors or [],
             rows=settings_form.view(rows_schema, os.environ),
             sections=settings_form.sections_in_order(rows_schema), section_forms=forms,
-            open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE))
+            open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE),
+            restart=restart if restart in ("container", "dashboard") else "")
         response.status_code = status
         return response
 
     @app.get("/settings", response_class=HTMLResponse)
     def settings_get(request: Request):
-        return settings_page(request, message=request.query_params.get("message", ""))
+        return settings_page(request, message=request.query_params.get("message", ""),
+                             restart=request.query_params.get("restart", ""))
 
     @app.post("/settings", response_class=HTMLResponse)
     async def settings_save(request: Request):
@@ -270,7 +273,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return settings_page(request, errors=exc.errors, status=400)
         message = (f"Saved {len(changes)} changed setting(s): {', '.join(sorted(changes))}"
                    if changes else "Saved; nothing had changed.")
-        return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}", status_code=303)
+        restart_kind = settings_form.restart_needed(changes)
+        url = f"/settings?message={message.replace(' ', '+')}"
+        if restart_kind:
+            url += f"&restart={restart_kind}"
+        return RedirectResponse(url=url, status_code=303)
 
     @app.post("/settings/section/{path}", response_class=HTMLResponse)
     async def settings_save_section(request: Request, path: str):
