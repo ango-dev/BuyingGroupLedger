@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+{% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
+{% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
+
+<p class="muted">Edits <code>{{ config_path }}</code> in place (your <code>//</code> comment keys are kept).
+The scheduled run reads the file fresh on its next start, so a change applies to the next run with no
+restart. The dashboard itself reads settings once at start: after changing a <code>web</code> or
+<code>database</code> value, use <em>Restart dashboard</em> below. A setting whose variable is exported
+in the environment is marked <span class="tag stale">env override</span>: the file value is saved but
+the environment still wins for the running process.</p>
+<p class="muted"><strong>This page has no login.</strong> Whoever can open it can read and change every
+credential here. Keep the dashboard on loopback or your own network.</p>
+
+<form method="post" action="/settings" class="settings">
+  {% for section in sections %}
+  <details class="dossier" open>
+    <summary><strong>{{ section }}</strong></summary>
+    <div class="dossier-body">
+      <table class="grid settings-table">
+        <tbody>
+        {% for row in rows if row.setting.section == section %}
+          {% set s = row.setting %}
+          <tr>
+            <th scope="row">
+              <label for="f-{{ s.env }}" class="mono">{{ s.key }}</label>
+              <div class="muted mono small">{{ s.env }}</div>
+              {% if row.overridden %}<span class="tag stale" title="exported in the environment; the file value is saved but does not reach the running process">env override</span>{% endif %}
+            </th>
+            <td class="input">
+              {% if s.kind == 'bool' %}
+                <input type="checkbox" id="f-{{ s.env }}" name="{{ s.env }}" value="on" {{ 'checked' if row.value is sameas true or row.value in ('true', 'True', '1', 'yes', 'on') }}>
+              {% elif s.secret %}
+                <input type="password" id="f-{{ s.env }}" name="{{ s.env }}" value="" autocomplete="new-password"
+                       placeholder="{{ '•••••••• (set; blank keeps it)' if row.secret_set else '(not set)' }}">
+                {% if row.secret_set %}<label class="small"><input type="checkbox" name="{{ s.env }}__clear" value="1"> clear</label>{% endif %}
+              {% elif s.kind in ('int', 'float') %}
+                <input type="number" id="f-{{ s.env }}" name="{{ s.env }}" value="{{ row.value }}" step="{{ '1' if s.kind == 'int' else 'any' }}">
+              {% else %}
+                <input type="text" id="f-{{ s.env }}" name="{{ s.env }}" value="{{ row.value }}" {% if s.kind == 'rate' %}placeholder="0.02 or 2%"{% endif %}>
+              {% endif %}
+              {% if s.help %}<div class="muted small help">{{ s.help }}</div>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endfor %}
+  <div class="inline-form">
+    <button type="submit">Save settings</button>
+  </div>
+</form>
+
+<h2>Structured sections</h2>
+<p class="muted">Lists and objects are edited as JSON and validated entry by entry before anything
+is written. Values here are shown in full, including proxy and retailer passwords.</p>
+{% for path, shape, help, text in section_forms %}
+<form method="post" action="/settings/section/{{ path }}" class="settings-section">
+  <details class="dossier" {{ 'open' if open_section == path }}>
+    <summary><strong class="mono">{{ path }}</strong> <span class="muted">— {{ help }}</span></summary>
+    <div class="dossier-body">
+      <textarea name="text" rows="{{ 6 if shape == 'object' else 16 }}" class="mono json" spellcheck="false">{{ text }}</textarea>
+      <div class="inline-form"><button type="submit">Save {{ path }}</button></div>
+    </div>
+  </details>
+</form>
+{% endfor %}
+
+<h2>Apply</h2>
+<form method="post" action="/settings/restart" class="inline-form"
+      onsubmit="return confirm('Restart the dashboard process now? In Docker it comes back within seconds; run `python -m web` again on a desktop.')">
+  <button type="submit">Restart dashboard</button>
+  <span class="muted">re-reads config.json for the web and database settings; the scheduler is untouched</span>
+</form>
+{% endblock %}

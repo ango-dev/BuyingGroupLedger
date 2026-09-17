@@ -235,6 +235,33 @@ a *Create a backup now* button (the zip lands in `backups/` and is downloadable 
 unauthenticated page must not be able to replace the live configuration, so there you restore from
 the command line. After a restore, restart the app so the restored `config.json` is read.
 
+### The Settings page
+
+`/settings` edits `config.json` in place — every scalar setting (grouped by section, booleans as
+checkboxes, secrets as password fields that show only whether a value is set; blank keeps it, *clear*
+blanks it) and the structured sections (`profiles`, `warehouses`, `cards`,
+`google.service_account`) as JSON, each entry validated by its own model before anything is
+written. Your `//` comment keys survive, because the write goes through the same
+`config.loader.save_config` that `scripts/create_profile.py` uses. A setting whose variable is
+exported in the environment is marked *env override*: the file is saved, but the environment still
+wins for the running process, as everywhere else.
+
+**When a change takes effect.** The scheduled run is a fresh process every time, so it reads the
+saved file on its next start with no restart. The dashboard reads settings once at start, so after
+changing a `web` or `database` value press *Restart dashboard*: in the container the entrypoint's
+loop brings it back within seconds; on a desktop, run `python -m web` again. In Docker the
+`config.json` mount is writable for exactly this page (nothing in a scheduled run writes it).
+
+**The page is derived, not hand-built.** `web/settings_form.py` reads `ENV_TO_CONFIG`, the
+`Settings` fields (type, and `repr=False` for secrets) and `config.example.json`'s `"// key"`
+comments, so a scalar setting added the documented way appears with the right widget and its help
+text; `tests/test_web_settings.py` fails if any variable is missing from the page. A new structured
+section, a special widget, or a changed section model must be added to `SECTIONS` by hand
+([CLAUDE.md](../CLAUDE.md) states the rule).
+
+**No login.** Whoever can open the page can read and change every credential. Keep the dashboard on
+loopback or your own network; the LAN publish is opt-in for that reason.
+
 **What the dashboard cannot do, by design:** write the Sheet, edit a row, submit tracking, file
 insurance, run a scrape, or add the `Expected Payout` column. For those, the commands in
 [CLAUDE.md](../CLAUDE.md)'s cost table remain the way.

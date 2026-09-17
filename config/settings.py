@@ -203,6 +203,11 @@ class Settings:
     A masked repr costs nothing; the values are still read normally as attributes.
     """
 
+    # The Browser-Use SDK reads this out of os.environ itself (_export_sdk_env above puts the
+    # config value there); the field exists so the setting is visible where every other one is --
+    # the browser Settings page derives its form from these fields (web/settings_form.py).
+    browser_use_api_key: str = field(default=_get_str("BROWSER_USE_API_KEY"), repr=False)
+
     # How many CALENDAR days back to include, counting today as 0. Default 1 = "today and
     # yesterday". Retailers expose only an order date (no time), so the window is date-based
     # (see BaseRetailerScraper._date_window).

@@ -10,6 +10,7 @@ or `python -m web` serves, built from config.json's `web` section.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -86,10 +87,21 @@ def cell(row, name: str) -> str:
 # --------------------------------------------------------------------------------------------------
 
 
+def _exit_soon(delay: float = 0.5) -> None:
+    """Leave the process shortly after the current response is sent. In the container,
+    docker/entrypoint.sh's loop starts the dashboard again within seconds, with config.json
+    re-read; on a desktop the operator runs `python -m web` again."""
+    import threading
+
+    threading.Timer(delay, lambda: os._exit(0)).start()
+
+
 def create_app(reader: LedgerReader | None = None, *, settings=None,
                logs_dir: Path | None = None, failures_dir: Path | None = None,
                backup_dir: Path | None = None, repo_root_dir: Path | None = None,
-               clock: Callable[[], datetime] | None = None) -> FastAPI:
+               clock: Callable[[], datetime] | None = None,
+               restarter: Callable[[], None] | None = None) -> FastAPI:
+    restart = restarter or _exit_soon
     if settings is None:
         from config.settings import settings as live_settings
 
@@ -227,6 +239,58 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         message = (f"Restored {len(result['restored'])} file(s), kept {len(result['skipped_existing'])}"
                    " existing. Restart the app so the restored config.json is read.")
         return RedirectResponse(url=f"/backup?message={message.replace(' ', '+')}", status_code=303)
+
+    # --- settings (edits config.json in place; never the Sheet) ---------------------------------
+    from web import settings_form
+
+    def settings_page(request: Request, *, message: str = "", errors: list[str] | None = None,
+                      open_section: str = "", section_texts: dict | None = None, status: int = 200):
+        rows_schema = settings_form.schema()
+        texts = section_texts or {}
+        forms = [(path, shape, help_text, texts.get(path, settings_form.section_text(path)))
+                 for path, shape, _model, help_text in settings_form.SECTIONS]
+        response = page_no_snapshot(
+            request, "settings.html", message=message, errors=errors or [],
+            rows=settings_form.view(rows_schema, os.environ),
+            sections=settings_form.sections_in_order(rows_schema), section_forms=forms,
+            open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE))
+        response.status_code = status
+        return response
+
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings_get(request: Request):
+        return settings_page(request, message=request.query_params.get("message", ""))
+
+    @app.post("/settings", response_class=HTMLResponse)
+    async def settings_save(request: Request):
+        form = await request.form()
+        try:
+            changes = settings_form.apply_scalars(form)
+        except settings_form.SettingsError as exc:
+            return settings_page(request, errors=exc.errors, status=400)
+        message = (f"Saved {len(changes)} changed setting(s): {', '.join(sorted(changes))}"
+                   if changes else "Saved; nothing had changed.")
+        return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}", status_code=303)
+
+    @app.post("/settings/section/{path}", response_class=HTMLResponse)
+    async def settings_save_section(request: Request, path: str):
+        form = await request.form()
+        text = str(form.get("text", ""))
+        try:
+            count = settings_form.apply_section(path, text)
+        except settings_form.SettingsError as exc:
+            return settings_page(request, errors=exc.errors, open_section=path,
+                                 section_texts={path: text}, status=400)
+        message = f"Saved {path} ({count} entr{'y' if count == 1 else 'ies'})."
+        return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}", status_code=303)
+
+    @app.post("/settings/restart", response_class=HTMLResponse)
+    def settings_restart(request: Request):
+        restart()
+        return HTMLResponse("<!doctype html><meta http-equiv='refresh' content='6;url=/settings'>"
+                            "<p style='font-family:system-ui;padding:20px'>Restarting the dashboard; "
+                            "this page reloads in a few seconds. On a desktop, run "
+                            "<code>python -m web</code> again.</p>")
 
     @app.get("/health")
     def health(request: Request):

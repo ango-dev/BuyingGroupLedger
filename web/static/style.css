@@ -27,6 +27,15 @@
   border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 .theme-toggle:hover, button:hover { border-color: var(--accent); }
 .inline-form { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.small { font-size: 0.82em; }
+.settings-table th { width: 320px; font-weight: 500; vertical-align: top; }
+.settings-table td.input input[type=text], .settings-table td.input input[type=password],
+.settings-table td.input input[type=number] { width: 100%; max-width: 640px; font: inherit;
+  color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.settings-table .help { margin-top: 4px; max-width: 760px; }
+textarea.json { width: 100%; font-size: 0.85em; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.banner ul { margin: 4px 0 0 18px; }
 .banner.ok { background: var(--ok-bg); color: var(--ok); }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); }
