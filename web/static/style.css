@@ -91,11 +91,13 @@ table.ledger td { white-space: nowrap; }
    Sheet's OWN conditional-format colours, read from its rules on 2026-09-17: whole-row background
    by Status (=$B2="delivered" and friends), strikethrough on cancelled / superseded. Colours are
    the sheet's exact RGB; the text stays dark on them in both themes, as on the sheet. */
-body.wide main { max-width: none; padding: 0 8px 40px; }
-.sheet { overflow: auto; max-height: calc(100vh - 150px); border: 1px solid var(--line); background: var(--card); }
-table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; }
-table.sheetlike th, table.sheetlike td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 3px 6px; }
-table.sheetlike th { position: sticky; top: 0; z-index: 2; background: var(--bg); }
+body.wide main { max-width: none; padding: 0 0 40px; }
+/* No inner scroll container. The PAGE scrolls, vertically
+   and horizontally; the header row sticks to the viewport top on the way down. */
+.sheet { overflow: visible; background: var(--card); }
+table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: collapse; line-height: 1.3; }
+table.sheetlike th, table.sheetlike td { border: 0; border-right: 1px solid #d5d5d5; border-bottom: 1px solid #d5d5d5; padding: 1px 4px; }
+table.sheetlike th { position: sticky; top: 0; z-index: 2; background: var(--bg); box-shadow: 0 1px 0 var(--line); }
 table.sheetlike td.item { max-width: 420px; }
 table.sheetlike td.rownum, table.sheetlike th.rownum { position: sticky; left: 0; z-index: 1; background: var(--bg); color: var(--muted); text-align: right; font-size: 0.8em; min-width: 34px; }
 table.sheetlike th.rownum { z-index: 3; }
