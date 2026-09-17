@@ -128,13 +128,29 @@ Backup page, and `/health` as JSON. FastAPI + Jinja2 + htmx, no build step; a li
 the header (remembered per browser; follows the system until you choose). The dependencies are
 `requirements-web.txt`, an optional install on a desktop and part of the one Docker image.
 
-**The read-only guarantee.** The dashboard cannot write the Sheet: its live backend opens the
-worksheet through `scripts.audit_sheet.open_worksheet_readonly`, the `spreadsheets.readonly` scope,
-so Google refuses a write before any code could attempt one. It never calls a retailer or a
-buying-group API, never runs a scrape, and never changes the ledger schema (`FIELDNAMES` / `HEADER`
-are frozen; `tests/test_schema.py` enforces them). Every ledger route is a `GET`; the only `POST`s
-are on the Backup page and write local files only. `tests/test_web.py` pins all of it, including
-that no write method of the worksheet is ever named in `web/`.
+**No automatic writes.** Every *read* of the Sheet goes through
+`scripts.audit_sheet.open_worksheet_readonly`, the `spreadsheets.readonly` scope, so nothing that
+merely displays the ledger can write it. The dashboard never calls a retailer or a buying-group
+API, never runs a scrape, and never changes the ledger schema (`FIELDNAMES` / `HEADER` are frozen;
+`tests/test_schema.py` enforces them). **The one Sheet write is a cell you edit by hand on the
+Orders page**, through `web/ledger_writer.py` and nothing else: `tests/test_web.py` scans every
+other file in `web/` for the write scope and the worksheet's write methods, and
+`tests/test_web_edit.py` pins what that one file may do. The other `POST`s (Backup, Settings) write
+local files only.
+
+**Editing on the Orders page.** The table is the Sheet: every column in the Sheet's order, rows
+coloured by the Sheet's own status rules (read from its conditional formats: ordered red, shipped
+orange, delivered yellow, paid green, return terracotta, cancelled grey and superseded dark grey
+with strikethrough), a frozen header, full page width. Double-click a cell (or press Enter on it)
+to edit; Enter saves, Esc cancels. An edit lands on the Sheet exactly as if typed there: the row is
+found **by its key** on a fresh read (the sheet may have re-sorted), the cell must still show what
+the page showed or the edit is refused as a conflict, a value goes through the upsert's own
+coercion (numbers stay numbers, checkboxes booleans, dates plain text), and a blank clears the cell
+while keeping its number format. Not editable: the four key columns (Order ID, Order Date, Item
+Name, Shipment: changing one duplicates the row on the next re-check), the two formulas (COGS,
+Total Profit) and Last Scraped At. Status must be one of the ledger's words; dates must be
+`YYYY-MM-DD`. The snapshot backend is view-only (a CSV has nothing to write to); the `db` backend
+writes the Sheet and re-mirrors, so the copy follows.
 
 **Three backends, one adapter** (`web/ledger_reader.py`), chosen in `config.json`'s `web` section or
 by `WEB_LEDGER_SOURCE=snapshot|sheet|db` (the variable table in [configuration.md](configuration.md)

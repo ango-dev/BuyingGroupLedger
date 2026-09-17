@@ -367,11 +367,15 @@ class TestReadOnlyGuarantee:
     FORBIDDEN_IMPORTS = ("scrapers", "buying_groups", "sync_tracking", "respond_bfmr", "receipts",
                          "main")
 
-    @staticmethod
-    def _sources() -> dict[str, str]:
+    #: The ONE file that may write the Sheet: a cell you edit by hand on the Orders page.
+    #: tests/test_web_edit.py pins what it may and may not do; everything else stays read-only.
+    WRITE_FILE = "ledger_writer.py"
+
+    @classmethod
+    def _sources(cls) -> dict[str, str]:
         root = Path(__file__).resolve().parents[1] / "web"
         return {str(p.relative_to(root)): p.read_text(encoding="utf-8")
-                for p in root.rglob("*.py")}
+                for p in root.rglob("*.py") if p.name != cls.WRITE_FILE}
 
     def test_no_worksheet_write_method_or_write_scope_is_named_in_web(self):
         for name, text in self._sources().items():
@@ -659,7 +663,7 @@ class TestOverviewPage:
         assert "Realized profit" in body and "$193.00" in body
         assert "Open rows by status and buying group" in body
         assert "Blank Card Last 4" in body and "111-0000002-0000002" in body
-        assert "read-only" in body
+        assert "no automatic writes" in body
 
     def test_heartbeat_shows_fresh(self, client):
         body = client.get("/").text
@@ -713,8 +717,8 @@ class TestOrdersPage:
     def test_sort_links_and_order(self, client):
         body = client.get("/orders", params={"sort": "total_cost", "dir": "desc"},
                           headers={"HX-Request": "true"}).text
-        first = body.index("$2,000.00")
-        assert first < body.index("$1,259.99") < body.index("$1,000.00")
+        cells = re.findall(r'data-field="total_cost"[^>]*>\s*([^<]*)', body)
+        assert [c.strip() for c in cells][:3] == ["$2,000.00", "$1,259.99", "$1,000.00"]
         assert "sort=total_cost&amp;dir=asc" in body or "sort=total_cost&dir=asc" in body
 
     def test_facets_come_from_the_whole_ledger(self, client):
@@ -952,7 +956,7 @@ class TestThemeToggle:
         assert 'onclick="toggleTheme()"' in body
         assert 'localStorage.getItem("ledger-theme")' in body
         # Applied in <head>, before the stylesheet-dependent body renders.
-        assert body.index("ledger-theme") < body.index("<body>")
+        assert body.index("ledger-theme") < body.index("<body")
         assert 'href="/backup"' in body
 
     def test_the_stylesheet_honours_the_attribute_over_the_system_preference(self):

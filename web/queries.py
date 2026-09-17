@@ -8,15 +8,15 @@ from models.order import FIELDNAMES
 
 from web.ledger_reader import FIELD_TO_HEADER, LedgerRow
 
-#: The columns the ledger table shows, in order, by FIELDNAMES name. Each is sortable. The heading
-#: is HEADER's own name for the column so the page and the sheet never disagree on a label.
-TABLE_COLUMNS = (
-    "order_date", "status", "retailer", "item_name", "shipment", "quantity", "order_id",
-    "tracking_number", "tracking_submitted", "delivery_date", "buying_group",
-    "total_cost", "cashback_rate", "cogs", "insurance", "payout_amount", "payout_date",
-    "total_profit", "profile_label", "receipt_url",
-)
-assert all(c in FIELDNAMES for c in TABLE_COLUMNS)
+#: The columns the ledger table shows: EVERY column, in the Sheet's own order. Each is sortable. The heading is HEADER's own name
+#: for the column so the page and the sheet never disagree on a label.
+TABLE_COLUMNS = tuple(FIELDNAMES)
+
+#: Rendered as anchors rather than text.
+LINK_FIELDS = ("order_url", "tracking_url", "receipt_url")
+#: Right-aligned, money-formatted.
+MONEY_FIELDS = ("cost_per_item", "total_cost", "shipping", "sales_tax", "gift_card", "rewards_used",
+                "cogs", "insurance", "payout_amount", "total_profit")
 
 #: Sorted as numbers (blank last), everything else as text.
 NUMERIC_SORT = {

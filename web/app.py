@@ -100,7 +100,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                logs_dir: Path | None = None, failures_dir: Path | None = None,
                backup_dir: Path | None = None, repo_root_dir: Path | None = None,
                clock: Callable[[], datetime] | None = None,
-               restarter: Callable[[], None] | None = None) -> FastAPI:
+               restarter: Callable[[], None] | None = None,
+               writer=None) -> FastAPI:
+    """`writer` is the ONE sheet-write path (web/ledger_writer.SheetCellWriter): cell edits on
+    the Orders page. None = the page is view-only (the snapshot backend, or a test)."""
     restart = restarter or _exit_soon
     if settings is None:
         from config.settings import settings as live_settings
@@ -151,6 +154,20 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         snapshot = load(request)
         return page(request, "overview.html", snapshot=snapshot, summary=overview(snapshot))
 
+    # The sheet writer: cell edits on the Orders page. The snapshot backend is a CSV, so there is
+    # nothing to write to and the page stays view-only there.
+    if writer is None and reader.backend != "snapshot":
+        from web.ledger_writer import SheetCellWriter
+
+        writer = SheetCellWriter()
+    app.state.writer = writer
+    from web.ledger_writer import EDITABLE_FIELDS, EditError
+    from web.queries import LINK_FIELDS, MONEY_FIELDS
+
+    templates.env.globals["EDITABLE_FIELDS"] = EDITABLE_FIELDS
+    templates.env.globals["LINK_FIELDS"] = LINK_FIELDS
+    templates.env.globals["MONEY_FIELDS"] = MONEY_FIELDS
+
     @app.get("/orders", response_class=HTMLResponse)
     def orders(request: Request):
         snapshot = load(request)
@@ -159,11 +176,42 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         context = {
             "snapshot": snapshot, "filters": filters, "rows": rows, "total": len(snapshot.rows),
             "facets": facets(snapshot.rows), "columns": column_headings(),
+            "editable": writer is not None, "wide": True,
         }
         # htmx asks for just the table; a plain browser request gets the whole page.
         if request.headers.get("HX-Request", "").lower() == "true":
             return page(request, "_orders_table.html", **context)
         return page(request, "orders.html", **context)
+
+    @app.post("/orders/cell", response_class=HTMLResponse)
+    async def orders_cell(request: Request):
+        """Write ONE cell (the Orders page's inline editor) and answer with that cell re-rendered
+        from a fresh read. Always 200 with the cell: an error rides in the cell's data-error, so
+        htmx swaps it in and the page shows the message where the edit was made."""
+        form = await request.form()
+        key = {k: str(form.get(k, "")) for k in ("order_id", "order_date", "item_name", "shipment")}
+        field = str(form.get("field", ""))
+        value = str(form.get("value", ""))
+        expected = form.get("expected")
+        error = ""
+        if writer is None:
+            error = "editing is off: this backend is a CSV snapshot"
+        elif field not in EDITABLE_FIELDS:
+            error = f"{field} is not editable"
+        else:
+            try:
+                writer.write_cell(key, field, value,
+                                  None if expected is None else str(expected))
+            except EditError as exc:
+                error = str(exc)
+            except Exception as exc:  # noqa: BLE001 -- the page must show why, not a 500
+                error = f"{type(exc).__name__}: {exc}"
+        snapshot = reader.load(force=not error)
+        row = next((r for r in snapshot.rows
+                    if r.order_id == key["order_id"] and r.order_date == key["order_date"]
+                    and r.item_name == key["item_name"] and r.shipment == key["shipment"]), None)
+        return page(request, "_cell.html", snapshot=snapshot, row=row, col=field, key=key,
+                    editable=writer is not None, error=error)
 
     @app.get("/orders/{order_id}", response_class=HTMLResponse)
     def order(request: Request, order_id: str):

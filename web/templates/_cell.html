@@ -1,0 +1,29 @@
+{#- ONE <td> of the ledger table, rendered from a LedgerRow. Used by _orders_table.html for every
+    cell and returned alone by POST /orders/cell after an edit (htmx swaps the td in place).
+    `row` may be None after a conflict (the row left the sheet): the cell then only shows the error. -#}
+{%- set editable_cell = editable and col in EDITABLE_FIELDS -%}
+{%- set text = (row | cell(col)) if row else '' -%}
+{%- set raw = row.text(col) if row else '' -%}
+<td class="{{ 'num' if col in MONEY_FIELDS or col in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }}{{ ' mono' if col in ('order_id', 'tracking_number', 'package_id', 'card_last4') }}{{ ' item' if col == 'item_name' }}{{ ' edit' if editable_cell }}{{ ' error' if error }}"
+    data-field="{{ col }}"
+    {%- if editable_cell %} data-raw="{{ raw }}" data-order-id="{{ key.order_id }}" data-order-date="{{ key.order_date }}" data-item-name="{{ key.item_name }}" data-shipment="{{ key.shipment }}" tabindex="0" title="double-click or press Enter to edit"{% endif %}
+    {%- if error %} data-error="{{ error }}"{% endif %}>
+  {%- if error %}<span class="cell-error" title="{{ error }}">⚠ {{ error }}</span> {% endif -%}
+  {%- if row -%}
+    {%- if col == 'order_id' -%}
+      <a href="/orders/{{ row.order_id }}">{{ row.order_id }}</a>
+    {%- elif col == 'item_name' -%}
+      <span title="{{ row.item_name }}">{{ row.item_name }}</span>
+    {%- elif col == 'tracking_number' -%}
+      {%- if row.tracking_number and row.text('tracking_url') -%}<a href="{{ row.text('tracking_url') }}" rel="noopener">{{ row.tracking_number }}</a>{%- else -%}{{ row.tracking_number }}{%- endif -%}
+    {%- elif col in LINK_FIELDS -%}
+      {%- if raw -%}<a href="{{ raw }}" rel="noopener" title="{{ raw }}">{{ 'receipt' if col == 'receipt_url' else 'tracking' if col == 'tracking_url' else 'order' }} ↗</a>{%- endif -%}
+    {%- elif col == 'tracking_submitted' -%}
+      <span class="check">{{ '☑' if row.tracking_submitted else '☐' }}</span>
+    {%- elif col == 'payout_amount' -%}
+      {{ text }}{% if row.is_committed %} <span class="tag committed" title="committed by the buying group, not yet paid">proj.</span>{% endif %}
+    {%- else -%}
+      {{ text }}
+    {%- endif -%}
+  {%- endif -%}
+</td>

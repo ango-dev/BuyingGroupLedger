@@ -85,6 +85,40 @@ table.compact { width: auto; min-width: 280px; }
 table.ledger td.item { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 table.ledger td { white-space: nowrap; }
 .scroll { overflow-x: auto; }
+
+/* --- The Orders page as a sheet ---------------------------------------------------------------
+   Full-bleed (body.wide drops main's max-width), a frozen header row, thin grid lines, and the
+   Sheet's OWN conditional-format colours, read from its rules on 2026-09-17: whole-row background
+   by Status (=$B2="delivered" and friends), strikethrough on cancelled / superseded. Colours are
+   the sheet's exact RGB; the text stays dark on them in both themes, as on the sheet. */
+body.wide main { max-width: none; padding: 0 8px 40px; }
+.sheet { overflow: auto; max-height: calc(100vh - 150px); border: 1px solid var(--line); background: var(--card); }
+table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; }
+table.sheetlike th, table.sheetlike td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 3px 6px; }
+table.sheetlike th { position: sticky; top: 0; z-index: 2; background: var(--bg); }
+table.sheetlike td.item { max-width: 420px; }
+table.sheetlike td.rownum, table.sheetlike th.rownum { position: sticky; left: 0; z-index: 1; background: var(--bg); color: var(--muted); text-align: right; font-size: 0.8em; min-width: 34px; }
+table.sheetlike th.rownum { z-index: 3; }
+table.sheetlike tr.status-ordered td    { background: #EA9999; color: #1a1a1a; }
+table.sheetlike tr.status-shipped td    { background: #F9CB9C; color: #1a1a1a; }
+table.sheetlike tr.status-delivered td  { background: #FFE599; color: #1a1a1a; }
+table.sheetlike tr.status-paid td       { background: #B6D7A8; color: #1a1a1a; }
+table.sheetlike tr.status-return td     { background: #DD7E6B; color: #1a1a1a; }
+table.sheetlike tr.status-cancelled td  { background: #CCCCCC; color: #1a1a1a; text-decoration: line-through; }
+table.sheetlike tr.status-superseded td { background: #666666; color: #f4f4f4; text-decoration: line-through; }
+table.sheetlike tr[class*="status-"] td a { color: #1d4ed8; }
+table.sheetlike tr.status-superseded td a { color: #cfe0ff; }
+table.sheetlike tr[class*="status-"] td.rownum { background: var(--bg); color: var(--muted); text-decoration: none; }
+table.sheetlike td .check { font-size: 1.1em; }
+/* editing */
+table.sheetlike td.edit { cursor: cell; }
+table.sheetlike td.edit:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
+table.sheetlike td.edit:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+table.sheetlike td[data-editing] { padding: 0; }
+.cell-input { width: 100%; min-width: 120px; font: inherit; padding: 3px 6px; border: 2px solid var(--accent); background: #fff; color: #1a1a1a; box-sizing: border-box; }
+table.sheetlike td.saving { opacity: 0.6; }
+table.sheetlike td.error { outline: 2px solid var(--bad); outline-offset: -2px; }
+.cell-error { color: var(--bad); font-weight: 600; white-space: normal; }
 .count { margin: 6px 0; }
 .ext { color: var(--muted); }
 
