@@ -184,6 +184,8 @@ class TestOrdersCellRoute:
         assert '<tr class="status-shipped' in body and '<tr class="status-paid' in body
         assert "double-click a cell to edit" in body
         assert "/static/edit.js" in body
+        assert "/static/sheet.js" in body  # the frozen filter bar + header measurement
+        assert "/static/sheet.js" not in client.get("/").text  # only the wide page needs it
 
     def test_an_edit_writes_the_sheet_and_returns_the_fresh_cell(self, sheet, tmp_path):
         client = self._client(sheet, tmp_path)

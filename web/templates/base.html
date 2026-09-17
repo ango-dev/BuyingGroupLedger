@@ -27,6 +27,7 @@
   </script>
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/edit.js" defer></script>
+  {% if wide %}<script src="/static/sheet.js" defer></script>{% endif %}
 </head>
 <body class="{{ 'wide' if wide }}">
 <header class="top">

@@ -91,13 +91,22 @@ table.ledger td { white-space: nowrap; }
    Sheet's OWN conditional-format colours, read from its rules on 2026-09-17: whole-row background
    by Status (=$B2="delivered" and friends), strikethrough on cancelled / superseded. Colours are
    the sheet's exact RGB; the text stays dark on them in both themes, as on the sheet. */
-body.wide main { max-width: none; padding: 0 0 40px; }
-/* No inner scroll container. The PAGE scrolls, vertically
-   and horizontally; the header row sticks to the viewport top on the way down. */
+/* ONE scroll region, like Sheets: on a wide page the body is the viewport, the nav stays put at
+   the top, and <main> is the single thing that scrolls (both ways). Inside it the filter bar
+   sticks to the top and the column header sticks just below it (--toolbar-h is measured by
+   static/sheet.js, since the bar's height depends on wrapping). */
+body.wide { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+body.wide header.top { flex: 0 0 auto; }
+body.wide main { flex: 1 1 auto; min-height: 0; overflow: auto; max-width: none; padding: 0 0 40px; }
+body.wide .filters { position: sticky; top: 0; left: 0; z-index: 4; margin: 0; border-radius: 0; border-width: 0 0 1px; }
+body.wide h1 { margin: 8px 8px 6px; }
+body.wide .count { margin: 4px 8px; }
 .sheet { overflow: visible; background: var(--card); }
-table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: collapse; line-height: 1.3; }
-table.sheetlike th, table.sheetlike td { border: 0; border-right: 1px solid #d5d5d5; border-bottom: 1px solid #d5d5d5; padding: 1px 4px; }
-table.sheetlike th { position: sticky; top: 0; z-index: 2; background: var(--bg); box-shadow: 0 1px 0 var(--line); }
+table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: collapse; }
+/* Grid lines are TRANSLUCENT so they take the row's own colour, as the sheet's do over a coloured
+   row -- an opaque grey line reads as a gap between rows. */
+table.sheetlike th, table.sheetlike td { border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); border-bottom: 1px solid rgba(0, 0, 0, 0.12); padding: 3px 6px; }
+table.sheetlike th { position: sticky; top: var(--toolbar-h, 0px); z-index: 2; background: var(--bg); box-shadow: 0 1px 0 var(--line); }
 table.sheetlike td.item { max-width: 420px; }
 table.sheetlike td.rownum, table.sheetlike th.rownum { position: sticky; left: 0; z-index: 1; background: var(--bg); color: var(--muted); text-align: right; font-size: 0.8em; min-width: 34px; }
 table.sheetlike th.rownum { z-index: 3; }
