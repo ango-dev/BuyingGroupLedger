@@ -881,6 +881,10 @@ class TestReaderFromSettings:
         assert ENV_TO_CONFIG["WEB_SHEET_CACHE_TTL_SECONDS"] == "web.sheet_cache_ttl_seconds"
         assert ENV_TO_CONFIG["WEB_BIND_HOST"] == "web.bind_host"
         assert ENV_TO_CONFIG["WEB_PORT"] == "web.port"
+        assert ENV_TO_CONFIG["WEB_ENABLED"] == "web.enabled"
+        assert ENV_TO_CONFIG["LEDGER_DB_PATH"] == "database.path"
+        assert _settings().web_enabled in (True, False)
+        assert _settings().ledger_db_path
         defaults = _settings()
         assert defaults.web_sheet_cache_ttl_seconds == 300 or defaults.web_sheet_cache_ttl_seconds > 0
 
@@ -893,31 +897,249 @@ class TestReaderFromSettings:
 class TestPackaging:
     ROOT = Path(__file__).resolve().parents[1]
 
-    def test_the_web_extras_are_not_in_the_scheduler_requirements(self):
+    def test_the_web_extras_are_a_separate_pinned_file_installed_by_the_one_image(self):
+        """One container: the scheduler image installs requirements-web.txt
+        too. It stays a separate file so a desktop `python -m web` remains an opt-in install."""
         runtime = (self.ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
         for package in ("fastapi", "jinja2", "uvicorn", "markdown-it-py"):
-            assert package not in runtime, f"{package} must stay out of the scheduler image"
+            assert package not in runtime, f"{package} belongs in requirements-web.txt"
         extras = (self.ROOT / "requirements-web.txt").read_text(encoding="utf-8")
         assert re.search(r"^fastapi==\d", extras, re.M) and re.search(r"^jinja2==\d", extras, re.M)
+        assert re.search(r"^python-multipart==\d", extras, re.M)
+        dockerfile = (self.ROOT / "Dockerfile").read_text(encoding="utf-8")
+        assert "-r requirements-web.txt" in dockerfile and "EXPOSE 8765" in dockerfile
+        assert not (self.ROOT / "web" / "Dockerfile").exists(), "one image, not two"
 
-    def test_the_compose_service_is_behind_the_web_profile_and_mounts_read_only(self):
+    def test_the_compose_file_has_one_service_that_publishes_the_dashboard_on_loopback(self):
         compose = (self.ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-        web = compose[compose.index("\n  web:\n"):]
-        ledger = compose[: compose.index("\n  web:\n")]
-        assert 'profiles: ["web"]' in web
-        assert "profiles:" not in ledger, "the scheduler service must not be behind a profile"
-        assert "dockerfile: web/Dockerfile" in web
-        for mount in ("./config.json:/app/config.json:ro", "./data:/app/data:ro",
-                      "./logs:/app/logs:ro"):
-            assert mount in web
-        assert ".state.json" not in web
+        assert "\n  web:\n" not in compose, "one container, not two"
+        assert "profiles:" not in compose
+        assert '"${WEB_PUBLISH_HOST:-127.0.0.1}:${WEB_PUBLISH_PORT:-8765}:8765"' in compose
+        for name in ("WEB_ENABLED", "WEB_LEDGER_SOURCE", "LEDGER_DB_PATH"):
+            assert f'{name}: "${{{name}:-}}"' in compose, f"{name} is not passed through"
+
+    def test_the_entrypoint_starts_the_dashboard_and_the_healthcheck_probes_it(self):
+        entrypoint = (self.ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
+        assert 'if [ "${WEB_ENABLED:-true}" = "true" ]' in entrypoint
+        assert "python -m web --host 0.0.0.0 --port 8765" in entrypoint
+        assert "exec /usr/local/bin/supercronic /app/crontab" in entrypoint  # still PID 1
+        healthcheck = (self.ROOT / "docker" / "healthcheck.sh").read_text(encoding="utf-8")
+        assert "/tmp/container.env" in healthcheck  # sees config.json's WEB_ENABLED / interval
+        assert "web dashboard is not answering" in healthcheck
+        from scripts.container_settings import EXPORTS
+
+        assert "WEB_ENABLED" in dict(EXPORTS)
 
     def test_operations_doc_says_how_to_run_it(self):
         doc = (self.ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
-        assert "docker compose --profile web up -d" in doc
+        assert "docker compose up -d --build" in doc
         assert "python -m web" in doc
+        assert "python -m scripts.backup" in doc and "python -m scripts.mirror_sheet_to_db" in doc
         assert "read-only" in doc.lower()
+
+    def test_backups_never_enter_git_or_an_image(self):
+        for name in (".gitignore", ".dockerignore"):
+            assert re.search(r"^backups/$", (self.ROOT / name).read_text(encoding="utf-8"), re.M), name
 
     def test_static_assets_are_vendored(self):
         assert (self.ROOT / "web" / "static" / "htmx.min.js").stat().st_size > 10_000
         assert (self.ROOT / "web" / "static" / "style.css").is_file()
+
+
+class TestThemeToggle:
+    def test_the_toggle_is_on_every_page_and_applies_before_first_paint(self, client):
+        body = client.get("/").text
+        assert 'onclick="toggleTheme()"' in body
+        assert 'localStorage.getItem("ledger-theme")' in body
+        # Applied in <head>, before the stylesheet-dependent body renders.
+        assert body.index("ledger-theme") < body.index("<body>")
+        assert 'href="/backup"' in body
+
+    def test_the_stylesheet_honours_the_attribute_over_the_system_preference(self):
+        css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(
+            encoding="utf-8")
+        assert ':root[data-theme="dark"]' in css
+        assert ':root:not([data-theme="light"])' in css  # system dark applies only while unset
+
+
+# --------------------------------------------------------------------------------------------------
+# Backup and restore
+# --------------------------------------------------------------------------------------------------
+
+
+class TestBackupScript:
+    @pytest.fixture
+    def repo(self, tmp_path):
+        root = tmp_path / "repo"
+        (root / "data").mkdir(parents=True)
+        (root / "logs" / "failures" / "x").mkdir(parents=True)
+        (root / "config.json").write_text('{"secret": 1}', encoding="utf-8")
+        (root / ".state.json").write_text("{}", encoding="utf-8")
+        (root / "data" / "ledger.sqlite3").write_bytes(b"sqlite")
+        (root / "data" / "sheet_backup_20260910T105451Z.csv").write_text("a,b\n", encoding="utf-8")
+        (root / "data" / "__pycache__").mkdir()
+        (root / "data" / "__pycache__" / "x.pyc").write_bytes(b"")
+        (root / "logs" / "run.log").write_text("log", encoding="utf-8")
+        (root / "logs" / "failures" / "x" / "page_1.html").write_text("<html>", encoding="utf-8")
+        return root
+
+    def test_members_are_the_state_files_and_data_never_logs(self, repo):
+        from scripts.backup import backup_members
+
+        assert [m.as_posix() for m in backup_members(repo)] == [
+            "config.json", ".state.json", "data/ledger.sqlite3",
+            "data/sheet_backup_20260910T105451Z.csv",
+        ]
+
+    def test_create_then_restore_into_a_fresh_clone(self, repo, tmp_path):
+        import zipfile
+
+        from scripts.backup import create_backup, list_backups, read_manifest, restore_backup
+
+        archive = create_backup(repo, repo / "backups")
+        assert archive.name.startswith("ledger_backup_") and archive.suffix == ".zip"
+        assert list_backups(repo / "backups") == [archive]
+        manifest = read_manifest(archive)
+        assert manifest["files"] == ["config.json", ".state.json", "data/ledger.sqlite3",
+                                     "data/sheet_backup_20260910T105451Z.csv"]
+        with zipfile.ZipFile(archive) as z:
+            assert "logs/run.log" not in z.namelist()
+
+        clone = tmp_path / "clone"
+        clone.mkdir()
+        result = restore_backup(archive, clone)
+        assert result == {"restored": manifest["files"], "skipped_existing": [], "ignored": []}
+        assert (clone / "config.json").read_text(encoding="utf-8") == '{"secret": 1}'
+        assert (clone / "data" / "ledger.sqlite3").read_bytes() == b"sqlite"
+
+    def test_restore_keeps_existing_files_unless_forced(self, repo, tmp_path):
+        from scripts.backup import create_backup, restore_backup
+
+        archive = create_backup(repo, tmp_path / "out")
+        (repo / "config.json").write_text("EDITED", encoding="utf-8")
+
+        kept = restore_backup(archive, repo)
+        assert "config.json" in kept["skipped_existing"] and kept["restored"] == []
+        assert (repo / "config.json").read_text(encoding="utf-8") == "EDITED"
+
+        forced = restore_backup(archive, repo, force=True)
+        assert "config.json" in forced["restored"]
+        assert (repo / "config.json").read_text(encoding="utf-8") == '{"secret": 1}'
+
+    def test_restore_ignores_members_outside_the_allowed_set(self, tmp_path):
+        import zipfile
+
+        from scripts.backup import restore_backup
+
+        archive = tmp_path / "evil.zip"
+        with zipfile.ZipFile(archive, "w") as z:
+            z.writestr("../outside.txt", "x")
+            z.writestr("main.py", "print('pwned')")
+            z.writestr("logs/run.log", "x")
+            z.writestr("config.json", "{}")
+        clone = tmp_path / "clone"
+        clone.mkdir()
+
+        result = restore_backup(archive, clone)
+        assert result["restored"] == ["config.json"]
+        assert sorted(result["ignored"]) == ["../outside.txt", "logs/run.log", "main.py"]
+        assert not (tmp_path / "outside.txt").exists() and not (clone / "main.py").exists()
+
+    def test_the_script_is_standard_library_only(self):
+        """A fresh clone restores BEFORE any pip install, with the system Python."""
+        source = (Path(__file__).resolve().parents[1] / "scripts" / "backup.py").read_text(
+            encoding="utf-8")
+        imported = set(re.findall(r"^(?:from|import)\s+([A-Za-z_][\w]*)", source, re.M))
+        allowed = {"__future__", "argparse", "json", "os", "socket", "subprocess", "sys",
+                   "zipfile", "datetime", "pathlib"}
+        assert imported <= allowed, imported - allowed
+
+    def test_cli(self, repo, capsys, monkeypatch):
+        from scripts import backup as script
+
+        monkeypatch.setattr(script, "ROOT", repo)
+        monkeypatch.setattr(script, "BACKUPS_DIR", repo / "backups")
+        assert script.main([]) == 0
+        assert "Wrote" in capsys.readouterr().err
+        assert script.main(["--list"]) == 0
+        assert "ledger_backup_" in capsys.readouterr().out
+        assert script.main(["--restore", "nope.zip"]) == 2
+
+
+class TestBackupPage:
+    @pytest.fixture
+    def repo(self, tmp_path):
+        root = tmp_path / "repo"
+        (root / "data").mkdir(parents=True)
+        (root / "data" / "ledger.sqlite3").write_bytes(b"sqlite")
+        return root
+
+    def _client(self, repo, snapshot_path, logs_dir, failures_dir):
+        app = create_app(SnapshotReader(snapshot_path), logs_dir=logs_dir,
+                         failures_dir=failures_dir, backup_dir=repo / "backups",
+                         repo_root_dir=repo, clock=lambda: NOW, settings=_settings())
+        return TestClient(app)
+
+    def test_create_and_download(self, repo, snapshot_path, logs_dir, failures_dir):
+        (repo / "config.json").write_text("{}", encoding="utf-8")
+        client = self._client(repo, snapshot_path, logs_dir, failures_dir)
+
+        page = client.get("/backup")
+        assert page.status_code == 200 and "Create a backup now" in page.text
+        assert "None yet." in page.text
+        assert "restoring from the page is disabled" in page.text  # configured host
+
+        created = client.post("/backup", follow_redirects=False)
+        assert created.status_code == 303
+        archives = list((repo / "backups").glob("ledger_backup_*.zip"))
+        assert len(archives) == 1
+
+        page = client.get("/backup").text
+        assert archives[0].name in page
+        download = client.get(f"/backup/{archives[0].name}")
+        assert download.status_code == 200
+        assert download.headers["content-type"] == "application/zip"
+        assert download.content == archives[0].read_bytes()
+
+    def test_download_rejects_anything_but_a_backup_name(self, repo, snapshot_path, logs_dir,
+                                                        failures_dir):
+        client = self._client(repo, snapshot_path, logs_dir, failures_dir)
+        assert client.get("/backup/config.json").status_code == 404
+        assert client.get("/backup/ledger_backup_missing.zip").status_code == 404
+        assert client.get("/backup/..%2Fconfig.json").status_code == 404
+
+    def test_restore_upload_only_on_a_fresh_clone(self, repo, snapshot_path, logs_dir,
+                                                  failures_dir, tmp_path):
+        import zipfile
+
+        archive = tmp_path / "ledger_backup_x.zip"
+        with zipfile.ZipFile(archive, "w") as z:
+            z.writestr("config.json", '{"restored": true}')
+            z.writestr("data/sheet_backup_1.csv", "a\n")
+        client = self._client(repo, snapshot_path, logs_dir, failures_dir)
+
+        page = client.get("/backup").text
+        assert "fresh clone" in page and 'action="/backup/restore"' in page
+
+        with archive.open("rb") as handle:
+            response = client.post("/backup/restore", files={"archive": ("b.zip", handle,
+                                                                          "application/zip")},
+                                   follow_redirects=False)
+        assert response.status_code == 303
+        assert (repo / "config.json").read_text(encoding="utf-8") == '{"restored": true}'
+        assert (repo / "data" / "sheet_backup_1.csv").is_file()
+
+        # Now configured: the upload is refused.
+        with archive.open("rb") as handle:
+            refused = client.post("/backup/restore", files={"archive": ("b.zip", handle,
+                                                                         "application/zip")})
+        assert refused.status_code == 409
+
+    def test_the_backup_page_works_without_any_ledger_source(self, repo, logs_dir, failures_dir,
+                                                             tmp_path):
+        """A fresh clone has no snapshot, no config and no sheet -- the page a restore starts
+        from must still render."""
+        app = create_app(SnapshotReader(data_dir=tmp_path / "empty"), logs_dir=logs_dir,
+                         failures_dir=failures_dir, backup_dir=repo / "backups",
+                         repo_root_dir=repo, clock=lambda: NOW, settings=_settings())
+        assert TestClient(app).get("/backup").status_code == 200

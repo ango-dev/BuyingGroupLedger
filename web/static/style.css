@@ -1,12 +1,33 @@
+/* Theme. Light is the base; dark applies when the system prefers it and nothing was chosen, or
+   when the toggle chose it (html[data-theme]). The toggle in base.html sets the attribute. */
 :root {
   --bg: #fafafa; --fg: #1a1a1a; --muted: #6b6b6b; --line: #e2e2e2; --card: #ffffff;
   --ok: #1e7f3f; --warn: #b45309; --bad: #b91c1c; --accent: #1d4ed8; --committed: #7c3aed;
+  --ok-bg: #e8f5ec; --warn-bg: #fff4e5;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 14px;
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #111; --fg: #eaeaea; --muted: #9a9a9a; --line: #2c2c2c; --card: #1a1a1a;
-          --accent: #7aa2ff; --committed: #b592ff; }
+  :root:not([data-theme="light"]) { --bg: #111; --fg: #eaeaea; --muted: #9a9a9a; --line: #2c2c2c;
+    --card: #1a1a1a; --accent: #7aa2ff; --committed: #b592ff; --ok-bg: #12301b; --warn-bg: #2f2410;
+    color-scheme: dark; }
 }
+:root[data-theme="dark"] { --bg: #111; --fg: #eaeaea; --muted: #9a9a9a; --line: #2c2c2c;
+  --card: #1a1a1a; --accent: #7aa2ff; --committed: #b592ff; --ok-bg: #12301b; --warn-bg: #2f2410;
+  color-scheme: dark; }
+/* The toggle shows the theme you would switch TO. */
+.only-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .only-light { display: none; }
+  :root:not([data-theme="light"]) .only-dark { display: inline; }
+}
+:root[data-theme="dark"] .only-light { display: none; }
+:root[data-theme="dark"] .only-dark { display: inline; }
+.theme-toggle, button { font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.theme-toggle:hover, button:hover { border-color: var(--accent); }
+.inline-form { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.banner.ok { background: var(--ok-bg); color: var(--ok); }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); }
 a { color: var(--accent); text-decoration: none; }
@@ -32,8 +53,7 @@ header .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .pill.ok { border-color: var(--ok); color: var(--ok); }
 .pill.stale { border-color: var(--warn); color: var(--warn); }
 .banner { padding: 8px 20px; }
-.banner.warn { background: #fff4e5; color: var(--warn); }
-@media (prefers-color-scheme: dark) { .banner.warn { background: #2f2410; } }
+.banner.warn { background: var(--warn-bg); color: var(--warn); }
 
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 12px 0; }
 .tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }

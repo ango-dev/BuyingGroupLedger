@@ -98,10 +98,12 @@
     "timezone": "UTC"
   },
 
-  "// web": "The READ-ONLY web dashboard (`python -m web`, or `docker compose --profile web up -d`). The scheduler never reads this section. See docs/operations.md, 'The web dashboard'.",
+  "// web": "The READ-ONLY web dashboard (`python -m web` on a desktop; in Docker it runs inside the one container beside the scheduler). See docs/operations.md, 'The web dashboard'.",
   "web": {
-    "// ledger_source": "WEB_LEDGER_SOURCE — `snapshot` serves a data/sheet_backup_*.csv (the newest, or snapshot_path); `sheet` serves the live Sheet through the read-only scope. Anything else is refused at startup.",
-    "ledger_source": "snapshot",
+    "// enabled": "WEB_ENABLED — in the container, start the dashboard beside the scheduler (and probe it in the healthcheck). false = a pure scheduler container, as before.",
+    "enabled": true,
+    "// ledger_source": "WEB_LEDGER_SOURCE — `db` serves the SQLite copy (database.path), refreshed from the live Sheet every sheet_cache_ttl_seconds (or from snapshot_path when set); `sheet` serves the live Sheet through the read-only scope with the same cache; `snapshot` serves a data/sheet_backup_*.csv. Anything else is refused at startup. Use `db` on the host.",
+    "ledger_source": "db",
     "// snapshot_path": "WEB_SNAPSHOT_PATH — a specific CSV for the snapshot backend. Blank = the newest data/sheet_backup_*.csv.",
     "snapshot_path": "",
     "// sheet_cache_ttl_seconds": "WEB_SHEET_CACHE_TTL_SECONDS — how long a live-Sheet read is served from memory before the next request re-reads it (one Sheets API read per refresh).",
@@ -110,6 +112,14 @@
     "bind_host": "127.0.0.1",
     "// port": "WEB_PORT",
     "port": 8765
+  },
+
+  "// database": "The SQLite copy of the ledger (ledger_db/). TODAY A MIRROR of the Sheet — every writer still targets the Sheet; the scheduled run reads it back into this file at the end (read-only scope), as do `python -m scripts.mirror_sheet_to_db` and the dashboard's `db` backend. Nothing on a money path READS it yet. Included in `python -m scripts.backup`.",
+  "database": {
+    "// path": "LEDGER_DB_PATH — relative to the repo root (in Docker, the mounted data/ volume).",
+    "path": "data/ledger.sqlite3",
+    "// mirror_after_run": "LEDGER_DB_MIRROR_AFTER_RUN — refresh the copy at the end of every scheduled run (one Sheets read; spends nothing, submits nothing). A failure alerts and never fails the run.",
+    "mirror_after_run": true
   },
 
   "// profiles": "One Browser-Use browser identity per entry, each behind its own proxy. `amazon` and `amazon-business` are separate accounts and MUST NOT share a profile — one identity for both is exactly the linking risk the separate profile exists to avoid. `profile_id` is filled in for you by `python -m scripts.create_profile`.",

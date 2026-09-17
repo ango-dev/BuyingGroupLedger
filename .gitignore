@@ -22,6 +22,8 @@ cards.json
 .costco_signin_capture/
 data/
 logs/
+# `python -m scripts.backup` output: each zip holds config.json and every live credential.
+backups/
 __pycache__/
 *.pyc
 .venv/

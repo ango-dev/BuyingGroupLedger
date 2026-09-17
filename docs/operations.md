@@ -123,26 +123,28 @@ Linux host has its own runbook: **[DEPLOY.md](../DEPLOY.md)**.
 
 A local web page over the ledger, in `web/`: an overview (open rows by status and buying group,
 projected versus realized profit, the COGS input gaps, the scheduler heartbeat), a filterable and
-sortable ledger table, one page per order, the failure dossiers with each `report.md` rendered, and
-`/health` as JSON. FastAPI + Jinja2 + htmx, no build step; the dependencies are the optional extra
-`requirements-web.txt`, which the scheduler image never installs.
+sortable ledger table, one page per order, the failure dossiers with each `report.md` rendered, a
+Backup page, and `/health` as JSON. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
+the header (remembered per browser; follows the system until you choose). The dependencies are
+`requirements-web.txt`, an optional install on a desktop and part of the one Docker image.
 
 **The read-only guarantee.** The dashboard cannot write the Sheet: its live backend opens the
 worksheet through `scripts.audit_sheet.open_worksheet_readonly`, the `spreadsheets.readonly` scope,
 so Google refuses a write before any code could attempt one. It never calls a retailer or a
 buying-group API, never runs a scrape, and never changes the ledger schema (`FIELDNAMES` / `HEADER`
-are frozen; `tests/test_schema.py` enforces them). Every route is a `GET`; every other method is
-refused; `tests/test_web.py` pins all of it, including that no write method of the worksheet is ever
-named in `web/`. In Docker, `config.json`, `data/` and `logs/` are mounted `:ro` as well.
+are frozen; `tests/test_schema.py` enforces them). Every ledger route is a `GET`; the only `POST`s
+are on the Backup page and write local files only. `tests/test_web.py` pins all of it, including
+that no write method of the worksheet is ever named in `web/`.
 
-**Two backends, one adapter** (`web/ledger_reader.py`), chosen in `config.json`'s `web` section or
-by `WEB_LEDGER_SOURCE=snapshot|sheet` (the variable table in [configuration.md](configuration.md)
-lists the five `WEB_*` settings):
+**Three backends, one adapter** (`web/ledger_reader.py`), chosen in `config.json`'s `web` section or
+by `WEB_LEDGER_SOURCE=snapshot|sheet|db` (the variable table in [configuration.md](configuration.md)
+lists every `WEB_*` setting):
 
 | Backend | Reads | For |
 |---|---|---|
-| `snapshot` (default) | the newest `data/sheet_backup_*.csv` (every `--apply` script writes one), or `web.snapshot_path` | development, tests, a look at yesterday's ledger with no credentials |
-| `sheet` | the live worksheet, read-only scope, cached in memory for `web.sheet_cache_ttl_seconds` (300 s) | the deployed dashboard |
+| `db` | `data/ledger.sqlite3` (see below), refreshed from the read-only Sheet every `web.sheet_cache_ttl_seconds` (300 s), or from `web.snapshot_path` when one is set | the host: instant pages, one Sheet read per interval, the copy survives restarts |
+| `sheet` | the live worksheet, read-only scope, cached in memory for the same interval | a desktop look at the live ledger |
+| `snapshot` (default) | the newest `data/sheet_backup_*.csv` (every `--apply` script writes one), or `web.snapshot_path` | development, tests, no credentials |
 
 Cells are read **by column name**, so a backup written before a column moved still reads correctly;
 `/health` reports `schema_matches: false` (with the missing and extra columns) when a source's header
@@ -165,28 +167,74 @@ committed cell is tagged `proj.` in every table. There is no `Expected Payout` c
 python -m web                                          # http://127.0.0.1:8765/ over the newest backup
 python -m web --snapshot data/sheet_backup_20260910T105451Z.csv
 python -m web --source sheet                           # the live Sheet, read-only
+python -m web --source db                              # the SQLite copy, refreshed from the Sheet
 ```
 
 Flags win over `config.json` and the environment. It binds to loopback unless `--host` (or
-`web.bind_host` / `WEB_BIND_HOST`) says otherwise — there is no authentication in phase 1, so anything
-beyond localhost or Tailscale is a deliberate choice. `?refresh=1` on any page forces the sheet
-backend to re-read before its cache expires (still a read).
+`web.bind_host` / `WEB_BIND_HOST`) says otherwise — there is no authentication, so anything beyond
+localhost or Tailscale is a deliberate choice. `?refresh=1` on any page forces a re-read before the
+cache expires (still a read).
 
-**Running it on the host** (Docker; a separate image and a compose *profile*, so a plain
-`docker compose up -d` starts exactly what it always did and the scheduler is untouched):
+**On the host it runs inside the one container.** `docker/entrypoint.sh` starts it beside the
+scheduler when `web.enabled` is true (the default), restarts it if it ever exits, and
+`docker/healthcheck.sh` probes it — a dead dashboard reports `unhealthy` with a reason that names
+the dashboard, never "the scheduler stopped". It is published on the host's **loopback** by default:
 
 ```bash
-docker compose --profile web up -d --build   # builds web/Dockerfile, publishes 127.0.0.1:8765
-docker compose --profile web logs -f web
-docker compose --profile web down            # stops both; `docker compose stop web` stops just the dashboard
+docker compose up -d --build                  # the usual command; the dashboard comes with it
+echo "WEB_PUBLISH_HOST=0.0.0.0" >> .env        # or the LAN / Tailscale IP to publish on
+docker compose up -d                          # re-create so the new port binding applies
+curl -s http://127.0.0.1:8765/health          # on the host: "ok": true, "backend": "db"
 ```
 
-Set `web.ledger_source` to `sheet` in the host's `config.json` for the live ledger (the snapshot
-backend only sees `data/` backups, which the scheduled run does not write). To reach it over
-Tailscale, put `WEB_PUBLISH_HOST=<the host's Tailscale IP>` in `.env`; the default publishes on the
-host's loopback only. `logs/` is the same volume the scheduler writes, so the heartbeat and the
-failure dossiers on the page are the host's own.
+Set `web.ledger_source` to `db` in the host's `config.json` (the example does). `WEB_ENABLED=false`
+(or `web.enabled: false`) makes the container a pure scheduler again.
 
-**What it cannot do (phase 1, by design):** write anything, edit a row, submit tracking, file
+### The SQLite copy of the ledger (`ledger_db/`)
+
+`data/ledger.sqlite3` is a **mirror** of the Sheet: one `ledger_rows` table whose columns are
+`FIELDNAMES` in order, typed from `sheets/ledger_sync.py`'s own field sets, keyed on the upsert key,
+plus a `mirror_runs` log. Every mirror replaces the table in one transaction, so the copy is always
+"the Sheet as of that read". Two things write it, and both only *read* the Sheet:
+
+```bash
+python -m scripts.mirror_sheet_to_db                                   # live Sheet -> DB (read-only scope)
+python -m scripts.mirror_sheet_to_db --from-snapshot data/sheet_backup_20260910T105451Z.csv
+```
+
+the dashboard's `db` backend, which runs the same mirror on its cache interval, and **the scheduled
+run itself, as its last step** (`main.run_db_mirror`, on by default via `database.mirror_after_run`):
+after the scrapes, the buying-group sync and the auto-reply, the run reads the Sheet back once and
+replaces the copy, so the file always holds what this run wrote. A failure there alerts and never
+fails the run. **Nothing on a money path reads the file**: every writer still targets the Sheet
+exactly as before, every reader (`load_order_state`, the sync, the audit, the tax report) still
+reads the Sheet, and a host running an older version is unaffected by the file's existence. That is
+deliberate: this is step one of moving off the Sheet as the database. The cutover (writers and
+readers target SQLite, the Sheet becomes an exported view, then goes away) is a separate decision,
+tracked in `the design notes`.
+
+### Backup and restore
+
+One zip of everything a `git clone` does not give you — `config.json`, `.state.json`, `.env` and the
+whole `data/` directory (the SQLite copy, the CSV sheet backups, the audit snapshots), with a
+manifest naming the commit it came from. Logs and failure dossiers are not included. **The archive
+holds every live credential**: keep it private (`backups/` is gitignored and never enters an image).
+
+```bash
+python -m scripts.backup                       # -> backups/ledger_backup_<UTC stamp>.zip
+python -m scripts.backup --list
+python -m scripts.backup --restore backups/ledger_backup_20260917T120000Z.zip          # keeps existing files
+python -m scripts.backup --restore backups/ledger_backup_20260917T120000Z.zip --force  # overwrites them
+```
+
+The script is **standard library only**, so on a new machine the whole move is: `git clone`, then
+`python -m scripts.backup --restore <zip>` with the system Python, then the normal setup
+(`docker compose up -d --build`, or the venv). The dashboard's **Backup** page offers the same:
+a *Create a backup now* button (the zip lands in `backups/` and is downloadable from the page), and a
+*Restore* upload form that is enabled **only while no `config.json` exists** — on a configured host an
+unauthenticated page must not be able to replace the live configuration, so there you restore from
+the command line. After a restore, restart the app so the restored `config.json` is read.
+
+**What the dashboard cannot do, by design:** write the Sheet, edit a row, submit tracking, file
 insurance, run a scrape, or add the `Expected Payout` column. For those, the commands in
 [CLAUDE.md](../CLAUDE.md)'s cost table remain the way.

@@ -120,6 +120,7 @@ class TestTheLoopIsolatesEachRetailer:
         monkeypatch.setattr(main, "load_profiles_for_retailer", lambda key: [profile])
         monkeypatch.setattr(main, "run_scrape", lambda s: ran.append(s.retailer_name))
         monkeypatch.setattr(main, "run_buying_group_sync", lambda: synced.append(True))
+        monkeypatch.setattr(main, "run_db_mirror", lambda: None)
         monkeypatch.setattr(main, "alert", lambda *a: None)
 
         main.main(["amazon", "costco"])
@@ -140,6 +141,7 @@ class TestTheLoopIsolatesEachRetailer:
         monkeypatch.setattr(main, "SCRAPERS", {"bestbuy": _Boom})
         monkeypatch.setattr(main, "load_profiles_for_retailer", lambda key: [profile])
         monkeypatch.setattr(main, "run_buying_group_sync", lambda: None)
+        monkeypatch.setattr(main, "run_db_mirror", lambda: None)
         monkeypatch.setattr(main, "alert", lambda subject, body: alerted.append(subject))
 
         main.main(["bestbuy"])

@@ -31,8 +31,12 @@ RUN set -eux; \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements-web.txt is the read-only dashboard's stack (FastAPI, Jinja2, uvicorn). It rides in
+# this one image on purpose -- the entrypoint starts it
+# beside the scheduler when WEB_ENABLED is true. It is still a separate file so `python -m web` on a
+# desktop stays an opt-in install.
+COPY requirements.txt requirements-web.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
 
 # App code only — secrets/config are excluded via .dockerignore and provided at runtime.
 COPY . .
@@ -42,6 +46,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/run_once.sh /usr/local/
 
 # Unbuffered so `docker compose logs -f` shows a run as it happens rather than in one burst at the end.
 ENV PYTHONUNBUFFERED=1
+
+# The dashboard. Bound to 0.0.0.0 INSIDE the container; docker-compose.yml decides which host
+# interface publishes it (127.0.0.1 unless WEB_PUBLISH_HOST says otherwise).
+EXPOSE 8765
 
 HEALTHCHECK --interval=15m --timeout=30s --start-period=2m \
     CMD /usr/local/bin/healthcheck.sh

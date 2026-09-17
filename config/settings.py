@@ -102,11 +102,15 @@ ENV_TO_CONFIG = {
     "OCI_FAILURES_PAR_URL_PREFIX": "receipts.oci.failures_par_url_prefix",
     # The read-only web dashboard (web/). None of these is read by the scheduler; see
     # docs/operations.md, "The web dashboard".
+    "WEB_ENABLED": "web.enabled",
     "WEB_LEDGER_SOURCE": "web.ledger_source",
     "WEB_SNAPSHOT_PATH": "web.snapshot_path",
     "WEB_SHEET_CACHE_TTL_SECONDS": "web.sheet_cache_ttl_seconds",
     "WEB_BIND_HOST": "web.bind_host",
     "WEB_PORT": "web.port",
+    # The SQLite copy of the ledger (ledger_db/). A mirror of the Sheet today; see its docstring.
+    "LEDGER_DB_PATH": "database.path",
+    "LEDGER_DB_MIRROR_AFTER_RUN": "database.mirror_after_run",
 }
 
 
@@ -383,8 +387,19 @@ class Settings:
     # Which backend web.ledger_reader serves: "snapshot" (a data/sheet_backup_*.csv -- the newest,
     # or `web_snapshot_path`) or "sheet" (the live Sheet through the READONLY scope, cached). The
     # scheduler never reads any of these. Anything else is refused at startup, not defaulted.
+    # In the container, docker/entrypoint.sh starts the dashboard beside the scheduler when this is
+    # true (and healthcheck.sh probes it). Off = the container is a pure scheduler, as before.
+    web_enabled: bool = _get_bool("WEB_ENABLED", True)
+    # "snapshot" | "sheet" | "db" -- the third serves data/ledger.sqlite3, refreshed from the
+    # read-only Sheet on the cache interval below (or from `web_snapshot_path` when one is set).
     web_ledger_source: str = _get_str("WEB_LEDGER_SOURCE", "snapshot")
     web_snapshot_path: str = _get_str("WEB_SNAPSHOT_PATH", "")
+    # The SQLite copy of the ledger (ledger_db/). Relative paths are under the repo root; in the
+    # container that is the mounted data/ volume, so the copy survives a rebuild.
+    ledger_db_path: str = _get_str("LEDGER_DB_PATH", "data/ledger.sqlite3")
+    # main.run_db_mirror: after every scheduled run, read the Sheet back (read-only scope) into
+    # the SQLite copy. Spends nothing, submits nothing -- one Sheets read per run.
+    ledger_db_mirror_after_run: bool = _get_bool("LEDGER_DB_MIRROR_AFTER_RUN", True)
     # How long a live-Sheet read is served from memory before the next request re-reads it. Every
     # refresh is one Sheets API read; 300 s keeps a page reload from ever becoming an API call.
     web_sheet_cache_ttl_seconds: int = _get_int("WEB_SHEET_CACHE_TTL_SECONDS", 300)

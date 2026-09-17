@@ -144,6 +144,7 @@ class TestNothingIsEnvironmentOnly:
             container_run_on_start=True,
             container_preflight_strict=False,
             container_timezone="America/New_York",
+            web_enabled=True,
         ))
 
         assert cs.render().splitlines() == [
@@ -151,6 +152,7 @@ class TestNothingIsEnvironmentOnly:
             "export RUN_ON_START='true'",
             "export PREFLIGHT_STRICT='false'",
             "export TZ='America/New_York'",
+            "export WEB_ENABLED='true'",
         ]
 
     def test_the_container_knobs_resolve_from_the_config_file(self, config_file, monkeypatch):

@@ -30,7 +30,7 @@ next to it, so this is the only thing to read.
 > `scripts/container_settings.py` on start — and still lets an exported variable win.
 
 <details>
-<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (44 of them)</summary>
+<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (47 of them)</summary>
 
 The list is generated from `ENV_TO_CONFIG` in [config/settings.py](../config/settings.py), which is the
 single place a name is mapped, and `tests/test_config_loader.py` fails if this table drifts from it.
@@ -79,11 +79,14 @@ fails closed on a typo rather than turning itself on.
 | `RUN_INTERVAL_HOURS` | `container.run_interval_hours` |
 | `RUN_ON_START` † | `container.run_on_start` |
 | `TZ` | `container.timezone` |
+| `WEB_ENABLED` † | `web.enabled` |
 | `WEB_LEDGER_SOURCE` | `web.ledger_source` |
 | `WEB_SNAPSHOT_PATH` | `web.snapshot_path` |
 | `WEB_SHEET_CACHE_TTL_SECONDS` | `web.sheet_cache_ttl_seconds` |
 | `WEB_BIND_HOST` | `web.bind_host` |
 | `WEB_PORT` | `web.port` |
+| `LEDGER_DB_PATH` | `database.path` |
+| `LEDGER_DB_MIRROR_AFTER_RUN` † | `database.mirror_after_run` |
 
 </details>
 

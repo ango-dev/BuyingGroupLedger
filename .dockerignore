@@ -28,5 +28,7 @@ __pycache__/
 *.pyc
 data/
 logs/
+# Backup zips hold config.json and every live credential -- never baked into an image.
+backups/
 .git/
 .gitignore

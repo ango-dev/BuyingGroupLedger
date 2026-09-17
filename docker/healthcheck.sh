@@ -9,6 +9,13 @@ set -uo pipefail
 # Overridable only so this logic can be exercised outside a container; the defaults are the real paths.
 STAMP="${HEARTBEAT_FILE:-/app/logs/.last_run}"
 STARTED="${STARTED_FILE:-/app/logs/.started}"
+# The knobs entrypoint.sh resolved from config.json (RUN_INTERVAL_HOURS, WEB_ENABLED, ...). A
+# healthcheck runs with the container's ORIGINAL environment, not the entrypoint's, so without this
+# a value that lives only in config.json would be invisible here and the shell defaults would judge.
+if [ -f "${CONTAINER_ENV_FILE:-/tmp/container.env}" ]; then
+    # shellcheck disable=SC1090
+    . "${CONTAINER_ENV_FILE:-/tmp/container.env}"
+fi
 HOURS="${RUN_INTERVAL_HOURS:-6}"
 
 # Two missed intervals before complaining: one run can legitimately overrun its slot (the agent
@@ -65,6 +72,16 @@ fi
 age=$(( now - $(date -r "$STAMP" +%s) ))
 if [ "$age" -gt "$GRACE" ]; then
     unhealthy "last run was $(( age / 3600 ))h ago; expected one every ${HOURS}h"
+fi
+
+# The dashboard runs in this container too (entrypoint.sh). A dead one is worth knowing about,
+# but it must never be mistaken for a dead scheduler, so its reason names it. Probed with Python
+# because curl was purged from the image; WEB_ENABLED=false skips the probe.
+WEB_URL="${WEB_HEALTH_URL:-http://127.0.0.1:8765/health}"
+if [ "${WEB_ENABLED:-true}" = "true" ]; then
+    if ! python -c "import sys, urllib.request; urllib.request.urlopen('$WEB_URL', timeout=5)" >/dev/null 2>&1; then
+        unhealthy "scheduler fine (last run $(( age / 60 ))m ago) but the web dashboard is not answering on ${WEB_URL}"
+    fi
 fi
 
 healthy "last run $(( age / 60 ))m ago (interval ${HOURS}h)"

@@ -19,7 +19,7 @@ BASH = shutil.which("bash")
 pytestmark = pytest.mark.skipif(BASH is None, reason="bash not available")
 
 
-def _run(tmp_path, *, stamp_age_s=None, started_age_s=None, hours=1):
+def _run(tmp_path, *, stamp_age_s=None, started_age_s=None, hours=1, web="false", web_url=None):
     stamp = tmp_path / ".last_run"
     started = tmp_path / ".started"
     marker = tmp_path / ".unhealthy_alerted"
@@ -34,7 +34,11 @@ def _run(tmp_path, *, stamp_age_s=None, started_age_s=None, hours=1):
     if started_age_s is not None:
         started.write_text("x"); os.utime(started, (now - started_age_s, now - started_age_s))
     env = {**os.environ, "HEARTBEAT_FILE": str(stamp), "STARTED_FILE": str(started),
-           "UNHEALTHY_MARKER": str(marker), "NOTIFY_CMD": f"bash {notify}", "RUN_INTERVAL_HOURS": str(hours)}
+           "UNHEALTHY_MARKER": str(marker), "NOTIFY_CMD": f"bash {notify}", "RUN_INTERVAL_HOURS": str(hours),
+           # The dashboard probe (2026-09-17): off unless a test is about it, and the entrypoint's
+           # resolved-settings file must not leak in from a real container.
+           "WEB_ENABLED": web, "WEB_HEALTH_URL": web_url or "http://127.0.0.1:9/health",
+           "CONTAINER_ENV_FILE": str(tmp_path / "no-container.env")}
     proc = subprocess.run([BASH, str(SCRIPT)], env=env, capture_output=True, text=True)
     return proc, marker, (sent.read_text().splitlines() if sent.exists() else [])
 
@@ -71,3 +75,46 @@ def test_no_run_yet_on_a_fresh_container_is_healthy(tmp_path):
 def test_no_run_long_after_start_alerts(tmp_path):
     proc, marker, sent = _run(tmp_path, started_age_s=3 * 3600, hours=1)
     assert proc.returncode == 1 and "NO run has completed" in proc.stdout and marker.exists() and sent
+
+
+# --- the dashboard probe (one container, 2026-09-17) ------------------------------------------
+
+
+def _serve_health(tmp_path):
+    """A throwaway HTTP server answering /health, on a free loopback port."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"ok": true}')
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}/health"
+
+
+def test_a_live_dashboard_keeps_the_container_healthy(tmp_path):
+    server, url = _serve_health(tmp_path)
+    try:
+        proc, marker, sent = _run(tmp_path, stamp_age_s=60, web="true", web_url=url)
+    finally:
+        server.shutdown()
+    assert proc.returncode == 0 and "last run 1m ago" in proc.stdout and sent == []
+
+
+def test_a_dead_dashboard_is_unhealthy_and_says_so_not_the_scheduler(tmp_path):
+    proc, marker, sent = _run(tmp_path, stamp_age_s=60, web="true")  # port 9: nothing listens
+    assert proc.returncode == 1
+    assert "web dashboard is not answering" in proc.stdout and "scheduler fine" in proc.stdout
+    assert marker.exists() and len(sent) == 2 and "web dashboard" in sent[1]
+
+
+def test_the_probe_is_skipped_when_the_dashboard_is_disabled(tmp_path):
+    proc, marker, sent = _run(tmp_path, stamp_age_s=60, web="false")
+    assert proc.returncode == 0 and sent == []

@@ -9,3 +9,5 @@ jinja2==3.1.6
 uvicorn==0.52.1
 # Renders each failure dossier's report.md on /failures. Pure Python.
 markdown-it-py==4.2.0
+# The Backup page's restore form uploads a zip (multipart). Pure Python.
+python-multipart==0.0.32

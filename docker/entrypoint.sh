@@ -63,6 +63,22 @@ echo "0 */${HOURS} * * * /usr/local/bin/run_once.sh" > /app/crontab
 echo "[entrypoint] timezone: $(date +%Z) ($(date -u +%FT%TZ) UTC)"
 echo "[entrypoint] scheduled every ${HOURS}h -> $(cat /app/crontab)"
 
+# --- the web dashboard ----------------------------------------------------------------------
+# Read-only over the ledger (web/), served from THIS container beside the scheduler. It never writes the Sheet and never touches a scrape: it is
+# a separate process that shares the image, the config and the mounted data/ + logs/. Restarted in
+# a loop if it ever exits, so a crash costs seconds, not a container restart; healthcheck.sh probes
+# it. WEB_ENABLED=false (config web.enabled) keeps this container a pure scheduler.
+if [ "${WEB_ENABLED:-true}" = "true" ]; then
+    echo "[entrypoint] starting the web dashboard on 0.0.0.0:8765 (read-only)"
+    (
+        while true; do
+            python -m web --host 0.0.0.0 --port 8765 || true
+            echo "[entrypoint] web dashboard exited; restarting in 5s" >&2
+            sleep 5
+        done
+    ) &
+fi
+
 # Optionally do one run immediately on container start (handy for first-boot / testing).
 if [ "${RUN_ON_START:-false}" = "true" ]; then
     echo "[entrypoint] RUN_ON_START=true -> running once now"

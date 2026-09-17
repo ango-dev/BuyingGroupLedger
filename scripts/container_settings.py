@@ -28,6 +28,9 @@ EXPORTS = (
     ("RUN_ON_START", lambda: "true" if settings.container_run_on_start else "false"),
     ("PREFLIGHT_STRICT", lambda: "true" if settings.container_preflight_strict else "false"),
     ("TZ", lambda: settings.container_timezone),
+    # Whether entrypoint.sh starts the read-only web dashboard beside the scheduler, and whether
+    # healthcheck.sh probes it. Same container, same config file.
+    ("WEB_ENABLED", lambda: "true" if settings.web_enabled else "false"),
 )
 
 
