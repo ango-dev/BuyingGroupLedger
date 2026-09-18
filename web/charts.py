@@ -108,7 +108,7 @@ def status_donut(status_counts: list[tuple[str, int]]) -> Donut:
     """Rows by status, in the ledger's lifecycle order, in the Sheet's colours."""
     order = {s: i for i, s in enumerate(STATUSES)}
     ordered = sorted(status_counts, key=lambda item: order.get(item[0], len(order)))
-    return donut("Rows by status", ordered, param="status", colors=STATUS_COLORS)
+    return donut("Rows by Status", ordered, param="status", colors=STATUS_COLORS)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -147,8 +147,8 @@ class StackedBars:
     total: int
 
 
-def open_rows_bars(open_table: dict, *, width: int = 360, bar_height: int = 18, gap: int = 8,
-                   label_width: int = 96, spacer: float = 2.0) -> StackedBars:
+def open_rows_bars(open_table: dict, *, width: int = 300, bar_height: int = 30, gap: int = 10,
+                   label_width: int = 78, spacer: float = 2.0) -> StackedBars:
     """One horizontal bar per buying group (largest first), stacked by status in lifecycle order,
     from summary.overview's `open_table`. Every segment links to /orders?status=..&group=..,
     the bar's label to the group alone. A 2px surface gap separates stacked segments."""

@@ -799,7 +799,7 @@ class TestOverviewPage:
 
     def test_lifetime_and_month_sections_are_linked_tiles(self, client):
         body = client.get("/").text
-        assert "<h2>Lifetime" in body and "Calendar month" in body
+        assert "<h2>Lifetime" in body and "Calendar Month" in body
         # NOW is 2026-09-17: the month section opens on September, with a way back only.
         assert "September 2026" in body and 'href="/?month=2026-08"' in body
         assert 'href="/?month=2026-10"' not in body
@@ -1388,7 +1388,9 @@ class TestCharts:
         assert 'href="/orders?status=shipped&amp;group=BFMR"' in body
         assert "<title>shipped: 1" in body  # the hover tooltip
         assert "table-view" not in body  # user: no table toggles under the charts
-        assert "Rows by status" in body and "Open Rows" in body
+        assert "Rows by Status" in body and "Rows by Retailer" in body and "Rows by Buying Group" in body
+        assert "Open Rows" in body
+        assert 'style="max-width' not in body[body.index('<figure class="bars"'):body.index("</figure>")]  # the bars fill their card
         # The legend sits beside the chart, inside the chart body.
         assert body.index('<div class="chart-body">') < body.index('<ul class="legend">')
 

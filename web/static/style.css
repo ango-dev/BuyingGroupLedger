@@ -132,7 +132,8 @@ input.month { font: inherit; color: var(--fg); background: var(--card); border: 
 .charts .legend li { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .charts .legend .num { min-width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; }
 .charts .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
-.bars text { font-size: 12px; fill: var(--fg); }
+.bars text { font-size: 13px; fill: var(--fg); }
+.charts .bars svg { flex: 1 1 auto; min-width: 0; }  /* fills the card: with a 300-unit viewBox it scales UP, never down */
 .bars a.bar-label text { fill: var(--accent); }
 .bars .bar-total { fill: var(--muted); font-variant-numeric: tabular-nums; }
 .bars .legend { flex-direction: column; }

@@ -219,8 +219,8 @@ def overview(snapshot: Snapshot, month: str = "", today: date | None = None) -> 
 
     donuts = [
         status_donut(status_counts),
-        donut("Rows by retailer", by_retailer.most_common(), param="retailer"),
-        donut("Rows by buying group", by_group.most_common(), param="group"),
+        donut("Rows by Retailer", by_retailer.most_common(), param="retailer"),
+        donut("Rows by Buying Group", by_group.most_common(), param="group"),
     ]
 
     return {
