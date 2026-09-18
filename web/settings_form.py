@@ -292,8 +292,40 @@ def _set_path(data: dict, path: str, value) -> None:
     node[parts[-1]] = value
 
 
+def _validate_frequency(text: str) -> str:
+    from scripts.backup import FREQUENCIES
+
+    if not text:
+        return ""  # the code default (daily) applies
+    if text.lower() not in FREQUENCIES:
+        raise ValueError("one of daily, weekly, monthly")
+    return text.lower()
+
+
+def _validate_time(text: str) -> str:
+    from scripts.backup import parse_time
+
+    if not text:
+        return ""  # the code default (03:30) applies
+    hour, minute = parse_time(text)
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _validate_days(text: str) -> str:
+    from scripts.backup import parse_days_any
+
+    return parse_days_any(text)
+
+
+#: Text settings with a vocabulary of their own, checked before anything is written.
+_VALIDATORS = {"BACKUP_FREQUENCY": _validate_frequency, "BACKUP_TIME": _validate_time,
+               "BACKUP_DAYS": _validate_days}
+
+
 def _parse(setting: Setting, raw: str) -> Any:
     text = (raw or "").strip()
+    if setting.env in _VALIDATORS:
+        return _VALIDATORS[setting.env](text)
     if setting.kind == "int":
         if not text:
             return ""
@@ -406,6 +438,9 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
     "web": ("Dashboard", "This web dashboard: its ledger source, bind address and port. "
             "Read once at dashboard start."),
     "database": ("Database", "The SQLite mirror of the ledger. Read once at dashboard start."),
+    "backups": ("Backups", "Scheduled backups of config.json, .state.json, .env and data/ (the "
+                "ledger) into backups/, on the container's clock, and how many to keep. Read once "
+                "at container start; the Backup & Restore panel below shows the schedule."),
     "profiles": ("Profiles", "One browser identity per entry: the Browser-Use profile, its proxy, "
                  "the retailers it is logged into and the sign-in it can perform unattended."),
     "warehouses": ("Warehouses", "Each buying group and the address jigs that route an order to "

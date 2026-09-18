@@ -1269,7 +1269,7 @@ class TestBackupScript:
         source = (Path(__file__).resolve().parents[1] / "scripts" / "backup.py").read_text(
             encoding="utf-8")
         imported = set(re.findall(r"^(?:from|import)\s+([A-Za-z_][\w]*)", source, re.M))
-        allowed = {"__future__", "argparse", "json", "os", "socket", "subprocess", "sys",
+        allowed = {"__future__", "argparse", "json", "os", "re", "socket", "sqlite3", "subprocess", "sys", "tempfile",
                    "zipfile", "datetime", "pathlib"}
         assert imported <= allowed, imported - allowed
 

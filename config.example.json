@@ -130,6 +130,20 @@
     "mirror_after_run": true
   },
 
+  "// backups": "Scheduled backups: a zip of config.json, .state.json, .env and data/ (the ledger) into backups/, made by the container's own cron (`python -m scripts.backup --scheduled`). The Settings page's Backup & Restore panel shows the schedule and the zips; the oldest are deleted once more than `keep` exist. Read once at container start. Copy backups/ off the Pi too -- one card is one point of failure.",
+  "backups": {
+    "// enabled": "BACKUP_ENABLED — true | false.",
+    "enabled": true,
+    "// frequency": "BACKUP_FREQUENCY — daily | weekly | monthly.",
+    "frequency": "daily",
+    "// time": "BACKUP_TIME — HH:MM, 24-hour, in the container's timezone (container.timezone).",
+    "time": "03:30",
+    "// days": "BACKUP_DAYS — weekly: day names (mon,thu); monthly: days of the month, 1-28 (1,15). Ignored when daily. Blank = Sunday / the 1st.",
+    "days": "",
+    "// keep": "BACKUP_KEEP — how many zips to keep in backups/: after each new backup (scheduled or from the dashboard) the oldest beyond this are deleted. 0 = keep all.",
+    "keep": 14
+  },
+
   "// profiles": "One Browser-Use browser identity per entry, each behind its own proxy. `amazon` and `amazon-business` are separate accounts and MUST NOT share a profile — one identity for both is exactly the linking risk the separate profile exists to avoid. `profile_id` is filled in for you by `python -m scripts.create_profile`.",
   "profiles": [
     {

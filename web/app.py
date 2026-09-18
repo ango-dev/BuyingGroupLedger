@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 from typing import Callable
 from urllib.parse import urlencode
 
@@ -790,7 +791,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         fresh = not (repo_root / "config.json").is_file()
         return {"archives": archives, "members": [m.as_posix() for m in
                                                    backup_module.backup_members(repo_root)],
-                "fresh_install": fresh, "backups_dir": str(backups_dir), **extra}
+                "fresh_install": fresh, "backups_dir": str(backups_dir),
+                "schedule": backup_module.schedule_from_settings(settings), **extra}
 
     def page_no_snapshot(request: Request, name: str, **context):
         base = {"request": request, "backend": reader.backend, "source": "", "loaded_at": None,
@@ -807,9 +809,14 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.post("/backup")
     def backup_create(request: Request):
         target = backup_module.create_backup(repo_root, backups_dir)
-        act("backup", f"Backup {target.name} created", {"name": target.name,
-                                                       "size_kb": target.stat().st_size // 1024})
-        return RedirectResponse(url=f"/settings?message=Wrote+{target.name}#s-backup", status_code=303)
+        # The retention rule applies to every backup made, scheduled or by hand.
+        deleted = backup_module.prune_backups(backups_dir, settings.backups_keep)
+        act("backup", f"Backup {target.name} created"
+            + (f"; {len(deleted)} older one(s) deleted" if deleted else ""),
+            {"name": target.name, "size_kb": target.stat().st_size // 1024,
+             "keep": settings.backups_keep, "deleted": [p.name for p in deleted]})
+        message = f"Wrote {target.name}" + (f" and deleted {len(deleted)} older backup(s)" if deleted else "")
+        return RedirectResponse(url=f"/settings?message={quote(message)}#s-backup", status_code=303)
 
     @app.get("/backup/{name}")
     def backup_download(name: str):

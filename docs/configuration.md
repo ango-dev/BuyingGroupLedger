@@ -26,11 +26,12 @@ next to it, so this is the only thing to read.
 >
 > Even the container's own knobs come from the config file. `docker-compose.yml` interpolates its
 > variables before any Python runs, so `docker/entrypoint.sh` resolves `container.*`
-> (`run_interval_hours`, `run_on_start`, `preflight_strict`, `timezone`) through
-> `scripts/container_settings.py` on start — and still lets an exported variable win.
+> (`run_interval_hours`, `run_on_start`, `preflight_strict`, `timezone`) and `backups.*` (the
+> scheduled-backup cron line) through `scripts/container_settings.py` on start — and still lets an
+> exported variable win.
 
 <details>
-<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (47 of them)</summary>
+<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (52 of them)</summary>
 
 The list is generated from `ENV_TO_CONFIG` in [config/settings.py](../config/settings.py), which is the
 single place a name is mapped, and `tests/test_config_loader.py` fails if this table drifts from it.
@@ -89,6 +90,11 @@ fails closed on a typo rather than turning itself on.
 | `LEDGER_BACKEND` | `ledger.backend` |
 | `LEDGER_DB_PATH` | `database.path` |
 | `LEDGER_DB_MIRROR_AFTER_RUN` † | `database.mirror_after_run` |
+| `BACKUP_ENABLED` † | `backups.enabled` |
+| `BACKUP_FREQUENCY` | `backups.frequency` |
+| `BACKUP_TIME` | `backups.time` |
+| `BACKUP_DAYS` | `backups.days` |
+| `BACKUP_KEEP` | `backups.keep` |
 
 </details>
 

@@ -349,6 +349,20 @@ python -m scripts.backup --restore backups/ledger_backup_20260917T120000Z.zip   
 python -m scripts.backup --restore backups/ledger_backup_20260917T120000Z.zip --force  # overwrites them
 ```
 
+**Scheduled backups** (2026-09-18). The container's own cron makes one on the `backups.*`
+schedule in `config.json` — `enabled`, `frequency` (`daily` / `weekly` / `monthly`), `time`
+(HH:MM in `container.timezone`), `days` (weekly: `mon,thu`; monthly: `1,15`; blank = Sunday / the
+1st) and `keep` (the oldest zips beyond this are deleted after every backup, scheduled or from the
+page; `0` keeps all) — all on the Settings page under *Backups*, taking effect at the next
+container start (the page prompts for the restart). `docker/entrypoint.sh` asks `python -m
+scripts.backup --print-cron` for the line and appends it to the crontab; `backup_once.sh` runs
+`python -m scripts.backup --scheduled`, which records the backup in the Activity log and ALERTS if
+it fails. A SQLite ledger goes into the zip through SQLite's own backup API (opened read-only), so
+a backup that lands during a run is still a consistent database. On a native install put the
+same line in your crontab: `$(python -m scripts.backup --print-cron) cd /path/to/repo && .venv/bin/python -m scripts.backup --scheduled`.
+The zips stay on the same machine — copy `backups/` somewhere else (rsync over your WireGuard link,
+a second disk, object storage) so the ledger survives the Pi's card.
+
 The script is **standard library only**, so on a new machine the whole move is: `git clone`, then
 `python -m scripts.backup --restore <zip>` with the system Python, then the normal setup
 (`docker compose up -d --build`, or the venv). The dashboard's Settings page has a **Backup & Restore** panel that offers the same

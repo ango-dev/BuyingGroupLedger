@@ -11,6 +11,13 @@
     <button type="submit" class="primary">Create a backup now</button>
     <span class="muted small">{{ members | length }} file(s) → <code>{{ backups_dir }}</code></span>
   </form>
+  <p class="muted small schedule">Scheduled:
+    {% if schedule.enabled %}<strong>{{ schedule.describe() }}</strong> (container time){% else %}<strong>off</strong>{% endif %}
+    · keeps the newest <strong>{{ schedule.keep if schedule.keep else 'all' }}</strong>{% if schedule.keep %}, deleting older ones after each new backup{% endif %}
+    · <a href="#s-backups">change</a>
+    {% for p in schedule.problems %}<span class="tag stale" title="{{ p }}">setting ignored</span>{% endfor %}
+    · copy <code>backups/</code> off this machine too: one card is one point of failure.
+  </p>
   <details class="advanced">
     <summary>What a backup would contain</summary>
     <ul class="files">{% for m in members %}<li class="mono small">{{ m }}</li>{% endfor %}</ul>

@@ -31,6 +31,14 @@ EXPORTS = (
     # Whether entrypoint.sh starts the read-only web dashboard beside the scheduler, and whether
     # healthcheck.sh probes it. Same container, same config file.
     ("WEB_ENABLED", lambda: "true" if settings.web_enabled else "false"),
+    # The scheduled-backup settings: entrypoint.sh asks `python -m scripts.backup --print-cron`
+    # for the cron line (blank = off) and appends it to the crontab. Exported so the Settings page
+    # knows they take effect at container start, like the run interval.
+    ("BACKUP_ENABLED", lambda: "true" if settings.backups_enabled else "false"),
+    ("BACKUP_FREQUENCY", lambda: settings.backups_frequency),
+    ("BACKUP_TIME", lambda: settings.backups_time),
+    ("BACKUP_DAYS", lambda: settings.backups_days),
+    ("BACKUP_KEEP", lambda: str(settings.backups_keep)),
 )
 
 

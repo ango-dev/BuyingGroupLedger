@@ -59,6 +59,15 @@ fi
 # Runs via run_once.sh rather than `python main.py` directly, so every run stamps the heartbeat the
 # healthcheck reads.
 echo "0 */${HOURS} * * * /usr/local/bin/run_once.sh" > /app/crontab
+# Scheduled backups (config.json `backups.*`): the cron expression comes from the app, so the
+# frequency / time / days rules live in one place (scripts/backup.py). Blank = disabled.
+BACKUP_CRON="$(cd /app && python -m scripts.backup --print-cron 2>/dev/null || true)"
+if [ -n "$BACKUP_CRON" ]; then
+    echo "${BACKUP_CRON} /usr/local/bin/backup_once.sh" >> /app/crontab
+    echo "[entrypoint] scheduled backups: $(cd /app && python -m scripts.backup --describe 2>/dev/null || echo "$BACKUP_CRON"), keeping the newest ${BACKUP_KEEP:-14}"
+else
+    echo "[entrypoint] scheduled backups: off (backups.enabled = false)"
+fi
 
 echo "[entrypoint] timezone: $(date +%Z) ($(date -u +%FT%TZ) UTC)"
 echo "[entrypoint] scheduled every ${HOURS}h -> $(cat /app/crontab)"

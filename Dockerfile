@@ -41,8 +41,8 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
 # App code only — secrets/config are excluded via .dockerignore and provided at runtime.
 COPY . .
 
-COPY docker/entrypoint.sh docker/run_once.sh docker/healthcheck.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/run_once.sh /usr/local/bin/healthcheck.sh
+COPY docker/entrypoint.sh docker/run_once.sh docker/backup_once.sh docker/healthcheck.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/run_once.sh /usr/local/bin/backup_once.sh /usr/local/bin/healthcheck.sh
 
 # Unbuffered so `docker compose logs -f` shows a run as it happens rather than in one burst at the end.
 ENV PYTHONUNBUFFERED=1

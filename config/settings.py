@@ -119,6 +119,13 @@ ENV_TO_CONFIG = {
     # ledger once it is "db".
     "LEDGER_DB_PATH": "database.path",
     "LEDGER_DB_MIRROR_AFTER_RUN": "database.mirror_after_run",
+    # Scheduled backups (scripts/backup.py --scheduled, on the container's own cron): whether,
+    # how often, when, on which days, and how many zips to keep. Read at container start.
+    "BACKUP_ENABLED": "backups.enabled",
+    "BACKUP_FREQUENCY": "backups.frequency",
+    "BACKUP_TIME": "backups.time",
+    "BACKUP_DAYS": "backups.days",
+    "BACKUP_KEEP": "backups.keep",
 }
 
 
@@ -429,6 +436,16 @@ class Settings:
     # The Tools page's profile-login session: closed (cookies saved) after this many minutes if
     # the user leaves it open. web/tools.ProfileSessions.
     web_tool_session_minutes: int = _get_int("WEB_TOOL_SESSION_MINUTES", 60)
+
+    # --- scheduled backups (docker/entrypoint.sh adds the cron line; scripts/backup.py) ---------
+    # A zip of config.json / .state.json / .env / data/ (the ledger) into backups/, on the
+    # container's clock: daily | weekly | monthly, at HH:MM, on `days` (weekly: mon,thu; monthly:
+    # 1,15; blank = Sunday / the 1st), keeping the newest `keep` (0 = all).
+    backups_enabled: bool = _get_bool("BACKUP_ENABLED", True)
+    backups_frequency: str = _get_str("BACKUP_FREQUENCY", "daily")
+    backups_time: str = _get_str("BACKUP_TIME", "03:30")
+    backups_days: str = _get_str("BACKUP_DAYS", "")
+    backups_keep: int = _get_int("BACKUP_KEEP", 14)
 
     def ledger_is_db(self) -> bool:
         """True when the SQLite file is the ledger (`ledger.backend` = `db`), False for the

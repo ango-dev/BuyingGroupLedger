@@ -4,6 +4,10 @@
     python -m scripts.backup --list
     python -m scripts.backup --restore backups/ledger_backup_20260917T120000Z.zip
     python -m scripts.backup --restore FILE --force # overwrite files that already exist
+    python -m scripts.backup --scheduled            # the container's cron job: create, then keep
+                                                    # the newest `backups.keep` zips (config.json)
+    python -m scripts.backup --prune [--keep N]     # apply the retention rule now
+    python -m scripts.backup --print-cron           # the schedule as a cron expression ("" = off)
 
 WHAT IS IN IT: everything a `git clone` does not give you --
 
@@ -29,10 +33,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import sqlite3
 import os
 import socket
 import subprocess
 import sys
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,7 +55,10 @@ ROOT_FILES = ("config.json", ".state.json", ".env")
 DIRS = ("data",)
 #: Never restored anywhere but under the repo root; never anything with a path component that
 #: climbs. Enforced on restore, whatever the archive says.
-_SKIP_SUFFIXES = (".pyc",)
+# SQLite's side files: a backup copies the database through SQLite's own backup API (a consistent
+# snapshot even mid-transaction), so a journal from another moment would only confuse a restore.
+_SKIP_SUFFIXES = (".pyc", "-wal", "-shm", "-journal")
+_SQLITE_MAGIC = b"SQLite format 3\x00"
 _SKIP_DIRS = ("__pycache__",)
 
 
@@ -111,7 +121,7 @@ def backup_members(root: Path | None = None) -> list[Path]:
             if not path.is_file():
                 continue
             rel = path.relative_to(root)
-            if any(part in _SKIP_DIRS for part in rel.parts) or rel.suffix in _SKIP_SUFFIXES:
+            if any(part in _SKIP_DIRS for part in rel.parts) or rel.name.endswith(_SKIP_SUFFIXES):
                 continue
             members.append(rel)
     return members
@@ -132,9 +142,220 @@ def create_backup(root: Path | None = None, out_dir: Path | None = None) -> Path
     }
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for rel in members:
-            archive.write(root / rel, rel.as_posix())
+            _write_member(archive, root / rel, rel.as_posix())
         archive.writestr(MANIFEST, json.dumps(manifest, indent=2))
     return target
+
+
+def _is_sqlite(path: Path) -> bool:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(len(_SQLITE_MAGIC)) == _SQLITE_MAGIC
+    except OSError:
+        return False
+
+
+def _write_member(archive: zipfile.ZipFile, path: Path, arcname: str) -> None:
+    """Add one file. A SQLite database (the ledger under `ledger.backend` = `db`) goes in as a
+    copy made by SQLite's online backup API, opened read-only: a scheduled backup may land while a
+    run is writing the ledger, and a byte copy of a file mid-transaction is not a database."""
+    if not _is_sqlite(path):
+        archive.write(path, arcname)
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / path.name
+        source = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            target = sqlite3.connect(copy)
+            try:
+                source.backup(target)
+            finally:
+                target.close()
+        finally:
+            source.close()
+        archive.write(copy, arcname)
+
+
+def prune_backups(out_dir: Path | None = None, keep: int = 0) -> list[Path]:
+    """Delete every zip beyond the newest `keep` (by name, which is the UTC stamp); `keep` <= 0
+    keeps everything. Returns what was deleted, oldest last."""
+    if keep <= 0:
+        return []
+    deleted = []
+    for path in list_backups(out_dir)[keep:]:
+        path.unlink()
+        deleted.append(path)
+    return deleted
+
+
+# --------------------------------------------------------------------------------------------------
+# The schedule: backups.* in config.json -> a cron line for the container's own scheduler
+# --------------------------------------------------------------------------------------------------
+
+FREQUENCIES = ("daily", "weekly", "monthly")
+DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_CRON_DOW = {"mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6, "sun": 0}
+_LONG_DAY = {"mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
+             "fri": "Friday", "sat": "Saturday", "sun": "Sunday"}
+DEFAULT_TIME = "03:30"
+DEFAULT_KEEP = 14
+
+
+def parse_time(text: str) -> tuple[int, int]:
+    """"HH:MM" (24-hour) -> (hour, minute); ValueError otherwise."""
+    match = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*", text or "")
+    if not match:
+        raise ValueError(f"{text!r} is not a time of day (write HH:MM, e.g. 03:30)")
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if hour > 23 or minute > 59:
+        raise ValueError(f"{text!r} is not a time of day (HH is 00-23, MM is 00-59)")
+    return hour, minute
+
+
+def parse_days(frequency: str, text: str) -> tuple:
+    """The days a weekly / monthly schedule fires on: day names ("mon,thu") or days of the month
+    ("1,15"). Blank = Sunday / the 1st. Daily ignores it. ValueError when it fits neither."""
+    tokens = [t.strip().lower() for t in re.split(r"[,\s;]+", text or "") if t.strip()]
+    if frequency == "weekly":
+        if not tokens:
+            return ("sun",)
+        names = tuple(t[:3] for t in tokens)
+        bad = [t for t in names if t not in DAY_NAMES]
+        if bad:
+            raise ValueError(f"{text!r}: weekly days are day names (mon, tue, ... sun)")
+        return tuple(dict.fromkeys(names))
+    if frequency == "monthly":
+        if not tokens:
+            return (1,)
+        try:
+            numbers = tuple(dict.fromkeys(int(t) for t in tokens))
+        except ValueError:
+            raise ValueError(f"{text!r}: monthly days are days of the month (1-28)") from None
+        if any(n < 1 or n > 28 for n in numbers):
+            raise ValueError(f"{text!r}: a monthly day must be 1-28 so it exists in every month")
+        return numbers
+    return ()
+
+
+def parse_days_any(text: str) -> str:
+    """Validation without knowing the frequency (the Settings page checks one field at a time):
+    blank, day names, or days of the month. Returns the text as typed."""
+    if not (text or "").strip():
+        return ""
+    errors = []
+    for frequency in ("weekly", "monthly"):
+        try:
+            parse_days(frequency, text)
+            return text.strip()
+        except ValueError as exc:
+            errors.append(str(exc))
+    raise ValueError("write day names (mon,thu) for weekly or days of the month (1,15) for monthly")
+
+
+def _ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _join(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+
+
+class Schedule:
+    """backups.* resolved: never invalid -- a bad value falls back and is named in `problems`."""
+
+    def __init__(self, enabled: bool = True, frequency: str = "daily", time: str = DEFAULT_TIME,
+                 days: str = "", keep: int = DEFAULT_KEEP):
+        problems: list[str] = []
+        self.enabled = bool(enabled)
+        frequency = str(frequency or "daily").strip().lower()
+        if frequency not in FREQUENCIES:
+            problems.append(f"backups.frequency {frequency!r} is not daily / weekly / monthly; using daily")
+            frequency = "daily"
+        self.frequency = frequency
+        try:
+            self.hour, self.minute = parse_time(str(time))
+        except ValueError as exc:
+            problems.append(f"backups.time: {exc}; using {DEFAULT_TIME}")
+            self.hour, self.minute = parse_time(DEFAULT_TIME)
+        try:
+            self.days = parse_days(frequency, str(days))
+        except ValueError as exc:
+            problems.append(f"backups.days: {exc}; using the default")
+            self.days = parse_days(frequency, "")
+        try:
+            self.keep = max(0, int(keep))
+        except (TypeError, ValueError):
+            problems.append(f"backups.keep {keep!r} is not a whole number; using {DEFAULT_KEEP}")
+            self.keep = DEFAULT_KEEP
+        self.problems = tuple(problems)
+
+    @property
+    def time(self) -> str:
+        return f"{self.hour:02d}:{self.minute:02d}"
+
+    def cron(self) -> str:
+        """The five-field cron expression (the container's TZ applies)."""
+        if self.frequency == "weekly":
+            return f"{self.minute} {self.hour} * * {','.join(str(_CRON_DOW[d]) for d in self.days)}"
+        if self.frequency == "monthly":
+            return f"{self.minute} {self.hour} {','.join(str(d) for d in self.days)} * *"
+        return f"{self.minute} {self.hour} * * *"
+
+    def describe(self) -> str:
+        if self.frequency == "weekly":
+            when = f"every {_join([_LONG_DAY[d] for d in self.days])}"
+        elif self.frequency == "monthly":
+            when = f"on the {_join([_ordinal(d) for d in self.days])} of each month"
+        else:
+            when = "every day"
+        return f"{when} at {self.time}"
+
+
+def schedule_from_settings(settings) -> Schedule:
+    return Schedule(enabled=settings.backups_enabled, frequency=settings.backups_frequency,
+                    time=settings.backups_time, days=settings.backups_days, keep=settings.backups_keep)
+
+
+def run_scheduled(root: Path | None = None, out_dir: Path | None = None) -> int:
+    """The cron job: one backup, then the retention rule, recorded in the activity log; a failure
+    ALERTS (a backup that silently stopped is the failure nobody notices until the day it is
+    needed). Reads the schedule from the settings, so this is the one entry point that is not
+    standard-library-only -- it runs inside the app's own environment."""
+    from config.settings import settings
+
+    schedule = schedule_from_settings(settings)
+    for problem in schedule.problems:
+        print(f"warning: {problem}", file=sys.stderr)
+    if not schedule.enabled:
+        print("Scheduled backups are off (backups.enabled = false); nothing written.")
+        return 0
+    root = Path(root) if root else ROOT
+    out_dir = Path(out_dir) if out_dir else root / "backups"
+    try:
+        target = create_backup(root, out_dir)
+        deleted = prune_backups(out_dir, schedule.keep)
+    except Exception as exc:
+        from alerts.notifier import alert
+
+        alert("Scheduled backup FAILED",
+              f"The scheduled backup could not be written: {type(exc).__name__}: {exc}\n"
+              f"Backups land in {out_dir}; the schedule is {schedule.describe()}. Make one from the "
+              "dashboard's Settings page to check the path, and look at docker compose logs.",
+              kind="backup")
+        print(f"Scheduled backup failed: {exc}", file=sys.stderr)
+        return 1
+    from diagnostics import activity
+
+    manifest = read_manifest(target)
+    activity.record("backup", f"Scheduled backup {target.name} created"
+                    + (f"; {len(deleted)} older one(s) deleted" if deleted else ""),
+                    {"name": target.name, "size_kb": target.stat().st_size // 1024,
+                     "files": len(manifest.get("files", [])), "keep": schedule.keep,
+                     "deleted": [p.name for p in deleted], "scheduled": True})
+    print(f"Wrote {target} ({target.stat().st_size / 1024:.0f} KB); keeping the newest "
+          f"{schedule.keep or 'all'}" + (f", deleted {len(deleted)}" if deleted else "") + ".")
+    return 0
 
 
 def list_backups(out_dir: Path | None = None) -> list[Path]:
@@ -197,7 +418,43 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true",
                         help="with --restore: overwrite files that already exist")
     parser.add_argument("--out-dir", default=None, help=f"where to write (default {BACKUPS_DIR})")
+    parser.add_argument("--scheduled", action="store_true",
+                        help="the cron job: back up, then keep only the newest backups.keep zips")
+    parser.add_argument("--prune", action="store_true", help="apply the retention rule now")
+    parser.add_argument("--keep", type=int, default=None,
+                        help="with --prune: how many to keep (default: backups.keep from config.json)")
+    parser.add_argument("--print-cron", action="store_true",
+                        help="print the schedule as a cron expression (blank when disabled)")
+    parser.add_argument("--describe", action="store_true", help="print the schedule in words")
     args = parser.parse_args(argv)
+    out_dir = Path(args.out_dir) if args.out_dir else None
+
+    if args.print_cron or args.describe:
+        from config.settings import settings
+
+        schedule = schedule_from_settings(settings)
+        for problem in schedule.problems:
+            print(f"warning: {problem}", file=sys.stderr)
+        if args.print_cron:
+            print(schedule.cron() if schedule.enabled else "")
+        else:
+            print(schedule.describe() if schedule.enabled else "off")
+        return 0
+
+    if args.scheduled:
+        return run_scheduled(out_dir=out_dir)
+
+    if args.prune:
+        keep = args.keep
+        if keep is None:
+            from config.settings import settings
+
+            keep = schedule_from_settings(settings).keep
+        deleted = prune_backups(out_dir or BACKUPS_DIR, keep)
+        for path in deleted:
+            print(f"deleted  {path.name}")
+        print(f"{len(deleted)} deleted; keeping the newest {keep or 'all'}.", file=sys.stderr)
+        return 0
 
     if args.list:
         for path in list_backups(Path(args.out_dir) if args.out_dir else BACKUPS_DIR):
@@ -223,7 +480,7 @@ def main(argv: list[str] | None = None) -> int:
               f"{len(result['ignored'])} ignored", file=sys.stderr)
         return 0
 
-    target = create_backup(out_dir=Path(args.out_dir) if args.out_dir else None)
+    target = create_backup(out_dir=out_dir)
     manifest = read_manifest(target)
     print(f"Wrote {target} ({target.stat().st_size / 1024:.0f} KB, {len(manifest['files'])} file(s)). "
           "It holds every live credential -- keep it private.", file=sys.stderr)

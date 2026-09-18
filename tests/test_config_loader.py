@@ -145,6 +145,8 @@ class TestNothingIsEnvironmentOnly:
             container_preflight_strict=False,
             container_timezone="America/New_York",
             web_enabled=True,
+            backups_enabled=True, backups_frequency="daily", backups_time="03:30",
+            backups_days="", backups_keep=14,
         ))
 
         assert cs.render().splitlines() == [
@@ -153,6 +155,11 @@ class TestNothingIsEnvironmentOnly:
             "export PREFLIGHT_STRICT='false'",
             "export TZ='America/New_York'",
             "export WEB_ENABLED='true'",
+            "export BACKUP_ENABLED='true'",
+            "export BACKUP_FREQUENCY='daily'",
+            "export BACKUP_TIME='03:30'",
+            "export BACKUP_DAYS=''",
+            "export BACKUP_KEEP='14'",
         ]
 
     def test_the_container_knobs_resolve_from_the_config_file(self, config_file, monkeypatch):
