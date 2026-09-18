@@ -108,7 +108,7 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
               f"{realized['rows']} settled rows", link(state="settled"), tone="settled",
               detail=f"{realized['rows']} settled row(s) in {realized['orders']} order(s) "
                      f"{scope}: Payout Date set, or status paid / return"),
-        _tile("Floating", _spend(unpaid), "money", "cost not paid back", link(state="unpaid"),
+        _tile("Floating", _spend(unpaid), "money", "payout not received", link(state="unpaid"),
               tone="floating",
               detail=f"Total Cost of the {len(unpaid)} row(s) in "
                      f"{len({r.order_id for r in unpaid})} order(s) {scope} the buying group has "
