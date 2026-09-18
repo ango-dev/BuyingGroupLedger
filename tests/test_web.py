@@ -1573,8 +1573,7 @@ class TestStaticAssetsCarryTheirBlocks:
             assert needle in css, f"style.css lost its {needle!r} rules"
         assert css.count("{") == css.count("}")
         # a scrolling filter bar clips the dropdown menus (2026-09-18): the bar must never scroll
-        bar = css[css.index(".filters { display: flex"):css.index("
-", css.index(".filters { display: flex"))]
+        bar = css[css.index(".filters { display: flex"):css.index(chr(10), css.index(".filters { display: flex"))]
         assert "overflow" not in bar
 
     def test_the_script_has_every_feature_block(self):
