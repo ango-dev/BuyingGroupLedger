@@ -36,28 +36,13 @@
   <input type="hidden" name="sort" value="{{ filters.sort }}">
   <input type="hidden" name="dir" value="{{ 'desc' if filters.desc else 'asc' }}">
   <noscript><button type="submit">Apply</button></noscript>
-  {% if editable %}
-  <span class="toolbar-sep"></span>
-  <label>Bulk edit <span class="muted small">(<span id="sel-count">0</span> selected)</span>
-    <span class="bulk">
-      <select name="field" form="bulk">
-        {% for f, heading in EDIT_FIELD_HEADINGS %}<option value="{{ f }}">{{ heading }}</option>{% endfor %}
-      </select>
-      <input type="text" name="value" form="bulk" placeholder="value (blank clears)">
-      <button type="submit" form="bulk" hx-post="/orders/bulk" hx-include="#filters, #bulk" hx-target="#orders-table"
-              hx-confirm="Set this field to this value on every selected row?">Apply</button>
-      <button type="submit" form="bulk" class="danger" hx-post="/orders/delete" hx-include="#filters, #bulk" hx-target="#orders-table"
-              hx-confirm="DELETE every selected row from the sheet? This cannot be undone here.">Delete selected</button>
-    </span>
-  </label>
-  {% endif %}
 </form>
 
 {% if editable %}
   {# Outside the filter form: a form cannot nest inside another. #}
   <details class="add-row" {{ 'open' if add_open }}>
     <summary>Add a row</summary>
-    <form method="post" action="/orders/add" class="add-form">
+    <form method="post" action="/orders/add" class="add-form" enctype="multipart/form-data">
       {% set af = add_form or {} %}
       <label>Order Date <input name="order_date" value="{{ af.get('order_date', '') }}" placeholder="YYYY-MM-DD" required></label>
       <label>Order ID <input name="order_id" value="{{ af.get('order_id', '') }}" required></label>
@@ -73,7 +58,8 @@
       <label>Buying Group <input name="buying_group" value="{{ af.get('buying_group', '') }}" list="groups"></label>
       <datalist id="groups">{% for v in facets.groups %}<option value="{{ v }}">{% endfor %}</datalist>
       <label>Tracking Number <input name="tracking_number" value="{{ af.get('tracking_number', '') }}"></label>
-      <label>Receipt Link <input name="receipt_url" value="{{ af.get('receipt_url', '') }}" placeholder="https://..." class="wide"></label>
+      <label>Receipt <input type="file" name="receipt_file" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf"> <span class="muted small">photo or PDF: stored with the captured receipts, the PAR link becomes Receipt Link</span></label>
+      <label>or a Receipt Link <input name="receipt_url" value="{{ af.get('receipt_url', '') }}" placeholder="https://..." class="wide"></label>
       <label>Card Last 4 <input name="card_last4" value="{{ af.get('card_last4', '') }}" size="4"></label>
       <label>Profile <input name="profile_label" value="{{ af.get('profile_label', '') }}" list="profiles"></label>
       <datalist id="profiles">{% for v in facets.profiles %}<option value="{{ v }}">{% endfor %}</datalist>
@@ -84,9 +70,25 @@
 {% endif %}
 
 {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
-<form id="bulk">
-<div id="orders-table">
-  {% include "_orders_table.html" %}
-</div>
+{# The selection (hidden checkboxes in the row-number cells) and the buttons that act on it are
+   ONE form, so the buttons' own form carries the selected keys -- an include of a second form did
+   not reliably. #}
+<form id="bulk" hx-include="#filters">
+  {% if editable %}
+  <div id="bulkbar" class="bulkbar">
+    <span class="muted small"><span id="sel-count">0</span> selected · click row numbers to select, shift-click for a range, click <b>#</b> for all</span>
+    <select name="field">
+      {% for f, heading in EDIT_FIELD_HEADINGS %}<option value="{{ f }}">{{ heading }}</option>{% endfor %}
+    </select>
+    <input type="text" name="value" placeholder="value (blank clears)">
+    <button type="submit" hx-post="/orders/bulk" hx-target="#orders-table"
+            hx-confirm="Set this field to this value on every selected row?">Apply to selected</button>
+    <button type="submit" class="danger" hx-post="/orders/delete" hx-target="#orders-table"
+            hx-confirm="DELETE every selected row from the sheet? This cannot be undone here.">Delete selected</button>
+  </div>
+  {% endif %}
+  <div id="orders-table">
+    {% include "_orders_table.html" %}
+  </div>
 </form>
 {% endblock %}

@@ -337,7 +337,7 @@ class TestOrdersRoutes:
         body = client.get("/orders").text
         assert '<body class="wide">' in body
         assert 'class="grid ledger sheetlike"' in body
-        assert body.count("<th ") == len(FIELDNAMES) + 2  # every column, the row number, the selector
+        assert body.count("<th ") == len(FIELDNAMES) + 1  # every column plus the row-number handle
         assert 'data-field="insurance"' in body and 'class="num edit"' in body
         order_id_td = re.search(r'<td class="([^"]*)"\s+data-field="order_id"', body)
         assert order_id_td and "edit" not in order_id_td.group(1)  # a key column: never editable
@@ -349,7 +349,12 @@ class TestOrdersRoutes:
         assert "/static/sheet.js" not in client.get("/").text
         # The row tools.
         assert 'name="sel"' in body and 'id="sel-all"' in body
+        assert 'class="sel"' not in body  # the row number is the handle; no checkbox column
         assert 'hx-post="/orders/bulk"' in body and 'hx-post="/orders/delete"' in body
+        # The buttons live INSIDE the form that owns the selection (live: "no rows selected").
+        bulk_form = body[body.index('<form id="bulk"'):body.index("</form>", body.index('<form id="bulk"'))]
+        assert 'hx-post="/orders/delete"' in bulk_form and 'name="sel"' in bulk_form
+        assert 'enctype="multipart/form-data"' in body and 'name="receipt_file"' in body
         assert 'action="/orders/add"' in body
         assert '<option value="insurance">Insurance</option>' in body
 
@@ -480,3 +485,95 @@ class TestTheWritePathIsSingular:
             else:
                 for token in ("worksheet.update(", "delete_rows(", "batch_update("):
                     assert token not in text, f"{path.name} mentions {token}"
+
+
+class TestReceiptUpload:
+    @pytest.fixture
+    def storage(self, monkeypatch):
+        from web import receipts_upload
+
+        stored = {}
+        monkeypatch.setattr(receipts_upload.store, "is_configured", lambda: True)
+
+        def put(key, body, ext):
+            stored[key] = (body, ext)
+            return f"https://par.example/o/{key}"
+
+        monkeypatch.setattr(receipts_upload.store, "put", put)
+        return stored
+
+    def test_store_receipt_files_under_the_capture_key_and_returns_the_par_link(self, storage):
+        from web.receipts_upload import store_receipt
+
+        link = store_receipt(retailer="Amazon Business", order_id="111-1", order_date="2026-09-17",
+                             filename="IMG_0042.JPEG", data=b"jpegbytes")
+        assert link == "https://par.example/o/receipts/amazon-business/2026-09/111-1.jpg"
+        assert storage["receipts/amazon-business/2026-09/111-1.jpg"] == (b"jpegbytes", "jpg")
+        assert store_receipt(retailer="Best Buy", order_id="BBY01-1", order_date="2026-09-17",
+                             filename="r.pdf", data=b"%PDF").endswith("receipts/bestbuy/2026-09/BBY01-1.pdf")
+        assert store_receipt(retailer="Woot!", order_id="W1", order_date="", filename="a.png",
+                             data=b"x").endswith("receipts/woot/unknown/W1.png")
+
+    def test_refusals(self, storage):
+        from web.receipts_upload import UploadError, store_receipt
+
+        with pytest.raises(UploadError, match="must be one of"):
+            store_receipt(retailer="Amazon", order_id="1", order_date="2026-09-17",
+                          filename="notes.docx", data=b"x")
+        with pytest.raises(UploadError, match="empty"):
+            store_receipt(retailer="Amazon", order_id="1", order_date="2026-09-17",
+                          filename="a.pdf", data=b"")
+        with pytest.raises(UploadError, match="Order ID is required"):
+            store_receipt(retailer="Amazon", order_id="", order_date="2026-09-17",
+                          filename="a.pdf", data=b"x")
+        assert storage == {}
+
+    def test_unconfigured_storage_says_so(self):
+        from web.receipts_upload import UploadError, store_receipt
+
+        with pytest.raises(UploadError, match="not configured"):
+            store_receipt(retailer="Amazon", order_id="1", order_date="2026-09-17",
+                          filename="a.pdf", data=b"x")
+
+    def test_add_row_with_a_photo_stores_it_and_links_the_row(self, storage, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/add",
+                               data={"order_id": "NEW-1", "order_date": "2026-09-17",
+                                     "item_name": "Thing", "retailer": "Costco"},
+                               files={"receipt_file": ("receipt.jpg", b"jpegbytes", "image/jpeg")},
+                               follow_redirects=False)
+        assert response.status_code == 303
+        written = dict(zip(FIELDNAMES, sheet.writes[0][1][0]))
+        assert written["receipt_url"] == "https://par.example/o/receipts/costco/2026-09/NEW-1.jpg"
+        assert "receipts/costco/2026-09/NEW-1.jpg" in storage
+
+    def test_add_row_with_a_bad_file_writes_nothing(self, storage, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/add",
+                               data={"order_id": "NEW-1", "order_date": "2026-09-17", "item_name": "T"},
+                               files={"receipt_file": ("notes.docx", b"x", "application/octet-stream")})
+        assert response.status_code == 400 and "receipt not uploaded" in response.text
+        assert sheet.writes == [] and storage == {}
+
+    def test_upload_for_an_existing_order_links_every_row(self, storage, sheet, tmp_path, logs_dir):
+        sheet.grid.append(row(order_date="2026-09-08", status="ordered", retailer="Best Buy",
+                              item_name="MacBook", shipment="2", quantity="1", order_id="BBY01-1"))
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        page = client.get("/orders/BBY01-1").text
+        assert 'action="/orders/BBY01-1/receipt"' in page
+        response = client.post("/orders/BBY01-1/receipt",
+                               files={"receipt_file": ("r.pdf", b"%PDF", "application/pdf")},
+                               follow_redirects=False)
+        assert response.status_code == 303 and "linked+on+2+row" in response.headers["location"]
+        data, option = sheet.batches[0]
+        assert option == "RAW" and len(data) == 2
+        assert all(d["values"] == [["https://par.example/o/receipts/bestbuy/2026-09/BBY01-1.pdf"]] for d in data)
+        after = client.get(response.headers["location"]).text
+        assert "Receipt stored and linked on 2 row(s)" in after
+        assert "receipts/bestbuy/2026-09/BBY01-1.pdf" in after
+
+    def test_upload_without_a_file_or_for_an_unknown_order(self, storage, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/BBY01-1/receipt", data={"x": "1"}, follow_redirects=False)
+        assert response.status_code == 303 and "choose+a+file" in response.headers["location"]
+        assert client.post("/orders/nope/receipt", files={"receipt_file": ("r.pdf", b"x", "application/pdf")}).status_code == 404

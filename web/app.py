@@ -251,21 +251,46 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         reader.load(force=True)
         return table_after(request, form, notice=f"Deleted {result['deleted']} row(s)")
 
+    from web import receipts_upload
+
+    async def receipt_from(form, *, retailer: str, order_id: str, order_date: str) -> str:
+        """The Receipt Link for an uploaded `receipt_file`, "" when none was sent."""
+        upload = form.get("receipt_file")
+        if upload is None or not getattr(upload, "filename", ""):
+            return ""
+        data = await upload.read()
+        return receipts_upload.store_receipt(retailer=retailer, order_id=order_id,
+                                            order_date=order_date, filename=upload.filename,
+                                            data=data)
+
     @app.post("/orders/add")
     async def orders_add(request: Request):
-        """Append one row from the Add-a-row form, then show it."""
+        """Append one row from the Add-a-row form, then show it. A photo / PDF in `receipt_file`
+        is stored first and its PAR link becomes the row's Receipt Link."""
         form = await request.form()
-        fields = {k: str(v) for k, v in form.items()}
+        fields = {k: str(v) for k, v in form.items() if isinstance(v, str)}
         if writer is None:
             raise HTTPException(status_code=409, detail="editing is off: this backend is a CSV snapshot")
+
+        def refused(message: str, status: int):
+            context = orders_context(request, params={}, error=message, add_form=fields,
+                                     add_open=True)
+            response = page(request, "orders.html", **context)
+            response.status_code = status
+            return response
+
+        try:
+            link = await receipt_from(form, retailer=fields.get("retailer", ""),
+                                      order_id=fields.get("order_id", ""),
+                                      order_date=fields.get("order_date", ""))
+        except receipts_upload.UploadError as exc:
+            return refused(f"receipt not uploaded: {exc}", 400)
+        if link:
+            fields["receipt_url"] = link
         try:
             result = writer.add_row(fields)
         except EditError as exc:
-            context = orders_context(request, params={}, error=str(exc), add_form=fields,
-                                     add_open=True)
-            response = page(request, "orders.html", **context)
-            response.status_code = exc.status
-            return response
+            return refused(str(exc), exc.status)
         reader.load(force=True)
         notice = f"Added {result['key']['order_id']} at sheet row {result['row_number']}"
         return RedirectResponse(
@@ -308,7 +333,38 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         view = order_view(snapshot.by_order(order_id))
         if view is None:
             raise HTTPException(status_code=404, detail=f"No ledger row carries Order ID {order_id!r}")
-        return page(request, "order.html", snapshot=snapshot, order=view)
+        return page(request, "order.html", snapshot=snapshot, order=view,
+                    editable=writer is not None,
+                    notice=request.query_params.get("notice", ""),
+                    error=request.query_params.get("error", ""))
+
+    @app.post("/orders/{order_id}/receipt")
+    async def order_receipt(request: Request, order_id: str):
+        """Upload a receipt for an EXISTING order: store it, then write the link into Receipt Link
+        on every row of that order (the link is per order -- docs/data-model.md)."""
+        form = await request.form()
+        snapshot = reader.load()
+        rows = snapshot.by_order(order_id)
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"No ledger row carries Order ID {order_id!r}")
+        if writer is None:
+            raise HTTPException(status_code=409, detail="editing is off: this backend is a CSV snapshot")
+        first = rows[0]
+        try:
+            link = await receipt_from(form, retailer=first.retailer, order_id=order_id,
+                                      order_date=first.order_date)
+            if not link:
+                raise receipts_upload.UploadError("choose a file first")
+            keys = [{"order_id": r.order_id, "order_date": r.order_date, "item_name": r.item_name,
+                     "shipment": r.shipment} for r in rows]
+            result = writer.write_cells(keys, "receipt_url", link)
+        except (receipts_upload.UploadError, EditError) as exc:
+            return RedirectResponse(url=f"/orders/{order_id}?" + urlencode({"error": str(exc)}),
+                                    status_code=303)
+        reader.load(force=True)
+        notice = f"Receipt stored and linked on {result['written']} row(s)"
+        return RedirectResponse(url=f"/orders/{order_id}?" + urlencode({"notice": notice}),
+                                status_code=303)
 
     @app.get("/failures", response_class=HTMLResponse)
     def failures(request: Request):

@@ -140,3 +140,17 @@
   });
   document.addEventListener("htmx:afterSwap", function () { last = null; syncClasses(); });
 })();
+
+// The # header is the select-all handle (the header checkbox is hidden, like the row ones).
+(function () {
+  "use strict";
+  document.addEventListener("click", function (e) {
+    var th = e.target.closest ? e.target.closest("th.rownum") : null;
+    if (!th) return;
+    var all = document.getElementById("sel-all");
+    if (!all) return;
+    e.preventDefault();
+    all.checked = !all.checked;
+    all.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+})();

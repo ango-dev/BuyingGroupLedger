@@ -35,7 +35,10 @@ from config.settings import settings
 from receipts.sources import CONTENT_TYPES
 
 # Receipts are PDF/PNG; failure dossiers (diagnostics/dossier.py) share this store and add three.
-_CONTENT_TYPES = {**CONTENT_TYPES, "md": "text/markdown", "html": "text/html", "txt": "text/plain"}
+_CONTENT_TYPES = {**CONTENT_TYPES, "md": "text/markdown", "html": "text/html", "txt": "text/plain",
+                  # Hand-uploaded receipt photos from the dashboard (web/receipts_upload.py). NOT in
+                  # sources.CONTENT_TYPES: that table is the capture's probe list (pdf before png).
+                  "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
 
 log = logging.getLogger(__name__)
 

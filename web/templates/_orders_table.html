@@ -1,18 +1,18 @@
 {# The table alone: what htmx swaps into #orders-table, and what orders.html includes on a full load.
    Every ledger column in the Sheet's order; rows coloured by the Sheet's own status rules; each
-   editable cell is a <td class="edit"> the inline editor (static/edit.js) posts to /orders/cell;
-   a selection checkbox per row feeds the bulk-edit / delete buttons (form #bulk). #}
+   editable cell is a <td class="edit"> the inline editor (static/edit.js) posts to /orders/cell.
+   SELECTION is Sheets-style: the row-number cell is the row's handle (click, shift-click a range,
+   click the # header for all); the hidden checkbox inside it is what the #bulk form posts. #}
 {% if notice %}<div class="banner ok">{{ notice }}</div>{% endif %}
 {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
 <p class="muted count">{{ rows | length }} of {{ total }} row(s)
-  {% if editable %}<span class="muted">· double-click a cell to edit; Enter saves, Esc cancels · tick rows for bulk edit / delete</span>{% else %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
+  {% if editable %}<span class="muted">· double-click a cell to edit; Enter saves, Esc cancels</span>{% else %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
 </p>
 <div class="sheet" id="sheet">
 <table class="grid ledger sheetlike">
   <thead>
     <tr>
-      {% if editable %}<th class="sel"><input type="checkbox" id="sel-all" title="select every row shown" aria-label="select all"></th>{% endif %}
-      <th class="rownum">#</th>
+      <th class="rownum" title="{{ 'select / unselect every row shown' if editable else '' }}">{% if editable %}<input type="checkbox" id="sel-all" hidden aria-label="select all">{% endif %}#</th>
       {% for name, heading in columns %}
       {% set active = filters.sort == name %}
       {% set next_dir = 'asc' if (active and filters.desc) else 'desc' %}
@@ -28,14 +28,13 @@
     {% for row in rows %}
     {% set key = {'order_id': row.order_id, 'order_date': row.order_date, 'item_name': row.item_name, 'shipment': row.shipment} %}
     <tr class="status-{{ row.status }} payout-{{ row.payout_state }}">
-      {% if editable %}<td class="sel"><input type="checkbox" name="sel" value="{{ key | tojson }}" aria-label="select row {{ row.row_number }}"></td>{% endif %}
-      <td class="rownum muted" title="sheet row {{ row.row_number }}">{{ row.row_number }}</td>
+      <td class="rownum muted" title="sheet row {{ row.row_number }}{{ ' — click to select' if editable }}">{% if editable %}<input type="checkbox" name="sel" value="{{ key | tojson }}" hidden aria-label="select row {{ row.row_number }}">{% endif %}{{ row.row_number }}</td>
       {% for name, heading in columns %}
         {% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}
       {% endfor %}
     </tr>
     {% else %}
-    <tr><td colspan="{{ columns | length + (2 if editable else 1) }}" class="muted">No rows match.</td></tr>
+    <tr><td colspan="{{ columns | length + 1 }}" class="muted">No rows match.</td></tr>
     {% endfor %}
   </tbody>
 </table>

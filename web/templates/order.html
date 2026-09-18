@@ -3,6 +3,8 @@
 {% block content %}
 <p class="crumbs"><a href="/orders">Orders</a> › <span class="mono">{{ order.order_id }}</span></p>
 <h1>{{ order.retailer }} <span class="mono">{{ order.order_id }}</span></h1>
+{% if notice %}<div class="banner ok">{{ notice }}</div>{% endif %}
+{% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
 
 <section class="facts">
   <dl>
@@ -13,7 +15,15 @@
     <dt>Card</dt><dd>{{ order.card }}{% if order.card_last4 %} <span class="mono">…{{ order.card_last4 }}</span>{% endif %}</dd>
     <dt>Delivery Address</dt><dd>{{ order.delivery_address }}</dd>
     <dt>Order Link</dt><dd>{% for u in order.order_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">none</span>{% endfor %}</dd>
-    <dt>Receipt Link</dt><dd>{% for u in order.receipt_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">no receipt captured</span>{% endfor %}</dd>
+    <dt>Receipt Link</dt><dd>{% for u in order.receipt_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">no receipt captured</span>{% endfor %}
+      {% if editable %}
+      <form method="post" action="/orders/{{ order.order_id }}/receipt" enctype="multipart/form-data" class="inline-form receipt-upload">
+        <input type="file" name="receipt_file" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf" required>
+        <button type="submit">Upload receipt</button>
+        <span class="muted small">a photo or PDF; stored with the captured receipts, the PAR link is written to every row of this order</span>
+      </form>
+      {% endif %}
+    </dd>
     <dt>Last Scraped At</dt><dd>{{ order.last_scraped_at }}</dd>
   </dl>
 </section>

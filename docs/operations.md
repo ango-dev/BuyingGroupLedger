@@ -152,14 +152,23 @@ Total Profit) and Last Scraped At. Status must be one of the ledger's words; dat
 `YYYY-MM-DD`. The snapshot backend is view-only (a CSV has nothing to write to); the `db` backend
 writes the Sheet and re-mirrors, so the copy follows.
 
-**Rows: add, bulk edit, delete.** Tick rows (the header box ticks every row shown), pick a field
-and a value in the filter bar and *Apply* to set it on all of them in one batched write (blank
-clears), or *Delete selected* to remove them from the sheet (confirmed first; rows are removed
-bottom-up so the located numbers stay valid; all-or-nothing). *Add a row* takes the key columns
-(Order Date, Order ID, Item Name, Shipment) plus the common ones; it lands where the sync's own
-append would (after the last occupied row, blanks sent as `None` so the column formats survive, the
-two formula cells stamped), Total Cost is computed from Quantity × Cost Per Item, and the row sorts
-into date order on the next sync. A key that already exists is refused.
+**Rows: select, add, bulk edit, delete.** Selection is Sheets-style: click a row number to select
+that row (it tints blue), shift-click for a range, click the `#` header for every row shown. The
+bar under the filters acts on the selection: pick a field and a value and *Apply* to set it on all
+of them in one batched write (blank clears), or *Delete selected* to remove them from the sheet
+(confirmed first; rows are removed bottom-up so the located numbers stay valid; all-or-nothing).
+*Add a row* takes the key columns (Order Date, Order ID, Item Name, Shipment) plus the common ones;
+it lands where the sync's own append would (after the last occupied row, blanks sent as `None` so
+the column formats survive, the two formula cells stamped), Total Cost is computed from Quantity ×
+Cost Per Item, and the row sorts into date order on the next sync. A key that already exists is
+refused.
+
+**Receipts by hand.** The add form takes a photo or PDF, and an order's page has an *Upload
+receipt* button: the file is stored in the same OCI bucket under the same key the capture uses
+(`receipts/<retailer>/<YYYY-MM>/<order id>.<ext>`), and the PAR link becomes Receipt Link — on
+every row of the order, since the link is per order. Needs the receipt store configured
+(`receipts.oci.bucket` and the PAR prefix); otherwise the page says so and nothing is uploaded.
+Accepted: pdf, png, jpg, webp, up to 25 MB.
 
 **While a scheduled run is in progress every write is refused** (the page says so and nothing is
 written). The sync caches sheet row numbers from its pre-sync snapshot; a row deleted or appended

@@ -411,11 +411,19 @@ class TestReadOnlyGuarantee:
                 f"web/{name} uses a worksheet method other than get_values: "
                 f"{self.WORKSHEET_USE.findall(text)}")
 
+    #: The ONE exemption to the receipts ban: hand uploads go to the same object store the capture
+    #: uses (store + the key scheme in sources). Never receipts.capture -- that opens a paid browser.
+    RECEIPT_STORE_ONLY = "receipts_upload.py"
+
     def test_web_never_imports_a_scraper_or_a_buying_group_client(self):
         pattern = re.compile(r"^\s*(?:from|import)\s+([A-Za-z_][\w.]*)", re.M)
         for name, text in self._sources().items():
             for module in pattern.findall(text):
                 top = module.split(".")[0]
+                if top == "receipts" and name == self.RECEIPT_STORE_ONLY:
+                    assert module in ("receipts", "receipts.store", "receipts.sources"), module
+                    assert "receipts.capture" not in text and "import capture" not in text
+                    continue
                 assert top not in self.FORBIDDEN_IMPORTS, f"web/{name} imports {module}"
 
     @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
