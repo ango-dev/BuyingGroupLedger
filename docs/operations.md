@@ -206,7 +206,8 @@ share, the insurance premium and the buying group's commission; dollars over dol
 order counts for more than a small one), paid out (settled payouts),
 **floating** (Total Cost of the rows the buying group has not paid yet: no settled payout; gift
 cards excluded), projected profit (committed, undated payouts) and realized profit (settled rows) —
-so the two read side by side. Floating is not spend minus paid out: that gap also holds the
+so the two read side by side, all eight on one line with a few words under each number and the
+full definition as the tile's tooltip. Floating is not spend minus paid out: that gap also holds the
 settled rows' cost minus their payout, and since the profit here comes from cashback a settled row
 is usually paid a little less than it cost. *Lifetime* counts every row of the ledger. *Calendar month* shows one month at a time
 (arrows step through the months the ledger spans; the current month by default, `/?month=YYYY-MM`

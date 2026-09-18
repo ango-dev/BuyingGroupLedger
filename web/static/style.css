@@ -89,6 +89,15 @@ header .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; fo
 a.tile.link { display: block; color: var(--fg); text-decoration: none; transition: border-color .12s, transform .12s; }
 a.tile.link:hover { border-color: var(--accent); transform: translateY(-1px); }
 a.tile.link:hover .label { color: var(--accent); }
+/* the two stat sections: all eight tiles on ONE line, compact, wrapping to
+   two rows of four only on a narrow screen */
+.tiles.stats { grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
+.tiles.stats .tile { padding: 9px 11px; min-width: 0; }
+.tiles.stats .label { font-size: 0.68em; letter-spacing: .03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tiles.stats .value { font-size: 1.3em; margin: 3px 0 2px; overflow-wrap: anywhere; }
+.tiles.stats .hint { font-size: 0.76em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1180px) { .tiles.stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .tiles.stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .reconcile { margin: -4px 0 14px; }
 .reconcile .money { font-variant-numeric: tabular-nums; }
 h2.month-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

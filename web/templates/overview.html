@@ -6,9 +6,9 @@
 {#- A stat tile is a LINK: it opens the Orders page filtered the same way the number was counted.
    -#}
 {% macro tiles(items) %}
-<section class="tiles">
+<section class="tiles stats">
   {% for t in items %}
-  <a class="tile link {{ 'payout-' ~ t.tone if t.tone }}" href="{{ t.href }}">
+  <a class="tile link {{ 'payout-' ~ t.tone if t.tone }}" href="{{ t.href }}" title="{{ t.detail }}">
     <div class="label">{{ t.label }}</div>
     {% if t.kind == 'money' %}<div class="value money">{{ t.value | money }}</div>
     {% elif t.kind == 'percent' %}<div class="value money">{{ (t.value | percent) if t.value is not none else '—' }}</div>
@@ -20,7 +20,7 @@
 </section>
 {% endmacro %}
 
-<h2>Lifetime <span class="muted small">— every row of the ledger; click a tile to open those rows</span></h2>
+<h2>Lifetime <span class="muted small">— every row; click a tile to open its rows, hover for the definition</span></h2>
 {{ tiles(summary.lifetime) }}
 <p class="muted small reconcile">Total Profit column sum: <strong class="money">{{ summary.column_sum.profit | money }}</strong>
   — what SUM() over the sheet's Total Profit gives ({{ summary.column_sum.rows }} cells): realized + projected{% if summary.column_sum.other %} + {{ summary.column_sum.other | money }} on rows with a payout cell but neither state{% endif %}.

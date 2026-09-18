@@ -619,6 +619,9 @@ class TestOverview:
                           "Floating", "Projected profit", "Realized profit"]
         assert [t["label"] for t in summary["month"]["tiles"]] == labels
         assert [t["kind"] for t in summary["month"]["tiles"]] == [t["kind"] for t in summary["lifetime"]]
+        # an overview: a few words under each number, the definition in the tooltip
+        for t in summary["lifetime"] + summary["month"]["tiles"]:
+            assert len(t["hint"].split()) <= 4 and t["detail"]
 
     def test_lifetime_tiles_count_every_row(self, summary):
         by_label = {t["label"]: t for t in summary["lifetime"]}
@@ -640,7 +643,8 @@ class TestOverview:
         # (136 + 57) / (400 + 300). Cost-weighted by construction (dollars over dollars).
         assert by_label["Actual return"]["value"] == round(193.0 / 700.0, 4)
         assert by_label["Actual return"]["kind"] == "percent"
-        assert "2 settled row(s)" in by_label["Actual return"]["hint"]
+        assert by_label["Actual return"]["hint"] == "2 settled rows"
+        assert "(Payout" in by_label["Actual return"]["detail"]
         assert by_label["Actual return"]["href"] == "/orders?state=settled&sort=total_profit&dir=desc"
         assert by_label["Floating"]["value"] != round(by_label["Spend"]["value"] - by_label["Paid out"]["value"], 2)
 
@@ -792,7 +796,8 @@ class TestOverviewPage:
         assert "September 2026" in body and 'href="/?month=2026-08"' in body
         assert 'href="/?month=2026-10"' not in body
         # every tile is a link to the Orders page, filtered the way it was counted
-        assert 'class="tile link " href="/orders"' in body
+        assert 'class="tile link " href="/orders" title="every row of the ledger"' in body
+        assert '<section class="tiles stats">' in body
         assert 'href="/orders?state=open"' in body
         assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
         assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body

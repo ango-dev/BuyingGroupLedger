@@ -42,8 +42,12 @@ def _gap(rows: list[LedgerRow]) -> dict:
             "more": max(0, len(ids) - GAP_SAMPLE)}
 
 
-def _tile(label: str, value, kind: str, hint: str, href: str, tone: str = "") -> dict:
-    return {"label": label, "value": value, "kind": kind, "hint": hint, "href": href, "tone": tone}
+def _tile(label: str, value, kind: str, hint: str, href: str, tone: str = "",
+          detail: str = "") -> dict:
+    """`hint` is the few words under the number (it is an overview); `detail` is the full
+    definition, shown as the tile's tooltip."""
+    return {"label": label, "value": value, "kind": kind, "hint": hint, "href": href,
+            "tone": tone, "detail": detail}
 
 
 def _orders_link(**params) -> str:
@@ -88,31 +92,35 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
     realized = _money_block(paid)
     return [
         _tile("Rows / orders", (len(placed), len({r.order_id for r in placed})), "pair",
-              f"every row {scope}", link()),
-        _tile("Open rows", len(open_rows), "count",
-              f"rows {scope} still ordered, shipped or delivered: the buying group has not paid yet",
-              link(state="open")),
-        _tile("Spend", _spend(placed), "money",
-              f"Total Cost over every row {scope} that carries money (cancelled / superseded "
-              "excluded)", link(sort="total_cost", dir="desc")),
-        _tile("Actual return", rate, "percent",
-              f"(Payout \u2212 COGS \u2212 Insurance) / Total Cost over the {rated} settled row(s) "
-              f"{scope}: cashback after shipping, tax, gift cards and rewards, less insurance, "
-              "against what the group actually paid; cost-weighted",
-              link(state="settled", sort="total_profit", dir="desc")),
+              "all rows", link(), detail=f"every row {scope}"),
+        _tile("Open rows", len(open_rows), "count", "not paid yet", link(state="open"),
+              detail=f"rows {scope} still ordered, shipped or delivered: the buying group has "
+                     "not paid yet"),
+        _tile("Spend", _spend(placed), "money", "Total Cost", link(sort="total_cost", dir="desc"),
+              detail=f"Total Cost over every row {scope} that carries money (cancelled / "
+                     "superseded excluded)"),
+        _tile("Actual return", rate, "percent", f"{rated} settled rows",
+              link(state="settled", sort="total_profit", dir="desc"),
+              detail=f"(Payout \u2212 COGS \u2212 Insurance) / Total Cost over the {rated} settled "
+                     f"row(s) {scope}: cashback after shipping, tax, gift cards and rewards, less "
+                     "insurance, against what the group actually paid; cost-weighted"),
         _tile("Paid out", realized["payout"], "money",
-              f"{realized['rows']} settled row(s) in {realized['orders']} order(s) {scope}: "
-              "Payout Date set, or status paid / return", link(state="settled"), tone="settled"),
-        _tile("Floating", _spend(unpaid), "money",
-              f"Total Cost of the {len(unpaid)} row(s) in {len({r.order_id for r in unpaid})} "
-              f"order(s) {scope} the buying group has not paid yet (no settled payout; gift "
-              "cards excluded)", link(state="unpaid"), tone="floating"),
+              f"{realized['rows']} settled rows", link(state="settled"), tone="settled",
+              detail=f"{realized['rows']} settled row(s) in {realized['orders']} order(s) "
+                     f"{scope}: Payout Date set, or status paid / return"),
+        _tile("Floating", _spend(unpaid), "money", "cost not paid back", link(state="unpaid"),
+              tone="floating",
+              detail=f"Total Cost of the {len(unpaid)} row(s) in "
+                     f"{len({r.order_id for r in unpaid})} order(s) {scope} the buying group has "
+                     "not paid yet (no settled payout; gift cards excluded)"),
         _tile("Projected profit", projected["profit"], "money",
-              f"{projected['rows']} row(s), {projected['orders']} order(s) {scope} with a "
-              "committed payout and no Payout Date", link(state="committed"), tone="committed"),
+              f"{projected['rows']} committed rows", link(state="committed"), tone="committed",
+              detail=f"{projected['rows']} row(s), {projected['orders']} order(s) {scope} with a "
+                     "committed payout and no Payout Date"),
         _tile("Realized profit", realized["profit"], "money",
-              f"Total Profit of the {realized['rows']} settled row(s), {realized['orders']} "
-              f"order(s) {scope}", link(state="settled"), tone="settled"),
+              f"{realized['rows']} settled rows", link(state="settled"), tone="settled",
+              detail=f"Total Profit of the {realized['rows']} settled row(s), "
+                     f"{realized['orders']} order(s) {scope}"),
     ]
 
 
