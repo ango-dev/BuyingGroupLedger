@@ -429,34 +429,51 @@ h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 button.primary:hover { filter: brightness(1.08); }
 button.ghost { background: transparent; }
-.entry-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
-.entry-card { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.entry-card > header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.entry-card > header h3 { margin: 0; font-size: 1.02em; }
-.entry-card .row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 10px; align-items: center; font-size: 0.92em; }
-.entry-card .row > span:first-child { color: var(--muted); }
-.entry-card fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 10px; margin: 2px 0 0; min-width: 0; }
-.entry-card fieldset legend { color: var(--muted); font-size: 0.82em; text-transform: uppercase; letter-spacing: .04em; padding: 0 4px; }
-.entry-card .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
-.entry-card .grid2 label, .entry-card .grid1 label { display: flex; flex-direction: column; gap: 2px; font-size: 0.85em; color: var(--muted); }
-.entry-card .grid1 { display: grid; gap: 6px; }
+/* entries: collapsible, one readable line each; open state remembered in a cookie (settings.js) */
+.entry-list { display: flex; flex-direction: column; gap: 8px; }
+.entry-card { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.entry-card > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; }
+.entry-card > summary::-webkit-details-marker { display: none; }
+.entry-card > summary::before { content: "▸"; color: var(--muted); font-size: 0.85em; width: 1em; flex: 0 0 auto; }
+.entry-card[open] > summary::before { content: "▾"; }
+.entry-card > summary:hover { background: var(--card); border-radius: 10px; }
+.entry-card[open] > summary { border-bottom: 1px solid var(--line); border-radius: 10px 10px 0 0; }
+.entry-card .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.8em; background: var(--card); border: 1px solid var(--line); color: var(--fg); }
+.entry-card .chip.muted { color: var(--muted); }
+.entry-card .chip.ok { color: var(--ok); border-color: var(--ok); }
+.entry-card .entry-form { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 12px; }
+.entry-card .fgrid { display: grid; gap: 8px 12px; }
+.entry-card .fgrid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.entry-card .fgrid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) { .entry-card .fgrid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.entry-card .fgrid label, .entry-card .fgrid .lbl { display: flex; flex-direction: column; gap: 3px; font-size: 0.85em; color: var(--muted); min-width: 0; }
+.entry-card .fgrid label input, .entry-card .fgrid .secret input[type=password] { width: 100%; box-sizing: border-box; }
+.entry-card .fblock { border-top: 1px solid var(--line); padding-top: 10px; }
+.entry-card .ftitle { font-size: 0.82em; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.entry-card .ftitle .muted { text-transform: none; letter-spacing: 0; }
 .entry-card .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.entry-card .chips label { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 0.85em; cursor: pointer; }
+.entry-card .chips label { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 0.85em; cursor: pointer; background: var(--card); }
 .entry-card .chips input { accent-color: var(--accent); }
-.entry-card .subrow { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 6px; align-items: end; padding: 6px 0; border-top: 1px dashed var(--line); }
-.entry-card .subrow.head { border-top: 0; }
-.entry-card .subrow label { display: flex; flex-direction: column; gap: 2px; font-size: 0.82em; color: var(--muted); min-width: 0; }
-.entry-card .subrow .rm { font-size: 0.8em; color: var(--muted); white-space: nowrap; }
-.entry-card footer { display: flex; gap: 8px; align-items: center; margin-top: auto; padding-top: 6px; }
-.entry-card footer form { margin: 0; margin-left: auto; }
+.entry-card .secret { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.entry-card .secret .clear { display: inline-flex; align-items: center; gap: 3px; font-size: 0.8em; color: var(--muted); white-space: nowrap; }
+table.entry-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+table.entry-table th { text-align: left; font-weight: 500; color: var(--muted); padding: 2px 6px 4px 0; white-space: nowrap; }
+table.entry-table td { padding: 3px 6px 3px 0; vertical-align: middle; min-width: 0; }
+table.entry-table td.narrow { width: 90px; }
+table.entry-table td.rm { width: 1%; white-space: nowrap; color: var(--muted); font-size: 0.9em; }
+table.entry-table td.rm label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+table.entry-table td input[type=text], table.entry-table td input[type=password] { width: 100%; box-sizing: border-box; padding: 4px 7px; }
+table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-top: 6px; }
+table.entry-table.rates { max-width: 420px; }
+.entry-card details.multi.cell { font-size: 1em; color: var(--muted); }
+.entry-card details.multi.cell .summary-text { width: 100%; box-sizing: border-box; padding: 4px 7px; font-size: 1em; }
+.entry-card footer { display: flex; gap: 8px; align-items: center; padding-top: 4px; }
 .entry-card footer .entry-delete-button { margin-left: auto; }
 form.entry-delete { display: none; }
 .entry-card.new { border-style: dashed; background: transparent; }
-.entry-card.new > summary { cursor: pointer; list-style: none; color: var(--accent); font-weight: 600; padding: 4px 0; }
-.entry-card.new > summary::-webkit-details-marker { display: none; }
-.entry-card.new[open] > summary { color: var(--fg); margin-bottom: 6px; }
-.entry-card .set { color: var(--ok); font-size: 0.85em; }
-.entry-card .unset { color: var(--muted); font-size: 0.85em; }
+.entry-card.new > summary { color: var(--accent); font-weight: 600; }
+.entry-card.new > summary::before { content: ""; width: 0; }
+.panel-tools { font-size: 0.6em; font-weight: 400; margin-left: 10px; color: var(--muted); }
 details.advanced { margin-top: 12px; }
 details.advanced > summary { cursor: pointer; color: var(--muted); font-size: 0.9em; }
 details.advanced textarea { margin-top: 8px; }
@@ -513,10 +530,8 @@ details.multi.single .menu label:has(input:checked)::before { content: "✓"; po
 details.multi.inline { display: inline-block; vertical-align: middle; }
 details.multi.inline summary { flex-direction: row; align-items: center; gap: 6px; }
 .bulkbar details.multi .summary-text, .add-form details.multi .summary-text { padding: 4px 8px; }
-.entry-card details.multi.field { font-size: 0.85em; color: var(--muted); min-width: 0; }
-.entry-card details.multi.field summary { gap: 2px; }
+.entry-card details.multi.field { font-size: 1em; color: var(--muted); min-width: 0; }
 .entry-card details.multi.field .summary-text { font-size: 1em; width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: 6px; }
-.entry-card .subrow details.multi.field { min-width: 0; }
 table.activity { width: 100%; table-layout: auto; }
 
 /* ---- file drop zones (_dropzone.html): the page's own picker, click or drop ---- */

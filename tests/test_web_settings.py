@@ -411,6 +411,12 @@ class TestEntryCards:
         assert 'action="/settings/section/cards/entry"' in body and "+ Add card" in body
         assert 'action="/settings/section/cards/entry/0/delete"' in body
         assert 'action="/settings/section/cards"' in body and "Edit cards as JSON" in body
+        # entries are collapsible, keyed for the cookie, with a readable summary line
+        assert '<details class="entry-card" data-key="cards:0315">' in body
+        assert '<details class="entry-card" data-key="profiles:p1">' in body
+        assert 'data-expand="cards"' in body and 'data-collapse="cards"' in body
+        assert '<span class="chip">costco</span>' in body  # the profile's retailers, at a glance
+        assert "settings-open" in client.get("/static/settings.js").text
         assert "USB Prime Business" in body and 'value="0315"' in body
         assert "No warehouses yet." in body
         assert 'src="/static/settings.js' in body and 'id="settings-confirm"' in body
@@ -555,6 +561,7 @@ class TestEntryCards:
              "contains": ["suite 4", "dock"]}]}]
         body = client.get("/settings").text
         assert 'name="jig.1.label"' in body and 'placeholder="new jig"' in body
+        assert '<table class="entry-table">' in body and "BFMR-A" in body  # jigs are a table
         client.post("/settings/section/warehouses/entry/0", data={
             "buying_group": "BFMR", "jig.0.label": "BFMR-A", "jig.0.street": "13 Sample",
             "jig.0.__remove": "1", "jig.1.label": "B", "jig.1.zip": "99999"})

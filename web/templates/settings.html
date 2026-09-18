@@ -96,124 +96,163 @@ here, so keep the dashboard on loopback or your own network.</p>
       </div>
     </form>
 
-    {# ---- the list sections: one card per entry, a dashed card to add one ---- #}
-    {% macro secret_input(name, is_set, label) %}
-      <label>{{ label }}
-        <input type="password" name="{{ name }}" value="" autocomplete="new-password" placeholder="{{ '•••••••• (set; blank keeps it)' if is_set else '(not set)' }}">
-        {% if is_set %}<span class="small"><input type="checkbox" name="{{ name }}__clear" value="1"> clear</span>{% endif %}
-      </label>
-    {% endmacro %}
+    {# ---- the list sections: one collapsible entry per item, a dashed card to add one. An entry is a <details>
+       whose summary is the readable line (name + facts as chips); the form is inside. Sub-lists
+       (sign-ins, jigs, per-retailer rates) are small tables, one row each, the last row blank to
+       add one. settings.js remembers which entries are open in the `settings-open` cookie. ---- #}
+    {% macro secret_cell(name, is_set) -%}
+      <input type="password" name="{{ name }}" value="" autocomplete="new-password" placeholder="{{ '••••••••' if is_set else '(not set)' }}" title="{{ 'set; blank keeps it' if is_set else 'not set' }}">
+      {% if is_set %}<label class="clear" title="clear the stored value"><input type="checkbox" name="{{ name }}__clear" value="1"> clear</label>{% endif %}
+    {%- endmacro %}
 
     {% macro profile_fields(p) %}
-      <div class="grid2">
+      <div class="fgrid two">
         <label>Label <input type="text" name="label" value="{{ p.label if p else '' }}" required placeholder="profile-1"></label>
         <label>Browser-Use profile id <input type="text" name="profile_id" value="{{ p.profile_id if p else '' }}" class="mono"></label>
       </div>
-      <fieldset>
-        <legend>Logged into</legend>
+      <div class="fblock">
+        <div class="ftitle">Logged into</div>
         <div class="chips">
           {% for r in retailer_keys %}<label><input type="checkbox" name="retailers" value="{{ r }}" {{ 'checked' if p and r in p.retailers }}> {{ r }}</label>{% endfor %}
         </div>
-      </fieldset>
-      <fieldset>
-        <legend>Proxy <span class="muted">(blank host = no proxy)</span></legend>
-        <div class="grid2">
+      </div>
+      <div class="fblock">
+        <div class="ftitle">Proxy <span class="muted">— blank host = none</span></div>
+        <div class="fgrid four">
           <label>Host <input type="text" name="proxy_host" value="{{ p.proxy.host if p and p.proxy else '' }}"></label>
           <label>Port <input type="number" name="proxy_port" value="{{ p.proxy.port if p and p.proxy else '' }}"></label>
           <label>Username <input type="text" name="proxy_username" value="{{ p.proxy.username if p and p.proxy else '' }}"></label>
-          {{ secret_input('proxy_password', p and p.proxy and p.proxy.password_set, 'Password') }}
+          <label>Password <span class="secret">{{ secret_cell('proxy_password', p and p.proxy and p.proxy.password_set) }}</span></label>
         </div>
-      </fieldset>
-      <fieldset>
-        <legend>Unattended sign-in</legend>
-        {% if p %}{% for a in p.auth %}
-        <div class="subrow {{ 'head' if loop.first }}">
-          <label>{{ a.retailer }} · username <input type="text" name="auth.{{ a.retailer }}.username" value="{{ a.username }}"></label>
-          {{ secret_input('auth.' ~ a.retailer ~ '.password', a.password_set, 'password') }}
-          {{ secret_input('auth.' ~ a.retailer ~ '.totp_secret', a.totp_set, 'TOTP seed') }}
-          <label class="rm"><input type="checkbox" name="auth.{{ a.retailer }}.__remove" value="1"> remove</label>
-        </div>
-        {% endfor %}{% endif %}
-        <div class="subrow {{ 'head' if not p or not p.auth }}">
-          {% set have = (p.auth | map(attribute='retailer') | list) if p else [] %}
-          {{ choose('auth_new_retailer', [('', '— retailer —')] + (auth_retailers | reject('in', have) | list), '', 'add for', 'field') }}
-          <label>username <input type="text" name="auth_new_username"></label>
-          <label>password <input type="password" name="auth_new_password" autocomplete="new-password"></label>
-          <label>TOTP seed <input type="password" name="auth_new_totp_secret" autocomplete="new-password"></label>
-        </div>
-        <p class="muted small">Password sign-in with an authenticator-app seed, for bestbuy and amazon-business. Enrol the app, not SMS.</p>
-      </fieldset>
+      </div>
+      <div class="fblock">
+        <div class="ftitle">Unattended sign-in <span class="muted">— password + authenticator seed (bestbuy, amazon-business); enrol the app, not SMS</span></div>
+        <table class="entry-table">
+          <thead><tr><th>retailer</th><th>username</th><th>password</th><th>TOTP seed</th><th></th></tr></thead>
+          <tbody>
+            {% if p %}{% for a in p.auth %}
+            <tr>
+              <td class="mono">{{ a.retailer }}</td>
+              <td><input type="text" name="auth.{{ a.retailer }}.username" value="{{ a.username }}"></td>
+              <td><span class="secret">{{ secret_cell('auth.' ~ a.retailer ~ '.password', a.password_set) }}</span></td>
+              <td><span class="secret">{{ secret_cell('auth.' ~ a.retailer ~ '.totp_secret', a.totp_set) }}</span></td>
+              <td class="rm"><label title="remove this sign-in on save"><input type="checkbox" name="auth.{{ a.retailer }}.__remove" value="1"> remove</label></td>
+            </tr>
+            {% endfor %}{% endif %}
+            {% set have = (p.auth | map(attribute='retailer') | list) if p else [] %}
+            <tr class="new-row">
+              <td>{{ choose('auth_new_retailer', [('', '— add —')] + (auth_retailers | reject('in', have) | list), '', '', 'cell') }}</td>
+              <td><input type="text" name="auth_new_username" placeholder="username"></td>
+              <td><input type="password" name="auth_new_password" autocomplete="new-password" placeholder="password"></td>
+              <td><input type="password" name="auth_new_totp_secret" autocomplete="new-password" placeholder="TOTP seed"></td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     {% endmacro %}
 
     {% macro warehouse_fields(w) %}
-      <div class="grid1">
+      <div class="fgrid two">
         <label>Buying group <input type="text" name="buying_group" value="{{ w.buying_group if w else '' }}" required placeholder="BFMR — the value written to the ledger"></label>
       </div>
-      <fieldset>
-        <legend>Address jigs <span class="muted">(a jig matches when every filled field appears in the address)</span></legend>
-        {% set jigs = (w.jigs if w else []) + [{'label': '', 'street': '', 'zip': '', 'name_contains': '', 'contains': ''}] %}
-        {% for j in jigs %}
-        {% set i = loop.index0 %}
-        <div class="subrow {{ 'head' if loop.first }}">
-          <label>label <input type="text" name="jig.{{ i }}.label" value="{{ j.label }}" placeholder="{{ 'new jig' if loop.last else '' }}"></label>
-          <label>street <input type="text" name="jig.{{ i }}.street" value="{{ j.street }}"></label>
-          <label>zip <input type="text" name="jig.{{ i }}.zip" value="{{ j.zip }}"></label>
-          {% if not loop.last %}<label class="rm"><input type="checkbox" name="jig.{{ i }}.__remove" value="1"> remove</label>{% else %}<span></span>{% endif %}
-          <label>name contains <input type="text" name="jig.{{ i }}.name_contains" value="{{ j.name_contains }}"></label>
-          <label style="grid-column: span 2">also contains <input type="text" name="jig.{{ i }}.contains" value="{{ j.contains }}" placeholder="comma-separated extra substrings"></label>
-        </div>
-        {% endfor %}
-      </fieldset>
+      <div class="fblock">
+        <div class="ftitle">Address jigs <span class="muted">— a jig matches when every filled field appears in the address</span></div>
+        <table class="entry-table">
+          <thead><tr><th>label</th><th>street</th><th>zip</th><th>name contains</th><th>also contains</th><th></th></tr></thead>
+          <tbody>
+            {% set jigs = (w.jigs if w else []) + [{'label': '', 'street': '', 'zip': '', 'name_contains': '', 'contains': ''}] %}
+            {% for j in jigs %}
+            {% set i = loop.index0 %}
+            <tr class="{{ 'new-row' if loop.last }}">
+              <td><input type="text" name="jig.{{ i }}.label" value="{{ j.label }}" placeholder="{{ 'new jig' if loop.last else '' }}"></td>
+              <td><input type="text" name="jig.{{ i }}.street" value="{{ j.street }}"></td>
+              <td class="narrow"><input type="text" name="jig.{{ i }}.zip" value="{{ j.zip }}"></td>
+              <td><input type="text" name="jig.{{ i }}.name_contains" value="{{ j.name_contains }}"></td>
+              <td><input type="text" name="jig.{{ i }}.contains" value="{{ j.contains }}" placeholder="comma-separated"></td>
+              <td class="rm">{% if not loop.last %}<label title="remove this jig on save"><input type="checkbox" name="jig.{{ i }}.__remove" value="1"> remove</label>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     {% endmacro %}
 
     {% macro card_fields(c) %}
-      <div class="grid2">
+      <div class="fgrid four">
         <label>Name <input type="text" name="name" value="{{ c.name if c else '' }}" required placeholder="Chase Freedom Unlimited"></label>
         <label>Last 4 <input type="text" name="last4" value="{{ c.last4 if c else '' }}" required maxlength="4" pattern="[0-9]{4}" class="mono"></label>
-        <label>Cashback rate <input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="0.02 or 2% (blank = the default rate)"></label>
-        {{ choose('profile', [('', 'any account')] + (profile_labels | list), c.profile if c else '', 'Only for profile', 'field') }}
+        <label>Cashback rate <input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="0.02 or 2%"></label>
+        <span class="lbl">Only for profile {{ choose('profile', [('', 'any account')] + (profile_labels | list), c.profile if c else '', '', 'field') }}</span>
       </div>
-      <fieldset>
-        <legend>Per-retailer rates <span class="muted">(override the card's rate at one retailer)</span></legend>
-        {% set pairs = (c.retailer_rates if c else []) + [('', '')] %}
-        {% for retailer, rate in pairs %}
-        <div class="subrow {{ 'head' if loop.first }}">
-          {% set keys = (retailer_keys | list) + ([retailer] if retailer and retailer not in retailer_keys else []) %}
-          {{ choose('rate.' ~ loop.index0 ~ '.retailer', [('', '— add —' if loop.last else '— remove —')] + keys, retailer, 'retailer', 'field') }}
-          <label>rate <input type="text" name="rate.{{ loop.index0 }}.rate" value="{{ rate }}" placeholder="5%"></label>
-          <span></span><span></span>
-        </div>
-        {% endfor %}
-      </fieldset>
+      <div class="fblock">
+        <div class="ftitle">Per-retailer rates <span class="muted">— override the card's rate at one retailer; blank the retailer to drop a row</span></div>
+        <table class="entry-table rates">
+          <thead><tr><th>retailer</th><th>rate</th></tr></thead>
+          <tbody>
+            {% set pairs = (c.retailer_rates if c else []) + [('', '')] %}
+            {% for retailer, rate in pairs %}
+            {% set keys = (retailer_keys | list) + ([retailer] if retailer and retailer not in retailer_keys else []) %}
+            <tr class="{{ 'new-row' if loop.last }}">
+              <td>{{ choose('rate.' ~ loop.index0 ~ '.retailer', [('', '— add —' if loop.last else '— remove —')] + keys, retailer, '', 'cell') }}</td>
+              <td class="narrow"><input type="text" name="rate.{{ loop.index0 }}.rate" value="{{ rate }}" placeholder="5%"></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endmacro %}
+
+    {% macro entry_summary(path, e) %}
+      {% if path == 'profiles' %}
+        <strong>{{ e.label or '(unlabelled)' }}</strong>
+        {% for r in e.retailers %}<span class="chip">{{ r }}</span>{% endfor %}
+        {% if not e.retailers %}<span class="chip muted">no retailers</span>{% endif %}
+        {% if e.proxy %}<span class="chip">proxy</span>{% endif %}
+        {% for a in e.auth %}<span class="chip ok">sign-in: {{ a.retailer }}</span>{% endfor %}
+      {% elif path == 'warehouses' %}
+        <strong>{{ e.buying_group or '(unnamed)' }}</strong>
+        <span class="chip">{{ e.jigs | length }} jig(s)</span>
+        {% for j in e.jigs[:4] %}<span class="chip muted">{{ j.label or j.street or j.zip }}</span>{% endfor %}
+        {% if e.jigs | length > 4 %}<span class="chip muted">+{{ e.jigs | length - 4 }}</span>{% endif %}
+      {% else %}
+        <strong>{{ e.name or '(unnamed)' }}</strong> <span class="mono muted">…{{ e.last4 }}</span>
+        <span class="chip">{{ e.cashback_rate if e.cashback_rate != '' else 'default rate' }}</span>
+        {% for r, rate in e.retailer_rates %}<span class="chip muted">{{ r }} {{ rate }}</span>{% endfor %}
+        {% if e.profile %}<span class="chip">{{ e.profile }}</span>{% endif %}
+      {% endif %}
     {% endmacro %}
 
     {% macro entry_section(path, singular, items, fields) %}
     {% set title, blurb = section_title(path) %}
     <section class="panel" id="s-{{ path }}">
-      <header><h2>{{ title }} <span class="muted small">{{ items | length }}</span></h2><p class="muted">{{ blurb }}</p></header>
-      <div class="entry-cards">
+      <header>
+        <h2>{{ title }} <span class="muted small">{{ items | length }}</span>
+          <span class="panel-tools"><a href="#" class="small" data-expand="{{ path }}">expand all</a> · <a href="#" class="small" data-collapse="{{ path }}">collapse all</a></span>
+        </h2>
+        <p class="muted">{{ blurb }}</p>
+      </header>
+      <div class="entry-list" data-section="{{ path }}">
         {% for e in items %}
-        <form method="post" action="/settings/section/{{ path }}/entry/{{ e.index }}" class="entry-card" autocomplete="off">
-          <header>
-            <h3>{% if path == 'profiles' %}{{ e.label or '(unlabelled)' }}{% elif path == 'warehouses' %}{{ e.buying_group or '(unnamed)' }}{% else %}{{ e.name or '(unnamed)' }} <span class="mono muted">…{{ e.last4 }}</span>{% endif %}</h3>
-            {% if path == 'profiles' %}<span class="muted small">{{ e.retailers | join(', ') or 'no retailers' }}{% if e.proxy %} · proxy{% endif %}{% if e.auth %} · sign-in: {{ e.auth | map(attribute='retailer') | join(', ') }}{% endif %}</span>
-            {% elif path == 'warehouses' %}<span class="muted small">{{ e.jigs | length }} jig(s)</span>
-            {% else %}<span class="muted small">{{ e.cashback_rate or 'default rate' }}{% if e.profile %} · {{ e.profile }}{% endif %}</span>{% endif %}
-          </header>
-          {{ fields(e) }}
-          <footer>
-            <button type="submit" class="small primary">Save {{ singular }}</button>
-            <button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="remove this {{ singular }} from config.json">✕ Remove</button>
-          </footer>
-        </form>
-        <form method="post" id="del-{{ path }}-{{ e.index }}" action="/settings/section/{{ path }}/entry/{{ e.index }}/delete" class="entry-delete" hidden
-              data-confirm="Remove {{ singular }} {% if path == 'profiles' %}{{ e.label }}{% elif path == 'warehouses' %}{{ e.buying_group }}{% else %}{{ e.name }} …{{ e.last4 }}{% endif %} from config.json?"></form>
+        {% set key = path ~ ':' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else e.last4)) %}
+        <details class="entry-card" data-key="{{ key }}">
+          <summary>{{ entry_summary(path, e) }}</summary>
+          <form method="post" action="/settings/section/{{ path }}/entry/{{ e.index }}" class="entry-form" autocomplete="off">
+            {{ fields(e) }}
+            <footer>
+              <button type="submit" class="small primary">Save {{ singular }}</button>
+              <button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="remove this {{ singular }} from config.json">✕ Remove</button>
+            </footer>
+          </form>
+          <form method="post" id="del-{{ path }}-{{ e.index }}" action="/settings/section/{{ path }}/entry/{{ e.index }}/delete" class="entry-delete" hidden
+                data-confirm="Remove {{ singular }} {% if path == 'profiles' %}{{ e.label }}{% elif path == 'warehouses' %}{{ e.buying_group }}{% else %}{{ e.name }} …{{ e.last4 }}{% endif %} from config.json?"></form>
+        </details>
         {% else %}
         <p class="settings-empty">No {{ path }} yet.</p>
         {% endfor %}
         <details class="entry-card new" {{ 'open' if open_section == path }}>
           <summary>+ Add {{ singular }}</summary>
-          <form method="post" action="/settings/section/{{ path }}/entry" autocomplete="off">
+          <form method="post" action="/settings/section/{{ path }}/entry" class="entry-form" autocomplete="off">
             {{ fields(none) }}
             <footer><button type="submit" class="small primary">Add {{ singular }}</button></footer>
           </form>
