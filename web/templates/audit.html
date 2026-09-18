@@ -1,0 +1,46 @@
+{% extends "orders.html" %}
+{# The Audit page: scripts/audit_sheet's checks over the ledger, the affected rows in the Orders
+   view with a Finding column (web/audit_view.py). The lead is the checks' summary; the extra
+   filter picks which checks' rows to show. #}
+{% block title %}Audit{% endblock %}
+{% block heading %}<h1>Audit</h1>{% endblock %}
+{% block lead %}
+{% set counts = audit.counts() %}
+<div class="lead">
+  <p class="muted small">Every check of <span class="mono">scripts.audit_sheet</span> run against the ledger this page serves{% if not audit.sheet_checks %} (the Google Sheet checks — formulas, formats — are skipped: {{ 'the ledger is the database' if backend == 'db' else 'a CSV snapshot has no formulas or formats' }}){% endif %}. Below: every row a check named, with the finding beside it. Pick checks to narrow the rows; the filters, sort and search work as on Orders.</p>
+  <section class="tiles stats">
+    <div class="tile {{ 'warn' if counts.FAIL }}"><div class="label">Failing checks</div><div class="value">{{ counts.FAIL }}</div><div class="hint">of {{ audit.results | length }}</div></div>
+    <div class="tile"><div class="label">Warnings</div><div class="value">{{ counts.WARN }}</div><div class="hint">worth a look</div></div>
+    <div class="tile"><div class="label">Rows flagged</div><div class="value">{{ audit.by_key | length }}</div><div class="hint">{{ audit.flagged_checks | length }} check(s) name rows</div></div>
+    <div class="tile"><div class="label">Passing</div><div class="value">{{ counts.PASS }}</div><div class="hint">{{ counts.SKIP }} skipped</div></div>
+  </section>
+  <details class="audit-results" {{ 'open' if counts.FAIL or counts.WARN }}>
+    <summary>All checks — {{ counts.FAIL }} fail, {{ counts.WARN }} warn, {{ counts.PASS }} pass, {{ counts.SKIP }} skipped</summary>
+    <table class="audit">
+      <thead><tr><th>Check</th><th>Status</th><th>What it found</th><th class="n">Rows</th></tr></thead>
+      <tbody>
+      {% for c in audit.checks %}
+        <tr class="{{ c.status | lower }}">
+          <td class="mono">{% if c.rows %}<a href="/audit?check={{ c.name }}" class="{{ 'current' if c.name in checks }}">{{ c.name }}</a>{% else %}{{ c.name }}{% endif %}</td>
+          <td><span class="tag {{ c.status | lower }}">{{ c.status }}</span></td>
+          <td>{{ c.summary }}{% for note in c.notes %}<span class="note">{{ note }}</span>{% endfor %}</td>
+          <td class="n">{% if c.rows %}{{ c.rows }}{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</div>
+{% endblock %}
+{% block extra_filters %}
+  {% set flagged = audit.flagged_checks %}
+  <details class="multi" data-param="check">
+    <summary><span class="lbl">Check</span> <span class="summary-text"><span class="summary-value">{{ 'all' if not checks else (checks | join(', ') if checks | length <= 1 else (checks | length) ~ ' selected') }}</span><span class="caret">▾</span></span></summary>
+    <div class="menu">
+      <label class="all"><input type="checkbox" class="all-box" {{ 'checked' if not checks }}> All</label>
+      {% for name in flagged %}
+      <label><input type="checkbox" name="check" value="{{ name }}" {{ 'checked' if name in checks }}> {{ name }}</label>
+      {% endfor %}
+    </div>
+  </details>
+{% endblock %}

@@ -30,11 +30,14 @@
         <dt>Group</dt><dd>{{ c.buying_group }}</dd>
         <dt>Qty</dt><dd>{{ c.quantity }}</dd>
         <dt>Cost</dt><dd class="num">{{ c.total_cost | money }}</dd>
-        <dt>Payout</dt><dd class="num">{{ c.payout | money }}{% if c.payout_state == 'committed' %} <span class="tag committed">proj.</span>{% elif c.payout_state == 'partly settled' %} <span class="tag committed">part</span>{% endif %}</dd>
+        <dt>Payout</dt><dd class="num">{% if c.payout_state == 'committed' %}{{ (c.expected or c.payout) | money }} <span class="tag committed" title="what the buying group committed to pay; not paid yet">proj.</span>{% else %}{{ c.payout | money }}{% if c.payout_state == 'partly settled' %} <span class="tag committed">part</span>{% endif %}{% endif %}</dd>
         <dt>Profit</dt><dd class="num {{ 'neg' if c.profit is not none and c.profit < 0 else ('pos' if c.profit is not none and c.profit > 0) }}">{{ c.profit | money }}</dd>
         {% if c.tracking %}<dt>Tracking</dt><dd class="mono small">{{ c.tracking | join(', ') }}</dd>{% endif %}
         {% if c.card %}<dt>Card</dt><dd>{{ c.card }}</dd>{% endif %}
       </dl>
+      {% if findings is not none and findings_by_order.get(c.order_id) %}
+      <div class="finding">{% for label, line in findings_by_order[c.order_id] %}<div><b>{{ label }}</b> {{ line }}</div>{% endfor %}</div>
+      {% endif %}
       {% if editable %}
       <details class="card-edit">
         <summary class="muted small">edit rows <span class="row-count">· {{ c.rows }} row(s)</span></summary>
@@ -70,19 +73,19 @@
       </footer>
     </article>
     {% else %}
-    <p class="muted">No orders match.</p>
+    <p class="muted">{{ 'Nothing to show.' if scope else 'No orders match.' }}</p>
     {% endfor %}
   </div>
   {% if pager.pages > 1 %}
   <nav class="pager" aria-label="pages">
-    <a class="{{ '' if pager.has_prev else 'disabled' }}" href="/orders?{{ filters.as_query(page=(pager.page - 1) if pager.has_prev else 1) | query }}"
-       hx-get="/orders?{{ filters.as_query(page=(pager.page - 1) if pager.has_prev else 1) | query }}" hx-target="#orders-table" hx-push-url="true">‹ prev</a>
+    <a class="{{ '' if pager.has_prev else 'disabled' }}" href="{{ base }}?{{ filters.as_query(page=(pager.page - 1) if pager.has_prev else 1) | query }}"
+       hx-get="{{ base }}?{{ filters.as_query(page=(pager.page - 1) if pager.has_prev else 1) | query }}" hx-target="#orders-table" hx-push-url="true">‹ prev</a>
     {% for n in pager.window %}
-    <a class="{{ 'current' if n == pager.page }}" href="/orders?{{ filters.as_query(page=n) | query }}"
-       hx-get="/orders?{{ filters.as_query(page=n) | query }}" hx-target="#orders-table" hx-push-url="true">{{ n }}</a>
+    <a class="{{ 'current' if n == pager.page }}" href="{{ base }}?{{ filters.as_query(page=n) | query }}"
+       hx-get="{{ base }}?{{ filters.as_query(page=n) | query }}" hx-target="#orders-table" hx-push-url="true">{{ n }}</a>
     {% endfor %}
-    <a class="{{ '' if pager.has_next else 'disabled' }}" href="/orders?{{ filters.as_query(page=(pager.page + 1) if pager.has_next else pager.pages) | query }}"
-       hx-get="/orders?{{ filters.as_query(page=(pager.page + 1) if pager.has_next else pager.pages) | query }}" hx-target="#orders-table" hx-push-url="true">next ›</a>
+    <a class="{{ '' if pager.has_next else 'disabled' }}" href="{{ base }}?{{ filters.as_query(page=(pager.page + 1) if pager.has_next else pager.pages) | query }}"
+       hx-get="{{ base }}?{{ filters.as_query(page=(pager.page + 1) if pager.has_next else pager.pages) | query }}" hx-target="#orders-table" hx-push-url="true">next ›</a>
     <span class="muted small">page {{ pager.page }} of {{ pager.pages }}</span>
   </nav>
   {% endif %}

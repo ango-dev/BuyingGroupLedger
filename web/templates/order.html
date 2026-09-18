@@ -35,7 +35,7 @@
   <div class="tile"><div class="label">Insurance</div><div class="value money">{{ order.totals.insurance | money }}</div></div>
   <div class="tile payout-{{ order.payout_state | replace(' ', '-') }}">
     <div class="label">Payout Amount</div>
-    <div class="value money">{{ order.totals.payout | money }}</div>
+    <div class="value money">{{ (order.totals.expected if order.payout_state == 'committed' and order.totals.expected else order.totals.payout) | money }}</div>
     <div class="hint">
       {% if order.payout_state == 'settled' %}settled{% if order.payout_dates %} on {{ order.payout_dates | join(', ') }}{% endif %}
       {% elif order.payout_state == 'partly settled' %}partly settled ({{ order.payout_dates | join(', ') }}); the rest is a commitment
@@ -43,6 +43,9 @@
       {% else %}no payout recorded{% endif %}
     </div>
   </div>
+  {% if order.totals.expected and order.payout_state != 'committed' %}
+  <div class="tile payout-committed"><div class="label">Expected Payout</div><div class="value money">{{ order.totals.expected | money }}</div><div class="hint">what the buying group committed to{% if (order.totals.payout - order.totals.expected) | abs > 0.02 %}; paid {{ order.totals.payout | money }}{% endif %}</div></div>
+  {% endif %}
   <div class="tile"><div class="label">{{ 'Projected' if order.payout_state == 'committed' else 'Total' }} Profit</div><div class="value money">{{ order.totals.profit | money }}</div></div>
 </section>
 

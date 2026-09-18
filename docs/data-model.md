@@ -18,7 +18,8 @@ rarely-scanned reference/audit columns parked at the end:
 Order ID · Tracking Number · Tracking Submitted · Delivery Date · Buying Group ·
 Cost Per Item · Total Cost · Shipping · Sales Tax · Gift Card · Rewards Used · Card · Cashback Rate · COGS ·
 Insurance · Payout Amount · Payout Date · Return Qty · Return Date · Total Profit ·
-Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Package ID · Last Scraped At`
+Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Package ID · Last Scraped At ·
+Expected Payout`
 
 **Package ID** (column 33, beside Card Last 4) is the retailer's *own* identity for the physical package a row belongs
 to: Amazon's `shipmentId` (read from the card's "Track package" link, or from the "View your item"
@@ -31,19 +32,25 @@ its own row however Amazon re-orders its cards; a multi-SKU carton shares one id
 is told apart by item name. A blank id never blocks a match. `audit_sheet`'s
 `package_id_per_shipment` fails if one id ever sits under two Shipment numbers of one order.
 
-**Payout Amount holds two kinds of number since 2026-09-11.** While a BFMR package is **open**, the
-sync fills the cell with the payout price BFMR has **committed** to (`payout_price`/`total_payout`,
-on its tracker from the moment a purchase exists — before shipping, before payment), prorated by
-Total Cost like a real payout. **Payout Date stays blank**, and the blank date beside a non-terminal
-Status is what marks the figure as a commitment rather than money received — so Total Profit shows
-the *projected* profit on open BFMR rows, deliberately. When BFMR **changes** the committed price,
-the cells are rewritten to the new figure and an alert names old → new; when the package **settles**,
-the real amount, Payout Date and `paid` status overwrite the commitment exactly as before, and a
-settled amount that disagrees with the commitment is alerted once, on the run that writes it. MOD
-publishes no price through its API, so MOD cells stay blank until MOD actually pays. Anything
-keyed on "has this been paid?" reads the **(Payout Date, Status)** pair, never the amount alone —
-the cash-basis tax report already keys income on Payout Date, and the audit's straddle line
-(`cogs_inputs_complete`) counts a dated-or-`paid` payout as settled.
+**Expected Payout (column 35, since 2026-09-18) is the buying group's COMMITMENT; Payout Amount
+is the money.** While a BFMR package is **open**, the sync fills Expected Payout with the payout
+price BFMR has committed to (`payout_price`/`total_payout`, on its tracker from the moment a
+purchase exists — before shipping, before payment), prorated by Total Cost like a real payout.
+Payout Amount stays blank until the package **settles**, when the real amount, Payout Date and
+`paid` status land; the commitment is left where it is, so the two figures sit side by side and
+the dashboard's **Reconciliation** page can list every order paid more or less than promised.
+When BFMR **changes** the committed price, Expected Payout is rewritten to the new figure and an
+alert names old → new; a settled amount that disagrees with the commitment is alerted once, on
+the run that writes it. MOD publishes no price through its API, so its Expected Payout stays
+blank and its orders are never "reconciled". Total Profit is blank until Payout Amount is filled
+(the formula never sees a commitment); the dashboard shows the *projected* profit (Expected Payout
+− COGS − Insurance) on committed rows instead. Anything keyed on "has this been paid?" reads the
+**(Payout Date, Status)** pair — the cash-basis tax report keys income on Payout Date, the audit's
+straddle line (`cogs_inputs_complete`) counts a dated-or-`paid` payout as settled. *From
+2026-09-11 to 2026-09-18 the commitment shared the Payout Amount cell with a blank date;
+`python -m scripts.migrate_expected_payout --apply` (also under Tools → Ledger Fixes) moves the
+open rows' commitments into the new column once, and a ledger still holding that shape reads
+correctly on the dashboard in the meantime.*
 
 > **Changing the column order is a MIGRATION, not an edit**, and it takes two steps.
 > `python -m scripts.reorder_sheet --apply` moves the row *values*; `python -m

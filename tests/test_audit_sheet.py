@@ -161,6 +161,7 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
         "Sales Tax": Cell("", fmt="currency"),
         "Rewards Used": Cell("", fmt="currency"),
         "Package ID": Cell(""),
+        "Expected Payout": Cell("", fmt="currency"),
         "Receipt Link": Cell(
             "https://objectstorage.us-ashburn-1.oraclecloud.com/p/tok/n/ns/b/bkt/o/"
             f"receipts/bestbuy/2026-08/BBY01-{row_number:09d}.pdf"

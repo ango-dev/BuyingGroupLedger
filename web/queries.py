@@ -17,13 +17,13 @@ TABLE_COLUMNS = tuple(FIELDNAMES)
 LINK_FIELDS = ("order_url", "tracking_url", "receipt_url")
 #: Right-aligned, money-formatted.
 MONEY_FIELDS = ("cost_per_item", "total_cost", "shipping", "sales_tax", "gift_card", "rewards_used",
-                "cogs", "insurance", "payout_amount", "total_profit")
+                "cogs", "insurance", "payout_amount", "total_profit", "expected_payout")
 
 #: Sorted as numbers (blank last), everything else as text.
 NUMERIC_SORT = {
     "quantity", "shipment", "total_cost", "cost_per_item", "shipping", "sales_tax", "gift_card",
     "rewards_used", "cashback_rate", "cogs", "insurance", "payout_amount", "return_quantity",
-    "total_profit",
+    "total_profit", "expected_payout",
 }
 
 #: Which fields a free-text search looks in.
@@ -33,17 +33,17 @@ SEARCH_FIELDS = ("order_id", "item_name", "tracking_number", "package_id", "card
 DEFAULT_SORT = "order_date"
 #: The columns a card's per-row mini-table shows (the same editable cells as the big table).
 CARD_COLUMNS = ("item_name", "shipment", "status", "quantity", "tracking_number", "delivery_date",
-                "insurance", "payout_amount", "payout_date", "total_profit", "delivery_address",
+                "insurance", "expected_payout", "payout_amount", "payout_date", "total_profit", "delivery_address",
                 "order_url", "tracking_url", "receipt_url")
 #: The columns an order page's shipment tables show, every one through the same editable cell.
 ORDER_COLUMNS = ("item_name", "status", "quantity", "cost_per_item", "total_cost", "shipping",
                  "sales_tax", "gift_card", "rewards_used", "cashback_rate", "cogs", "insurance",
-                 "payout_amount", "payout_date", "return_quantity", "return_date", "total_profit",
+                 "expected_payout", "payout_amount", "payout_date", "return_quantity", "return_date", "total_profit",
                  "tracking_number", "delivery_date", "package_id", "buying_group", "card_last4")
 #: What the cards view can sort by (the table sorts by any column header).
 SORT_CHOICES = tuple((f, FIELD_TO_HEADER[f]) for f in (
     "order_date", "order_id", "status", "retailer", "buying_group", "item_name", "delivery_date",
-    "total_cost", "payout_amount", "payout_date", "total_profit", "last_scraped_at"))
+    "total_cost", "expected_payout", "payout_amount", "payout_date", "total_profit", "last_scraped_at"))
 #: The two ways the Orders page shows the ledger: the sheet-like table, or one card per ORDER.
 VIEWS = ("table", "cards")
 PER_PAGE_CHOICES = (12, 24, 48, 96)
@@ -321,7 +321,9 @@ def order_view(rows: list[LedgerRow]) -> dict | None:
             "cogs": round(sum(r.cogs or 0.0 for r in money_rows if r.cogs is not None), 2),
             "insurance": round(sum(r.number("insurance") or 0.0 for r in money_rows), 2),
             "payout": round(sum(r.payout_amount or 0.0 for r in money_rows), 2),
-            "profit": round(sum(r.profit or 0.0 for r in money_rows if r.profit is not None), 2),
+            "expected": round(sum(r.expected_payout or 0.0 for r in money_rows), 2),
+            "profit": round(sum(r.profit_or_projected or 0.0 for r in money_rows
+                                if r.profit_or_projected is not None), 2),
         },
         "payout_state": payout_state,
         "payout_dates": unique("payout_date"),
@@ -346,7 +348,7 @@ def order_cards(rows: list[LedgerRow]) -> list[dict]:
                 "order_id": row.order_id, "order_date": row.order_date, "retailer": row.retailer,
                 "profile": row.profile, "buying_group": row.buying_group or "(blank)",
                 "statuses": [], "items": [], "tracking": [], "keys": [], "rows": 0,
-                "quantity": 0, "total_cost": 0.0, "payout": 0.0, "profit": 0.0,
+                "quantity": 0, "total_cost": 0.0, "payout": 0.0, "expected": 0.0, "profit": 0.0,
                 "has_profit": False, "payout_states": set(), "receipt_urls": [],
                 "order_url": row.text("order_url"), "card": row.text("card_name"),
                 "row_objs": [], "item_lines": [],
@@ -375,8 +377,9 @@ def order_cards(rows: list[LedgerRow]) -> list[dict]:
             card["quantity"] += int(row.number("quantity") or 0)
             card["total_cost"] += row.total_cost or 0.0
             card["payout"] += row.payout_amount or 0.0
-            if row.profit is not None:
-                card["profit"] += row.profit
+            card["expected"] += row.expected_payout or 0.0
+            if row.profit_or_projected is not None:
+                card["profit"] += row.profit_or_projected
                 card["has_profit"] = True
             card["payout_states"].add(row.payout_state)
         receipt = row.text("receipt_url")
@@ -395,6 +398,7 @@ def order_cards(rows: list[LedgerRow]) -> list[dict]:
             card["payout_state"] = "none"
         card["total_cost"] = round(card["total_cost"], 2)
         card["payout"] = round(card["payout"], 2)
+        card["expected"] = round(card["expected"], 2)
         card["profit"] = round(card["profit"], 2) if card["has_profit"] else None
         card["is_open"] = any(s in ("ordered", "shipped", "delivered") for s in card["statuses"])
         out.append(card)

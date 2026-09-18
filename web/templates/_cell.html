@@ -21,7 +21,9 @@
     {%- elif col == 'tracking_submitted' -%}
       <span class="check">{{ '☑' if row.tracking_submitted else '☐' }}</span>
     {%- elif col == 'payout_amount' -%}
-      {{ text }}{% if row.is_committed %} <span class="tag committed" title="committed by the buying group, not yet paid">proj.</span>{% endif %}
+      {{ text }}{% if row.is_committed and raw %} <span class="tag committed" title="committed by the buying group, not yet paid">proj.</span>{% endif %}
+    {%- elif col == 'expected_payout' -%}
+      {{ text }}{% if row.is_committed and raw %} <span class="tag committed" title="what the buying group committed to pay; not paid yet">proj.</span>{% endif %}
     {%- else -%}
       {{ text }}
     {%- endif -%}

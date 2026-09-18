@@ -161,11 +161,15 @@ TOOLS: tuple[Tool, ...] = (
          "Copy the (deprecated) Google Sheet into data/ledger.sqlite3. Under the db backend this REPLACES the ledger and needs Force.",
          "Google Sheet", (Field("--force", "Force", "flag", "replace the ledger with the Sheet's copy"),),
          writes=True, sheet_only=False),
-    Tool("audit_sheet", "scripts.audit_sheet", "Audit the Sheet",
-         "The read-only invariant audit of the Google Sheet (formulas, formats, keys). Sheet backend only.",
-         "Google Sheet", (Field("--stale-days", "Stale after (days)", "int", default="3"),
-                          Field("--strict", "Strict", "flag")),
-         sheet_only=True),
+    Tool("audit_sheet", "scripts.audit_sheet", "Audit the ledger",
+         "The read-only invariant audit: keys, money, missing mandatory cells, staleness. Under the database "
+         "backend the Google Sheet checks (formulas, formats) are skipped. The Audit page shows the same findings by row.",
+         "Checks", (Field("--stale-days", "Stale after (days)", "int", default="3"),
+                    Field("--strict", "Strict", "flag"))),
+    Tool("migrate_expected_payout", "scripts.migrate_expected_payout", "Move commitments to Expected Payout",
+         "One-time, after the 2026-09-18 column: move each open row's committed payout out of Payout Amount into "
+         "Expected Payout, so the Reconciliation page can compare the promise with the payment.",
+         "Ledger Fixes", (APPLY,), writes=True),
 )
 
 GROUPS = ("Accounts", "Checks", "Ledger Fixes", "Google Sheet")

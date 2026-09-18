@@ -212,6 +212,13 @@ FIELDNAMES = [
     # match.
     "package_id",
     "last_scraped_at",
+    # The buying group's COMMITTED payout for this row: BFMR's tracker price, prorated by Total
+    # Cost, written by sync_tracking the moment the purchase links the order and left alone once
+    # the row settles -- so the dashboard's Reconciliation page can compare what was PAID (Payout
+    # Amount) with what was PROMISED. Column 35, appended last (2026-09-18; the design parked in
+    # the design notes since 2026-09-11, built now that the Sheet is deprecated and the web UI needs the two
+    # figures apart). Always blank from a scraper; excluded from both formulas.
+    "expected_payout",
 ]
 
 
@@ -244,6 +251,8 @@ class OrderItem(BaseModel):
     insurance: float | None = None
     payout_date: str = ""
     payout_amount: float | None = None
+    # The group's committed payout (see FIELDNAMES). Filled by sync_tracking, never by a scraper.
+    expected_payout: float | None = None
     # Always blank from here; sheets.ledger_sync writes a live formula into the cell instead.
     # Both are DERIVED IN THE SHEET (live formulas) and always emitted blank from here — they
     # exist on the model only so FIELDNAMES can name real fields and the columns hold their
@@ -289,7 +298,7 @@ class OrderItem(BaseModel):
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
                      "cashback_rate", "insurance", "payout_amount", "cogs", "total_profit",
                      "return_quantity", "gift_card", "sales_tax", "rewards_used",
-                     mode="before")
+                     "expected_payout", mode="before")
     @classmethod
     def _blank_to_none(cls, v):
         # A scraper may send "" (or whitespace) for numbers it skipped — treat as None, not 0.

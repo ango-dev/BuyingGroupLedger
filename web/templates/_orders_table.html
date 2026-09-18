@@ -13,12 +13,13 @@
   <thead>
     <tr>
       <th class="rownum" title="{{ 'select / unselect every row shown' if editable else '' }}">{% if editable %}<input type="checkbox" id="sel-all" hidden aria-label="select all">{% endif %}#</th>
+      {% if findings is not none %}<th class="col-finding">Finding</th>{% endif %}
       {% for name, heading in columns %}
       {% set active = filters.sort == name %}
       {% set next_dir = 'asc' if (active and filters.desc) else 'desc' %}
       <th class="col-{{ name }} {{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }} {{ 'sorted' if active }}">
-        <a href="/orders?{{ filters.as_query(sort=name, dir=next_dir) | query }}"
-           hx-get="/orders?{{ filters.as_query(sort=name, dir=next_dir) | query }}"
+        <a href="{{ base }}?{{ filters.as_query(sort=name, dir=next_dir) | query }}"
+           hx-get="{{ base }}?{{ filters.as_query(sort=name, dir=next_dir) | query }}"
            hx-target="#orders-table" hx-push-url="true">{{ heading }}{% if active %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a>
       </th>
       {% endfor %}
@@ -29,12 +30,13 @@
     {% set key = {'order_id': row.order_id, 'order_date': row.order_date, 'item_name': row.item_name, 'shipment': row.shipment} %}
     <tr class="status-{{ row.status }} payout-{{ row.payout_state }}">
       <td class="rownum muted" title="sheet row {{ row.row_number }}{{ ' — click to select' if editable }}">{% if editable %}<input type="checkbox" name="sel" value="{{ key | tojson | forceescape }}" hidden aria-label="select row {{ row.row_number }}">{% endif %}{{ row.row_number }}</td>
+      {% if findings is not none %}<td class="finding">{% for label, line in findings.get(row_key(row), []) %}<div><b>{{ label }}</b> {{ line }}</div>{% endfor %}</td>{% endif %}
       {% for name, heading in columns %}
         {% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}
       {% endfor %}
     </tr>
     {% else %}
-    <tr><td colspan="{{ columns | length + 1 }}" class="muted">No rows match.</td></tr>
+    <tr><td colspan="{{ columns | length + (2 if findings is not none else 1) }}" class="muted">{{ 'Nothing to show.' if scope else 'No rows match.' }}</td></tr>
     {% endfor %}
   </tbody>
 </table>

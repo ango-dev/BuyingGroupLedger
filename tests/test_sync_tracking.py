@@ -13,6 +13,7 @@ from buying_groups.base import PayoutRecord, SubmissionResult
 from models.order import STATUSES
 from sheets.ledger_sync import HEADER
 from sync_tracking import (
+    EXPECTED_PAYOUT_COL,
     INSURANCE_COL,
     PAYOUT_AMOUNT_COL,
     PAYOUT_DATE_COL,
@@ -1044,12 +1045,22 @@ class TestExpectedPayoutPlanning:
 
     def test_a_tracked_row_carries_its_recorded_commitment_and_settlement_state(self):
         plan = plan_tracking_submissions(HEADER_LIST, [
-            shipped("O1", "T1", **{PAYOUT_AMOUNT_COL: 500}),
-            shipped("O2", "T2", **{PAYOUT_AMOUNT_COL: 97, PAYOUT_DATE_COL: "2026-09-01"}),
+            shipped("O1", "T1", **{EXPECTED_PAYOUT_COL: 500}),
+            shipped("O2", "T2", **{PAYOUT_AMOUNT_COL: 97, PAYOUT_DATE_COL: "2026-09-01",
+                                   EXPECTED_PAYOUT_COL: 100}),
         ])
-        assert plan["payout_by_row"][2] == 500.0, "the recorded commitment is the baseline"
+        assert plan["expected_by_row"][2] == 500.0, "the recorded commitment is the baseline"
+        assert plan["payout_by_row"][2] is None
         assert plan["date_by_row"][2] == ""
         assert plan["date_by_row"][3] == "2026-09-01", "a dated payout is settled money"
+        assert plan["expected_by_row"][3] == 100.0 and plan["payout_by_row"][3] == 97.0
+
+    def test_a_sheet_from_before_the_column_reads_no_commitment_and_still_syncs(self):
+        header = [h for h in HEADER_LIST if h != EXPECTED_PAYOUT_COL]
+        rows = [shipped("O1", "T1")[: len(header)]]
+        plan = plan_tracking_submissions(header, rows)
+        assert plan["expected_by_row"][2] is None
+        assert [s.order_id for s in plan["by_group"]["BFMR"]] == ["O1"]
 
     def test_retired_and_cancelled_rows_stay_out_of_the_order_index(self):
         plan = plan_tracking_submissions(HEADER_LIST, [
@@ -1066,10 +1077,11 @@ class TestExpectedPayoutPlanning:
 
 
 class TestExpectedPayoutAllocation:
-    """allocate_expected_payouts: prorate the commitment into Payout Amount, notice when it MOVES,
-    and never touch a cell that holds (or is this run receiving) real money."""
+    """allocate_expected_payouts: prorate the commitment into Expected Payout (its own column
+    since 2026-09-18), notice when it MOVES, and never touch a row that holds (or is this run
+    receiving) real money -- a settled row's commitment stays as the record of what was promised."""
 
-    COL = PAYOUT_AMOUNT_COL
+    COL = EXPECTED_PAYOUT_COL
 
     @staticmethod
     def _alloc(records, rows_by_order, costs, items=None, status=None, expected=None,

@@ -72,13 +72,13 @@ LEDGER_ROWS = [
         order_url="https://www.amazon.com/gp/css/order-details?orderID=111-0000001-0000001",
         delivery_address="BuyForMeRetail B999999, Testville, NH 03050", card_last4="0315",
         last_scraped_at="2026-09-10T10:48:26+00:00", **_formula_cells(2)),
-    # sheet row 3: OPEN, shipped, COMMITTED payout (amount, no date) -> PROJECTED profit
+    # sheet row 3: OPEN, shipped, COMMITTED payout (Expected Payout, nothing paid) -> PROJECTED profit
     row(order_date="2026-09-08", status="shipped", retailer="Best Buy",
         item_name="MacBook Air 15 M5 Midnight", shipment="1", quantity="1",
         order_id="BBY01-800000000001", tracking_number="529900000012", tracking_submitted="True",
         delivery_date="2026-09-15", buying_group="BFMR", cost_per_item="1000", total_cost="1000",
         shipping="0", sales_tax="0", gift_card="0", rewards_used="0", card_name="Amex Business Gold",
-        cashback_rate="0.04", insurance="6.4", payout_amount="1230", profile_label="profile-alpha",
+        cashback_rate="0.04", insurance="6.4", expected_payout="1230", profile_label="profile-alpha",
         order_url="https://www.bestbuy.com/profile/ss/orders/order-details/BBY01-800000000001/view",
         tracking_url="https://www.fedex.com/fedextrack/?trknbr=529900000012",
         receipt_url="https://objectstorage.example/o/receipts/bestbuy/BBY01-800000000001.pdf",
@@ -94,13 +94,14 @@ LEDGER_ROWS = [
         receipt_url="https://objectstorage.example/o/receipts/bestbuy/BBY01-800000000001.pdf",
         delivery_address="BFMR B999999, Testville, NH 03050", card_last4="4331", package_id="2",
         **_formula_cells(4)),
-    # sheet row 5: SETTLED -- paid, dated payout -> REALIZED profit. Costco, MOD.
+    # sheet row 5: SETTLED -- paid, dated payout -> REALIZED profit; paid $20 LESS than committed
     row(order_date="2026-08-20", status="paid", retailer="Costco",
         item_name="iPad Air 11 M4 (Item #2042809)", shipment="1", quantity="2",
         order_id="1399000017", tracking_number="1Z999AA10000000001", tracking_submitted="True",
         delivery_date="2026-08-25", buying_group="MOD", cost_per_item="200", total_cost="400",
         shipping="0", sales_tax="0", gift_card="0", rewards_used="0", card_name="Venmo Visa",
         cashback_rate="0.09", insurance="0", payout_amount="500", payout_date="2026-09-01",
+        expected_payout="520",
         profile_label="profile-bravo", tracking_url="https://www.ups.com/track?tracknum=1Z999AA10000000001",
         delivery_address="MOD warehouse", card_last4="4351", **_formula_cells(5)),
     # sheet row 6: SETTLED by STATUS alone -- MOD's dateless paid row
@@ -460,9 +461,25 @@ class TestPayoutSemantics:
         assert r.is_settled and r.payout_state == "settled"
 
     @pytest.mark.parametrize("status", ["ordered", "shipped", "delivered"])
-    def test_an_undated_payout_on_an_open_or_delivered_row_is_a_commitment(self, status):
+    def test_an_expected_payout_on_an_open_or_delivered_row_is_a_commitment(self, status):
+        r = _row(status=status, expected_payout="1230", total_cost="1000", cashback_rate="0.04",
+                 insurance="6.4")
+        assert r.is_committed and not r.is_settled and r.payout_state == "committed"
+        assert r.expected_payout == 1230.0 and r.projected_payout == 1230.0
+        assert r.profit is None and r.projected_profit == 263.6 and r.profit_or_projected == 263.6
+
+    @pytest.mark.parametrize("status", ["ordered", "shipped", "delivered"])
+    def test_a_legacy_undated_payout_amount_still_reads_as_a_commitment(self, status):
+        """A CSV backup or a Sheet from before Expected Payout (2026-09-18) carried the
+        commitment in Payout Amount with a blank date; it still shows as projected."""
         r = _row(status=status, payout_amount="1230")
         assert r.is_committed and not r.is_settled and r.payout_state == "committed"
+        assert r.projected_payout == 1230.0
+
+    def test_a_settled_row_keeps_its_commitment_as_the_record_of_the_promise(self):
+        r = _row(status="paid", payout_amount="500", payout_date="2026-09-01", expected_payout="520")
+        assert r.is_settled and not r.is_committed and r.expected_payout == 520.0
+        assert r.projected_payout is None and r.projected_profit is None
 
     def test_no_amount_is_no_payout_at_all(self):
         r = _row(status="delivered", payout_date="2026-09-01")
@@ -598,9 +615,10 @@ class TestOverview:
         assert summary["realized"] == {"rows": 2, "orders": 2, "payout": 830.0, "cogs": 637.0,
                                        "profit": 193.0}
 
-    def test_the_column_sum_is_realized_plus_projected_plus_the_rest(self, summary):
-        """What SUM() over the sheet's Total Profit gives, so the page reconciles with the sheet."""
-        assert summary["column_sum"] == {"rows": 3, "profit": round(263.6 + 193.0, 2), "other": 0.0}
+    def test_the_column_sum_is_the_rows_with_a_total_profit(self, summary):
+        """What SUM() over the Total Profit column gives: the settled rows only, now that a
+        commitment lives in Expected Payout and leaves Total Profit blank until paid."""
+        assert summary["column_sum"] == {"rows": 2, "profit": 193.0, "other": 0.0}
 
     def test_cogs_input_gaps_skip_money_free_rows(self, summary):
         gaps = summary["gaps"]
@@ -1590,3 +1608,142 @@ class TestStaticAssetsCarryTheirBlocks:
                        'closest(".dropzone")', "data-autosubmit", 'classList.add("just-in")',
                        'matches(\'[hx-trigger*="every"]\')'):
             assert needle in js, f"edit.js lost its {needle!r} block"
+
+
+# --------------------------------------------------------------------------------------------------
+# The Audit and Reconciliation pages: the Orders view over the affected rows (2026-09-18)
+# --------------------------------------------------------------------------------------------------
+
+
+class TestAuditPage:
+    """scripts/audit_sheet's checks over the ledger the dashboard serves, each finding on its row."""
+
+    def test_the_page_is_the_orders_view_over_the_flagged_rows(self, client):
+        body = client.get("/audit").text
+        assert "<h1>Audit</h1>" in body and 'id="filters"' in body and 'action="/audit"' in body
+        assert '<th class="col-finding">Finding</th>' in body
+        # Row 8 has COGS but no Cashback Rate: cogs_inputs_complete names it.
+        assert "111-0000002-0000002" in body and "no rate resolved" in body
+        assert "<b>cogs_inputs_complete</b>" in body
+        # The summary lists every check with its status; the Sheet-only ones skip on a CSV.
+        assert 'class="tag fail"' in body and "cogs_inputs_complete" in body
+        assert "a Google Sheet check" in body
+        # The check filter lists the checks that flagged rows.
+        assert 'data-param="check"' in body and 'name="check" value="cogs_inputs_complete"' in body
+        # No "Add a row" and no remembered-filter cookie on this page.
+        assert "Add a row" not in body
+        assert 'name="scope" value="audit"' in body
+
+    def test_choosing_a_check_narrows_the_rows_to_that_check(self, client):
+        body = client.get("/audit", params={"check": "cogs_inputs_complete"}).text
+        assert "111-0000002-0000002" in body and "<b>cogs_inputs_complete</b>" in body
+        # A check that flagged nothing shows nothing.
+        empty = client.get("/audit", params={"check": "status_is_present"}).text
+        assert "Nothing to show." in empty and "111-0000002-0000002" not in empty
+
+    def test_the_cards_view_carries_the_findings_too(self, client):
+        body = client.get("/audit", params={"view": "cards"}).text
+        assert '<div class="finding">' in body and "no rate resolved" in body
+        assert 'href="/audit?' in body or "page 1 of 1" in body or "order(s)" in body
+
+    def test_an_htmx_request_gets_the_partial_on_the_pages_own_url(self, client):
+        response = client.get("/audit", headers={"HX-Request": "true"})
+        assert "<html" not in response.text and '<td class="finding">' in response.text
+        assert 'hx-get="/audit?' in response.text  # the sort links stay on the page
+
+    def test_the_orders_filters_memory_is_not_replayed_or_written_here(self, client):
+        client.get("/orders", params={"remember": "1", "retailer": "Costco"})
+        body = client.get("/audit").text
+        assert "111-0000002-0000002" in body  # an Amazon row: the Costco memory did not apply
+        response = client.get("/audit", params={"remember": "1", "retailer": "Amazon", "view": "cards"})
+        assert response.cookies.get("ledger-view") == "cards"  # layout is shared
+        assert 'class="card status-' in client.get("/orders").text  # the shared layout memory applied
+        assert "retailer=Amazon" not in (client.cookies.get("ledger-filters") or "")
+
+    def test_the_report_is_cached_until_the_ledger_changes(self, client, snapshot_path):
+        from web import audit_view
+
+        calls = []
+        original = audit_view.run_audit
+
+        def counting(*args, **kwargs):
+            calls.append(1)
+            return original(*args, **kwargs)
+
+        import web.app as app_module
+
+        app_module.run_audit = counting
+        try:
+            client.get("/audit")
+            client.get("/audit", params={"view": "cards"})
+            assert len(calls) == 1
+            write_snapshot(snapshot_path, *LEDGER_ROWS, row(order_date="2026-09-18", status="ordered",
+                                                             item_name="New", shipment="1",
+                                                             order_id="NEW-1", quantity="1",
+                                                             cost_per_item="5", total_cost="5"))
+            client.get("/audit")
+            assert len(calls) == 2
+        finally:
+            app_module.run_audit = original
+
+    def test_rows_named_by_a_detail_line(self):
+        from web.audit_view import rows_named
+
+        assert rows_named("row 157: order X has no status") == [157]
+        assert rows_named("row 157, Card Last 4: stored as a number") == [157]
+        assert rows_named("rows [2, 3]: order O1 shipment '1'") == [2, 3]
+        assert rows_named("12 cell(s) never filled -- run the backfill") == []
+
+    def test_the_report_refuses_every_non_get(self, client):
+        assert client.post("/audit").status_code == 405
+
+
+class TestReconPage:
+    """Orders the buying group paid more or less than it committed to."""
+
+    def test_a_short_paid_order_is_listed_with_both_figures(self, client):
+        body = client.get("/recon").text
+        assert "<h1>Reconciliation</h1>" in body and 'action="/recon"' in body
+        # Row 5: expected 520, paid 500.
+        assert "1399000017" in body and "short-paid by $20.00" in body
+        assert "expected $520.00, paid $500.00" in body
+        # The dateless MOD row (no commitment) and the open committed row are not mismatches.
+        assert "1399000018" not in body and "BBY01-800000000001" not in body
+        assert 'class="tile' in body and "$20.00" in body
+
+    def test_the_cards_view_and_the_partial(self, client):
+        cards = client.get("/recon", params={"view": "cards"}).text
+        assert '<div class="finding">' in cards and "<b>short</b>" in cards
+        partial = client.get("/recon", headers={"HX-Request": "true"}).text
+        assert "<html" not in partial and 'hx-get="/recon?' in partial
+
+    def test_reconcile_compares_order_totals_over_settled_rows_only(self):
+        from web.recon_view import findings_for, reconcile
+
+        rows = [
+            # one order, two rows: 300 + 220 committed, 300 + 200 paid -> short 20
+            _row(order_id="O1", order_date="2026-08-01", item_name="Widget", shipment="1", status="paid",
+                 payout_amount="300", payout_date="2026-09-01", expected_payout="300", total_cost="250"),
+            _row(order_id="O1", order_date="2026-08-01", item_name="Widget", shipment="2", status="paid",
+                 payout_amount="200", payout_date="2026-09-01", expected_payout="220", total_cost="250"),
+            # over-paid
+            _row(order_id="O2", status="paid", payout_amount="110", expected_payout="100"),
+            # a cent of rounding is not a mismatch
+            _row(order_id="O3", status="paid", payout_amount="100.01", expected_payout="100"),
+            # still open: not compared; no commitment: not compared
+            _row(order_id="O4", status="shipped", expected_payout="100"),
+            _row(order_id="O5", status="paid", payout_amount="90", payout_date="2026-09-01"),
+            # a settled loss with a commitment: short by the whole thing
+            _row(order_id="O6", status="return", payout_amount="0", expected_payout="50"),
+        ]
+        report = reconcile(rows)
+        assert [o.order_id for o in report.orders] == ["O6", "O1", "O2"]
+        assert report.compared == 4
+        by = report.by_order()
+        assert by["O1"].difference == -20.0 and by["O1"].kind == "short" and by["O1"].rows == 2
+        assert by["O2"].difference == 10.0 and by["O2"].kind == "over"
+        assert report.short_total == 70.0 and report.over_total == 10.0
+        assert "short-paid by $20.00" in by["O1"].line
+        findings = findings_for(rows, report)
+        assert findings[("O1", "2026-08-01", "Widget", "2")] == [("short", "expected $220.00, paid $200.00 on this row; the order is short-paid by $20.00")]
+        assert not any(k[0] == "O4" for k in findings)

@@ -27,7 +27,10 @@ from scripts import backup as backup_module
 from web import failures as failures_module
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
-from web.queries import Filters, column_headings, facets, filter_rows, order_view, sort_rows
+from web.audit_view import AuditCache, audit_grids, audit_key, key_of, run_audit
+from web.queries import (Filters, _values as query_values, column_headings, facets, filter_rows,
+                         order_view, sort_rows)
+from web.recon_view import findings_for as recon_findings, reconcile
 from web.summary import overview
 
 HERE = Path(__file__).resolve().parent
@@ -35,7 +38,7 @@ TEMPLATES_DIR = HERE / "templates"
 STATIC_DIR = HERE / "static"
 
 #: The routes, for the read-only test that asserts every one of them refuses any non-GET method.
-ROUTES = ("/", "/orders", "/orders/{order_id}", "/failures", "/health")
+ROUTES = ("/", "/orders", "/orders/{order_id}", "/audit", "/recon", "/failures", "/health")
 
 
 # --------------------------------------------------------------------------------------------------
@@ -232,13 +235,13 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     #: Never remembered: a page number is where you were, not how you look at the ledger.
     TRANSIENT = {"page", "notice", "error", "remember", "refresh"}
 
-    def remembered(request: Request, params) -> QueryParams:
+    def remembered(request: Request, params, replay: bool = True) -> QueryParams:
         """The request's params with the remembered view / page size filled in when the request
         does not say. A BARE
         /orders -- no query at all, the nav link -- comes back with the whole remembered filter
         and sort state."""
         items = list(params.multi_items()) if hasattr(params, "multi_items") else list(params.items())
-        if not [k for k, _v in items if k not in TRANSIENT]:
+        if replay and not [k for k, _v in items if k not in TRANSIENT]:
             from urllib.parse import parse_qsl
 
             items = [(k, v) for k, v in items if k in TRANSIENT] + \
@@ -252,7 +255,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             items.append(("per", per))
         return QueryParams(items)
 
-    def remember(request: Request, response, filters: Filters):
+    def remember(request: Request, response, filters: Filters, scope: str = ""):
         """Persist the view / page size and the whole filter / sort state -- but ONLY from the
         filter form's own requests (they carry `remember=1`). A link that names a filter in its
         URL, an overview tile or a bookmark, is applied for that visit and never rewrites the
@@ -264,22 +267,71 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         if "per" in request.query_params:
             response.set_cookie(PER_COOKIE, str(filters.per), max_age=COOKIE_MAX_AGE, samesite="lax")
         explicit = [(k, v) for k, v in request.query_params.multi_items() if k not in TRANSIENT]
-        if explicit:
+        if explicit and not scope:  # the Audit / Recon pages share the layout memory, not the filters
             from urllib.parse import urlencode
 
             response.set_cookie(FILTERS_COOKIE, urlencode(explicit, doseq=True), max_age=COOKIE_MAX_AGE,
                                 samesite="lax")
         return response
 
-    def orders_context(request: Request, params=None, **extra) -> dict:
+    # The Audit and Reconciliation pages ARE the Orders view (table or cards, the same filters,
+    # sort, search, editing) over a subset of rows with a finding beside each. `scope` names the
+    # subset; the filter form carries it so an htmx swap or a bulk edit re-renders the same page.
+    SCOPES = {"": "/orders", "audit": "/audit", "recon": "/recon"}
+    audit_cache = AuditCache()
+    app.state.audit_cache = audit_cache
+
+    def audit_report(snapshot):
+        def build():
+            grids, sheet_checks = audit_grids(reader, snapshot)
+            return run_audit(grids, sheet_checks=sheet_checks)
+
+        return audit_cache.get(audit_key(reader, snapshot), build)
+
+    def row_key(row) -> tuple:
+        return key_of(row.order_id, row.order_date, row.item_name, row.shipment)
+
+    templates.env.globals["row_key"] = row_key
+
+    def orders_context(request: Request, params=None, *, scope: str = "", **extra) -> dict:
         snapshot = load(request)
-        filters = Filters.from_query(remembered(request, params if params is not None
-                                                else request.query_params))
-        rows = sort_rows(filter_rows(snapshot.rows, filters), filters)
+        params = params if params is not None else request.query_params
+        scope = scope or str(params.get("scope") or "")
+        if scope not in SCOPES:
+            scope = ""
+        # A bare /audit or /recon never replays the remembered Orders filters (they are another
+        # page's memory); the view and page size are layout and are shared.
+        filters = Filters.from_query(remembered(request, params, replay=not scope))
+        rows = snapshot.rows
+        findings = None
+        if scope == "audit":
+            report = audit_report(snapshot)
+            checks = tuple(c for c in query_values(params, "check") if c)
+            wanted = report.keys_for(checks)
+            rows = [r for r in rows if row_key(r) in wanted]
+            findings = {
+                k: [(f.check, f.line) for f in fs if not checks or f.check in checks]
+                for k, fs in report.by_key.items() if k in wanted
+            }
+            extra.update(audit=report, checks=checks)
+        elif scope == "recon":
+            report = reconcile(snapshot.rows)
+            rows = [r for r in rows if r.order_id in report.keys]
+            findings = recon_findings(rows, report)
+            extra.update(recon=report)
+        by_order: dict[str, list] = {}
+        for key, lines in (findings or {}).items():
+            bucket = by_order.setdefault(key[0], [])
+            for line in lines:
+                if line not in bucket:
+                    bucket.append(line)
+        rows = sort_rows(filter_rows(rows, filters), filters)
         context = {
             "snapshot": snapshot, "filters": filters, "rows": rows, "total": len(snapshot.rows),
             "facets": facets(snapshot.rows), "columns": column_headings(),
-            "editable": writer is not None, "wide": True, **extra,
+            "editable": writer is not None, "wide": True,
+            "scope": scope, "base": SCOPES[scope], "findings": findings,
+            "findings_by_order": by_order, **extra,
         }
         if filters.view == "cards":
             context["pager"] = paginate(order_cards(rows), filters.per, filters.page)
@@ -303,6 +355,25 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         else:
             response = page(request, "orders.html", **context)
         return remember(request, response, context["filters"])
+
+    def scoped(request: Request, scope: str):
+        """The Audit / Reconciliation page: the Orders view over that scope's rows."""
+        if request.query_params.get("reset"):
+            return RedirectResponse(url=SCOPES[scope], status_code=303)
+        context = orders_context(request, scope=scope, notice=request.query_params.get("notice", ""))
+        if request.headers.get("HX-Request", "").lower() == "true":
+            response = page(request, partial_for(context["filters"]), **context)
+        else:
+            response = page(request, f"{scope}.html", **context)
+        return remember(request, response, context["filters"], scope)
+
+    @app.get("/audit", response_class=HTMLResponse)
+    def audit(request: Request):
+        return scoped(request, "audit")
+
+    @app.get("/recon", response_class=HTMLResponse)
+    def recon(request: Request):
+        return scoped(request, "recon")
 
     def selected_keys(form) -> list[dict]:
         keys = []

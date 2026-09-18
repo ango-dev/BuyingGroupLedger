@@ -33,7 +33,7 @@ log = logging.getLogger("apply_sheet_formats")
 
 #: Columns that must display as money, by NAME. Everything the year-end totals are read off.
 CURRENCY_COLUMNS = (
-    "Cost Per Item", "Total Cost", "Shipping", "COGS", "Insurance", "Payout Amount", "Total Profit",
+    "Cost Per Item", "Total Cost", "Shipping", "COGS", "Insurance", "Payout Amount", "Total Profit", "Expected Payout",
     "Gift Card", "Sales Tax", "Rewards Used",
 )
 #: Columns that must display as a percentage. Cashback Rate STORES a fraction (0.04) and shows "4%".
@@ -56,7 +56,7 @@ _PERCENT = {"type": "PERCENT", "pattern": "0.##%"}
 #: on its next re-check. That is the design notes, and it cost a migration to undo the first time.
 TABLE_COLUMN_TYPES = {
     "Cost Per Item": "CURRENCY", "Total Cost": "CURRENCY", "Shipping": "CURRENCY",
-    "COGS": "CURRENCY", "Insurance": "CURRENCY", "Payout Amount": "CURRENCY",
+    "COGS": "CURRENCY", "Insurance": "CURRENCY", "Payout Amount": "CURRENCY", "Expected Payout": "CURRENCY",
     "Total Profit": "CURRENCY", "Gift Card": "CURRENCY", "Sales Tax": "CURRENCY",
     "Rewards Used": "CURRENCY",
     "Cashback Rate": "PERCENT",

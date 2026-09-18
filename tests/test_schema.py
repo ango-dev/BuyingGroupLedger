@@ -37,6 +37,7 @@ def test_column_order_is_pinned():
         "cashback_rate", "cogs", "insurance", "payout_amount", "payout_date", "return_quantity",
         "return_date", "total_profit", "profile_label", "order_url", "tracking_url",
         "receipt_url", "delivery_address", "card_last4", "package_id", "last_scraped_at",
+        "expected_payout",
     ]
     assert HEADER == [
         "Order Date", "Status", "Retailer", "Item Name", "Shipment", "Quantity", "Order ID",
@@ -44,7 +45,7 @@ def test_column_order_is_pinned():
         "Total Cost", "Shipping", "Sales Tax", "Gift Card", "Rewards Used", "Card",
         "Cashback Rate", "COGS", "Insurance", "Payout Amount", "Payout Date", "Return Qty",
         "Return Date", "Total Profit", "Profile", "Order Link", "Tracking Link", "Receipt Link",
-        "Delivery Address", "Card Last 4", "Package ID", "Last Scraped At",
+        "Delivery Address", "Card Last 4", "Package ID", "Last Scraped At", "Expected Payout",
     ]
 
 

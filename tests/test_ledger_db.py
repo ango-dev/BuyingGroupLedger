@@ -74,17 +74,46 @@ class TestSchema:
         assert KEY_FIELDS == ("order_id", "order_date", "item_name", "shipment")
         assert 'PRIMARY KEY ("order_id", "order_date", "item_name", "shipment")' in ledger_rows_ddl()
 
-    def test_a_stale_table_is_rebuilt_to_the_current_columns(self, tmp_path):
+    def test_a_table_lacking_the_newest_column_keeps_its_rows_and_gains_it(self, tmp_path):
+        """The file IS the ledger under `db`: a column appended to the schema (Expected Payout,
+        2026-09-18) must never cost a row. The old table is copied into the new column order."""
         path = tmp_path / "old.sqlite3"
+        old = [name for name, _ in columns() if name != "expected_payout"]
         with sqlite3.connect(path) as conn:
-            conn.execute('CREATE TABLE "ledger_rows" ("order_id" TEXT, "old_column" TEXT)')
-            conn.execute('INSERT INTO "ledger_rows" VALUES ("x", "y")')
+            conn.execute('CREATE TABLE "ledger_rows" (' + ", ".join(f'"{n}" TEXT' for n in old) + ")")
+            conn.execute(
+                'INSERT INTO "ledger_rows" ("order_id", "order_date", "item_name", "shipment", '
+                '"total_cost", "sheet_row") VALUES ("x", "2026-09-01", "Widget", "1", 12.5, 2)')
 
         db = LedgerDb(path)
         with db.connect() as conn:
             names = [r[1] for r in conn.execute('PRAGMA table_info("ledger_rows")')]
         assert names == [name for name, _ in columns()]
-        assert db.row_count() == 0
+        rows = db.fetch_rows()
+        assert len(rows) == 1 and rows[0]["order_id"] == "x" and rows[0]["total_cost"] == 12.5
+        assert rows[0]["expected_payout"] is None
+
+    def test_an_empty_table_with_a_foreign_column_is_rebuilt(self, tmp_path):
+        path = tmp_path / "old.sqlite3"
+        with sqlite3.connect(path) as conn:
+            conn.execute('CREATE TABLE "ledger_rows" ("order_id" TEXT, "old_column" TEXT)')
+        db = LedgerDb(path)
+        with db.connect() as conn:
+            names = [r[1] for r in conn.execute('PRAGMA table_info("ledger_rows")')]
+        assert names == [name for name, _ in columns()] and db.row_count() == 0
+
+    def test_a_populated_table_with_a_foreign_column_is_refused_not_dropped(self, tmp_path):
+        path = tmp_path / "old.sqlite3"
+        with sqlite3.connect(path) as conn:
+            conn.execute('CREATE TABLE "ledger_rows" ("order_id" TEXT, "old_column" TEXT)')
+            conn.execute('INSERT INTO "ledger_rows" VALUES ("x", "y")')
+        import pytest
+
+        with pytest.raises(RuntimeError, match="old_column"):
+            with LedgerDb(path).connect():
+                pass
+        with sqlite3.connect(path) as conn:  # untouched
+            assert conn.execute('SELECT COUNT(*) FROM "ledger_rows"').fetchone()[0] == 1
 
     def test_relative_paths_are_under_the_repo_root(self):
         from ledger_db.store import ROOT

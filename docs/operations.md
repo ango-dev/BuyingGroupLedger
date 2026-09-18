@@ -124,8 +124,10 @@ Linux host has its own runbook: **[DEPLOY.md](../DEPLOY.md)**.
 A local web page over the ledger, in `web/`: an overview (open rows by status and buying group,
 projected versus realized profit, the COGS input gaps, the scheduler heartbeat), a filterable and
 sortable ledger table, one page per order, an Activity page (what every run
-and every dashboard change did, with the failure dossiers' reports rendered in place), a Settings page
-(with backup and restore), and `/health` as JSON for the container's healthcheck. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
+and every dashboard change did, with the failure dossiers' reports rendered in place), an **Audit**
+page and a **Reconciliation** page (both the Orders view over the affected rows — see below), a
+Settings page (with backup and restore), a Tools menu, and `/health` as JSON for the container's
+healthcheck. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
 the header (remembered per browser; follows the system until you choose). The dependencies are
 `requirements-web.txt`, an optional install on a desktop and part of the one Docker image.
 
@@ -395,13 +397,48 @@ To stay on the Sheet for now, set `"ledger": {"backend": "sheet"}` in `config.js
 Under `db`: `python -m scripts.mirror_sheet_to_db` and the end-of-run mirror refuse to run (a
 mirror from the stale Sheet would overwrite the ledger), the dashboard serves the file directly
 whatever `web.ledger_source` says (an explicit `--source` still wins for development), `/health`
-reports `ledger_backend`, and `python -m scripts.audit_sheet` exits with a note (its checks are the
-Sheet's: formulas, formats, notes, grid; `--from-snapshot` still audits a saved Sheet snapshot).
+reports `ledger_backend`, and `python -m scripts.audit_sheet` runs its DATA checks against the
+database through the worksheet adapter (keys, money invariants, missing mandatory cells,
+staleness) while the Sheet-only checks — formulas, formats, merged cells, the formatted/stored
+disagreement — report SKIP (`--from-snapshot` still audits a saved Sheet snapshot in full). The
+same findings, by row, are the dashboard's Audit page.
 The Sheet-only maintenance scripts (`reorder_sheet`, `apply_sheet_formats`, the format-related
 backfills) are not meant for the database and say so if they hit a method the adapter does not
 have. **Nothing of the Sheet code is deleted**: switching back is setting the flag to `sheet`
 (the Sheet then lags by whatever was written meanwhile). Deleting the Sheet paths is the user's
 call, tracked in the design notes.
+
+### The Audit and Reconciliation pages
+
+Both are the **Orders view** — the same filter bar, table or cards, sort, search and cell editing
+— over a subset of rows, with a **Finding** column (table) or block (card) beside each.
+Neither writes anything.
+
+- **Audit** (`/audit`, `web/audit_view.py`): every check of `scripts.audit_sheet` run against the
+  ledger the dashboard serves (under `db`, through the worksheet adapter — the CLI's own path; the
+  Sheet-only checks skip), then every row a check named, mapped to its order. The lead shows the
+  checks with their status and how many rows each flagged; the **Check** dropdown narrows the rows
+  to the checks you pick. A detail line that names no row (a count, advice to run a backfill) is
+  shown under its check in the summary. The report is rebuilt whenever the rows change (a cell
+  edit, a sync, a mirror) and shared between a page load and its htmx swaps.
+- **Reconciliation** (`/recon`, `web/recon_view.py`): every order the buying group paid **more or
+  less** than it committed to — Payout Amount against Expected Payout, compared as order totals
+  over the same settled rows (two cents of tolerance plus a cent per row for proration drift), the
+  biggest gap first, with short-paid / over-paid / net totals in the lead. A row with no
+  commitment (MOD publishes none) is not compared. Fix a figure by editing the cell; take a real
+  shortfall up with the group.
+
+Both pages share the Orders page's remembered **view and page size** (cards or table) but never
+replay or rewrite its remembered filters.
+
+**One-time migration for ledgers from before 2026-09-18.** The commitment used to live in Payout
+Amount with a blank date. `python -m scripts.migrate_expected_payout` (Tools → Ledger Fixes →
+*Move commitments to Expected Payout*) lists each open row's commitment and `--apply` moves it
+into Expected Payout, clearing Payout Amount and re-stamping the profit formula. Run it once after
+deploying; the next sync fills Expected Payout itself from then on. A ledger still holding the old
+shape reads correctly on the dashboard in the meantime (an undated Payout Amount on an open row is
+still shown as projected), but the Reconciliation page cannot compare an order until its
+commitment has its own cell.
 
 ### The Settings page
 

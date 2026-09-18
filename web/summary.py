@@ -24,6 +24,16 @@ def _status_order(statuses) -> list[str]:
     return known + unknown
 
 
+def _projected_block(rows: list[LedgerRow]) -> dict:
+    """The committed rows' money: the commitment as the payout, the projected profit as profit."""
+    payout = sum(r.projected_payout or 0.0 for r in rows)
+    profit = sum(r.projected_profit or 0.0 for r in rows if r.projected_profit is not None)
+    cogs = sum(r.cogs or 0.0 for r in rows if r.cogs is not None)
+    orders = {r.order_id for r in rows}
+    return {"rows": len(rows), "orders": len(orders), "payout": round(payout, 2),
+            "cogs": round(cogs, 2), "profit": round(profit, 2)}
+
+
 def _money_block(rows: list[LedgerRow]) -> dict:
     payout = sum(r.payout_amount or 0.0 for r in rows)
     profit = sum(r.profit or 0.0 for r in rows if r.profit is not None)
@@ -88,7 +98,7 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
     open_rows = [r for r in placed if r.is_open]
     unpaid = [r for r in placed if r.is_unpaid]
     rate, rated = actual_return(paid)
-    projected = _money_block([r for r in placed if r.is_committed])
+    projected = _projected_block([r for r in placed if r.is_committed])
     realized = _money_block(paid)
     return [
         _tile("Rows / orders", (len(placed), len({r.order_id for r in placed})), "pair",
@@ -115,8 +125,8 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
                      "not paid yet (no settled payout; gift cards excluded)"),
         _tile("Projected profit", projected["profit"], "money",
               f"{projected['rows']} committed rows", link(state="committed"), tone="committed",
-              detail=f"{projected['rows']} row(s), {projected['orders']} order(s) {scope} with a "
-                     "committed payout and no Payout Date"),
+              detail=f"{projected['rows']} row(s), {projected['orders']} order(s) {scope} with an "
+                     "Expected Payout the buying group has not paid yet"),
         _tile("Realized profit", realized["profit"], "money",
               f"{realized['rows']} settled rows", link(state="settled"), tone="settled",
               detail=f"Total Profit of the {realized['rows']} settled row(s), "
@@ -194,7 +204,7 @@ def overview(snapshot: Snapshot, month: str = "", today: date | None = None) -> 
 
     # Projected = committed payouts (amount, no date, no buying-group outcome); realized = settled
     # ($0.00 settlements included: a return that paid nothing is a real loss).
-    projected = _money_block([r for r in rows if r.is_committed])
+    projected = _projected_block([r for r in rows if r.is_committed])
     realized = _money_block([r for r in rows if r.is_settled])
     # What SUM() over the sheet's Total Profit column gives: every row whose formula shows a
     # number -- realized + projected + anything else with a payout cell. Shown so the page can be

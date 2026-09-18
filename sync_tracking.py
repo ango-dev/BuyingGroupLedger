@@ -92,6 +92,10 @@ log = logging.getLogger("sync_tracking")
 #: them apart, which is why the settled test at plan time requires `paid` status, not just money.
 INSURANCE_COL = "Insurance"
 PAYOUT_AMOUNT_COL = "Payout Amount"
+#: The group's COMMITTED payout (2026-09-18): its own column, so the settlement never overwrites
+#: it and the dashboard's Reconciliation page can compare the two. Optional in a header (an older
+#: Sheet); read through optional_cell, and only ever written when HEADER carries it.
+EXPECTED_PAYOUT_COL = "Expected Payout"
 PAYOUT_DATE_COL = "Payout Date"
 STATUS_COL = "Status"
 SUBMITTED_COL = "Tracking Submitted"
@@ -139,6 +143,8 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
           "date_by_row":         {row_number: str},     # blank = not settled; gates the commitment
                                                         # writes and makes the paid-vs-committed
                                                         # mismatch alert fire exactly once
+          "expected_by_row":     {row_number: float | None},  # Expected Payout as it stands -- the
+                                                        # baseline the price-change alert compares
           "submitted_by_row":    {row_number: bool},    # already ticked? don't re-tick
           "unresolved_split":    [(row_number, order_id, tracking_number), ...],   # Quantity "*"
           "corrupted_tracking":  [(row_number, order_id, tracking_number), ...],   # float-ified cell
@@ -161,7 +167,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     # which switched the Best Buy suffix retry off entirely: `_is_bestbuy("")` is False, so no carton
     # ever reached it. The feature was dead in production while its own unit tests passed, because
     # they build a TrackingSubmission directly and never cross this seam.
-    idx.update({name: header.index(name) for name in ("Retailer",) if name in header})
+    idx.update({name: header.index(name) for name in ("Retailer", EXPECTED_PAYOUT_COL) if name in header})
 
     by_group: dict[str, list[TrackingSubmission]] = {}
     rows_by_tracking: dict[str, list[int]] = {}
@@ -185,6 +191,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     rows_by_order: dict[str, dict[str, list[int]]] = {}
     payout_by_row: dict[int, float | None] = {}
     date_by_row: dict[int, str] = {}
+    expected_by_row: dict[int, float | None] = {}
 
     for offset, row in enumerate(data_rows):
         row_number = offset + 2  # row 1 is the header
@@ -253,6 +260,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
                 item_of_row[row_number] = cell("Item Name")
                 payout_by_row[row_number] = _as_float(cell(PAYOUT_AMOUNT_COL))
                 date_by_row[row_number] = cell(PAYOUT_DATE_COL)
+                expected_by_row[row_number] = _as_float(optional_cell(EXPECTED_PAYOUT_COL))
                 rows_by_order.setdefault(group_key, {}).setdefault(order_id, []).append(row_number)
             continue
 
@@ -295,6 +303,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         order_of_row[row_number] = order_id
         payout_by_row[row_number] = _as_float(cell(PAYOUT_AMOUNT_COL))
         date_by_row[row_number] = cell(PAYOUT_DATE_COL)
+        expected_by_row[row_number] = _as_float(optional_cell(EXPECTED_PAYOUT_COL))
         rows_by_order.setdefault(group_key, {}).setdefault(order_id, []).append(row_number)
 
         # SETTLED = paid, with money actually recorded. Such a package needs no further SUBMITTING:
@@ -345,6 +354,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "insurance_by_row": insurance_by_row,
         "payout_by_row": payout_by_row,
         "date_by_row": date_by_row,
+        "expected_by_row": expected_by_row,
         "submitted_by_row": submitted_by_row,
         "unresolved_split": unresolved_split,
         "corrupted_tracking": corrupted_tracking,
@@ -576,18 +586,20 @@ def allocate_expected_payouts(
     costs_by_row: dict[int, float],
     item_of_row: dict[int, str],
     status_by_row: dict[int, str],
-    payout_by_row: dict[int, float | None],
+    expected_by_row: dict[int, float | None],
     date_by_row: dict[int, str] | None = None,
     settling_rows: set[int] | None = None,
 ) -> tuple[dict[int, dict], list[str]]:
-    """Fill Payout Amount with each order's COMMITTED payout, and spot a commitment that moved.
+    """Fill Expected Payout with each order's COMMITTED payout, and spot a commitment that moved.
 
-    The forward-looking half of the payout write: BFMR publishes the payout price from the moment a purchase exists, so Payout
-    Amount carries it from purchase link onward — Payout Date stays blank, which is what marks the
-    figure as a commitment rather than a settlement — and a tracker read that disagrees with the
-    cell is BFMR CHANGING the committed price. That is the event this function detects: the cell
-    is updated to the current commitment (the sheet mirrors what BFMR will actually pay) and the
-    change is reported for an alert naming old -> new.
+    The forward-looking half of the payout write. BFMR publishes the payout price from the moment
+    a purchase exists, so Expected Payout carries it from purchase link onward (its OWN column
+    since 2026-09-18 -- from 2026-09-11 to then it shared Payout Amount with a blank date; the
+    dashboard's Reconciliation page needs the promise kept beside the payment, so
+    scripts/migrate_expected_payout moves the old commitments over), and a tracker read that
+    disagrees with the cell is BFMR CHANGING the committed price. That is the event this function
+    detects: the cell is updated to the current commitment (the ledger mirrors what BFMR will
+    actually pay) and the change is reported for an alert naming old -> new.
 
     Same shape as allocate_payouts on purpose: records are bucketed per (order, deal-hint), a
     multi-deal order's rows are partitioned by `_split_rows_by_deal` (falling back to one order-
@@ -608,7 +620,7 @@ def allocate_expected_payouts(
     change — and a bucket whose total still agrees only rewrites cells when membership shifted
     (a new row appended, a blank to fill), silently, so an unchanged commitment queues no writes.
 
-    Returns ({row_number: {PAYOUT_AMOUNT_COL: value}}, [change detail lines]).
+    Returns ({row_number: {EXPECTED_PAYOUT_COL: value}}, [change detail lines]).
     """
     date_by_row = date_by_row or {}
     settling_rows = settling_rows or set()
@@ -648,26 +660,26 @@ def allocate_expected_payouts(
             total_cost = sum(costs)
             new_total = round(sub["expected"], 2)
             if new_total <= 0:
-                # Same rule as the settlement path: never write a 0 into Payout Amount — the
-                # profit formula would compute a large fictitious loss out of it.
+                # Same rule as the settlement path: a 0 is not a commitment, it is BFMR not
+                # having priced the purchase yet -- never written.
                 continue
             new_values = {
                 n: round(new_total * ((cost / total_cost) if total_cost else (1 / len(group_rows))), 2)
                 for n, cost in zip(group_rows, costs)
             }
-            old_values = {n: payout_by_row.get(n) for n in group_rows}
+            old_values = {n: expected_by_row.get(n) for n in group_rows}
             known = [v for v in old_values.values() if v is not None]
             if not known:
                 # First sighting: record the commitment, nothing to compare against yet.
                 for n, value in new_values.items():
-                    writes[n] = {PAYOUT_AMOUNT_COL: value}
+                    writes[n] = {EXPECTED_PAYOUT_COL: value}
                 continue
             old_total = round(sum(known), 2)
             # Totals, with slack for one rounding step per row, so proration drift never
             # masquerades as BFMR moving the price.
             if abs(old_total - new_total) > max(0.02, 0.01 * len(group_rows)):
                 for n, value in new_values.items():
-                    writes[n] = {PAYOUT_AMOUNT_COL: value}
+                    writes[n] = {EXPECTED_PAYOUT_COL: value}
                 label = sub["hint"] or item_of_row.get(group_rows[0], "") or "order"
                 changes.append(
                     f"  order {order_id} / {label[:60]}: ${old_total:,.2f} -> ${new_total:,.2f}")
@@ -676,7 +688,7 @@ def allocate_expected_payouts(
                 # Same commitment, different split (a row appended, a blank to fill): re-prorate
                 # quietly so the cells sum back to the committed total.
                 for n, value in new_values.items():
-                    writes[n] = {PAYOUT_AMOUNT_COL: value}
+                    writes[n] = {EXPECTED_PAYOUT_COL: value}
     return writes, changes
 
 
@@ -977,8 +989,8 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
             + "\n".join(mismatches),
         )
 
-    # The committed price, written into Payout Amount (no Payout Date) from the moment the
-    # purchase links the reservation to an order — and watched: a commitment that MOVED is
+    # The committed price, written into Expected Payout from the moment the purchase links the
+    # reservation to an order — and watched: a commitment that MOVED is
     # rewritten to the new figure and alerted old -> new. Rows this run is SETTLING are handed to
     # the allocator so the commitment pass can never overwrite real money or misread a partial
     # settlement as a price drop. hasattr-gated like file_insurance: only BFMR publishes a price
@@ -993,7 +1005,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
         commitments = client.fetch_expected_payouts(list(orders))
         expected_writes, price_changes = allocate_expected_payouts(
             commitments, orders, plan["costs_by_row"], plan["item_of_row"],
-            plan["status_by_row"], plan["payout_by_row"], plan.get("date_by_row"),
+            plan["status_by_row"], plan.get("expected_by_row") or {}, plan.get("date_by_row"),
             settling_rows=settling,
         )
         _merge_writes(all_writes, expected_writes)
@@ -1005,10 +1017,9 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
             _alert(
                 apply,
                 f"{group_key}: {len(price_changes)} committed payout price(s) changed",
-                f"{group_key} changed the payout price it commits to on these orders. Payout "
-                "Amount now carries the NEW commitment (no Payout Date — nothing has been paid "
-                "yet). If a drop is not one you agreed to, take it up with them before the "
-                "package settles:\n"
+                f"{group_key} changed the payout price it commits to on these orders. Expected "
+                "Payout now carries the NEW commitment (nothing has been paid yet). If a drop is "
+                "not one you agreed to, take it up with them before the package settles:\n"
                 + "\n".join(price_changes),
             )
 
@@ -1075,7 +1086,7 @@ def _merge_writes(target: dict[int, dict], incoming: dict[int, dict]) -> None:
 
 
 def _write_payout_cells(worksheet, writes: dict[int, dict], apply: bool) -> None:
-    """Write Insurance / Payout Amount / Payout Date, then RE-STAMP the profit formula.
+    """Write Insurance / Payout Amount / Payout Date / Expected Payout, then RE-STAMP the profit formula.
 
     The re-stamp is not optional. `_write_profit_formulas` exists because a RAW write over a row
     carrying the Total Profit formula freezes it into whatever number it last evaluated to, and this

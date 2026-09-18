@@ -160,6 +160,12 @@ class LedgerRow:
         return self.text("payout_date")
 
     @property
+    def expected_payout(self) -> float | None:
+        """What the buying group COMMITTED to pay for this row (Expected Payout, filled by the
+        sync from BFMR's tracker price; blank for MOD, which publishes none)."""
+        return self.number("expected_payout")
+
+    @property
     def is_settled(self) -> bool:
         """The group's outcome is IN: a Payout Amount cell (any amount, $0.00 included -- a return
         or clawback that paid nothing is a settled LOSS, and the sheet's Total Profit shows it)
@@ -172,14 +178,36 @@ class LedgerRow:
 
     @property
     def is_committed(self) -> bool:
-        """A projected payout: the amount BFMR has committed to, not yet paid (a non-zero amount,
-        date blank, status not a buying-group outcome -- the allocator never writes a zero
-        commitment). Total Profit on such a row is PROJECTED."""
-        return (
-            bool(self.payout_amount)
-            and not self.is_settled
-            and not self.is_money_free
-        )
+        """A projected payout: the group has committed to an amount (Expected Payout, since
+        2026-09-18) and has not paid yet. A ledger from before the column -- a CSV backup, a Sheet
+        not yet migrated -- carried the commitment IN Payout Amount with a blank date, and that
+        legacy shape still reads as committed here. A zero is never a commitment (the allocator
+        never writes one)."""
+        if self.is_money_free or self.is_settled:
+            return False
+        return bool(self.expected_payout) or bool(self.payout_amount)
+
+    @property
+    def projected_payout(self) -> float | None:
+        """The committed figure a projected profit is computed from, or None when not committed."""
+        if not self.is_committed:
+            return None
+        return self.expected_payout if self.expected_payout else self.payout_amount
+
+    @property
+    def projected_profit(self) -> float | None:
+        """Expected Payout - COGS - Insurance on a committed row (the formula's arithmetic with
+        the commitment in place of the payout); None otherwise."""
+        payout = self.projected_payout
+        if payout is None:
+            return None
+        return round(payout - (self.cogs or 0.0) - (self.number("insurance") or 0.0), 2)
+
+    @property
+    def profit_or_projected(self) -> float | None:
+        """Total Profit when the row has one (a payout is in), else the projected profit."""
+        profit = self.profit
+        return profit if profit is not None else self.projected_profit
 
     @property
     def is_unpaid(self) -> bool:

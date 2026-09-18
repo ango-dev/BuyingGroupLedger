@@ -351,6 +351,18 @@ class Options:
 
 CHECKS: list[tuple[str, bool, Callable]] = []
 
+#: Checks about the Google Sheet as a spreadsheet -- live formulas, display formats, merged
+#: cells, the formatted/stored disagreement -- which have nothing to say about the SQLite ledger
+#: (its two formula columns are computed on every read, its values are typed). Under
+#: `ledger.backend` = `db` they report SKIP; every DATA check (keys, money invariants, missing
+#: mandatory cells, staleness) runs against the database exactly as it ran against the Sheet.
+SHEET_ONLY_CHECKS = frozenset({
+    "key_is_format_independent", "profit_formula_coverage", "profit_formula_literal",
+    "cogs_formula_coverage", "cogs_formula_literal", "no_stray_formulas",
+    "display_round_trips_to_stored", "no_formula_errors", "no_merged_cells",
+    "profit_blank_despite_payout", "profit_value_matches_inputs",
+})
+
 
 def check(name: str, requires_schema: bool = True):
     """Register a check.
@@ -1925,9 +1937,15 @@ def check_no_merged_cells(sheet: Sheet, opts: Options) -> Result:
 # --------------------------------------------------------------------------------------------------
 
 
-def run_checks(sheet: Sheet, opts: Options) -> list[Result]:
+def run_checks(sheet: Sheet, opts: Options, *, sheet_checks: bool = True) -> list[Result]:
+    """Every check, in registration order. `sheet_checks=False` (the ledger is the database)
+    reports the SHEET_ONLY_CHECKS as SKIP instead of running them against a grid that has no
+    formulas or formats to inspect."""
     results = []
     for name, requires_schema, fn in CHECKS:
+        if not sheet_checks and name in SHEET_ONLY_CHECKS:
+            results.append(Result(name, "SKIP", "a Google Sheet check; the ledger is the database"))
+            continue
         if requires_schema and not sheet.schema_ok:
             results.append(Result(name, "SKIP", "header doesn't match the schema -- indices would be wrong"))
             continue
@@ -2219,15 +2237,14 @@ def main() -> None:
     parser.add_argument("--stale-days", type=int, default=3, help="warn when an OPEN row hasn't been re-scraped in this many days (default 3)")
     args = parser.parse_args()
 
+    sheet_checks = True
     if not args.from_snapshot:
         from config.settings import settings
 
         if settings.ledger_is_db():
-            print("ledger.backend is `db`: the ledger is data/ledger.sqlite3, and this audit's "
-                  "checks are the Google Sheet's (formulas, formats, notes, grid). It has nothing to "
-                  "audit there. The dashboard's /health and the offline tests cover the database; "
-                  "`--from-snapshot` still audits a saved Sheet snapshot.", file=sys.stderr)
-            raise SystemExit(2)
+            # The ledger is data/ledger.sqlite3: the data checks run against it through the
+            # worksheet adapter; the Sheet-only checks (formulas, formats, merges) report SKIP.
+            sheet_checks = False
 
     if args.from_snapshot:
         from_path = _snapshot_path(args.from_snapshot)
@@ -2252,7 +2269,7 @@ def main() -> None:
 
     sheet = Sheet(grids)
     opts = Options(expect_rows=args.expect_rows, strict=args.strict, stale_days=args.stale_days)
-    results = run_checks(sheet, opts)
+    results = run_checks(sheet, opts, sheet_checks=sheet_checks)
 
     diff = None
     compare_path = _snapshot_path(args.compare) if args.compare else None

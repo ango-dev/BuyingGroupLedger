@@ -3,13 +3,18 @@
 {% from "_dropzone.html" import dropzone %}
 {% block title %}Orders{% endblock %}
 {% block content %}
-<h1>Orders</h1>
+{# The Audit and Reconciliation pages extend this template: the same filter bar, table and cards
+   over their own rows, with a Finding column. `base` is the page's own URL,
+   `scope` names it, both from the route. #}
+{% block heading %}<h1>Orders</h1>{% endblock %}
+{% block lead %}{% endblock %}
 
-<form id="filters" class="filters" method="get" action="/orders"
-      hx-get="/orders" hx-target="#orders-table" hx-indicator="#orders-table" hx-push-url="true"
+<form id="filters" class="filters" method="get" action="{{ base }}"
+      hx-get="{{ base }}" hx-target="#orders-table" hx-indicator="#orders-table" hx-push-url="true"
       hx-trigger="change, keyup changed delay:300ms from:#q, submit">
   {# Only the form's OWN requests write the remembered filters / view. #}
   <input type="hidden" name="remember" value="1">
+  {% if scope %}<input type="hidden" name="scope" value="{{ scope }}">{% endif %}
   {% for param, label, options, chosen in (('retailer', 'Retailer', facets.retailers, filters.retailers), ('profile', 'Profile', facets.profiles, filters.profiles), ('status', 'Status', facets.statuses, filters.statuses), ('group', 'Buying group', facets.groups, filters.groups)) %}
   <details class="multi" data-param="{{ param }}">
     <summary><span class="lbl">{{ label }}</span> <span class="summary-text"><span class="summary-value">{{ 'all' if not chosen else (chosen | join(', ') if chosen | length <= 2 else (chosen | length) ~ ' selected') }}</span><span class="caret">▾</span></span></summary>
@@ -21,6 +26,7 @@
     </div>
   </details>
   {% endfor %}
+  {% block extra_filters %}{% endblock %}
   <label class="search">Search
     <input id="q" type="search" name="q" value="{{ filters.q }}" placeholder="order id, item, tracking, package id, last 4, address">
   </label>
@@ -42,7 +48,7 @@
     {{ choose('per', PER_PAGE_CHOICES, filters.per, 'Per page') }}
   </span>
   <noscript><button type="submit">Apply</button></noscript>
-  <a class="button small reset" href="/orders?reset=1" title="clear the filters, search and sort (the view and page size stay)">Reset</a>
+  <a class="button small reset" href="{{ base }}?reset=1" title="clear the filters, search and sort (the view and page size stay)">Reset</a>
 </form>
 
 {# The in-page confirmation. htmx's hx-confirm question is routed here (static/edit.js listens
@@ -57,7 +63,7 @@
   </form>
 </dialog>
 
-{% if editable %}
+{% if editable and not scope %}
   {# Outside the filter form: a form cannot nest inside another. #}
   <details class="add-row" {{ 'open' if add_open }}>
     <summary>Add a row</summary>

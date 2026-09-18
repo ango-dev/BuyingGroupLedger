@@ -84,6 +84,7 @@ HEADER = [
                    # Best Buy groupId): matched on before the tracking number. TEXT, never typed.
                    # Added 2026-09-09, moved before Last Scraped At 2026-09-10 — see models/order.py.
     "Last Scraped At",
+    "Expected Payout",  # the group's COMMITTED payout (sync_tracking), kept apart from the paid one
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
@@ -97,7 +98,7 @@ HEADER = [
 # number returns None for it and _coerce leaves it as text untouched — no data is lost.
 _NUMERIC_FIELDS = {
     "quantity", "cost_per_item", "shipping", "total_cost",
-    "cashback_rate", "insurance", "payout_amount",
+    "cashback_rate", "insurance", "payout_amount", "expected_payout",
     "shipment", "return_quantity", "gift_card", "sales_tax", "rewards_used",
 }
 
@@ -1182,7 +1183,7 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
 # blank themselves on a cancelled row (see _cogs_formula).
 _CANCELLED_BLANK_FIELDS = (
     "cost_per_item", "total_cost", "shipping", "insurance", "payout_amount", "payout_date",
-    "gift_card", "sales_tax", "rewards_used",
+    "gift_card", "sales_tax", "rewards_used", "expected_payout",
 )
 # A SUPERSEDED row blanks Quantity as well: it is the multiplier that booked the
 # re-labelled package's cost twice, and "how many were ordered" is already told by the live row.

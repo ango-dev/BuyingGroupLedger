@@ -90,19 +90,45 @@ class LedgerDb:
         return conn
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
-        """Create the tables, or REBUILD ledger_rows when its columns are not FIELDNAMES in order.
+        """Create the tables, or MIGRATE ledger_rows when its columns are not FIELDNAMES in order.
 
-        The table is a mirror, so rebuilding loses nothing the next mirror does not restore -- and
-        a schema that silently lagged the ledger's would be the positional-drift bug in a new coat.
+        Under `ledger.backend` = `db` this file IS the ledger, so a schema change must carry every
+        row across: when the table merely lacks columns (the schema rule is "append last", so a
+        new column is the only legal change) it is rebuilt in the current column order with the
+        rows copied over and the new cells NULL -- one transaction, nothing dropped. A table
+        holding columns the schema no longer knows is rebuilt only when it is EMPTY; a populated
+        one is refused loudly, because dropping it would be the "silently records nothing" outcome
+        (restore a backup or migrate by hand). A schema that silently lagged the ledger's would be
+        the positional-drift bug in a new coat, so the columns are compared in full, in order.
         """
         conn.execute(MIRROR_RUNS_DDL)
         existing = [r["name"] for r in conn.execute('PRAGMA table_info("ledger_rows")')]
         wanted = [name for name, _ in columns()]
-        if existing != wanted:
-            conn.execute("BEGIN")
-            conn.execute('DROP TABLE IF EXISTS "ledger_rows"')
-            conn.execute(ledger_rows_ddl())
+        if existing == wanted:
+            return
+        conn.execute("BEGIN")
+        try:
+            if not existing:
+                conn.execute(ledger_rows_ddl())
+            else:
+                unknown = [name for name in existing if name not in wanted]
+                rows = int(conn.execute('SELECT COUNT(*) FROM "ledger_rows"').fetchone()[0])
+                if unknown and rows:
+                    raise RuntimeError(
+                        f"{self.path}: ledger_rows holds {rows} row(s) and column(s) the schema no "
+                        f"longer knows ({', '.join(unknown)}); refusing to rebuild it. Restore a "
+                        "backup or migrate the table by hand.")
+                kept = [name for name in wanted if name in existing]
+                conn.execute('ALTER TABLE "ledger_rows" RENAME TO "ledger_rows__old"')
+                conn.execute(ledger_rows_ddl())
+                if kept and rows:
+                    cols = ", ".join(f'"{name}"' for name in kept)
+                    conn.execute(f'INSERT INTO "ledger_rows" ({cols}) SELECT {cols} FROM "ledger_rows__old"')
+                conn.execute('DROP TABLE "ledger_rows__old"')
             conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     # --- writes (the mirror is the only writer) --------------------------------------------------
     def replace_rows(self, records: list[dict], *, backend: str, source: str, skipped: int = 0,
