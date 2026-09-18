@@ -200,8 +200,9 @@ refusal lasts as long as the run does.
 **The Tools page** runs the scripts worth running from a browser, each exactly as it runs on the
 command line (`python -m scripts.<name> <args>`, the arguments its own `--help` declares): **Run
 once** (`python -m main [retailer]` — a real run exactly as the schedule does it, scrape, upsert
-and the buying-group sync that submits tracking and files insurance; confirmed in-page and
-refused while a run holds the lock), the preflight check, the tax report, the buying-group probe, the receipt checks, the Costco token
+and the buying-group sync that submits tracking and files insurance; confirmed in-page, refused
+while a run holds the lock, holding that lock itself so no scheduled run overlaps it, and stamping
+the heartbeat when it ends exactly as the cron wrapper does), the preflight check, the tax report, the buying-group probe, the receipt checks, the Costco token
 tool, the backfills and ledger fixes, the Sheet mirror, and the Sheet audit while the ledger is
 the Sheet. A tool that writes the ledger asks in-page first, runs dry by default where the script
 has a dry run, and is refused while a scheduled run holds the run lock; one that spends (a cloud

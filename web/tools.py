@@ -65,6 +65,10 @@ class Tool:
     writes: bool = False  # changes the ledger / a third party: confirmed, run-lock gated
     spends: str = ""      # what it costs, if anything ("a cloud browser session")
     sheet_only: bool = False  # meaningful only while ledger.backend is sheet
+    #: Stamp logs/.last_run when the job ends, as docker/run_once.sh does after the scheduled run.
+    #: Only for a tool that IS the run: it holds the same run lock the schedule checks, so a hand
+    #: run and a scheduled one are one and the same event to the heartbeat.
+    heartbeat: bool = False
 
     def argv(self, form: dict) -> list[str]:
         """The command-line arguments for a submitted form, validated: an unknown field or a bad
@@ -111,7 +115,8 @@ TOOLS: tuple[Tool, ...] = (
          "A full run now, as the schedule does it: scrape every retailer (or one), update the ledger, then the "
          "buying-group sync -- which submits tracking numbers and files insurance for real. Not a dry run.",
          "Run", (Field("", "Retailer", "select", "blank = every retailer", choices=RETAILER_CHOICES),),
-         writes=True, spends="cloud browser sessions, and it submits tracking and files insurance"),
+         writes=True, spends="cloud browser sessions, and it submits tracking and files insurance",
+         heartbeat=True),
     Tool("preflight", "scripts.preflight", "Preflight check",
          "Config and dependency check: the misconfigurations that would otherwise fail silently. Offline.",
          "Checks", (Field("--strict", "Strict", "flag", "treat warnings as failures"),)),
@@ -207,6 +212,7 @@ class Job:
     returncode: int | None = None
     finished_at: datetime | None = None
     error: str = ""
+    heartbeat: bool = False  # stamp logs/.last_run when this job ends (Tool.heartbeat)
     _process: Any = field(default=None, repr=False)
 
     @property
@@ -227,7 +233,8 @@ class JobRunner:
 
     def __init__(self, logs_dir: Path, root: Path | None = None, python: str | None = None,
                  clock: Callable[[], datetime] | None = None, launch=None):
-        self.dir = Path(logs_dir) / "tools"
+        self.logs_dir = Path(logs_dir)
+        self.dir = self.logs_dir / "tools"
         self.root = Path(root) if root else ROOT
         self.python = python or sys.executable
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -249,7 +256,7 @@ class JobRunner:
             self.dir.mkdir(parents=True, exist_ok=True)
             job_id = self.clock().strftime("%Y%m%dT%H%M%SZ") + "-" + t.key + "-" + uuid.uuid4().hex[:6]
             job = Job(id=job_id, tool_key=t.key, argv=list(argv), started_at=self.clock(),
-                      log_path=self.dir / f"{job_id}.log")
+                      log_path=self.dir / f"{job_id}.log", heartbeat=t.heartbeat)
             command = [self.python, "-m", t.module, *argv]
             try:
                 handle = job.log_path.open("w", encoding="utf-8")
@@ -275,6 +282,17 @@ class JobRunner:
                 handle.close()
             except Exception:  # noqa: BLE001
                 pass
+            if job.heartbeat:
+                self.stamp_heartbeat(job)
+
+    def stamp_heartbeat(self, job: Job) -> None:
+        """logs/.last_run, exactly as docker/run_once.sh writes it: after the run, whatever its
+        exit code (the heartbeat says the run HAPPENED; a failed run alerts on its own)."""
+        try:
+            stamp = self.clock().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            (self.logs_dir / ".last_run").write_text(stamp, encoding="utf-8")
+        except OSError as exc:
+            log.warning("could not stamp the heartbeat after %s: %s", job.id, exc)
 
     def recent(self, limit: int = 20) -> list[Job]:
         return sorted(self.jobs.values(), key=lambda j: j.started_at, reverse=True)[:limit]

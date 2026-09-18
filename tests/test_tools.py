@@ -309,7 +309,8 @@ class TestRunOnce:
 
     def test_the_tool_is_main_itself(self):
         t = tools.tool("run_once")
-        assert t.module == "main" and t.group == "Run" and t.writes and t.spends
+        assert t.module == "main" and t.group == "Run" and t.writes and t.spends and t.heartbeat
+        assert not any(o.heartbeat for o in tools.TOOLS if o.key != "run_once")
         assert t.argv({}) == [] and t.argv({"Retailer": "costco"}) == ["costco"]
         with pytest.raises(ValueError, match="not one of"):
             t.argv({"Retailer": "walmart"})
@@ -326,3 +327,33 @@ class TestRunOnce:
         assert 'id="t-run_once"' in body and "python -m main" in body
         assert "submits tracking numbers and files insurance" in body and 'class="tag stale"' in body
         assert 'data-param="Retailer"' in body
+
+    def test_a_finished_run_stamps_the_heartbeat_like_the_cron_wrapper(self, tmp_path):
+        """The tool holds the same run lock the schedule checks, so its run is a run: the
+        heartbeat is written when it ends, whatever the exit code (run_once.sh's rule)."""
+        import subprocess
+        import time
+
+        from web.heartbeat import read_heartbeat
+
+        runner = tools.JobRunner(tmp_path, clock=lambda: NOW)
+        stamped = tools.Tool("r", "unused", "R", "", "Run", heartbeat=True)
+        plain = tools.Tool("p", "unused", "P", "", "Checks")
+        runner.launch = lambda command, handle: subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.exit(3)"], stdout=handle, stderr=subprocess.STDOUT, text=True)
+        job = runner.start(plain, [])
+        job._process.wait()
+        for _ in range(50):
+            if not job.running:
+                break
+            time.sleep(0.05)
+        assert not (tmp_path / ".last_run").exists()
+        job = runner.start(stamped, [])
+        job._process.wait()
+        for _ in range(50):
+            if job.finished_at and (tmp_path / ".last_run").exists():
+                break
+            time.sleep(0.05)
+        assert job.returncode == 3
+        assert (tmp_path / ".last_run").read_text(encoding="utf-8") == "2026-09-18T12:00:00Z"
+        assert read_heartbeat(tmp_path, now=NOW, interval_hours=6)["stale"] is False
