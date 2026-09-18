@@ -154,3 +154,50 @@
     all.dispatchEvent(new Event("change", { bubbles: true }));
   });
 })();
+
+// In-page confirmation: every hx-confirm question is routed to the <dialog id="confirm"> instead
+// of the browser's own prompt. htmx fires
+// htmx:confirm before any request that carries hx-confirm; cancel it, show the dialog, and issue
+// the request only on Confirm. Pages without the dialog fall back to htmx's default.
+(function () {
+  "use strict";
+  document.addEventListener("htmx:confirm", function (e) {
+    var question = e.detail && e.detail.question;
+    var dialog = document.getElementById("confirm");
+    if (!question || !dialog || typeof dialog.showModal !== "function") return;
+    e.preventDefault();
+    document.getElementById("confirm-text").textContent = question;
+    var ok = document.getElementById("confirm-ok");
+    var cancel = document.getElementById("confirm-cancel");
+    function done(confirmed) {
+      ok.removeEventListener("click", onOk);
+      cancel.removeEventListener("click", onCancel);
+      dialog.removeEventListener("close", onClose);
+      if (dialog.open) dialog.close();
+      if (confirmed) e.detail.issueRequest(true);
+    }
+    function onOk() { done(true); }
+    function onCancel() { done(false); }
+    function onClose() { done(false); }
+    ok.addEventListener("click", onOk);
+    cancel.addEventListener("click", onCancel);
+    dialog.addEventListener("close", onClose);
+    dialog.showModal();
+    ok.focus();
+  });
+})();
+
+// Switching the view (table / cards) or the page size reloads the whole page rather than swapping
+// the table: the bulk bar and the per-page control live outside the swapped region.
+(function () {
+  "use strict";
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (!t || !t.form || t.form.id !== "filters") return;
+    if (t.name !== "view" && t.name !== "per") return;
+    e.stopPropagation();
+    var page = t.form.querySelector('input[name="page"]');
+    if (page) page.value = "";
+    t.form.submit();
+  }, true);
+})();

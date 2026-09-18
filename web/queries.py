@@ -30,6 +30,10 @@ SEARCH_FIELDS = ("order_id", "item_name", "tracking_number", "package_id", "card
                  "delivery_address")
 
 DEFAULT_SORT = "order_date"
+#: The two ways the Orders page shows the ledger: the sheet-like table, or one card per ORDER.
+VIEWS = ("table", "cards")
+PER_PAGE_CHOICES = (12, 24, 48, 96)
+DEFAULT_PER_PAGE = 24
 
 
 @dataclass(frozen=True)
@@ -41,17 +45,33 @@ class Filters:
     q: str = ""
     sort: str = DEFAULT_SORT
     desc: bool = True
+    view: str = "table"
+    per: int = DEFAULT_PER_PAGE
+    page: int = 1
 
     @classmethod
     def from_query(cls, params) -> "Filters":
-        """From a request's query mapping. An unknown sort key falls back to the default rather
-        than raising -- a stale bookmark should still render."""
+        """From a request's query mapping. An unknown sort key, view or page size falls back to
+        the default rather than raising -- a stale bookmark should still render."""
         sort = str(params.get("sort") or DEFAULT_SORT).strip()
         if sort not in FIELDNAMES:
             sort = DEFAULT_SORT
         direction = str(params.get("dir") or "").strip().lower()
         desc = direction != "asc" if direction else sort in ("order_date", "delivery_date",
                                                               "payout_date", "last_scraped_at")
+        view = str(params.get("view") or "table").strip().lower()
+        if view not in VIEWS:
+            view = "table"
+        try:
+            per = int(str(params.get("per") or DEFAULT_PER_PAGE))
+        except ValueError:
+            per = DEFAULT_PER_PAGE
+        if per not in PER_PAGE_CHOICES:
+            per = DEFAULT_PER_PAGE
+        try:
+            page = max(1, int(str(params.get("page") or 1)))
+        except ValueError:
+            page = 1
         return cls(
             retailer=str(params.get("retailer") or "").strip(),
             profile=str(params.get("profile") or "").strip(),
@@ -60,14 +80,20 @@ class Filters:
             q=str(params.get("q") or "").strip(),
             sort=sort,
             desc=desc,
+            view=view,
+            per=per,
+            page=page,
         )
 
     def as_query(self, **overrides) -> dict:
         values = {"retailer": self.retailer, "profile": self.profile, "status": self.status,
                   "group": self.group, "q": self.q, "sort": self.sort,
-                  "dir": "desc" if self.desc else "asc"}
+                  "dir": "desc" if self.desc else "asc",
+                  "view": self.view if self.view != "table" else "",
+                  "per": str(self.per) if self.per != DEFAULT_PER_PAGE else "",
+                  "page": str(self.page) if self.page > 1 else ""}
         values = {**values, **overrides}
-        return {k: v for k, v in values.items() if v}
+        return {k: v for k, v in values.items() if v not in ("", None)}
 
 
 def _value_of(row: LedgerRow, name: str):
@@ -210,3 +236,76 @@ def order_view(rows: list[LedgerRow]) -> dict | None:
         "payout_dates": unique("payout_date"),
         "last_scraped_at": max((r.text("last_scraped_at") for r in rows), default=""),
     }
+
+
+# --------------------------------------------------------------------------------------------------
+# The cards view: one card per ORDER, in the table's row order, paginated
+# --------------------------------------------------------------------------------------------------
+
+
+def order_cards(rows: list[LedgerRow]) -> list[dict]:
+    """Group already-filtered, already-sorted rows by Order ID (first appearance keeps the sort),
+    summarising each order for a card: what, where, the money, and every row key (so a card's
+    delete can name all of its rows)."""
+    cards: dict[str, dict] = {}
+    for row in rows:
+        card = cards.get(row.order_id)
+        if card is None:
+            card = cards[row.order_id] = {
+                "order_id": row.order_id, "order_date": row.order_date, "retailer": row.retailer,
+                "profile": row.profile, "buying_group": row.buying_group or "(blank)",
+                "statuses": [], "items": [], "tracking": [], "keys": [], "rows": 0,
+                "quantity": 0, "total_cost": 0.0, "payout": 0.0, "profit": 0.0,
+                "has_profit": False, "payout_states": set(), "receipt_urls": [],
+                "order_url": row.text("order_url"), "card": row.text("card_name"),
+            }
+        card["rows"] += 1
+        if row.status and row.status not in card["statuses"]:
+            card["statuses"].append(row.status)
+        name = row.item_name
+        if name and name not in card["items"]:
+            card["items"].append(name)
+        if row.tracking_number and row.tracking_number not in card["tracking"]:
+            card["tracking"].append(row.tracking_number)
+        card["keys"].append({"order_id": row.order_id, "order_date": row.order_date,
+                             "item_name": row.item_name, "shipment": row.shipment})
+        if not row.is_money_free:
+            card["quantity"] += int(row.number("quantity") or 0)
+            card["total_cost"] += row.total_cost or 0.0
+            card["payout"] += row.payout_amount or 0.0
+            if row.profit is not None:
+                card["profit"] += row.profit
+                card["has_profit"] = True
+            card["payout_states"].add(row.payout_state)
+        receipt = row.text("receipt_url")
+        if receipt and receipt not in card["receipt_urls"]:
+            card["receipt_urls"].append(receipt)
+    out = []
+    for card in cards.values():
+        states = card.pop("payout_states")
+        if states == {"settled"}:
+            card["payout_state"] = "settled"
+        elif "settled" in states:
+            card["payout_state"] = "partly settled"
+        elif "committed" in states:
+            card["payout_state"] = "committed"
+        else:
+            card["payout_state"] = "none"
+        card["total_cost"] = round(card["total_cost"], 2)
+        card["payout"] = round(card["payout"], 2)
+        card["profit"] = round(card["profit"], 2) if card["has_profit"] else None
+        card["is_open"] = any(s in ("ordered", "shipped", "delivered") for s in card["statuses"])
+        out.append(card)
+    return out
+
+
+def paginate(items: list, per: int, page: int) -> dict:
+    """One page of `items` plus what the pager needs. A page past the end clamps to the last."""
+    total = len(items)
+    pages = max(1, (total + per - 1) // per)
+    page = min(max(1, page), pages)
+    start = (page - 1) * per
+    return {"items": items[start:start + per], "total": total, "pages": pages, "page": page,
+            "per": per, "start": start + 1 if total else 0, "end": min(start + per, total),
+            "has_prev": page > 1, "has_next": page < pages,
+            "window": [n for n in range(max(1, page - 3), min(pages, page + 3) + 1)]}

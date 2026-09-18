@@ -35,8 +35,34 @@
   </label>
   <input type="hidden" name="sort" value="{{ filters.sort }}">
   <input type="hidden" name="dir" value="{{ 'desc' if filters.desc else 'asc' }}">
+  <span class="toolbar-sep"></span>
+  <label>View
+    <span class="view-toggle" role="group" aria-label="view">
+      <select name="view" id="view">
+        <option value="table" {{ 'selected' if filters.view == 'table' }}>Table</option>
+        <option value="cards" {{ 'selected' if filters.view == 'cards' }}>Cards</option>
+      </select>
+    </span>
+  </label>
+  <label class="{{ '' if filters.view == 'cards' else 'hidden' }}" id="per-page">Per page
+    <select name="per">
+      {% for n in PER_PAGE_CHOICES %}<option value="{{ n }}" {{ 'selected' if n == filters.per }}>{{ n }}</option>{% endfor %}
+    </select>
+  </label>
   <noscript><button type="submit">Apply</button></noscript>
 </form>
+
+{# The in-page confirmation. htmx's hx-confirm question is routed here (static/edit.js listens
+   for htmx:confirm), so the browser's own dialog is never shown. #}
+<dialog id="confirm" class="confirm">
+  <form method="dialog">
+    <p id="confirm-text"></p>
+    <div class="inline-form">
+      <button type="button" id="confirm-cancel" value="cancel">Cancel</button>
+      <button type="button" id="confirm-ok" class="danger">Confirm</button>
+    </div>
+  </form>
+</dialog>
 
 {% if editable %}
   {# Outside the filter form: a form cannot nest inside another. #}
@@ -74,7 +100,7 @@
    ONE form, so the buttons' own form carries the selected keys -- an include of a second form did
    not reliably. #}
 <form id="bulk" hx-include="#filters">
-  {% if editable %}
+  {% if editable and filters.view == 'table' %}
   <div id="bulkbar" class="bulkbar">
     <span class="muted small"><span id="sel-count">0</span> selected · click row numbers to select, shift-click for a range, click <b>#</b> for all</span>
     <select name="field">
@@ -88,7 +114,7 @@
   </div>
   {% endif %}
   <div id="orders-table">
-    {% include "_orders_table.html" %}
+    {% if filters.view == 'cards' %}{% include "_orders_cards.html" %}{% else %}{% include "_orders_table.html" %}{% endif %}
   </div>
 </form>
 {% endblock %}

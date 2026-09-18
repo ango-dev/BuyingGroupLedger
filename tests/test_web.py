@@ -1281,3 +1281,37 @@ class TestCharts:
         body = client.get("/").text
         assert re.search(r'href="/static/style\.css\?v=\d+"', body)
         assert re.search(r'src="/static/htmx\.min\.js\?v=\d+"', body)
+
+
+class TestCardsHelpers:
+    def test_filters_parse_view_per_and_page_with_safe_fallbacks(self):
+        f = Filters.from_query({"view": "cards", "per": "48", "page": "3"})
+        assert (f.view, f.per, f.page) == ("cards", 48, 3)
+        assert f.as_query() == {"sort": "order_date", "dir": "desc", "view": "cards", "per": "48",
+                                "page": "3"}
+        bad = Filters.from_query({"view": "list", "per": "7", "page": "zero"})
+        assert (bad.view, bad.per, bad.page) == ("table", 24, 1)
+        assert "view" not in bad.as_query() and "per" not in bad.as_query()
+
+    def test_order_cards_group_rows_per_order_in_row_order(self, snapshot_path):
+        from web.queries import order_cards
+
+        rows = sort_rows(SnapshotReader(snapshot_path).load().rows, Filters())
+        cards = order_cards(rows)
+        assert [c["order_id"] for c in cards][:2] == ["111-0000001-0000001", "BBY01-800000000001"]
+        bby = next(c for c in cards if c["order_id"] == "BBY01-800000000001")
+        assert bby["rows"] == 2 and bby["quantity"] == 3 and bby["total_cost"] == 3000.0
+        assert bby["statuses"] == ["shipped", "ordered"] and bby["payout_state"] == "committed"
+        assert bby["profit"] == 263.6 and len(bby["keys"]) == 2
+        assert bby["tracking"] == ["529900000012"] and len(bby["receipt_urls"]) == 1
+        cancelled = next(c for c in cards if c["order_id"] == "1399000019")
+        assert cancelled["total_cost"] == 0.0 and cancelled["profit"] is None
+
+    def test_paginate(self):
+        from web.queries import paginate
+
+        p = paginate(list(range(50)), 12, 2)
+        assert p["items"] == list(range(12, 24)) and p["pages"] == 5
+        assert (p["start"], p["end"], p["has_prev"], p["has_next"]) == (13, 24, True, True)
+        assert paginate(list(range(50)), 12, 99)["page"] == 5  # clamps to the last page
+        assert paginate([], 12, 1) == {**paginate([], 12, 1), "total": 0, "pages": 1, "start": 0, "end": 0}

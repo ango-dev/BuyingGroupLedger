@@ -593,3 +593,52 @@ class TestSelectionValueSurvivesTheBrowser:
         # And the round trip through the route deletes exactly that row.
         response = client.post("/orders/delete", data={"sel": [html_module.unescape(values[1])]})
         assert "Deleted 1 row(s)" in response.text and sheet.deleted == [3]
+
+
+class TestCardsView:
+    def test_cards_view_is_paginated_and_each_card_deletes_all_of_its_rows(self, sheet, tmp_path, logs_dir):
+        import html as html_module
+
+        for n in range(30):  # enough orders for two pages at 24
+            sheet.grid.insert(2, row(order_date=f"2026-08-{(n % 28) + 1:02d}", status="paid",
+                                     retailer="Costco", item_name=f"Thing {n}", shipment="1",
+                                     order_id=f"ORD-{n:03d}", total_cost="10", payout_amount="12",
+                                     payout_date="2026-09-01"))
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        body = client.get("/orders", params={"view": "cards"}).text
+        assert '<body class="wide">' in body and '<dialog id="confirm"' in body
+        assert body.count('<article class="card') == 24
+        assert "1–24 of 32 order(s)" in body
+        assert 'class="pager"' in body and "page 1 of 2" in body
+        assert 'id="bulkbar"' not in body  # the cards have their own delete
+        assert '<option value="cards" selected>' in body
+
+        page2 = client.get("/orders", params={"view": "cards", "page": "2"},
+                           headers={"HX-Request": "true"}).text
+        assert "<html" not in page2 and page2.count('<article class="card') == 8
+
+        twelve = client.get("/orders", params={"view": "cards", "per": "12"}).text
+        assert twelve.count('<article class="card') == 12 and "page 1 of 3" in twelve
+
+        # The two-row order's card carries both keys; deleting it removes both rows.
+        sheet.grid.append(row(order_date="2026-09-08", status="ordered", retailer="Best Buy",
+                              item_name="MacBook", shipment="2", order_id="BBY01-1"))
+        client.get("/orders", params={"refresh": "1"})
+        body = client.get("/orders", params={"view": "cards", "q": "BBY01-1"}).text
+        card = body[body.index('<article class="card'):body.index("</article>")]
+        assert "all 2 of its row(s)" in card
+        values = re.findall(r'name="sel" value="([^"]*)"', card)
+        assert len(values) == 2
+        keys = [json.loads(html_module.unescape(v)) for v in values]
+        assert {k["shipment"] for k in keys} == {"1", "2"}
+        response = client.post("/orders/delete", data={"sel": [html_module.unescape(v) for v in values],
+                                                       "view": "cards", "q": "BBY01-1"})
+        assert "Deleted 2 row(s)" in response.text and len(sheet.deleted) == 2
+        assert "No orders match." in response.text  # re-rendered as cards, under the same filter
+
+    def test_confirmations_go_through_the_page_dialog(self, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        body = client.get("/orders").text
+        assert '<dialog id="confirm"' in body and 'id="confirm-ok"' in body
+        js = (Path(__file__).resolve().parents[1] / "web" / "static" / "edit.js").read_text(encoding="utf-8")
+        assert 'addEventListener("htmx:confirm"' in js and "issueRequest(true)" in js

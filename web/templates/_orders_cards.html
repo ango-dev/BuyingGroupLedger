@@ -1,0 +1,64 @@
+{# The cards view: one card per ORDER (web/queries.order_cards), paginated. Swapped into
+   #orders-table exactly like the table partial; the same filters, sort and search apply. A card's
+   Delete posts EVERY row key of the order to /orders/delete (the same route the table's bulk
+   delete uses), through the in-page confirmation dialog. #}
+{% if notice %}<div class="banner ok">{{ notice }}</div>{% endif %}
+{% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
+<p class="muted count">{{ pager.start }}–{{ pager.end }} of {{ pager.total }} order(s) ({{ rows | length }} row(s))
+  {% if not editable %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
+</p>
+<div class="cards-wrap">
+  <div class="cards">
+    {% for c in pager["items"] %}
+    <article class="card status-{{ c.statuses[0] if c.statuses else 'unknown' }} payout-{{ c.payout_state | replace(' ', '-') }}">
+      <header>
+        <a class="mono order-id" href="/orders/{{ c.order_id }}">{{ c.order_id }}</a>
+        <span class="muted">{{ c.order_date }}</span>
+        <span class="retailer">{{ c.retailer }}</span>
+        {% for s in c.statuses %}<span class="tag status-{{ s }}">{{ s }}</span>{% endfor %}
+      </header>
+      <ul class="items">
+        {% for name in c['items'] %}<li title="{{ name }}">{{ name }}</li>{% endfor %}
+      </ul>
+      <dl class="facts-grid">
+        <dt>Group</dt><dd>{{ c.buying_group }}</dd>
+        <dt>Qty</dt><dd>{{ c.quantity }}</dd>
+        <dt>Cost</dt><dd class="num">{{ c.total_cost | money }}</dd>
+        <dt>Payout</dt><dd class="num">{{ c.payout | money }}{% if c.payout_state == 'committed' %} <span class="tag committed">proj.</span>{% elif c.payout_state == 'partly settled' %} <span class="tag committed">part</span>{% endif %}</dd>
+        <dt>Profit</dt><dd class="num {{ 'neg' if c.profit is not none and c.profit < 0 }}">{{ c.profit | money }}</dd>
+        {% if c.tracking %}<dt>Tracking</dt><dd class="mono small">{{ c.tracking | join(', ') }}</dd>{% endif %}
+        {% if c.card %}<dt>Card</dt><dd>{{ c.card }}</dd>{% endif %}
+      </dl>
+      <footer>
+        <span class="links">
+          <a href="/orders/{{ c.order_id }}">details</a>
+          {% if c.order_url %}<a href="{{ c.order_url }}" rel="noopener">order ↗</a>{% endif %}
+          {% for u in c.receipt_urls %}<a href="{{ u }}" rel="noopener">receipt ↗</a>{% endfor %}
+        </span>
+        {% if editable %}
+        <form class="card-delete" hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"
+              hx-confirm="Delete order {{ c.order_id }} — all {{ c.rows }} of its row(s) — from the sheet? This cannot be undone here.">
+          {% for k in c['keys'] %}<input type="hidden" name="sel" value="{{ k | tojson | forceescape }}">{% endfor %}
+          <button type="submit" class="danger small" title="delete every row of this order">Delete</button>
+        </form>
+        {% endif %}
+      </footer>
+    </article>
+    {% else %}
+    <p class="muted">No orders match.</p>
+    {% endfor %}
+  </div>
+  {% if pager.pages > 1 %}
+  <nav class="pager" aria-label="pages">
+    <a class="{{ '' if pager.has_prev else 'disabled' }}" href="/orders?{{ filters.as_query(page=(pager.page - 1) if pager.has_prev else 1) | urlencode }}"
+       hx-get="/orders?{{ filters.as_query(page=(pager.page - 1) if pager.has_prev else 1) | urlencode }}" hx-target="#orders-table" hx-push-url="true">‹ prev</a>
+    {% for n in pager.window %}
+    <a class="{{ 'current' if n == pager.page }}" href="/orders?{{ filters.as_query(page=n) | urlencode }}"
+       hx-get="/orders?{{ filters.as_query(page=n) | urlencode }}" hx-target="#orders-table" hx-push-url="true">{{ n }}</a>
+    {% endfor %}
+    <a class="{{ '' if pager.has_next else 'disabled' }}" href="/orders?{{ filters.as_query(page=(pager.page + 1) if pager.has_next else pager.pages) | urlencode }}"
+       hx-get="/orders?{{ filters.as_query(page=(pager.page + 1) if pager.has_next else pager.pages) | urlencode }}" hx-target="#orders-table" hx-push-url="true">next ›</a>
+    <span class="muted small">page {{ pager.page }} of {{ pager.pages }}</span>
+  </nav>
+  {% endif %}
+</div>

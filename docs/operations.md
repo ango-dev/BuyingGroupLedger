@@ -163,6 +163,13 @@ the column formats survive, the two formula cells stamped), Total Cost is comput
 Cost Per Item, and the row sorts into date order on the next sync. A key that already exists is
 refused.
 
+**Two views.** The *View* control in the filter bar switches between the sheet-like table and
+**cards**: one card per order (its rows grouped: items, statuses, tracking, group, quantity, cost,
+payout, profit, links), under the same filters, sort and search, paginated with a *Per page* choice
+of 12 / 24 / 48 / 96. A card's *Delete* removes every row of that order, through the same
+all-or-nothing delete the table uses. Every confirmation on the page (bulk apply, delete, card
+delete) is an in-page dialog rather than the browser's own prompt.
+
 **Receipts by hand.** The add form takes a photo or PDF, and an order's page has an *Upload
 receipt* button: the file is stored in the same OCI bucket under the same key the capture uses
 (`receipts/<retailer>/<YYYY-MM>/<order id>.<ext>`), and the PAR link becomes Receipt Link — on

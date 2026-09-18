@@ -180,22 +180,32 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     templates.env.globals["MONEY_FIELDS"] = MONEY_FIELDS
     templates.env.globals["EDIT_FIELD_HEADINGS"] = [(f, FIELD_TO_HEADER[f]) for f in EDITABLE_FIELDS]
 
+    from web.queries import PER_PAGE_CHOICES, order_cards, paginate
+
+    templates.env.globals["PER_PAGE_CHOICES"] = PER_PAGE_CHOICES
+
     def orders_context(request: Request, params=None, **extra) -> dict:
         snapshot = load(request)
         filters = Filters.from_query(params if params is not None else request.query_params)
         rows = sort_rows(filter_rows(snapshot.rows, filters), filters)
-        return {
+        context = {
             "snapshot": snapshot, "filters": filters, "rows": rows, "total": len(snapshot.rows),
             "facets": facets(snapshot.rows), "columns": column_headings(),
             "editable": writer is not None, "wide": True, **extra,
         }
+        if filters.view == "cards":
+            context["pager"] = paginate(order_cards(rows), filters.per, filters.page)
+        return context
+
+    def partial_for(filters: Filters) -> str:
+        return "_orders_cards.html" if filters.view == "cards" else "_orders_table.html"
 
     @app.get("/orders", response_class=HTMLResponse)
     def orders(request: Request):
         context = orders_context(request, notice=request.query_params.get("notice", ""))
-        # htmx asks for just the table; a plain browser request gets the whole page.
+        # htmx asks for just the table / cards; a plain browser request gets the whole page.
         if request.headers.get("HX-Request", "").lower() == "true":
-            return page(request, "_orders_table.html", **context)
+            return page(request, partial_for(context["filters"]), **context)
         return page(request, "orders.html", **context)
 
     def selected_keys(form) -> list[dict]:
@@ -212,8 +222,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     def table_after(request: Request, form, *, notice: str = "", error: str = ""):
         """The table re-rendered from a forced re-read, with the page's filters (posted along
         with the form) still applied and a notice or error line on top."""
-        return page(request, "_orders_table.html",
-                    **orders_context(request, params=form, notice=notice, error=error))
+        context = orders_context(request, params=form, notice=notice, error=error)
+        return page(request, partial_for(context["filters"]), **context)
 
     @app.post("/orders/bulk", response_class=HTMLResponse)
     async def orders_bulk(request: Request):
