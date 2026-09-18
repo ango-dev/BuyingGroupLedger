@@ -687,6 +687,17 @@ class TestViewMemory:
         client.get("/orders", params={"q": "", "sort": "order_date", "dir": "desc"})
         assert 'value="shipped" checked' not in client.get("/orders").text
 
+    def test_reset_forgets_the_remembered_filters(self, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        client.get("/orders", params={"status": "shipped", "view": "cards"})
+        assert 'value="shipped" checked' in client.get("/orders").text
+        assert 'href="/orders?reset=1"' in client.get("/orders").text
+        reset = client.get("/orders", params={"reset": "1"}, follow_redirects=False)
+        assert reset.status_code == 303 and reset.headers["location"] == "/orders"
+        body = client.get("/orders").text
+        assert 'value="shipped" checked' not in body
+        assert 'name="view" value="cards" checked' in body  # the view is a layout preference: kept
+
     def test_a_bad_cookie_is_ignored(self, sheet, tmp_path, logs_dir):
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
         client.cookies.set("ledger-view", "grid")

@@ -40,6 +40,7 @@
     {{ choose('per', PER_PAGE_CHOICES, filters.per, 'Per page') }}
   </span>
   <noscript><button type="submit">Apply</button></noscript>
+  <a class="button small reset" href="/orders?reset=1" title="clear the filters, search and sort (the view and page size stay)">Reset</a>
 </form>
 
 {# The in-page confirmation. htmx's hx-confirm question is routed here (static/edit.js listens

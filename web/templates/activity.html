@@ -41,6 +41,7 @@ From <code>{{ activity_path }}</code> and the dossiers under <code>{{ failures_d
   {% endif %}
   {{ choose('dir', [('desc', 'newest first'), ('asc', 'oldest first')], 'desc' if filters.desc else 'asc', 'Order') }}
   <noscript><button type="submit">Apply</button></noscript>
+  <a class="button small reset" href="/activity?reset=1" title="clear the type, window, search, run and order (hidden types stay)">Reset</a>
 </form>
 
 <div id="activity-table">

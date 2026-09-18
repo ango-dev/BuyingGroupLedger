@@ -286,6 +286,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     @app.get("/orders", response_class=HTMLResponse)
     def orders(request: Request):
+        if request.query_params.get("reset"):
+            # The Reset button: forget the remembered filters / sort (the view and page size are
+            # layout preferences and stay) and land on the defaults.
+            response = RedirectResponse(url="/orders", status_code=303)
+            response.delete_cookie(FILTERS_COOKIE)
+            return response
         context = orders_context(request, notice=request.query_params.get("notice", ""))
         # htmx asks for just the table / cards; a plain browser request gets the whole page.
         if request.headers.get("HX-Request", "").lower() == "true":
@@ -516,6 +522,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     @app.get("/activity", response_class=HTMLResponse)
     def activity_page(request: Request):
+        if request.query_params.get("reset"):
+            # The Reset button: type, window, search, run and order back to their defaults. The
+            # hidden types are a preference and stay.
+            return RedirectResponse(url="/activity", status_code=303)
         filters = ActivityFilters.from_query(request.query_params)
         # The hidden types: what the form just said, else what this browser remembered.
         if not filters.hide_set:

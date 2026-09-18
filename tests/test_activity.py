@@ -268,6 +268,8 @@ class TestThePage:
                         at=datetime(2026, 9, 18, 8, 0, tzinfo=timezone.utc))
         body = client.get("/activity").text
         assert ">Container health<" in body and body.count("<tr class=\"kind-") == 2
+        css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
+        assert ".tag.kind-health { background: #" in css  # its own colour, not the default white
         assert 'data-param="hide"' in body and '<th>Type</th>' in body and "<th>Kind</th>" not in body
 
         # the form says: hide health
@@ -291,6 +293,13 @@ class TestThePage:
         assert [e["kind"] for e in activity.read()] == ["alert", "health"]
         script = (Path(__file__).resolve().parents[1] / "docker" / "healthcheck.sh").read_text(encoding="utf-8")
         assert script.count("ALERT_KIND=health $NOTIFY") == 2
+
+    def test_reset_lands_on_the_defaults_and_keeps_the_hidden_types(self, client):
+        client.get("/activity", params={"hide_set": "1", "hide": "health"})
+        assert 'href="/activity?reset=1"' in client.get("/activity", params={"type": "alert"}).text
+        reset = client.get("/activity", params={"reset": "1", "type": "alert", "days": "0"}, follow_redirects=False)
+        assert reset.status_code == 303 and reset.headers["location"] == "/activity"
+        assert client.cookies.get("activity-hide") == "health"
 
     def test_an_empty_log_renders(self, client):
         body = client.get("/activity").text
