@@ -1569,8 +1569,14 @@ class TestStaticAssetsCarryTheirBlocks:
                        ".bulkbar", ".add-form", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
                        "table.activity { width: 100%", ".dropzone.dragover",
-                       ".filters { display: flex; flex-wrap: nowrap", ".filters label.search {"):
+                       ".filters { display: flex; flex-wrap: nowrap", ".filters label.search {",
+                       "@keyframes rise-in", ".just-in {", "prefers-reduced-motion"):
             assert needle in css, f"style.css lost its {needle!r} rules"
+        # motion stays cheap: nothing transitions "all", and no layout property is ever animated
+        motion = css[css.index("/* ---- Motion"):]
+        assert "transition: all" not in motion and "transition-property: all" not in motion
+        for prop in ("width", "height", "margin", "padding", "top", "left"):
+            assert not any("@keyframes" in line and prop + ":" in line for line in motion.splitlines())
         assert css.count("{") == css.count("}")
         # a scrolling filter bar clips the dropdown menus (2026-09-18): the bar must never scroll
         bar = css[css.index(".filters { display: flex"):css.index(chr(10), css.index(".filters { display: flex"))]
@@ -1581,5 +1587,6 @@ class TestStaticAssetsCarryTheirBlocks:
         for needle in ("startEdit(", 'closest("td.rownum")', 'closest("th.rownum")',
                        'addEventListener("htmx:confirm"', "details.multi", 'name !== "view"',
                        '".cell-edit, .cell-empty"', 'contains("single")', '"time.local"',
-                       'closest(".dropzone")', "data-autosubmit"):
+                       'closest(".dropzone")', "data-autosubmit", 'classList.add("just-in")',
+                       'matches(\'[hx-trigger*="every"]\')'):
             assert needle in js, f"edit.js lost its {needle!r} block"

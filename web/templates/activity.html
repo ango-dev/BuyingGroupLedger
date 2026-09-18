@@ -9,7 +9,7 @@ failure dossier (its report opens in place), and every change made from this das
 From <code>{{ activity_path }}</code> and the dossiers under <code>{{ failures_dir }}</code>.</p>
 
 <form id="activity-filters" class="filters" method="get" action="/activity"
-      hx-get="/activity" hx-target="#activity-table" hx-push-url="true"
+      hx-get="/activity" hx-target="#activity-table" hx-indicator="#activity-table" hx-push-url="true"
       hx-trigger="change, keyup changed delay:300ms from:#aq, submit">
   <details class="multi" data-param="type">
     <summary><span class="lbl">Type</span> <span class="summary-text"><span class="summary-value">{{ 'all' if not filters.kinds else (filters.kinds | map('replace', '_', ' ') | join(', ') if filters.kinds | length <= 2 else (filters.kinds | length) ~ ' selected') }}</span><span class="caret">▾</span></span></summary>

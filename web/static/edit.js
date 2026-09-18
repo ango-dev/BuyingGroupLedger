@@ -325,3 +325,23 @@
   show();
   setInterval(function () { if (left > 0) { left -= 1; show(); if (left === 0) location.reload(); } }, 1000);
 })();
+
+// New content gets the page's entrance (style.css, "Motion"): whatever an htmx swap put on the
+// page is tagged .just-in for one animation, then untagged so the next swap into the same target
+// runs it again. A polled refresh (hx-trigger="every ...", the running tool job) is left alone --
+// it would fade every two seconds -- and so is an out-of-band button.
+(function () {
+  "use strict";
+  document.addEventListener("htmx:afterSwap", function (e) {
+    var el = e.target;
+    if (!el || !el.classList || el.matches('[hx-trigger*="every"]')) return;
+    el.classList.remove("just-in");
+    void el.offsetWidth;  // restart the animation when the same element is swapped again
+    el.classList.add("just-in");
+    el.addEventListener("animationend", function done(ev) {
+      if (ev.target !== el) return;
+      el.classList.remove("just-in");
+      el.removeEventListener("animationend", done);
+    });
+  });
+})();

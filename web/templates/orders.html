@@ -6,7 +6,7 @@
 <h1>Orders</h1>
 
 <form id="filters" class="filters" method="get" action="/orders"
-      hx-get="/orders" hx-target="#orders-table" hx-push-url="true"
+      hx-get="/orders" hx-target="#orders-table" hx-indicator="#orders-table" hx-push-url="true"
       hx-trigger="change, keyup changed delay:300ms from:#q, submit">
   {# Only the form's OWN requests write the remembered filters / view. #}
   <input type="hidden" name="remember" value="1">

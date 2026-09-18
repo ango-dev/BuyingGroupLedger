@@ -592,3 +592,54 @@ header nav details.nav-menu .menu a.current { color: var(--accent); font-weight:
 .session .guidance { margin: 0; padding-left: 18px; font-size: 0.9em; color: var(--muted); }
 .session iframe.live { width: 100%; height: 70vh; min-height: 480px; border: 1px solid var(--line); border-radius: 8px; background: #000; }
 .tag.kind-tool { background: #d8e6f0; }
+
+/* ---- Motion. The rules that keep
+   it cheap: only opacity, transform and colours ever animate (never a layout property, never a
+   blanket transition of every property); every entrance is a one-shot of ~.2s; nothing loops except the dim of a cell
+   while it saves; and everything collapses to nothing under prefers-reduced-motion. New content
+   gets the same entrance as the page: an htmx swap (edit.js tags what arrived .just-in, except a
+   polled refresh), a cell editor, an opened menu or card, a dialog, a banner. ---- */
+:root { --ease: cubic-bezier(.2, .7, .2, 1); --quick: .14s; --enter: .22s; }
+@keyframes rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes pulse { 50% { opacity: .4; } }
+
+/* the page: the content rises in once; a banner fades in above it */
+main { animation: rise-in var(--enter) var(--ease) backwards; }
+.banner { animation: fade-in var(--enter) var(--ease) backwards; }
+
+/* new content: what an htmx swap put on the page (opacity only: a swapped table can be tall, and
+   a transform is ignored on a table cell anyway), the inline cell editor, a cell being saved */
+.just-in { animation: fade-in var(--enter) var(--ease) backwards; }
+.cell-input { animation: fade-in var(--quick) var(--ease) backwards; }
+table.sheetlike td.saving { animation: pulse .9s ease-in-out infinite; }
+/* while a filter, sort or page request is in flight the region it will replace dims a little --
+   after a short delay, so the usual instant answer from SQLite never flickers it */
+#orders-table, #activity-table { transition: opacity var(--quick) var(--ease) .25s; }
+#orders-table.htmx-request, #activity-table.htmx-request { opacity: .55; }
+
+/* menus, collapsibles and the confirm dialog open with a short drop or fade */
+details.multi[open] > .menu { animation: menu-in var(--quick) var(--ease) backwards; }
+.entry-card[open] > :not(summary), details.advanced[open] > :not(summary), details.dossier[open] > :not(summary),
+.card details[open] > :not(summary) { animation: fade-in var(--enter) var(--ease) backwards; }
+dialog.confirm[open] { animation: pop-in var(--enter) var(--ease) backwards; }
+dialog.confirm[open]::backdrop { animation: fade-in var(--enter) var(--ease) backwards; }
+.tip { transform: translateY(2px); transition: opacity var(--quick), transform var(--quick); }
+.tip.on { transform: none; }
+
+/* hover and focus: colours cross-fade, buttons press, tiles and cards lift a pixel */
+button, a.button, .theme-toggle, header .meta .gear, .pager a, header nav a, header nav details.nav-menu .nav-link,
+header nav details.nav-menu .menu a, details.multi .summary-text, details.multi .menu label, .entry-card > summary,
+.entry-card .chips label, td .cell-edit, td .cell-empty, .settings-nav a, .tile, .card, .charts figure {
+  transition-property: color, background-color, border-color, box-shadow, transform, opacity, filter;
+  transition-duration: var(--quick); transition-timing-function: var(--ease); }
+button:active:not(:disabled), a.button:active { transform: translateY(1px); }
+.card:hover { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); transform: translateY(-1px); }
+.charts figure:hover { border-color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important; transition-delay: 0s !important; }
+}
