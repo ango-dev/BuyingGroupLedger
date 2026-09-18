@@ -355,7 +355,7 @@ class TestOrdersRoutes:
         assert 'hx-post="/orders/delete"' in bulk_form and 'name="sel"' in bulk_form
         assert 'enctype="multipart/form-data"' in body and 'name="receipt_file"' in body
         assert 'action="/orders/add"' in body
-        assert '<option value="insurance">Insurance</option>' in body
+        assert 'name="field" value="insurance"' in body and "Insurance" in body
 
     def test_an_edit_writes_the_sheet_and_returns_the_fresh_cell(self, sheet, tmp_path, logs_dir):
         client = self._client(sheet, tmp_path, logs_dir)
@@ -611,11 +611,11 @@ class TestCardsView:
         assert "1–24 of 32 order(s)" in body
         assert 'class="pager"' in body and "page 1 of 2" in body
         assert 'id="bulkbar"' not in body  # the cards have their own delete
-        assert '<option value="cards" selected>' in body
+        assert 'name="view" value="cards" checked' in body
         # Cards carry the same editable cells as the table, and the Status cell wears the row colour.
         assert 'class="num edit"' in body and 'data-field="insurance"' in body
         assert 'data-field="status"' in body and '<table class="grid card-rows">' in body
-        assert '<select name="sort">' in body and '<option value="total_profit"' in body
+        assert 'data-param="sort"' in body and 'name="sort" value="total_profit"' in body
         first_card = body[body.index('<article'):body.index('</article>')]
         assert '<dd class="num pos">$' in body  # a positive profit reads green, a negative red
         assert '<dt>Status</dt><dd><span class="tag status-' in first_card  # a coloured box in the facts
@@ -662,8 +662,8 @@ class TestViewMemory:
 
         # An overview link names only a filter; it opens in the remembered view.
         body = client.get("/orders", params={"status": "shipped"}).text
-        assert '<article class="card' in body and '<option value="12" selected>' in body
-        assert '<option value="cards" selected>' in body
+        assert '<article class="card' in body and 'name="per" value="12" checked' in body
+        assert 'name="view" value="cards" checked' in body
         # htmx swaps follow it too, and an explicit choice overrides and updates the memory.
         assert '<article class="card' in client.get("/orders", headers={"HX-Request": "true"}).text
         back = client.get("/orders", params={"view": "table"})
@@ -675,7 +675,7 @@ class TestViewMemory:
         client.cookies.set("ledger-view", "grid")
         client.cookies.set("ledger-per", "7")
         body = client.get("/orders").text
-        assert '<article class="card' not in body and '<option value="24" selected>' in body
+        assert '<article class="card' not in body and 'name="per" value="24" checked' in body
 
 
 class TestOrderPageEditing:
@@ -739,3 +739,17 @@ class TestOrderPageEditing:
         # may match a card's <footer> from above.
         css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
         assert "body.wide footer {" not in css and "\nfooter {" not in css
+
+
+class TestTheDropdowns:
+    def test_no_native_select_is_left_on_the_orders_or_settings_page(self, sheet, tmp_path, logs_dir):
+        """every select-one dropdown uses the page's own dropdown design."""
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        for url, params in (("/orders", {}), ("/orders", {"view": "cards"}), ("/settings", {})):
+            body = client.get(url, params=params).text
+            assert "<select" not in body, url
+            assert 'class="multi single' in body, url
+        body = client.get("/orders", params={"view": "cards"}).text
+        # a single-choice dropdown submits like a select: one radio per option, the pick checked
+        assert 'name="dir" value="desc" checked' in body and 'name="dir" value="asc"' in body
+        assert '<span class="summary-value">newest / highest first</span>' in body

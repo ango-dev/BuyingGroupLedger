@@ -219,12 +219,21 @@
     var boxes = Array.prototype.slice.call(details.querySelectorAll('input[name]'));
     var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
     if (all) all.checked = picked.length === 0;
-    var text = details.querySelector(".summary-text");
+    var text = details.querySelector(".summary-value") || details.querySelector(".summary-text");
     if (text) text.textContent = picked.length === 0 ? "all" : (picked.length <= 2 ? picked.join(", ") : picked.length + " selected");
   }
   document.addEventListener("change", function (e) {
     var details = e.target.closest ? e.target.closest("details.multi") : null;
     if (!details) return;
+    if (details.classList.contains("single")) {
+      // A single-choice dropdown (radios): show the pick, close the menu; the form's own change
+      // trigger does the rest.
+      var label = e.target.closest("label");
+      var value = details.querySelector(".summary-value");
+      if (label && value) value.textContent = label.textContent.trim();
+      details.removeAttribute("open");
+      return;
+    }
     if (e.target.classList.contains("all-box")) {
       details.querySelectorAll('input[name]').forEach(function (b) { b.checked = false; });
       e.target.checked = true;
@@ -237,4 +246,24 @@
       if (!d.contains(e.target)) d.removeAttribute("open");
     });
   });
+})();
+
+// Times in the viewer's own zone: every <time class="local" datetime="..."> is re-rendered from its UTC stamp,
+// as "YYYY-MM-DD HH:MM:SS" (or "MM-DD HH:MM" for a run stamp). The server text stays for no-JS.
+(function () {
+  "use strict";
+  function two(n) { return (n < 10 ? "0" : "") + n; }
+  function render(el) {
+    var d = new Date(el.getAttribute("datetime"));
+    if (isNaN(d.getTime())) return;
+    var date = d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" + two(d.getDate());
+    var time = two(d.getHours()) + ":" + two(d.getMinutes());
+    el.textContent = el.classList.contains("run") ? two(d.getMonth() + 1) + "-" + two(d.getDate()) + " " + time
+                                                  : date + " " + time + ":" + two(d.getSeconds());
+    el.title = el.getAttribute("datetime") + " (UTC)";
+  }
+  function all() { document.querySelectorAll("time.local").forEach(render); }
+  document.addEventListener("DOMContentLoaded", all);
+  document.addEventListener("htmx:afterSwap", all);
+  if (document.readyState !== "loading") all();
 })();

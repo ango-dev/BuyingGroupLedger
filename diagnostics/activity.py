@@ -171,6 +171,15 @@ def counts_by_kind(events: list[dict]) -> dict[str, int]:
 _RUN_STAMP = re.compile(r"^run-(\d{8}T\d{6}Z)$")
 
 
+def run_started_at(run_id: str | None) -> str:
+    """"run-20260918T140501Z" -> "2026-09-18T14:05:01+00:00" (the page renders it in local time)."""
+    match = _RUN_STAMP.match(run_id or "")
+    if not match:
+        return ""
+    s = match.group(1)
+    return f"{s[0:4]}-{s[4:6]}-{s[6:8]}T{s[9:11]}:{s[11:13]}:{s[13:15]}+00:00"
+
+
 def run_label(run_id: str | None) -> str:
     """"run-20260918T140501Z" -> "09-18 14:05" for a table cell."""
     match = _RUN_STAMP.match(run_id or "")

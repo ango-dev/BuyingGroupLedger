@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_select.html" import choose %}
 {% block title %}Settings{% endblock %}
 {% block content %}
 <h1>Settings</h1>
@@ -134,12 +135,8 @@ here, so keep the dashboard on loopback or your own network.</p>
         </div>
         {% endfor %}{% endif %}
         <div class="subrow {{ 'head' if not p or not p.auth }}">
-          <label>add for
-            <select name="auth_new_retailer">
-              <option value="">— retailer —</option>
-              {% for r in auth_retailers %}{% if not p or r not in (p.auth | map(attribute='retailer') | list) %}<option value="{{ r }}">{{ r }}</option>{% endif %}{% endfor %}
-            </select>
-          </label>
+          {% set have = (p.auth | map(attribute='retailer') | list) if p else [] %}
+          {{ choose('auth_new_retailer', [('', '— retailer —')] + (auth_retailers | reject('in', have) | list), '', 'add for', 'field') }}
           <label>username <input type="text" name="auth_new_username"></label>
           <label>password <input type="password" name="auth_new_password" autocomplete="new-password"></label>
           <label>TOTP seed <input type="password" name="auth_new_totp_secret" autocomplete="new-password"></label>
@@ -174,25 +171,15 @@ here, so keep the dashboard on loopback or your own network.</p>
         <label>Name <input type="text" name="name" value="{{ c.name if c else '' }}" required placeholder="Chase Freedom Unlimited"></label>
         <label>Last 4 <input type="text" name="last4" value="{{ c.last4 if c else '' }}" required maxlength="4" pattern="[0-9]{4}" class="mono"></label>
         <label>Cashback rate <input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="0.02 or 2% (blank = the default rate)"></label>
-        <label>Only for profile
-          <select name="profile">
-            <option value="">any account</option>
-            {% for l in profile_labels %}<option value="{{ l }}" {{ 'selected' if c and c.profile == l }}>{{ l }}</option>{% endfor %}
-          </select>
-        </label>
+        {{ choose('profile', [('', 'any account')] + (profile_labels | list), c.profile if c else '', 'Only for profile', 'field') }}
       </div>
       <fieldset>
         <legend>Per-retailer rates <span class="muted">(override the card's rate at one retailer)</span></legend>
         {% set pairs = (c.retailer_rates if c else []) + [('', '')] %}
         {% for retailer, rate in pairs %}
         <div class="subrow {{ 'head' if loop.first }}">
-          <label>retailer
-            <select name="rate.{{ loop.index0 }}.retailer">
-              <option value="">{{ '— add —' if loop.last else '— remove —' }}</option>
-              {% for r in retailer_keys %}<option value="{{ r }}" {{ 'selected' if r == retailer }}>{{ r }}</option>{% endfor %}
-              {% if retailer and retailer not in retailer_keys %}<option value="{{ retailer }}" selected>{{ retailer }}</option>{% endif %}
-            </select>
-          </label>
+          {% set keys = (retailer_keys | list) + ([retailer] if retailer and retailer not in retailer_keys else []) %}
+          {{ choose('rate.' ~ loop.index0 ~ '.retailer', [('', '— add —' if loop.last else '— remove —')] + keys, retailer, 'retailer', 'field') }}
           <label>rate <input type="text" name="rate.{{ loop.index0 }}.rate" value="{{ rate }}" placeholder="5%"></label>
           <span></span><span></span>
         </div>

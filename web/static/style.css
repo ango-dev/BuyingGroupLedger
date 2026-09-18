@@ -315,20 +315,20 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
 .report td, .report th { border: 1px solid var(--line); padding: 3px 8px; }
 
 /* --- Multi-select filter dropdowns (the four facets) ------------------------------------------ */
-.filters details.multi { position: relative; font-size: 0.85em; color: var(--muted); }
-.filters details.multi summary { list-style: none; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
-.filters details.multi summary::-webkit-details-marker { display: none; }
-.filters details.multi .summary-text { display: inline-block; font-size: 1.18em; color: var(--fg); background: var(--bg);
+details.multi { position: relative; font-size: 0.85em; color: var(--muted); }
+details.multi summary { list-style: none; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
+details.multi summary::-webkit-details-marker { display: none; }
+details.multi .summary-text { display: inline-block; font-size: 1.18em; color: var(--fg); background: var(--bg);
   border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 120px; max-width: 220px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.filters details.multi[open] .summary-text { border-color: var(--accent); }
-.filters details.multi .menu { position: absolute; top: 100%; left: 0; z-index: 6; margin-top: 4px; min-width: 200px; max-height: 320px;
+details.multi[open] .summary-text { border-color: var(--accent); }
+details.multi .menu { position: absolute; top: 100%; left: 0; z-index: 6; margin-top: 4px; min-width: 200px; max-height: 320px;
   overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); display: flex; flex-direction: column; gap: 2px; }
-.filters details.multi .menu label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 1.15em;
+details.multi .menu label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 1.15em;
   color: var(--fg); white-space: nowrap; padding: 2px 4px; border-radius: 4px; }
-.filters details.multi .menu label:hover { background: var(--bg); }
-.filters details.multi .menu label.all { border-bottom: 1px solid var(--line); padding-bottom: 5px; margin-bottom: 3px; }
+details.multi .menu label:hover { background: var(--bg); }
+details.multi .menu label.all { border-bottom: 1px solid var(--line); padding-bottom: 5px; margin-bottom: 3px; }
 
 /* --- The row list inside a card: the same editable cells as the big table, in a scroll box the
    card owns, so a wide list never spills into the neighbouring card ------------------------------ */
@@ -351,9 +351,9 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
 .card tr.status-superseded td[data-field="status"] { background: #666666; color: #f4f4f4; text-decoration: line-through; }
 .cards { grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); }
 /* the caret sits inside the dropdown box */
-.filters details.multi .summary-text { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; }
-.filters details.multi .summary-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.filters details.multi .caret { color: var(--muted); flex: 0 0 auto; }
+details.multi .summary-text { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; }
+details.multi .summary-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.multi .caret { color: var(--muted); flex: 0 0 auto; }
 /* status as a coloured box in a card's facts, the row colours of the table */
 .card .tag.status-ordered    { background: #EA9999; color: #1a1a1a; border-color: transparent; }
 .card .tag.status-shipped    { background: #F9CB9C; color: #1a1a1a; border-color: transparent; }
@@ -504,3 +504,17 @@ table.activity tr.details-row td { background: var(--bg); }
 .event-details pre { margin: 0; white-space: pre-wrap; }
 .dossier-inline .report { max-width: 960px; }
 .dossier-inline h4 { margin: 8px 0 4px; }
+
+/* ---- the single-choice dropdown: the multi-select's look, one pick, no radio circles ---- */
+details.multi.single .menu input[type=radio] { position: absolute; opacity: 0; width: 0; height: 0; }
+details.multi.single .menu label { padding-left: 22px; position: relative; }
+details.multi.single .menu label:has(input:checked) { color: var(--accent); font-weight: 600; }
+details.multi.single .menu label:has(input:checked)::before { content: "✓"; position: absolute; left: 6px; }
+details.multi.inline { display: inline-block; vertical-align: middle; }
+details.multi.inline summary { flex-direction: row; align-items: center; gap: 6px; }
+.bulkbar details.multi .summary-text, .add-form details.multi .summary-text { padding: 4px 8px; }
+.entry-card details.multi.field { font-size: 0.85em; color: var(--muted); min-width: 0; }
+.entry-card details.multi.field summary { gap: 2px; }
+.entry-card details.multi.field .summary-text { font-size: 1em; width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: 6px; }
+.entry-card .subrow details.multi.field { min-width: 0; }
+table.activity { width: 100%; table-layout: auto; }

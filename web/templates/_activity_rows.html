@@ -11,9 +11,9 @@
     {% for e in events %}
     {% set n = loop.index %}
     <tr class="kind-{{ e.kind }}">
-      <td class="mono when" title="{{ e.at }}">{{ e.at | replace('T', ' ') | replace('+00:00', 'Z') }}</td>
+      <td class="mono when"><time class="local" datetime="{{ e.at }}" title="{{ e.at }}">{{ e.at | replace('T', ' ') | replace('+00:00', 'Z') }}</time></td>
       <td><span class="tag kind kind-{{ e.kind }}">{{ KINDS.get(e.kind, e.kind) }}</span></td>
-      <td class="mono small">{% if e.run_id %}<a href="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-get="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-target="#activity-table" hx-push-url="true" title="only this run">{{ run_label(e.run_id) }}</a>{% else %}<span class="muted">dashboard</span>{% endif %}</td>
+      <td class="mono small">{% if e.run_id %}<a href="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-get="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-target="#activity-table" hx-push-url="true" title="only this run"><time class="local run" datetime="{{ run_started_at(e.run_id) }}">{{ run_label(e.run_id) }}</time></a>{% elif e.kind in ('edit', 'backup', 'settings') %}<span class="muted">dashboard</span>{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="what">{{ e.summary }}
         {% if e.dossier %}<span class="mono small muted">{{ e.dossier.name }}</span>{% if not e.dossier.has_report %} <span class="tag stale">no report.md</span>{% endif %}{% endif %}
         {% if e.details.order_id %} <a href="/orders/{{ e.details.order_id }}" class="small mono">{{ e.details.order_id }}</a>{% endif %}

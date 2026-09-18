@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_select.html" import choose %}
 {% block title %}Orders{% endblock %}
 {% block content %}
 <h1>Orders</h1>
@@ -24,45 +25,19 @@
      can be widened or narrowed without going back. #}
   <label>Placed in <input type="month" name="month" value="{{ filters.month }}" class="month"></label>
   <label>Paid in <input type="month" name="paid" value="{{ filters.paid }}" class="month"></label>
-  <label>Payout
-    <select name="state">
-      <option value="" {{ 'selected' if not filters.state }}>any</option>
-      <option value="open" {{ 'selected' if filters.state == 'open' }}>open (not paid yet)</option>
-      <option value="committed" {{ 'selected' if filters.state == 'committed' }}>projected (committed)</option>
-      <option value="settled" {{ 'selected' if filters.state == 'settled' }}>settled</option>
-      <option value="unpaid" {{ 'selected' if filters.state == 'unpaid' }}>unpaid (floating)</option>
-    </select>
-  </label>
+  {{ choose('state', [('', 'any'), ('open', 'open (not paid yet)'), ('committed', 'projected (committed)'), ('settled', 'settled'), ('unpaid', 'unpaid (floating)')], filters.state, 'Payout') }}
   {% if filters.view == 'cards' %}
-  <label>Sort by
-    <select name="sort">
-      {% for f, heading in SORT_CHOICES %}<option value="{{ f }}" {{ 'selected' if f == filters.sort }}>{{ heading }}</option>{% endfor %}
-    </select>
-  </label>
-  <label>Order
-    <select name="dir">
-      <option value="desc" {{ 'selected' if filters.desc }}>newest / highest first</option>
-      <option value="asc" {{ 'selected' if not filters.desc }}>oldest / lowest first</option>
-    </select>
-  </label>
+  {{ choose('sort', SORT_CHOICES, filters.sort, 'Sort by') }}
+  {{ choose('dir', [('desc', 'newest / highest first'), ('asc', 'oldest / lowest first')], 'desc' if filters.desc else 'asc', 'Order') }}
   {% else %}
   <input type="hidden" name="sort" value="{{ filters.sort }}">
   <input type="hidden" name="dir" value="{{ 'desc' if filters.desc else 'asc' }}">
   {% endif %}
   <span class="toolbar-sep"></span>
-  <label>View
-    <span class="view-toggle" role="group" aria-label="view">
-      <select name="view" id="view">
-        <option value="table" {{ 'selected' if filters.view == 'table' }}>Table</option>
-        <option value="cards" {{ 'selected' if filters.view == 'cards' }}>Cards</option>
-      </select>
-    </span>
-  </label>
-  <label class="{{ '' if filters.view == 'cards' else 'hidden' }}" id="per-page">Per page
-    <select name="per">
-      {% for n in PER_PAGE_CHOICES %}<option value="{{ n }}" {{ 'selected' if n == filters.per }}>{{ n }}</option>{% endfor %}
-    </select>
-  </label>
+  {{ choose('view', [('table', 'Table'), ('cards', 'Cards')], filters.view, 'View') }}
+  <span class="{{ '' if filters.view == 'cards' else 'hidden' }}" id="per-page">
+    {{ choose('per', PER_PAGE_CHOICES, filters.per, 'Per page') }}
+  </span>
   <noscript><button type="submit">Apply</button></noscript>
 </form>
 
@@ -88,9 +63,7 @@
       <label>Order ID <input name="order_id" value="{{ af.get('order_id', '') }}" required></label>
       <label>Item Name <input name="item_name" value="{{ af.get('item_name', '') }}" required class="wide"></label>
       <label>Shipment <input name="shipment" value="{{ af.get('shipment', '1') }}" size="3"></label>
-      <label>Status
-        <select name="status">{% for s in ('ordered', 'shipped', 'delivered', 'cancelled', 'paid', 'return') %}<option value="{{ s }}" {{ 'selected' if af.get('status') == s }}>{{ s }}</option>{% endfor %}</select>
-      </label>
+      {{ choose('status', [('ordered', 'ordered'), ('shipped', 'shipped'), ('delivered', 'delivered'), ('cancelled', 'cancelled'), ('paid', 'paid'), ('return', 'return')], af.get('status', 'ordered'), 'Status', 'inline') }}
       <label>Retailer <input name="retailer" value="{{ af.get('retailer', '') }}" list="retailers"></label>
       <datalist id="retailers">{% for v in facets.retailers %}<option value="{{ v }}">{% endfor %}</datalist>
       <label>Quantity <input name="quantity" value="{{ af.get('quantity', '') }}" size="4"></label>
@@ -117,9 +90,7 @@
   {% if editable and filters.view == 'table' %}
   <div id="bulkbar" class="bulkbar">
     <span class="muted small"><span id="sel-count">0</span> selected · click row numbers to select, shift-click for a range, click <b>#</b> for all</span>
-    <select name="field">
-      {% for f, heading in EDIT_FIELD_HEADINGS %}<option value="{{ f }}">{{ heading }}</option>{% endfor %}
-    </select>
+    {{ choose('field', EDIT_FIELD_HEADINGS, EDIT_FIELD_HEADINGS[0][0], '', 'inline') }}
     <input type="text" name="value" placeholder="value (blank clears)">
     <button type="submit" hx-post="/orders/bulk" hx-target="#orders-table"
             hx-confirm="Set this field to this value on every selected row?">Apply to selected</button>

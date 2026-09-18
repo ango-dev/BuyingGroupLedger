@@ -444,6 +444,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     templates.env.globals["KINDS"] = activity_module.KINDS
     templates.env.globals["run_label"] = activity_module.run_label
+    templates.env.globals["run_started_at"] = activity_module.run_started_at
 
     def with_dossiers(events: list[dict]) -> list[dict]:
         """The failure dossiers on disk, merged in: a dossier the log already recorded gets its

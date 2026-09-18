@@ -54,6 +54,8 @@ class TestTheLog:
         assert [(e["kind"], e["run_id"] == run_id) for e in events] == [
             ("edit", False), ("run", True), ("scrape", True), ("run", True)]
         assert activity.run_label("run-20260918T140501Z") == "09-18 14:05"
+        assert activity.run_started_at("run-20260918T140501Z") == "2026-09-18T14:05:01+00:00"
+        assert activity.run_started_at(None) == ""
 
     def test_filters(self, tmp_path):
         path = tmp_path / "a.jsonl"
@@ -207,7 +209,9 @@ class TestThePage:
         assert "costco_p_20260917T080000Z" in body and 'href="/failures' not in body  # the Failures page is gone
         assert 'href="/orders/111-1"' in body  # an order id links to its page
         assert ">Alert<" in body and ">Failure dossier<" in body and ">Dashboard edit<" in body
-        assert "09-17 08:00" in body  # the run stamp
+        assert '<time class="local run" datetime="2026-09-17T08:00:00+00:00">09-17 08:00</time>' in body
+        assert '<time class="local" datetime="2026-09-18T09:00:00+00:00"' in body  # rendered in local time by edit.js
+        assert body.count("<select") == 0 and 'data-param="days"' in body  # the page's own dropdowns
         assert 'href="/activity"' in body and 'class="gear' in body and 'href="/health"' not in body
         assert 'href="/failures"' not in body
         assert 'class="pill backend"' not in body and "<footer" not in body  # gone (2026-09-18)
