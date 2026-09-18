@@ -111,6 +111,46 @@ class TestNonLoginFailures:
         assert (tmp_path / "failures").exists()
 
 
+class TestRecognisedLoginFailuresGetNoDossier:
+    """Best Buy's sign-in page names most failures (anti-bot, captcha, wrong password, identity
+    challenge); a dossier for each of those was spam. Only an unrecognised
+    failure -- no verdict, or the UNKNOWN one -- captures the page."""
+
+    def _fail(self, monkeypatch, message, **kwargs):
+        scraper = _scraper(bestbuy.BestBuyScraper)
+        monkeypatch.setattr(scraper, "_scrape_via_api",
+                            lambda: (_ for _ in ()).throw(ApiLoginError(message, **kwargs)))
+        alerts = []
+        monkeypatch.setattr(bestbuy, "alert", lambda subject, body: alerts.append((subject, body)))
+        with pytest.raises(LoggedOutError):
+            scraper.scrape()
+        return alerts
+
+    def test_a_recognised_failure_alerts_without_a_dossier(self, monkeypatch, tmp_path):
+        alerts = self._fail(monkeypatch, "ANTI-BOT / TRANSPORT -- auth requests died at the network "
+                                        "layer. WHAT TO DO: back off", recognised=True)
+        subject, body = alerts[0]
+        assert "session logged out" in subject and "ANTI-BOT" in body
+        assert "Failure dossier:" not in body and "No dossier" in body
+        assert not (tmp_path / "failures").exists() or not list((tmp_path / "failures").iterdir())
+
+    def test_an_unrecognised_failure_still_gets_its_dossier(self, monkeypatch, tmp_path):
+        alerts = self._fail(monkeypatch, "UNKNOWN -- the sign-in DOM may have changed", recognised=False)
+        assert "Failure dossier:" in alerts[0][1]
+        assert len(list((tmp_path / "failures").iterdir())) == 1
+
+    def test_the_login_raise_marks_the_verdict(self):
+        """bestbuy_api raises with recognised=True for every named verdict and False for UNKNOWN or
+        no verdict at all."""
+        import inspect
+
+        from scrapers import bestbuy_api
+
+        source = inspect.getsource(bestbuy_api)
+        assert 'recognised=bool(outcome.reason) and not outcome.reason.startswith("UNKNOWN")' in source
+        assert ApiLoginError("x").recognised is False
+
+
 class TestCostcoSelfHealsADeadToken:
     """A dead refresh token is the one auth failure recoverable without a human: the Browser-Use
     profile is still logged into Costco, so a CDP reconnect can capture a fresh token from the app's

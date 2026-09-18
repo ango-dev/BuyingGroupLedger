@@ -34,12 +34,18 @@ class BestBuyScraper(BaseRetailerScraper):
                 # skip so the user re-logs in the profile.
                 log.warning("Best Buy [%s]: API login failed (%s); skipping.",
                             self.profile.label, exc)
+                # A failure the sign-in page NAMED (anti-bot, captcha, wrong password, identity
+                # challenge ...) gets the alert alone; only an unrecognised one is worth a dossier.
+                #
+                where = ("" if getattr(exc, "recognised", False)
+                         else self._dossier_line(dossier, exc))
                 alert(
                     f"Best Buy [{self.profile.label}]: session logged out — API login failed, "
                     f"not recorded this run",
                     f"The Best Buy deterministic path could not sign in ({exc}). Re-login the profile "
                     f"(scripts/create_profile)."
-                    + self._dossier_line(dossier, exc),
+                    + (where or "\n\n(No dossier: the sign-in page said what the problem is, so "
+                                "there is nothing to capture.)"),
                 )
                 raise LoggedOutError(f"Best Buy:{self.profile.label}") from exc
             except Exception as exc:  # noqa: BLE001 — a NON-login failure (page shape)

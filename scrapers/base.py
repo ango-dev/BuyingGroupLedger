@@ -44,10 +44,22 @@ class ApiLoginError(Exception):
     """The deterministic API path could not authenticate (session logged out / login or token failed).
 
     Kept apart from every other failure because the response differs: a login failure is not a
-    page-shape change a code fix can address, so each retailer's scrape() catches this, alerts
-    (naming its dossier), and skips via LoggedOutError. Any OTHER deterministic-path failure
-    (page shape / parsing / network) goes through `_on_deterministic_failure`.
+    page-shape change a code fix can address, so each retailer's scrape() catches this, alerts,
+    and skips via LoggedOutError. Any OTHER deterministic-path failure (page shape / parsing /
+    network) goes through `_on_deterministic_failure`.
+
+    `recognised` says the sign-in page NAMED the problem (Best Buy: a wrong password, a locked
+    account, an identity challenge, a one-time code, a captcha, an anti-bot reset -- see
+    bestbuy_api._classify_signin_failure). A recognised failure gets the alert alone: there is
+    nothing in the captured page a code fix could use, and writing (and uploading) a dossier for
+    every anti-bot rejection was spam. An UNRECOGNISED one -- no verdict, or the
+    "UNKNOWN -- the sign-in DOM may have changed" verdict -- still gets its dossier, because that
+    is the case a selector fix is made from.
     """
+
+    def __init__(self, message: str = "", *, recognised: bool = False):
+        super().__init__(message)
+        self.recognised = recognised
 
 
 class BaseRetailerScraper(abc.ABC):

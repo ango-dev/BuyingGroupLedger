@@ -773,7 +773,10 @@ class BestBuyApiClient:
                             "the auth requests died at the NETWORK layer (anti-bot/transport, not the "
                             "page flow — changing egress does not help)."
                             if outcome.transport_failed else
-                            "Best Buy session is logged out and deterministic login did not succeed.")
+                            "Best Buy session is logged out and deterministic login did not succeed."),
+                        # The page named the problem: no dossier (see ApiLoginError). Only a missing
+                        # verdict or the UNKNOWN one is worth capturing.
+                        recognised=bool(outcome.reason) and not outcome.reason.startswith("UNKNOWN"),
                     )
                 log.info("Best Buy [%s]: deterministic self-login succeeded.", self.profile.label)
                 page.goto(PURCHASE_HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
