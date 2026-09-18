@@ -189,9 +189,38 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     templates.env.globals["CARD_COLUMNS"] = CARD_COLUMNS
     templates.env.globals["SORT_CHOICES"] = SORT_CHOICES
 
+    from starlette.datastructures import QueryParams
+
+    from web.queries import PER_PAGE_CHOICES as _PER, VIEWS as _VIEWS
+
+    VIEW_COOKIE, PER_COOKIE = "ledger-view", "ledger-per"
+    COOKIE_MAX_AGE = 365 * 24 * 3600
+
+    def remembered(request: Request, params) -> QueryParams:
+        """The request's params with the remembered view / page size filled in when the request
+        does not say."""
+        items = list(params.multi_items()) if hasattr(params, "multi_items") else list(params.items())
+        names = {k for k, _v in items}
+        view = request.cookies.get(VIEW_COOKIE, "")
+        if "view" not in names and view in _VIEWS:
+            items.append(("view", view))
+        per = request.cookies.get(PER_COOKIE, "")
+        if "per" not in names and per.isdigit() and int(per) in _PER:
+            items.append(("per", per))
+        return QueryParams(items)
+
+    def remember(request: Request, response, filters: Filters):
+        """Persist a view / page size the request chose explicitly."""
+        if "view" in request.query_params:
+            response.set_cookie(VIEW_COOKIE, filters.view, max_age=COOKIE_MAX_AGE, samesite="lax")
+        if "per" in request.query_params:
+            response.set_cookie(PER_COOKIE, str(filters.per), max_age=COOKIE_MAX_AGE, samesite="lax")
+        return response
+
     def orders_context(request: Request, params=None, **extra) -> dict:
         snapshot = load(request)
-        filters = Filters.from_query(params if params is not None else request.query_params)
+        filters = Filters.from_query(remembered(request, params if params is not None
+                                                else request.query_params))
         rows = sort_rows(filter_rows(snapshot.rows, filters), filters)
         context = {
             "snapshot": snapshot, "filters": filters, "rows": rows, "total": len(snapshot.rows),
@@ -210,8 +239,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         context = orders_context(request, notice=request.query_params.get("notice", ""))
         # htmx asks for just the table / cards; a plain browser request gets the whole page.
         if request.headers.get("HX-Request", "").lower() == "true":
-            return page(request, partial_for(context["filters"]), **context)
-        return page(request, "orders.html", **context)
+            response = page(request, partial_for(context["filters"]), **context)
+        else:
+            response = page(request, "orders.html", **context)
+        return remember(request, response, context["filters"])
 
     def selected_keys(form) -> list[dict]:
         keys = []

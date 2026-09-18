@@ -26,7 +26,7 @@
         <dt>Qty</dt><dd>{{ c.quantity }}</dd>
         <dt>Cost</dt><dd class="num">{{ c.total_cost | money }}</dd>
         <dt>Payout</dt><dd class="num">{{ c.payout | money }}{% if c.payout_state == 'committed' %} <span class="tag committed">proj.</span>{% elif c.payout_state == 'partly settled' %} <span class="tag committed">part</span>{% endif %}</dd>
-        <dt>Profit</dt><dd class="num {{ 'neg' if c.profit is not none and c.profit < 0 }}">{{ c.profit | money }}</dd>
+        <dt>Profit</dt><dd class="num {{ 'neg' if c.profit is not none and c.profit < 0 else ('pos' if c.profit is not none and c.profit > 0) }}">{{ c.profit | money }}</dd>
         {% if c.tracking %}<dt>Tracking</dt><dd class="mono small">{{ c.tracking | join(', ') }}</dd>{% endif %}
         {% if c.card %}<dt>Card</dt><dd>{{ c.card }}</dd>{% endif %}
       </dl>

@@ -206,7 +206,8 @@ body.wide .cards-wrap { overflow: auto; flex: 1 1 auto; min-height: 0; padding: 
 .card .facts-grid dt { color: var(--muted); }
 .card .facts-grid dd { margin: 0; overflow-wrap: anywhere; }
 .card .facts-grid dd.num { text-align: left; font-variant-numeric: tabular-nums; }
-.card .facts-grid dd.neg { color: var(--bad); }
+.card .facts-grid dd.neg { color: var(--bad); font-weight: 600; }
+.card .facts-grid dd.pos { color: var(--ok); font-weight: 600; }
 .card footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
 .card footer .links { display: flex; gap: 10px; flex-wrap: wrap; }
 .card form.card-delete { margin: 0; }

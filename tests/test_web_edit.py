@@ -617,6 +617,7 @@ class TestCardsView:
         assert 'data-field="status"' in body and '<table class="grid card-rows">' in body
         assert '<select name="sort">' in body and '<option value="total_profit"' in body
         first_card = body[body.index('<article'):body.index('</article>')]
+        assert '<dd class="num pos">$' in body  # a positive profit reads green, a negative red
         assert '<dt>Status</dt><dd><span class="tag status-' in first_card  # a coloured box in the facts
         assert '<details class="card-edit">' in first_card and '<ul class="items">' in first_card
 
@@ -649,3 +650,29 @@ class TestCardsView:
         assert '<dialog id="confirm"' in body and 'id="confirm-ok"' in body
         js = (Path(__file__).resolve().parents[1] / "web" / "static" / "edit.js").read_text(encoding="utf-8")
         assert 'addEventListener("htmx:confirm"' in js and "issueRequest(true)" in js
+
+
+class TestViewMemory:
+    def test_the_chosen_view_and_page_size_are_remembered_for_links_that_do_not_say(self, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        assert '<article class="card' not in client.get("/orders").text  # the default is the table
+
+        chosen = client.get("/orders", params={"view": "cards", "per": "12"})
+        assert chosen.cookies.get("ledger-view") == "cards" and chosen.cookies.get("ledger-per") == "12"
+
+        # An overview link names only a filter; it opens in the remembered view.
+        body = client.get("/orders", params={"status": "shipped"}).text
+        assert '<article class="card' in body and '<option value="12" selected>' in body
+        assert '<option value="cards" selected>' in body
+        # htmx swaps follow it too, and an explicit choice overrides and updates the memory.
+        assert '<article class="card' in client.get("/orders", headers={"HX-Request": "true"}).text
+        back = client.get("/orders", params={"view": "table"})
+        assert back.cookies.get("ledger-view") == "table"
+        assert '<article class="card' not in client.get("/orders").text
+
+    def test_a_bad_cookie_is_ignored(self, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        client.cookies.set("ledger-view", "grid")
+        client.cookies.set("ledger-per", "7")
+        body = client.get("/orders").text
+        assert '<article class="card' not in body and '<option value="24" selected>' in body
