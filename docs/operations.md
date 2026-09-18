@@ -124,7 +124,7 @@ Linux host has its own runbook: **[DEPLOY.md](../DEPLOY.md)**.
 A local web page over the ledger, in `web/`: an overview (open rows by status and buying group,
 projected versus realized profit, the COGS input gaps, the scheduler heartbeat), a filterable and
 sortable ledger table, one page per order, the failure dossiers with each `report.md` rendered, a
-Backup page, and `/health` as JSON. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
+Settings page (with backup and restore), and `/health` as JSON. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
 the header (remembered per browser; follows the system until you choose). The dependencies are
 `requirements-web.txt`, an optional install on a desktop and part of the one Docker image.
 
@@ -318,7 +318,8 @@ python -m scripts.backup --restore backups/ledger_backup_20260917T120000Z.zip --
 
 The script is **standard library only**, so on a new machine the whole move is: `git clone`, then
 `python -m scripts.backup --restore <zip>` with the system Python, then the normal setup
-(`docker compose up -d --build`, or the venv). The dashboard's **Backup** page offers the same:
+(`docker compose up -d --build`, or the venv). The dashboard's Settings page has a **Backup & Restore** panel that offers the same
+(`/backup` redirects there):
 a *Create a backup now* button (the zip lands in `backups/` and is downloadable from the page), and a
 *Restore* upload form that is enabled **only while no `config.json` exists** — on a configured host an
 unauthenticated page must not be able to replace the live configuration, so there you restore from

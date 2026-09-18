@@ -1128,7 +1128,7 @@ class TestThemeToggle:
         assert 'localStorage.getItem("ledger-theme")' in body
         # Applied in <head>, before the stylesheet-dependent body renders.
         assert body.index("ledger-theme") < body.index("<body")
-        assert 'href="/backup"' in body
+        assert 'href="/settings"' in body and 'href="/backup"' not in body  # Backup lives in Settings
 
     def test_the_stylesheet_honours_the_attribute_over_the_system_preference(self):
         css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(
@@ -1259,17 +1259,21 @@ class TestBackupPage:
         (repo / "config.json").write_text("{}", encoding="utf-8")
         client = self._client(repo, snapshot_path, logs_dir, failures_dir)
 
-        page = client.get("/backup")
+        # the old address lands on the Settings page's Backup panel
+        moved = client.get("/backup", params={"message": "hi there"}, follow_redirects=False)
+        assert moved.status_code == 303 and moved.headers["location"] == "/settings?message=hi+there#s-backup"
+        page = client.get("/settings")
         assert page.status_code == 200 and "Create a backup now" in page.text
+        assert 'id="s-backup"' in page.text and 'href="#s-backup"' in page.text
         assert "None yet." in page.text
         assert "restoring from the page is disabled" in page.text  # configured host
 
         created = client.post("/backup", follow_redirects=False)
-        assert created.status_code == 303
+        assert created.status_code == 303 and created.headers["location"].endswith("#s-backup")
         archives = list((repo / "backups").glob("ledger_backup_*.zip"))
         assert len(archives) == 1
 
-        page = client.get("/backup").text
+        page = client.get("/settings").text
         assert archives[0].name in page
         download = client.get(f"/backup/{archives[0].name}")
         assert download.status_code == 200
@@ -1293,14 +1297,14 @@ class TestBackupPage:
             z.writestr("data/sheet_backup_1.csv", "a\n")
         client = self._client(repo, snapshot_path, logs_dir, failures_dir)
 
-        page = client.get("/backup").text
+        page = client.get("/settings").text
         assert "fresh clone" in page and 'action="/backup/restore"' in page
 
         with archive.open("rb") as handle:
             response = client.post("/backup/restore", files={"archive": ("b.zip", handle,
                                                                           "application/zip")},
                                    follow_redirects=False)
-        assert response.status_code == 303
+        assert response.status_code == 303 and response.headers["location"].startswith("/settings?message=Restored")
         assert (repo / "config.json").read_text(encoding="utf-8") == '{"restored": true}'
         assert (repo / "data" / "sheet_backup_1.csv").is_file()
 
@@ -1310,14 +1314,15 @@ class TestBackupPage:
                                                                          "application/zip")})
         assert refused.status_code == 409
 
-    def test_the_backup_page_works_without_any_ledger_source(self, repo, logs_dir, failures_dir,
-                                                             tmp_path):
-        """A fresh clone has no snapshot, no config and no sheet -- the page a restore starts
-        from must still render."""
+    def test_the_backup_panel_works_without_any_ledger_source(self, repo, logs_dir, failures_dir,
+                                                              tmp_path):
+        """A fresh clone has no snapshot, no config and no sheet -- the Settings page a restore
+        starts from must still render."""
         app = create_app(SnapshotReader(data_dir=tmp_path / "empty"), logs_dir=logs_dir,
                          failures_dir=failures_dir, backup_dir=repo / "backups",
                          repo_root_dir=repo, clock=lambda: NOW, settings=_settings())
-        assert TestClient(app).get("/backup").status_code == 200
+        page = TestClient(app).get("/settings")
+        assert page.status_code == 200 and 'action="/backup/restore"' in page.text
 
 
 # --------------------------------------------------------------------------------------------------

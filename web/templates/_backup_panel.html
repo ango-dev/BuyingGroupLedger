@@ -1,0 +1,54 @@
+{#- Backup & restore, as a panel of the Settings page. The routes are unchanged: POST /backup makes a zip, GET /backup/<name>
+    downloads one, POST /backup/restore uploads one into a FRESH clone only. -#}
+<section class="panel" id="s-backup">
+  <header><h2>Backup &amp; Restore</h2>
+    <p class="muted">One zip of everything a <code>git clone</code> does not give you: <code>config.json</code>,
+    <code>.state.json</code>, <code>.env</code> and the whole <code>data/</code> directory. It holds every live
+    credential: keep it private. Logs and failure dossiers are not included.</p></header>
+
+  <form method="post" action="/backup" class="inline-form">
+    <button type="submit" class="primary">Create a backup now</button>
+    <span class="muted small">{{ members | length }} file(s) → <code>{{ backups_dir }}</code></span>
+  </form>
+
+  <h3>Existing Backups</h3>
+  {% if archives %}
+  <table class="grid compact">
+    <thead><tr><th>File</th><th>Created</th><th>Commit</th><th class="num">Files</th><th class="num">Size</th></tr></thead>
+    <tbody>
+      {% for a in archives %}
+      <tr>
+        <td class="mono"><a href="/backup/{{ a.name }}" download>{{ a.name }}</a></td>
+        <td>{{ a.created_at }}</td>
+        <td class="mono">{{ a.git_commit }}</td>
+        <td class="num">{{ a.files }}</td>
+        <td class="num">{{ a.size_kb }} KB</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">None yet.</p>
+  {% endif %}
+
+  <h3>Restore</h3>
+  {% if fresh_install %}
+  <p>No <code>config.json</code> exists here, so this is a fresh clone. Upload a backup to restore it,
+  then restart the app so the restored configuration is read.</p>
+  <form method="post" action="/backup/restore" enctype="multipart/form-data" class="inline-form">
+    <input type="file" name="archive" accept=".zip" required>
+    <label><input type="checkbox" name="force" value="1"> overwrite files that already exist</label>
+    <button type="submit">Restore</button>
+  </form>
+  {% else %}
+  <p class="muted">This host is configured, so restoring from the page is disabled (anyone who can open
+  this page could otherwise replace the live configuration). On the machine itself:</p>
+  <pre>python -m scripts.backup --restore backups/&lt;file&gt;.zip          # keeps existing files
+python -m scripts.backup --restore backups/&lt;file&gt;.zip --force  # overwrites them</pre>
+  {% endif %}
+
+  <details class="advanced">
+    <summary>What a backup would contain</summary>
+    <ul class="files">{% for m in members %}<li class="mono small">{{ m }}</li>{% endfor %}</ul>
+  </details>
+</section>

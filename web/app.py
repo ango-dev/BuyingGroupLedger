@@ -443,15 +443,17 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                 "schema_matches": True, "heartbeat": heartbeat()}
         return templates.TemplateResponse(request=request, name=name, context={**base, **context})
 
-    @app.get("/backup", response_class=HTMLResponse)
+    # The Backup page moved INTO Settings; the old address still lands there.
+    @app.get("/backup")
     def backup_page(request: Request):
-        return page_no_snapshot(request, "backup.html", **backup_context(
-            message=request.query_params.get("message", "")))
+        message = request.query_params.get("message", "")
+        query = f"?message={message.replace(' ', '+')}" if message else ""
+        return RedirectResponse(url=f"/settings{query}#s-backup", status_code=303)
 
     @app.post("/backup")
     def backup_create(request: Request):
         target = backup_module.create_backup(repo_root, backups_dir)
-        return RedirectResponse(url=f"/backup?message=Wrote+{target.name}", status_code=303)
+        return RedirectResponse(url=f"/settings?message=Wrote+{target.name}#s-backup", status_code=303)
 
     @app.get("/backup/{name}")
     def backup_download(name: str):
@@ -481,7 +483,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         result = backup_module.restore_backup(saved, repo_root, force=bool(force))
         message = (f"Restored {len(result['restored'])} file(s), kept {len(result['skipped_existing'])}"
                    " existing. Restart the app so the restored config.json is read.")
-        return RedirectResponse(url=f"/backup?message={message.replace(' ', '+')}", status_code=303)
+        return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-backup",
+                                status_code=303)
 
     # --- settings (edits config.json in place; never the Sheet) ---------------------------------
     from web import settings_form
@@ -506,7 +509,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             auth_retailers=settings_form.AUTH_RETAILERS,
             profile_labels=settings_form.profile_labels(),
             service_account_email=str(settings_form.config_value(
-                "google.service_account.client_email") or ""))
+                "google.service_account.client_email") or ""),
+            **backup_context())
         response.status_code = status
         return response
 

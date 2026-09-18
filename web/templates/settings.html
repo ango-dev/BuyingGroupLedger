@@ -37,8 +37,9 @@ here, so keep the dashboard on loopback or your own network.</p>
     <a href="#s-profiles">Profiles</a>
     <a href="#s-warehouses">Warehouses</a>
     <a href="#s-cards">Cards</a>
-    <a href="#s-google.service_account">Service account</a>
-    <div class="group">Apply</div>
+    <a href="#s-google.service_account">Service Account</a>
+    <div class="group">Maintenance</div>
+    <a href="#s-backup">Backup &amp; Restore</a>
     <a href="#s-apply">Restart</a>
   </nav>
 
@@ -255,6 +256,8 @@ here, so keep the dashboard on loopback or your own network.</p>
       </form>
     </section>
     {% endfor %}
+
+    {% include "_backup_panel.html" %}
 
     <section class="panel" id="s-apply">
       <header><h2>Apply</h2><p class="muted">Which settings need a restart is tagged on each field above.</p></header>
