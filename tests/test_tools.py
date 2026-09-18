@@ -222,7 +222,10 @@ class TestTheRoutes:
         # the header's Tools menu lists every tool, grouped; the profile login is the default panel
         menu = body[body.index('class="multi nav-menu'):body.index("</details>", body.index('class="multi nav-menu'))]
         assert 'href="/tools?tool=profile"' in menu and ">Ledger Fixes<" in menu and ">Checks<" in menu
-        for key in ("preflight", "tax_report", "backfill_tracking", "costco_token"):
+        # the profile login sits inside Accounts, first; the run is its own group, first of all
+        assert menu.index(">Run<") < menu.index("tool=run_once") < menu.index(">Accounts<") \
+            < menu.index("tool=profile") < menu.index("tool=costco_token")
+        for key in ("run_once", "preflight", "tax_report", "backfill_tracking", "costco_token"):
             assert f'href="/tools?tool={key}"' in menu
             assert f'id="t-{key}"' not in body  # not shown until picked
         assert 'tool=audit_sheet' in menu and 'tool=migrate_expected_payout' in menu
@@ -297,3 +300,29 @@ class TestTheRoutes:
         body = client.get("/tools").text
         assert "<iframe" not in body and FakeClient.stopped == ["sess-1"]
         assert "left open for 30 minutes" in activity.read(client.logs / "activity.jsonl")[0]["summary"]
+
+
+class TestRunOnce:
+    client = TestTheRoutes.client  # the same dashboard as the route tests
+
+    """`Run once` is `python -m main [retailer]`: a real run, confirmed, never under a live lock."""
+
+    def test_the_tool_is_main_itself(self):
+        t = tools.tool("run_once")
+        assert t.module == "main" and t.group == "Run" and t.writes and t.spends
+        assert t.argv({}) == [] and t.argv({"Retailer": "costco"}) == ["costco"]
+        with pytest.raises(ValueError, match="not one of"):
+            t.argv({"Retailer": "walmart"})
+
+    def test_it_is_refused_while_a_run_holds_the_lock(self, client, tmp_path):
+        logs_dir = tmp_path / "logs"
+        (logs_dir / ".run.lock").write_text("pid 1", encoding="utf-8")
+        response = client.post("/tools/run/run_once", data={"Retailer": ""}, follow_redirects=False)
+        assert response.status_code == 423 and "run is in progress" in response.text
+        assert not list((logs_dir / "tools").glob("*run_once*.log")) if (logs_dir / "tools").is_dir() else True
+
+    def test_the_page_names_what_it_costs(self, client):
+        body = client.get("/tools", params={"tool": "run_once"}).text
+        assert 'id="t-run_once"' in body and "python -m main" in body
+        assert "submits tracking numbers and files insurance" in body and 'class="tag stale"' in body
+        assert 'data-param="Retailer"' in body

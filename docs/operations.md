@@ -198,13 +198,15 @@ already keeps (`logs/.run.lock`, stale after three hours, the same rule as `main
 refusal lasts as long as the run does.
 
 **The Tools page** runs the scripts worth running from a browser, each exactly as it runs on the
-command line (`python -m scripts.<name> <args>`, the arguments its own `--help` declares): the
-preflight check, the tax report, the buying-group probe, the receipt checks, the Costco token
+command line (`python -m scripts.<name> <args>`, the arguments its own `--help` declares): **Run
+once** (`python -m main [retailer]` — a real run exactly as the schedule does it, scrape, upsert
+and the buying-group sync that submits tracking and files insurance; confirmed in-page and
+refused while a run holds the lock), the preflight check, the tax report, the buying-group probe, the receipt checks, the Costco token
 tool, the backfills and ledger fixes, the Sheet mirror, and the Sheet audit while the ledger is
 the Sheet. A tool that writes the ledger asks in-page first, runs dry by default where the script
 has a dry run, and is refused while a scheduled run holds the run lock; one that spends (a cloud
 browser session, a buying-group call) says so on its card. Output streams into the card; every run
-is an Activity event. **Log a profile in** is the interactive one: it opens a live Browser-Use
+is an Activity event. **Log a profile in** (under *Accounts* in the Tools menu) is the interactive one: it opens a live Browser-Use
 session on the profile through its proxy and embeds it in the page (an *open in a new tab* link
 is there for a browser that refuses the frame); log into the retailers, then *Close & save* —
 closing the session is what saves the cookies, and the profile id is written to config.json. Leave

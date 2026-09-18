@@ -575,6 +575,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         for group in tools_module.GROUPS:
             items = [(t.key, t.title) for t in tools_module.TOOLS
                      if t.group == group and (sheet_mode or not t.sheet_only)]
+            if group == "Accounts":
+                # The profile login is a page of its own, not a script; it belongs with the
+                # account tools.
+                items.insert(0, ("profile", "Log a profile in"))
             if items:
                 out.append((group, items))
         return out

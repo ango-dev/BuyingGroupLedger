@@ -2,7 +2,8 @@
 one as a subprocess and keeps its output, and the profile-login session -- the one interactive
 tool -- with the live Browser-Use browser embedded in the page.
 
-WHAT IS HERE AND WHAT IS NOT. Every tool below is `python -m scripts.<module> <args>` with the
+WHAT IS HERE AND WHAT IS NOT. Every tool below is `python -m <module> <args>` (scripts.<name>, or
+main for the run itself) with the
 arguments its own argparse declares, run from the repo root exactly as the operator would run it;
 nothing is re-implemented. The RECON probes (capture / signin / paginate probes) and the one-off
 migrations (migrate_config, reorder_sheet, apply_sheet_formats) are developer tools and stay on
@@ -102,6 +103,15 @@ APPLY = Field("--apply", "Apply", "flag", "write for real (unticked = dry run: s
 RETAILER = Field("--retailer", "Retailer", "select", "one retailer only", choices=RETAILER_CHOICES)
 
 TOOLS: tuple[Tool, ...] = (
+    # A real run, exactly as the schedule does it:
+    # `python -m main [retailer]` -- main.py takes its own run lock and exits quietly if one is
+    # held, and the page refuses to start it while the lock is live anyway. It scrapes, upserts
+    # the ledger, then runs the buying-group sync: tracking is SUBMITTED and insurance FILED.
+    Tool("run_once", "main", "Run once",
+         "A full run now, as the schedule does it: scrape every retailer (or one), update the ledger, then the "
+         "buying-group sync -- which submits tracking numbers and files insurance for real. Not a dry run.",
+         "Run", (Field("", "Retailer", "select", "blank = every retailer", choices=RETAILER_CHOICES),),
+         writes=True, spends="cloud browser sessions, and it submits tracking and files insurance"),
     Tool("preflight", "scripts.preflight", "Preflight check",
          "Config and dependency check: the misconfigurations that would otherwise fail silently. Offline.",
          "Checks", (Field("--strict", "Strict", "flag", "treat warnings as failures"),)),
@@ -172,7 +182,7 @@ TOOLS: tuple[Tool, ...] = (
          "Ledger Fixes", (APPLY,), writes=True),
 )
 
-GROUPS = ("Accounts", "Checks", "Ledger Fixes", "Google Sheet")
+GROUPS = ("Run", "Accounts", "Checks", "Ledger Fixes", "Google Sheet")
 
 
 def tool(key: str) -> Tool:

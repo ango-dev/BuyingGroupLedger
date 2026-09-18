@@ -46,10 +46,9 @@
     <details class="multi nav-menu {{ 'active' if path.startswith('/tools') }}">
       <summary><span class="nav-link">Tools <span class="caret">▾</span></span></summary>
       <div class="menu">
-        <a href="/tools?tool=profile" class="{{ 'current' if request.query_params.get('tool', 'profile') == 'profile' and path.startswith('/tools') }}">Log a profile in</a>
         {% for group, items in nav_tools() %}
         <div class="group">{{ group }}</div>
-        {% for key, title in items %}<a href="/tools?tool={{ key }}" class="{{ 'current' if request.query_params.get('tool') == key }}">{{ title }}</a>{% endfor %}
+        {% for key, title in items %}<a href="/tools?tool={{ key }}" class="{{ 'current' if request.query_params.get('tool', 'profile') == key and path.startswith('/tools') }}">{{ title }}</a>{% endfor %}
         {% endfor %}
       </div>
     </details>
