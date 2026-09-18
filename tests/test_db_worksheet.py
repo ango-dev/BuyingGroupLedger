@@ -121,6 +121,27 @@ class TestTheGrid:
         assert stored[FIELDNAMES.index("cashback_rate")] == 0.04
         assert stored[OID] == "X1" and formatted[FIELDNAMES.index("payout_amount")] == ""
 
+    def test_a_blank_cell_reads_as_an_empty_string_in_every_render(self, ws):
+        """gspread hands back "" for a blank cell whatever the render option; the readers do
+        str(cell).strip(). The first run after the cutover (2026-09-18) read None here, turned it
+        into the text "None", and handed six tracking-less rows to BFMR as the package "None"."""
+        from gspread.utils import ValueRenderOption
+
+        from sync_tracking import plan_tracking_submissions
+
+        ws.update(range_name="A2", values=[row(order_id="X1", order_date="2026-09-01",
+                                              item_name="Thing", shipment="1", status="ordered",
+                                              buying_group="BFMR", total_cost=50.0, quantity=1)])
+        stored = ws.get_values(value_render_option=ValueRenderOption.unformatted)
+        tracking = FIELDNAMES.index("tracking_number")
+        assert stored[1][tracking] == "" and stored[1][FIELDNAMES.index("payout_amount")] == ""
+        assert "None" not in [str(v) for v in stored[1]]
+        assert "None" not in [str(v) for v in ws.get_all_values()[1]]
+        assert "None" not in [str(v) for v in ws.data_rows()[0]]
+        # the real planner sees a row with no tracking number, not a package called "None"
+        plan = plan_tracking_submissions(stored[0], stored[1:])
+        assert plan["skipped_no_tracking"] == 1 and plan["rows_by_tracking"] == {}
+
     def test_sort_is_sheets_sort_with_blanks_last(self, ws):
         ws.update(range_name="A2", values=[
             row(order_id="B", order_date="2026-08-01", item_name="b", shipment="1", status="paid"),

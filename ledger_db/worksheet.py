@@ -26,7 +26,8 @@ WHAT SHEETS DID THAT THIS MUST DO ITSELF:
     profit_of -- the Python mirrors of the two formulas, pinned by test against the formulas' own
     cell references. So the number is the sheet's number, live, for every row, always.
   * RENDERING. A FORMATTED read returns strings (a bool as TRUE / FALSE, a number as its shortest
-    text, blank as ""); an UNFORMATTED read returns the stored types. The sync's own parser
+    text, blank as ""); an UNFORMATTED read returns the stored types -- and a blank cell is ""
+    there too, never None, because every reader does str(cell).strip(). The sync's own parser
     (_parse_display_number) reads both.
   * NONE MEANS SKIP. `update` leaves a cell alone for None (RAW) and clears it for "" under
     USER_ENTERED -- the two conventions _blank_to_none and _clear_cells rely on.
@@ -183,14 +184,19 @@ class DbWorksheet:
         return [[_formatted(v) for v in self._computed(n)] for n in range(1, len(self._rows) + 1)]
 
     def get_values(self, range_name: str | None = None, value_render_option=None, **_kwargs):
+        """The grid. UNFORMATTED keeps the stored types (a number, a bool) but a BLANK cell is ""
+        in every render, exactly as gspread hands it back: the readers do `str(cell).strip()`, and
+        a None here became the text "None" -- six blank tracking numbers went to BFMR as the
+        package "None" on the first run after the cutover (2026-09-18)."""
         option = str(getattr(value_render_option, "value", value_render_option) or "").upper()
         if "UNFORMATTED" in option:
-            return [list(self._computed(n)) if n > 1 else list(HEADER)
+            return [[("" if v is None else v) for v in self._computed(n)] if n > 1 else list(HEADER)
                     for n in range(1, len(self._rows) + 1)]
         return self.get_all_values()
 
     def data_rows(self) -> list[list[Any]]:
-        return [self._computed(n) for n in range(2, len(self._rows) + 1)]
+        return [[("" if v is None else v) for v in self._computed(n)]
+                for n in range(2, len(self._rows) + 1)]
 
     # --- writes ----------------------------------------------------------------------------------
     def _guard(self) -> None:
