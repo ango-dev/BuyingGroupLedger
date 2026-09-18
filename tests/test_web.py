@@ -1606,8 +1606,9 @@ class TestStaticAssetsCarryTheirBlocks:
                        'addEventListener("htmx:confirm"', "details.multi", 'name !== "view"',
                        '".cell-edit, .cell-empty"', 'contains("single")', '"time.local"',
                        'closest(".dropzone")', "data-autosubmit", 'classList.add("just-in")',
-                       'matches(\'[hx-trigger*="every"]\')', "sel-cell", 'addEventListener("copy"',
+                       'matches(\'[hx-trigger*="every"]\')', "sel-cell", 'execCommand("copy")',
                        'addEventListener("paste"', 'e.key === "Delete"', "fillSelection(", "all.checked = !any",
+                       "if (thenDown) move(1, 0, false)", "paint(false)",
                        'GRID_TD = "table.sheetlike td, table.order-rows td"'):
             assert needle in js, f"edit.js lost its {needle!r} block"
 

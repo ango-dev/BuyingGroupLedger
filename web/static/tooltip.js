@@ -96,9 +96,17 @@
     if (el && el.contains(e.relatedTarget)) return;
     hide();
   });
-  document.addEventListener("focusin", function (e) { var el = target(e.target); if (el) arm(el, true); });
+  // Focus shows the tip at once for the keyboard; focus the MOUSE caused (a click on a grid cell)
+  // is left to the hover rule, or every click would pop a panel.
+  var lastMouse = 0;
+  document.addEventListener("focusin", function (e) {
+    if (Date.now() - lastMouse < 500) return;
+    var el = target(e.target);
+    if (el) arm(el, true);
+  });
   document.addEventListener("focusout", hide);
-  document.addEventListener("mousedown", hide);
+  document.addEventListener("mousedown", function () { lastMouse = Date.now(); hide(); });
+  document.addEventListener("mouseup", function () { lastMouse = Date.now(); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") hide(); });
   window.addEventListener("scroll", function () { if (current) place(current); }, { passive: true });
   window.addEventListener("resize", function () { if (current) place(current); });

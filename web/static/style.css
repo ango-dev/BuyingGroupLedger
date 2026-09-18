@@ -626,8 +626,10 @@ table.audit a.current { font-weight: 600; color: var(--accent); }
 .tag.pass { background: var(--ok-bg); color: var(--ok); }
 .tag.skip { background: var(--bg); color: var(--muted); }
 
-/* ---- a cell typed by hand on the dashboard: the runs keep it (ledger_db/hand_edits) ---- */
-table.sheetlike td.hand, table.card-rows td.hand { box-shadow: inset 3px 0 0 var(--committed); }
+/* ---- a cell typed by hand on the dashboard: the runs keep it (ledger_db/hand_edits) ----
+   A border, not a box-shadow: the selection tint and the selected-row tint are box-shadows, and a
+   later shadow rule would replace them (a hand-edited cell then looked skipped by a drag). */
+table.sheetlike td.hand, table.card-rows td.hand, table.order-rows td.hand { border-left: 3px solid var(--committed); }
 
 /* ---- the Taxes page ---- */
 .tax-years .button.primary { color: #fff; }

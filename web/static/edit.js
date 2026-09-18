@@ -8,7 +8,7 @@
 //   Delete/Backspace clears every editable selected cell
 //   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
 //                    pastes a single value into every selected cell, or a block cell by cell from
-//                    the top-left of the selection
+//                    the top-left of the selection (through a hidden textarea, so it works on http)
 //   arrows           move the active cell; with Shift, extend the selection
 //
 // Every write is one POST to /orders/cell with the row's key, the field, the value and what the
@@ -42,6 +42,7 @@
   var sel = null;      // {r1, c1, r2, c2} or null
   var active = null;   // {r, c} or null
   var anchor = null;   // {r, c}: where a shift-click / drag range starts
+  var dragging = false;
 
   function forEachSelected(fn) {
     if (!sel) return;
@@ -52,18 +53,21 @@
       }
     }
   }
-  function paint() {
+  // Repaint the selection; `takeFocus` moves keyboard focus to the active cell. A repaint after an
+  // unrelated swap never steals focus from a field the user is typing in, and a drag in progress
+  // does not focus each cell it crosses (that would flash the tooltip on every one).
+  function paint(takeFocus) {
     document.querySelectorAll("td.sel-cell").forEach(function (td) { td.classList.remove("sel-cell"); });
     forEachSelected(function (td) { td.classList.add("sel-cell"); });
     var td = active ? cellAt(active.r, active.c) : null;
-    if (td && document.activeElement !== td && !document.querySelector("input.cell-input")) {
-      td.focus({ preventScroll: true });
-    }
+    if (!td || dragging || document.activeElement === td || document.querySelector("input.cell-input")) return;
+    var free = document.activeElement === document.body || inGrid(document.activeElement);
+    if (takeFocus || free) td.focus({ preventScroll: true });
   }
   function rangeCount() { return sel ? (sel.r2 - sel.r1 + 1) * (sel.c2 - sel.c1 + 1) : 0; }
   function setSelection(a, b) {
     sel = { r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
-    paint();
+    paint(true);
   }
   function selectOne(td) {
     grid = td.closest(GRID);
@@ -71,7 +75,7 @@
     anchor = p; active = p;
     setSelection(p, p);
   }
-  function clearSelection() { sel = null; anchor = null; paint(); }
+  function clearSelection() { sel = null; anchor = null; paint(false); }
 
   // ---- writes, one after another ----------------------------------------------------------------
   var queue = Promise.resolve();
@@ -133,7 +137,7 @@
       restore();
       td.focus({ preventScroll: true });
     }
-    function save() {
+    function save(thenDown) {
       if (done) return;
       done = true;
       var value = input.value;
@@ -141,9 +145,10 @@
       // A range selected around this cell: the value goes into every editable cell of it.
       if (rangeCount() > 1) { fillSelection(value); return; }
       writeCell(td, value);
+      if (thenDown) move(1, 0, false);  // Enter saves and steps down, as in Sheets
     }
     input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); save(); }
+      if (e.key === "Enter") { e.preventDefault(); save(true); }
       else if (e.key === "Escape") { e.preventDefault(); cancel(); }
       else if (e.key === "Tab") { e.preventDefault(); save(); move(0, e.shiftKey ? -1 : 1, false); }
     });
@@ -153,7 +158,6 @@
   }
 
   // ---- mouse: click selects, shift-click / drag extend ---------------------------------------------
-  var dragging = false;
   document.addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
     if (e.target.closest && e.target.closest("a, button, input, .cell-edit, .cell-empty")) return;
@@ -164,7 +168,7 @@
     if (open) open.blur();  // commits or cancels the open editor first
     if (e.shiftKey && anchor && td.closest(GRID) === table()) { active = coordsOf(td); setSelection(anchor, active); }
     else selectOne(td);
-    dragging = true;
+    dragging = true;  // set after the first paint, which focuses the clicked cell
     e.preventDefault();  // no text selection while dragging a range
   });
   document.addEventListener("mousemove", function (e) {
@@ -174,7 +178,7 @@
     var p = coordsOf(td);
     if (!active || p.r !== active.r || p.c !== active.c) { active = p; setSelection(anchor, p); }
   });
-  document.addEventListener("mouseup", function () { dragging = false; });
+  document.addEventListener("mouseup", function () { if (dragging) { dragging = false; paint(true); } });
   document.addEventListener("dblclick", function (e) {
     var td = e.target.closest ? e.target.closest("td.edit") : null;
     if (td && !td.hasAttribute("data-editing")) startEdit(td);
@@ -223,7 +227,47 @@
       });
     });
   }
-  var pasteHandled = false;
+  // ---- the clipboard ------------------------------------------------------------------------------
+  // A hidden textarea carries Ctrl+C / Ctrl+V: the browser's own copy and paste act on it, which
+  // works on plain http (the dashboard is reached over the LAN or the VPN) where navigator.clipboard
+  // does not exist. Copy fills it and runs the copy command; paste focuses it so the browser pastes
+  // there, and its paste event hands the text to the grid.
+  var clip = null;
+  function clipboard() {
+    if (clip) return clip;
+    clip = document.createElement("textarea");
+    clip.id = "grid-clipboard";
+    clip.setAttribute("aria-hidden", "true");
+    clip.tabIndex = -1;
+    clip.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+    document.body.appendChild(clip);
+    clip.addEventListener("paste", function (e) {
+      var text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+      e.preventDefault();
+      clip.value = "";
+      pasteText(text);
+      paint(true);
+    });
+    return clip;
+  }
+  function copySelection() {
+    var c = clipboard();
+    c.value = selectionTsv();
+    c.focus();
+    c.select();
+    try { document.execCommand("copy"); } catch (err) { /* nothing to do: the text stays in the box */ }
+    paint(true);
+  }
+  function armPaste() {
+    var c = clipboard();
+    c.value = "";
+    c.focus();  // the paste that follows the keystroke lands here
+    setTimeout(function () {
+      if (document.activeElement !== c) return;  // the paste event already handled it
+      if (c.value) { pasteText(c.value); c.value = ""; }
+      paint(true);
+    }, 150);
+  }
   document.addEventListener("keydown", function (e) {
     if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
     var td = active ? cellAt(active.r, active.c) : null;
@@ -237,43 +281,20 @@
     else if (e.key === "Enter") { e.preventDefault(); if (editable(td)) startEdit(td); }
     else if (e.key === "Escape") { e.preventDefault(); clearSelection(); }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); fillSelection(""); }
-    else if (ctrl && (e.key === "c" || e.key === "C")) {
-      var tsv = selectionTsv();
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(tsv).catch(function () {});
-    }
-    else if (ctrl && (e.key === "v" || e.key === "V")) {
-      pasteHandled = false;
-      setTimeout(function () {  // the paste event is the reliable path; readText is the fallback
-        if (pasteHandled || !navigator.clipboard || !navigator.clipboard.readText) return;
-        navigator.clipboard.readText().then(pasteText).catch(function () {});
-      }, 60);
-    }
+    else if (ctrl && (e.key === "c" || e.key === "C")) { e.preventDefault(); copySelection(); }
+    else if (ctrl && (e.key === "v" || e.key === "V")) { armPaste(); }  // not prevented: the paste must happen
     else if (!ctrl && !e.altKey && e.key.length === 1 && editable(td)) {
       e.preventDefault();
       startEdit(td, e.key);  // typing replaces the value, as in Sheets
     }
   });
-  document.addEventListener("copy", function (e) {
-    if (!sel || document.querySelector("input.cell-input")) return;
-    if (!inGrid(document.activeElement)) return;
-    e.clipboardData.setData("text/plain", selectionTsv());
-    e.preventDefault();
-  });
-  document.addEventListener("paste", function (e) {
-    if (!sel || document.querySelector("input.cell-input")) return;
-    if (!inGrid(document.activeElement)) return;
-    pasteHandled = true;
-    e.preventDefault();
-    pasteText(e.clipboardData.getData("text/plain"));
-  });
-
   // After a swap: a refused edit is surfaced where it happened; the selection is repainted onto
   // the new cells (a whole-table swap on a filter change starts with nothing selected).
   document.addEventListener("htmx:afterSwap", function (e) {
     var td = e.target && e.target.matches && e.target.matches("td[data-error]") ? e.target : null;
     if (td) { td.focus(); }
     if (e.target && e.target.id === "orders-table") { sel = null; anchor = null; active = null; }
-    paint();
+    paint(false);
   });
 })();
 
