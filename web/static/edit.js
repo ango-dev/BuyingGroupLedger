@@ -267,3 +267,46 @@
   document.addEventListener("htmx:afterSwap", all);
   if (document.readyState !== "loading") all();
 })();
+
+// File drop zones (templates/_dropzone.html): a drop puts the file into the hidden input, the
+// chosen name shows in place, and a zone marked data-autosubmit submits its form at once.
+(function () {
+  "use strict";
+  function show(zone, input) {
+    var out = zone.querySelector(".dz-file");
+    var name = input.files && input.files.length ? Array.prototype.map.call(input.files, function (f) { return f.name; }).join(", ") : "";
+    if (out) out.textContent = name;
+    zone.classList.toggle("has-file", !!name);
+  }
+  document.addEventListener("change", function (e) {
+    var input = e.target;
+    var zone = input && input.closest ? input.closest(".dropzone") : null;
+    if (!zone || input.type !== "file") return;
+    show(zone, input);
+    if (zone.dataset.autosubmit === "1" && input.files && input.files.length && input.form) {
+      if (input.form.requestSubmit) input.form.requestSubmit(); else input.form.submit();
+    }
+  });
+  ["dragenter", "dragover"].forEach(function (name) {
+    document.addEventListener(name, function (e) {
+      var zone = e.target.closest ? e.target.closest(".dropzone") : null;
+      if (!zone) return;
+      e.preventDefault();
+      zone.classList.add("dragover");
+    });
+  });
+  document.addEventListener("dragleave", function (e) {
+    var zone = e.target.closest ? e.target.closest(".dropzone") : null;
+    if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove("dragover");
+  });
+  document.addEventListener("drop", function (e) {
+    var zone = e.target.closest ? e.target.closest(".dropzone") : null;
+    if (!zone) return;
+    e.preventDefault();
+    zone.classList.remove("dragover");
+    var input = zone.querySelector('input[type="file"]');
+    if (!input || !e.dataTransfer || !e.dataTransfer.files.length) return;
+    try { input.files = e.dataTransfer.files; } catch (err) { return; }
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+})();

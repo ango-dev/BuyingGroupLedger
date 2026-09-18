@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_dropzone.html" import dropzone %}
 {% block title %}Order {{ order.order_id }}{% endblock %}
 {% block content %}
 <p class="crumbs"><a href="/orders">Orders</a> › <span class="mono">{{ order.order_id }}</span></p>
@@ -17,10 +18,9 @@
     <dt>Order Link</dt><dd>{% for u in order.order_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">none</span>{% endfor %}</dd>
     <dt>Receipt Link</dt><dd>{% for u in order.receipt_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">no receipt captured</span>{% endfor %}
       {% if editable %}
-      <form method="post" action="/orders/{{ order.order_id }}/receipt" enctype="multipart/form-data" class="inline-form receipt-upload">
-        <input type="file" name="receipt_file" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf" required>
-        <button type="submit">Upload receipt</button>
-        <span class="muted small">a photo or PDF; stored with the captured receipts, the PAR link is written to every row of this order</span>
+      <form method="post" action="/orders/{{ order.order_id }}/receipt" enctype="multipart/form-data" class="receipt-upload">
+        {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'a photo or PDF uploads as soon as you pick it; the PAR link is written to every row of this order', autosubmit=True) }}
+        <noscript><button type="submit">Upload receipt</button></noscript>
       </form>
       {% endif %}
     </dd>

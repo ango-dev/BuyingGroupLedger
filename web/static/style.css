@@ -518,3 +518,18 @@ details.multi.inline summary { flex-direction: row; align-items: center; gap: 6p
 .entry-card details.multi.field .summary-text { font-size: 1em; width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: 6px; }
 .entry-card .subrow details.multi.field { min-width: 0; }
 table.activity { width: 100%; table-layout: auto; }
+
+/* ---- file drop zones (_dropzone.html): the page's own picker, click or drop ---- */
+.dropzone { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1.5px dashed var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--muted); cursor: pointer; min-width: 260px; max-width: 640px; transition: border-color .12s, background .12s; }
+.dropzone:hover, .dropzone.dragover { border-color: var(--accent); color: var(--fg); background: var(--card); }
+.dropzone.dragover { border-style: solid; }
+.dropzone input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+.dropzone .dz-icon { font-size: 1.3em; color: var(--accent); flex: 0 0 auto; }
+.dropzone .dz-text { flex: 1 1 auto; font-size: 0.92em; }
+.dropzone .dz-text strong { color: var(--fg); font-weight: 600; }
+.dropzone .dz-file { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85em; color: var(--accent); overflow-wrap: anywhere; }
+.dropzone.has-file { border-color: var(--accent); border-style: solid; }
+.dropzone.compact { padding: 8px 10px; min-width: 220px; }
+.receipt-upload { margin-top: 6px; }
+.add-form .field-block { display: flex; flex-direction: column; gap: 2px; }

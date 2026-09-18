@@ -1,3 +1,4 @@
+{% from "_dropzone.html" import dropzone %}
 {#- Backup & restore, as a panel of the Settings page. The routes are unchanged: POST /backup makes a zip, GET /backup/<name>
     downloads one, POST /backup/restore uploads one into a FRESH clone only. -#}
 <section class="panel" id="s-backup">
@@ -49,7 +50,7 @@
   {% endif %}
   <form method="post" action="/backup/restore" enctype="multipart/form-data" class="inline-form"
         data-confirm="Restore this backup onto this host? Existing files are kept unless overwrite is ticked.">
-    <input type="file" name="archive" accept=".zip" required>
+    {{ dropzone('archive', '.zip', 'a ledger_backup_*.zip', klass='compact') }}
     <label><input type="checkbox" name="force" value="1"> overwrite files that already exist</label>
     <button type="submit" class="danger">Restore</button>
   </form>

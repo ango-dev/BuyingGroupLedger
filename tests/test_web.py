@@ -1568,7 +1568,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".bulkbar", ".add-form", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
-                       "table.activity { width: 100%"):
+                       "table.activity { width: 100%", ".dropzone.dragover"):
             assert needle in css, f"style.css lost its {needle!r} rules"
         assert css.count("{") == css.count("}")
 
@@ -1576,5 +1576,6 @@ class TestStaticAssetsCarryTheirBlocks:
         js = (self.ROOT / "edit.js").read_text(encoding="utf-8")
         for needle in ("startEdit(", 'closest("td.rownum")', 'closest("th.rownum")',
                        'addEventListener("htmx:confirm"', "details.multi", 'name !== "view"',
-                       '".cell-edit, .cell-empty"', 'contains("single")', '"time.local"'):
+                       '".cell-edit, .cell-empty"', 'contains("single")', '"time.local"',
+                       'closest(".dropzone")', "data-autosubmit"):
             assert needle in js, f"edit.js lost its {needle!r} block"

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_select.html" import choose %}
+{% from "_dropzone.html" import dropzone %}
 {% block title %}Orders{% endblock %}
 {% block content %}
 <h1>Orders</h1>
@@ -71,7 +72,7 @@
       <label>Buying Group <input name="buying_group" value="{{ af.get('buying_group', '') }}" list="groups"></label>
       <datalist id="groups">{% for v in facets.groups %}<option value="{{ v }}">{% endfor %}</datalist>
       <label>Tracking Number <input name="tracking_number" value="{{ af.get('tracking_number', '') }}"></label>
-      <label>Receipt <input type="file" name="receipt_file" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf"> <span class="muted small">photo or PDF: stored with the captured receipts, the PAR link becomes Receipt Link</span></label>
+      <span class="field-block">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'photo or PDF; the PAR link becomes Receipt Link', required=False, klass='compact') }}</span>
       <label>or a Receipt Link <input name="receipt_url" value="{{ af.get('receipt_url', '') }}" placeholder="https://..." class="wide"></label>
       <label>Card Last 4 <input name="card_last4" value="{{ af.get('card_last4', '') }}" size="4"></label>
       <label>Profile <input name="profile_label" value="{{ af.get('profile_label', '') }}" list="profiles"></label>

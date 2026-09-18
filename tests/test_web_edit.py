@@ -776,3 +776,25 @@ class TestTheDropdowns:
         # a single-choice dropdown submits like a select: one radio per option, the pick checked
         assert 'name="dir" value="desc" checked' in body and 'name="dir" value="asc"' in body
         assert '<span class="summary-value">newest / highest first</span>' in body
+
+
+class TestTheFilePickers:
+    def test_every_file_input_is_a_drop_zone(self, sheet, tmp_path, logs_dir):
+        """click to open the file dialog OR drag and drop, in the page's own
+        design; the order page's receipt uploads as soon as it is chosen."""
+        import re
+
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        order = client.get("/orders/BBY01-1").text
+        zone = order[order.index('<form method="post" action="/orders/BBY01-1/receipt"'):]
+        zone = zone[:zone.index("</form>")]
+        assert 'class="dropzone ' in zone and 'data-autosubmit="1"' in zone
+        assert 'name="receipt_file"' in zone and "Drop a file here" in zone
+        add = client.get("/orders").text
+        assert 'name="receipt_file"' in add and "data-autosubmit" not in add[add.index('name="receipt_file"') - 200:add.index('name="receipt_file"')]
+        settings = client.get("/settings").text
+        assert 'name="archive"' in settings and "Drop a file here" in settings
+        for body in (order, add, settings):
+            for m in re.finditer(r'<input type="file"', body):
+                before = body[max(0, m.start() - 160):m.start()]
+                assert 'class="dropzone' in before, "a bare file input"

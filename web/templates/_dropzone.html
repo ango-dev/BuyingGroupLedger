@@ -1,0 +1,13 @@
+{#- The page's own file picker. A <label> around a visually hidden <input type="file">: a click opens the file dialog,
+    a drop hands the file to the input (edit.js), the chosen name shows in place, and with
+    `autosubmit` the form submits the moment a file is chosen -- one action, no second click.
+
+    dropzone(name, accept, hint='', autosubmit=False, required=True, klass='') -#}
+{% macro dropzone(name, accept, hint='', autosubmit=False, required=True, klass='') -%}
+<label class="dropzone {{ klass }}" {% if autosubmit %}data-autosubmit="1"{% endif %}>
+  <input type="file" name="{{ name }}" accept="{{ accept }}" {{ 'required' if required }}>
+  <span class="dz-icon" aria-hidden="true">⤒</span>
+  <span class="dz-text"><strong>Drop a file here</strong> or click to choose{% if hint %} <span class="muted small">— {{ hint }}</span>{% endif %}</span>
+  <span class="dz-file"></span>
+</label>
+{%- endmacro %}
