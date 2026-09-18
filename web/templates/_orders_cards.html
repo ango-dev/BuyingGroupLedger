@@ -17,20 +17,11 @@
         <span class="retailer">{{ c.retailer }}</span>
         <span class="muted small">{{ c.rows }} row(s)</span>
       </header>
-      <div class="card-rows-wrap">
-      <table class="grid card-rows">
-        <thead><tr>{% for name in CARD_COLUMNS %}<th class="{{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment') }}">{{ header_of(name) }}</th>{% endfor %}</tr></thead>
-        <tbody>
-          {% for row in c.row_objs %}
-          {% set key = {'order_id': row.order_id, 'order_date': row.order_date, 'item_name': row.item_name, 'shipment': row.shipment} %}
-          <tr class="status-{{ row.status }}">
-            {% for name in CARD_COLUMNS %}{% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}{% endfor %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      </div>
+      <ul class="items">
+        {% for name in c['items'] %}<li title="{{ name }}">{{ name }}</li>{% endfor %}
+      </ul>
       <dl class="facts-grid">
+        <dt>Status</dt><dd>{% for s in c.statuses %}<span class="tag status-{{ s }}">{{ s }}</span> {% endfor %}</dd>
         <dt>Group</dt><dd>{{ c.buying_group }}</dd>
         <dt>Qty</dt><dd>{{ c.quantity }}</dd>
         <dt>Cost</dt><dd class="num">{{ c.total_cost | money }}</dd>
@@ -39,6 +30,24 @@
         {% if c.tracking %}<dt>Tracking</dt><dd class="mono small">{{ c.tracking | join(', ') }}</dd>{% endif %}
         {% if c.card %}<dt>Card</dt><dd>{{ c.card }}</dd>{% endif %}
       </dl>
+      {% if editable %}
+      <details class="card-edit">
+        <summary class="muted small">edit rows</summary>
+        <div class="card-rows-wrap">
+        <table class="grid card-rows">
+          <thead><tr>{% for name in CARD_COLUMNS %}<th class="{{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment') }}">{{ header_of(name) }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for row in c.row_objs %}
+            {% set key = {'order_id': row.order_id, 'order_date': row.order_date, 'item_name': row.item_name, 'shipment': row.shipment} %}
+            <tr class="status-{{ row.status }}">
+              {% for name in CARD_COLUMNS %}{% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}{% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </details>
+      {% endif %}
       <footer>
         <span class="links">
           <a href="/orders/{{ c.order_id }}">details</a>

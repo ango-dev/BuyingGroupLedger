@@ -616,7 +616,9 @@ class TestCardsView:
         assert 'class="num edit"' in body and 'data-field="insurance"' in body
         assert 'data-field="status"' in body and '<table class="grid card-rows">' in body
         assert '<select name="sort">' in body and '<option value="total_profit"' in body
-        assert 'class="tag status-' not in body[body.index('<article'):]  # tags moved into the row list
+        first_card = body[body.index('<article'):body.index('</article>')]
+        assert '<dt>Status</dt><dd><span class="tag status-' in first_card  # a coloured box in the facts
+        assert '<details class="card-edit">' in first_card and '<ul class="items">' in first_card
 
         page2 = client.get("/orders", params={"view": "cards", "page": "2"},
                            headers={"HX-Request": "true"}).text

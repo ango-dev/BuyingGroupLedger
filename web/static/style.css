@@ -308,3 +308,18 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
 .card tr.status-cancelled td[data-field="status"]  { background: #CCCCCC; color: #1a1a1a; text-decoration: line-through; }
 .card tr.status-superseded td[data-field="status"] { background: #666666; color: #f4f4f4; text-decoration: line-through; }
 .cards { grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); }
+/* the caret sits inside the dropdown box */
+.filters details.multi .summary-text { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; }
+.filters details.multi .summary-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filters details.multi .caret { color: var(--muted); flex: 0 0 auto; }
+/* status as a coloured box in a card's facts, the row colours of the table */
+.card .tag.status-ordered    { background: #EA9999; color: #1a1a1a; border-color: transparent; }
+.card .tag.status-shipped    { background: #F9CB9C; color: #1a1a1a; border-color: transparent; }
+.card .tag.status-delivered  { background: #FFE599; color: #1a1a1a; border-color: transparent; }
+.card .tag.status-paid       { background: #B6D7A8; color: #1a1a1a; border-color: transparent; }
+.card .tag.status-return     { background: #DD7E6B; color: #1a1a1a; border-color: transparent; }
+.card .tag.status-cancelled  { background: #CCCCCC; color: #1a1a1a; border-color: transparent; text-decoration: line-through; }
+.card .tag.status-superseded { background: #666666; color: #f4f4f4; border-color: transparent; text-decoration: line-through; }
+.card details.card-edit summary { cursor: pointer; }
+.card details.card-edit[open] summary { margin-bottom: 6px; }
+.cards { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
