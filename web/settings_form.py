@@ -208,24 +208,52 @@ def is_overridden(setting: Setting, environ: Mapping[str, str]) -> bool:
     return bool((environ.get(setting.env) or "").strip())
 
 
+#: Settings that, left blank, use ANOTHER setting's value at run time (the one place that choice
+#: is made is Settings.bfmr_reply_account). The page shows the fallback as the field's
+#: placeholder -- never as its value, so saving cannot copy it into the file.
+FALLBACKS: dict[str, tuple[str, str]] = {
+    "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS": ("GMAIL_ADDRESS", "the alerts account"),
+    "BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD": ("GMAIL_APP_PASSWORD", "the alerts app password"),
+}
+
+
+def _fallback_placeholder(setting: Setting, by_env: dict[str, Setting]) -> str:
+    """What a blank field will use, as placeholder text, or "" when the fallback is blank too.
+    A secret fallback is never shown -- only that one is set."""
+    source = FALLBACKS.get(setting.env)
+    if source is None:
+        return ""
+    other = by_env.get(source[0])
+    if other is None:
+        return ""
+    if setting.secret:
+        return f"uses {source[1]} (set; blank keeps it that way)" if config_value(other.path) else ""
+    value = config_value(other.path)
+    return f"{value} ({source[1]}, used while this is blank)" if value else ""
+
+
 def view(settings: list[Setting], environ: Mapping[str, str]) -> list[dict]:
     """One row per setting: the FILE's value, or -- when the file omits the key -- the code's
     default, marked `defaulted` so the page can say so (a flag that defaults to true reads as
-    ticked, not blank)."""
+    ticked, not blank). A blank field with a FALLBACKS entry shows what it will use instead."""
     defaults = code_defaults()
+    by_env = {s.env: s for s in settings}
     rows = []
     for s in settings:
         value = current_value(s)
-        defaulted = value is None and not s.secret and defaults.get(s.env) is not None
+        defaulted = value is None and not s.secret and defaults.get(s.env) not in (None, "")
         if defaulted:
             value = defaults[s.env]
+        stored = config_value(s.path)
+        placeholder = _fallback_placeholder(s, by_env) if not stored else ""
         rows.append({
             "setting": s,
             "value": "" if value is None else value,
-            "secret_set": bool(config_value(s.path)) if s.secret else False,
+            "secret_set": bool(stored) if s.secret else False,
             "overridden": is_overridden(s, environ),
             "restart": restart_scope(s),
             "defaulted": defaulted,
+            "placeholder": placeholder,
         })
     return rows
 
@@ -294,7 +322,7 @@ def apply_scalars(form: Mapping[str, str], settings: list[Setting] | None = None
     errors: list[str] = []
     for s in settings:
         before = config_value(s.path)
-        if before is None and not s.secret and defaults.get(s.env) is not None:
+        if before is None and not s.secret and defaults.get(s.env) not in (None, ""):
             before = defaults[s.env]  # what the page showed: a key the file omits reads as its default
         if s.kind == "bool":
             value = str(form.get(s.env, "")).strip().lower() in ("on", "true", "1", "yes")

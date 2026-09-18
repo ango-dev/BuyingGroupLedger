@@ -380,6 +380,32 @@ class TestEntryCards:
         assert defaults["RUN_INTERVAL_HOURS"] == 6 and defaults["WEB_ENABLED"] is True
         assert defaults["GOOGLE_SHEET_WORKSHEET_NAME"] == "Orders" and defaults["GOOGLE_SHEET_ID"] is None
 
+    def test_the_combined_package_account_shows_the_alerts_account_as_its_fallback(self, client, config):
+        # the fixture sets alerts.gmail_address / gmail_app_password and no combined-package pair
+        body = client.get("/settings").text
+        address = body[body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS"'):body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD"')]
+        assert 'value=""' in address and 'placeholder="me@example.com (the alerts account, used while this is blank)"' in address
+        assert ">falls back<" in address and ">default<" not in address
+        password = body[body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD"'):body.index('for="f-MAXOUTDEALS_API_BASE_URL"')]
+        assert 'placeholder="uses the alerts app password (set; blank keeps it that way)"' in password
+        assert "hunter2" not in password and ">falls back<" in password
+        # saving with the field left blank writes NOTHING into it (the placeholder is not a value)
+        form = {s.env: "" for s in settings_form.schema() if not s.secret and s.kind != "bool"}
+        form["LOOKBACK_DAYS"] = "3"
+        client.post("/settings", data=form)
+        assert config_value("buying_groups.bfmr.combined_package_gmail_address") in (None, "")
+        # its own value, once set, is shown as the value and the fallback tag goes
+        config(alerts={"gmail_address": "me@example.com", "gmail_app_password": "hunter2"},
+               buying_groups={"bfmr": {"combined_package_gmail_address": "bfmr@example.com"}})
+        body = client.get("/settings").text
+        address = body[body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS"'):body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD"')]
+        assert 'value="bfmr@example.com"' in address and ">falls back<" not in address
+        # both blank: no placeholder at all
+        config(alerts={}, buying_groups={"bfmr": {}})
+        body = client.get("/settings").text
+        address = body[body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS"'):body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD"')]
+        assert "placeholder=" not in address and ">falls back<" not in address
+
     def test_saving_the_shown_defaults_is_not_a_change_but_does_write_them(self, client):
         form = {}
         for row in settings_form.view(settings_form.schema(), {}):

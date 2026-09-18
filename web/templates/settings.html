@@ -60,6 +60,7 @@ here, so keep the dashboard on loopback or your own network.</p>
                 <span class="mono small muted">{{ s.env }}</span>
                 {% if row.overridden %}<span class="tag stale" title="exported in the environment; the file value is saved but does not reach the running process">env override</span>{% endif %}
                 {% if row.defaulted %}<span class="tag" title="config.json does not set this key; this is the value the code applies, and saving writes it to the file">default</span>{% endif %}
+                {% if row.placeholder %}<span class="tag" title="blank here means the value shown greyed in the box is used; type one to give this its own">falls back</span>{% endif %}
                 {% if row.restart == 'container' %}<span class="tag" title="the container reads this once at start: docker compose restart to apply">container restart</span>
                 {% elif row.restart == 'dashboard' %}<span class="tag" title="the dashboard reads this once at start: Restart dashboard to apply">dashboard restart</span>{% endif %}
               </div>
@@ -69,12 +70,12 @@ here, so keep the dashboard on loopback or your own network.</p>
                 <label class="switch"><input type="checkbox" id="f-{{ s.env }}" name="{{ s.env }}" value="on" {{ 'checked' if row.value is sameas true or row.value in ('true', 'True', '1', 'yes', 'on') }}> <span class="muted small">enabled</span></label>
               {% elif s.secret %}
                 <input type="password" id="f-{{ s.env }}" name="{{ s.env }}" value="" autocomplete="new-password"
-                       placeholder="{{ '•••••••• (set; blank keeps it)' if row.secret_set else '(not set)' }}">
+                       placeholder="{{ '•••••••• (set; blank keeps it)' if row.secret_set else (row.placeholder or '(not set)') }}">
                 {% if row.secret_set %}<label class="small clear"><input type="checkbox" name="{{ s.env }}__clear" value="1"> clear</label>{% endif %}
               {% elif s.kind in ('int', 'float') %}
                 <input type="number" id="f-{{ s.env }}" name="{{ s.env }}" value="{{ row.value }}" step="{{ '1' if s.kind == 'int' else 'any' }}">
               {% else %}
-                <input type="text" id="f-{{ s.env }}" name="{{ s.env }}" value="{{ row.value }}" {% if s.kind == 'rate' %}placeholder="0.02 or 2%"{% endif %}>
+                <input type="text" id="f-{{ s.env }}" name="{{ s.env }}" value="{{ row.value }}" {% if row.placeholder %}placeholder="{{ row.placeholder }}"{% elif s.kind == 'rate' %}placeholder="0.02 or 2%"{% endif %}>
               {% endif %}
               {% if s.help %}<div class="muted small help">{{ s.help }}</div>{% endif %}
             </div>
