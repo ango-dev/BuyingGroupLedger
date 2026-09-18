@@ -619,7 +619,7 @@ class TestCardsView:
         first_card = body[body.index('<article'):body.index('</article>')]
         assert '<dd class="num pos">$' in body  # a positive profit reads green, a negative red
         assert '<dt>Status</dt><dd><span class="tag status-' in first_card  # a coloured box in the facts
-        assert '<details class="card-edit">' in first_card and '<ul class="items">' in first_card
+        assert '<details class="card-edit">' in first_card and '<ol class="items' in first_card
 
         page2 = client.get("/orders", params={"view": "cards", "page": "2"},
                            headers={"HX-Request": "true"}).text
@@ -708,6 +708,18 @@ class TestOrderPageEditing:
                          settings=dataclasses.replace(settings, container_run_interval_hours=6))
         body = TestClient(app).get("/orders/X").text
         assert 'data-field="insurance"' in body and 'class="num edit"' not in body
+
+    def test_link_cells_carry_a_pencil_and_blank_ones_an_add_affordance(self, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        body = client.get("/orders").text
+        # every link column is editable: a filled cell shows its link plus the pencil, a blank
+        # one the "add" hint; both open the same inline editor (edit.js)
+        assert 'data-field="order_url"' in body
+        cell = body[body.index('data-field="order_url"'):]
+        cell = cell[:cell.index("</td>")]
+        assert ("cell-edit" in cell and "↗" in cell) or "add ↗" in cell
+        cards = client.get("/orders", params={"view": "cards"}).text
+        assert 'data-field="order_url"' in cards and 'data-field="delivery_address"' in cards
 
     def test_the_card_delete_is_at_the_bottom_right(self, sheet, tmp_path, logs_dir):
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)

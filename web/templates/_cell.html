@@ -15,9 +15,9 @@
     {%- elif col == 'item_name' -%}
       <span title="{{ row.item_name }}">{{ row.item_name }}</span>
     {%- elif col == 'tracking_number' -%}
-      {%- if row.tracking_number and row.text('tracking_url') -%}<a href="{{ row.text('tracking_url') }}" rel="noopener">{{ row.tracking_number }}</a>{%- else -%}{{ row.tracking_number }}{%- endif -%}
+      {%- if row.tracking_number and row.text('tracking_url') -%}<a href="{{ row.text('tracking_url') }}" rel="noopener">{{ row.tracking_number }}</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the tracking number" aria-label="edit tracking number">✎</button>{% endif %}{%- else -%}{{ row.tracking_number }}{%- endif -%}
     {%- elif col in LINK_FIELDS -%}
-      {%- if raw -%}<a href="{{ raw }}" rel="noopener" title="{{ raw }}">{{ 'receipt' if col == 'receipt_url' else 'tracking' if col == 'tracking_url' else 'order' }} ↗</a>{%- endif -%}
+      {%- if raw -%}<a href="{{ raw }}" rel="noopener" title="{{ raw }}">{{ 'receipt' if col == 'receipt_url' else 'tracking' if col == 'tracking_url' else 'order' }} ↗</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the link" aria-label="edit {{ col }}">✎</button>{% endif %}{%- elif editable_cell -%}<span class="muted cell-empty">add ↗</span>{%- endif -%}
     {%- elif col == 'tracking_submitted' -%}
       <span class="check">{{ '☑' if row.tracking_submitted else '☐' }}</span>
     {%- elif col == 'payout_amount' -%}

@@ -67,6 +67,13 @@
     var td = e.target.closest("td.edit");
     if (td && !td.hasAttribute("data-editing")) startEdit(armed(td));
   });
+  // A cell that shows a link cannot be double-clicked into (the first click follows the link),
+  // so it carries a pencil; a blank link cell shows "add" and edits on a single click.
+  document.addEventListener("click", function (e) {
+    var handle = e.target.closest ? e.target.closest(".cell-edit, .cell-empty") : null;
+    var td = handle ? handle.closest("td.edit") : null;
+    if (td && !td.hasAttribute("data-editing")) { e.preventDefault(); startEdit(armed(td)); }
+  });
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Enter") return;
     var td = e.target.closest ? e.target.closest("td.edit") : null;

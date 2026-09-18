@@ -781,6 +781,14 @@ class TestOverviewPage:
         body = client.get("/orders", params={"view": "cards"}).text
         assert ">Order ↗<" in body and ">Receipt ↗<" in body and ">Details<" in body
 
+    def test_a_card_lists_its_items_as_numbered_lines_with_quantity(self, client):
+        body = client.get("/orders", params={"view": "cards", "q": "111-0000002-0000002"}).text
+        card = body[body.index('<article class="card'):body.index("</article>")]
+        assert '<ol class="items ' in card and '<span class="n">1</span>' in card
+        assert "Fitbit Charge 6" in card and "×1" in card
+        # a single-item order carries no separators
+        assert 'class="items "' in card
+
     def test_heartbeat_shows_fresh(self, client):
         body = client.get("/").text
         assert "last run 3h 0m ago" in body
@@ -1390,6 +1398,18 @@ class TestMultiSelectFilters:
         assert len(filter_rows(rows, Filters.from_query({}))) == len(rows)
         assert Filters.from_query({"retailer": "Costco"}).retailers == ("Costco",)
 
+    def test_order_cards_carry_one_line_per_item_with_its_quantity_and_shipments(self, snapshot_path):
+        from web.queries import CARD_COLUMNS, order_cards
+
+        rows = SnapshotReader(snapshot_path).load().rows
+        by_id = {c["order_id"]: c for c in order_cards(rows)}
+        two = next(c for c in by_id.values() if c["rows"] > 1)
+        assert len(two["item_lines"]) == len(two["items"])
+        assert all(line["quantity"] >= 1 and line["shipments"] for line in two["item_lines"])
+        # the row list can edit the links and the address too
+        for col in ("order_url", "tracking_url", "receipt_url", "delivery_address"):
+            assert col in CARD_COLUMNS
+
     def test_month_paid_and_state_filters(self, snapshot_path):
         rows = SnapshotReader(snapshot_path).load().rows
         assert len(filter_rows(rows, Filters.from_query({"month": "2026-09"}))) == 3
@@ -1437,12 +1457,14 @@ class TestStaticAssetsCarryTheirBlocks:
         css = (self.ROOT / "style.css").read_text(encoding="utf-8")
         for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
-                       ".bulkbar", ".add-form", "tr.selected td", ".cards {"):
+                       ".bulkbar", ".add-form", "tr.selected td", ".cards {", ".card ol.items",
+                       "td .cell-edit", ".settings-nav", ".entry-card"):
             assert needle in css, f"style.css lost its {needle!r} rules"
         assert css.count("{") == css.count("}")
 
     def test_the_script_has_every_feature_block(self):
         js = (self.ROOT / "edit.js").read_text(encoding="utf-8")
         for needle in ("startEdit(", 'closest("td.rownum")', 'closest("th.rownum")',
-                       'addEventListener("htmx:confirm"', "details.multi", 'name !== "view"'):
+                       'addEventListener("htmx:confirm"', "details.multi", 'name !== "view"',
+                       '".cell-edit, .cell-empty"'):
             assert needle in js, f"edit.js lost its {needle!r} block"

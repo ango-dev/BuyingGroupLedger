@@ -142,7 +142,10 @@ local files only.
 coloured by the Sheet's own status rules (read from its conditional formats: ordered red, shipped
 orange, delivered yellow, paid green, return terracotta, cancelled grey and superseded dark grey
 with strikethrough), a frozen header, full page width. Double-click a cell (or press Enter on it)
-to edit; Enter saves, Esc cancels. An edit lands on the Sheet exactly as if typed there: the row is
+to edit; Enter saves, Esc cancels. A cell that shows a link (Order Link, Tracking Link, Receipt
+Link, a tracking number with its carrier link) cannot be double-clicked into — the click follows
+the link — so it carries a ✎ pencil that opens the editor, and a blank link cell shows *add ↗* on
+hover and edits on a single click. An edit lands on the Sheet exactly as if typed there: the row is
 found **by its key** on a fresh read (the sheet may have re-sorted), the cell must still show what
 the page showed or the edit is refused as a conflict, a value goes through the upsert's own
 coercion (numbers stay numbers, checkboxes booleans, dates plain text), and a blank clears the cell
@@ -170,9 +173,11 @@ is unticked). The choice travels in the URL as repeated parameters, so links and
 **Two views.** The *View* control in the filter bar switches between the sheet-like table and
 **cards**: one card per order under the same filters and search, sorted by the *Sort by* / *Order*
 controls that appear in the cards view, paginated with a *Per page* choice of 12 / 24 / 48 / 96.
-A card shows the order's totals (quantity, cost, payout with its state, profit) and a list of its
-rows with the same editable cells as the table (double-click, Enter, Esc), the Status cell coloured
-as the table's rows are. A card's *Delete* removes every row of that order, through the same
+A card shows the order's items one line each (numbered when there are several, with the quantity
+and the shipment each is in), the order's totals (quantity, cost, payout with its state, profit)
+and, behind *edit rows*, its rows with the same editable cells as the table (double-click, Enter,
+Esc), the Status cell coloured as the table's rows are — including Delivery Address, Order Link,
+Tracking Link and Receipt Link. A card's *Delete* removes every row of that order, through the same
 all-or-nothing delete the table uses. Every confirmation on the page (bulk apply, delete, card
 delete) is an in-page dialog rather than the browser's own prompt.
 

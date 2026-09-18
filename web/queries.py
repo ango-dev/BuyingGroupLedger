@@ -33,7 +33,8 @@ SEARCH_FIELDS = ("order_id", "item_name", "tracking_number", "package_id", "card
 DEFAULT_SORT = "order_date"
 #: The columns a card's per-row mini-table shows (the same editable cells as the big table).
 CARD_COLUMNS = ("item_name", "shipment", "status", "quantity", "tracking_number", "delivery_date",
-                "insurance", "payout_amount", "payout_date", "total_profit")
+                "insurance", "payout_amount", "payout_date", "total_profit", "delivery_address",
+                "order_url", "tracking_url", "receipt_url")
 #: The columns an order page's shipment tables show, every one through the same editable cell.
 ORDER_COLUMNS = ("item_name", "status", "quantity", "cost_per_item", "total_cost", "shipping",
                  "sales_tax", "gift_card", "rewards_used", "cashback_rate", "cogs", "insurance",
@@ -346,7 +347,7 @@ def order_cards(rows: list[LedgerRow]) -> list[dict]:
                 "quantity": 0, "total_cost": 0.0, "payout": 0.0, "profit": 0.0,
                 "has_profit": False, "payout_states": set(), "receipt_urls": [],
                 "order_url": row.text("order_url"), "card": row.text("card_name"),
-                "row_objs": [],
+                "row_objs": [], "item_lines": [],
             }
         card["rows"] += 1
         card["row_objs"].append(row)
@@ -355,6 +356,15 @@ def order_cards(rows: list[LedgerRow]) -> list[dict]:
         name = row.item_name
         if name and name not in card["items"]:
             card["items"].append(name)
+        # One line per distinct item: its quantity summed over its rows, the shipments it is in.
+        #
+        line = next((l for l in card["item_lines"] if l["name"] == name), None)
+        if line is None:
+            line = {"name": name, "quantity": 0, "shipments": [], "status": row.status}
+            card["item_lines"].append(line)
+        line["quantity"] += int(row.number("quantity") or 0)
+        if row.shipment and row.shipment not in line["shipments"]:
+            line["shipments"].append(row.shipment)
         if row.tracking_number and row.tracking_number not in card["tracking"]:
             card["tracking"].append(row.tracking_number)
         card["keys"].append({"order_id": row.order_id, "order_date": row.order_date,

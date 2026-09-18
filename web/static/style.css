@@ -441,3 +441,19 @@ details.advanced { margin-top: 12px; }
 details.advanced > summary { cursor: pointer; color: var(--muted); font-size: 0.9em; }
 details.advanced textarea { margin-top: 8px; }
 .settings-empty { color: var(--muted); font-style: italic; }
+
+/* ---- card item lines: numbered, with quantity / shipment, a rule between items ---- */
+.card ol.items { list-style: none; margin: 0; padding: 0; font-size: 0.92em; }
+.card ol.items li { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 3px 0; }
+.card ol.items.many li + li { border-top: 1px solid var(--line); }
+.card ol.items .n { display: none; flex: 0 0 auto; min-width: 1.5em; height: 1.5em; line-height: 1.5em; text-align: center;
+  border-radius: 999px; background: var(--bg); color: var(--muted); font-size: 0.8em; font-weight: 600; }
+.card ol.items.many .n { display: inline-block; }
+.card ol.items .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card ol.items .meta { flex: 0 0 auto; color: var(--muted); font-size: 0.85em; font-variant-numeric: tabular-nums; }
+/* ---- link cells: the pencil that opens the editor, the "add" affordance of a blank one ---- */
+td .cell-edit { margin-left: 6px; padding: 0 4px; font-size: 0.85em; line-height: 1.2; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; opacity: 0.55; }
+td:hover .cell-edit { opacity: 1; }
+td .cell-edit:hover { color: var(--accent); border-color: var(--accent); }
+td .cell-empty { font-size: 0.85em; cursor: text; opacity: 0; }
+td:hover .cell-empty { opacity: 0.8; }

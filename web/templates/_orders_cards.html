@@ -16,9 +16,15 @@
         <span class="muted">{{ c.order_date }}</span>
         <span class="retailer">{{ c.retailer }}</span>
       </header>
-      <ul class="items">
-        {% for name in c['items'] %}<li title="{{ name }}">{{ name }}</li>{% endfor %}
-      </ul>
+      <ol class="items {{ 'many' if c.item_lines | length > 1 }}">
+        {% for line in c.item_lines %}
+        <li title="{{ line.name }}">
+          <span class="n">{{ loop.index }}</span>
+          <span class="name">{{ line.name }}</span>
+          <span class="meta">{% if line.quantity %}×{{ line.quantity }}{% endif %}{% if c.item_lines | length > 1 and line.shipments %} · ship {{ line.shipments | join('/') }}{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ol>
       <dl class="facts-grid">
         <dt>Status</dt><dd>{% for s in c.statuses %}<span class="tag status-{{ s }}">{{ s }}</span> {% endfor %}</dd>
         <dt>Group</dt><dd>{{ c.buying_group }}</dd>
