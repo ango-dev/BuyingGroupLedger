@@ -22,6 +22,7 @@
   // The Orders table and an order page's shipment tables are all grids; the selection lives in
   // ONE of them at a time (the one last clicked), and a cell swap keeps the table element.
   var GRID = "table.sheetlike, table.order-rows";
+  var GRID_TD = "table.sheetlike td, table.order-rows td";  // NOT GRID + " td": the comma would split it
   var grid = null;     // the table the selection is in
   function table() { return grid && grid.isConnected ? grid : null; }
   function body() { var t = table(); return t ? t.tBodies[0] : null; }
@@ -156,7 +157,7 @@
   document.addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
     if (e.target.closest && e.target.closest("a, button, input, .cell-edit, .cell-empty")) return;
-    var td = e.target.closest ? e.target.closest(GRID + " td") : null;
+    var td = e.target.closest ? e.target.closest(GRID_TD) : null;
     if (!selectable(td)) return;
     if (td.hasAttribute("data-editing")) return;
     var open = document.querySelector("input.cell-input");
@@ -168,7 +169,7 @@
   });
   document.addEventListener("mousemove", function (e) {
     if (!dragging) return;
-    var td = e.target.closest ? e.target.closest(GRID + " td") : null;
+    var td = e.target.closest ? e.target.closest(GRID_TD) : null;
     if (!selectable(td) || td.closest(GRID) !== table()) return;
     var p = coordsOf(td);
     if (!active || p.r !== active.r || p.c !== active.c) { active = p; setSelection(anchor, p); }
