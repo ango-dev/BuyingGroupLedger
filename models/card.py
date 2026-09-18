@@ -78,6 +78,9 @@ class Card(BaseModel):
     cashback_rate: float | None = None
     retailer_rates: dict[str, float] = Field(default_factory=dict)
     profile: str = ""  # matches ProfileConfig.label
+    # A virtual card number (another card's, or a card with no account of its own): it earns
+    # cashback like any card, but the Taxes page does not ask for a sign-up bonus for it.
+    virtual: bool = False
 
     @field_validator("last4", mode="before")
     @classmethod

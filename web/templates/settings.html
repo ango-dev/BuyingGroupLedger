@@ -193,6 +193,7 @@ here, so keep the dashboard on loopback or your own network.</p>
         <label>Cashback rate <input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="0.02 or 2%"></label>
         <span class="lbl">Only for profile {{ choose('profile', [('', 'any account')] + (profile_labels | list), c.profile if c else '', '', 'field') }}</span>
       </div>
+      <label class="check"><input type="checkbox" name="virtual" value="on" {{ 'checked' if c and c.virtual }}> Virtual card <span class="muted small">— a virtual number of another card: the Taxes page does not ask for a sign-up bonus for it</span></label>
       <div class="fblock">
         <div class="ftitle">Per-retailer rates <span class="muted">— override the card's rate at one retailer; blank the retailer to drop a row</span></div>
         <table class="entry-table rates">

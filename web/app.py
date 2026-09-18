@@ -32,6 +32,7 @@ from web.audit_view import AuditCache, audit_grids, audit_key, key_of, run_audit
 from web.queries import (Filters, _values as query_values, column_headings, facets, filter_rows,
                          order_view, sort_rows)
 from web.recon_view import findings_for as recon_findings, reconcile
+from web import tax_inputs
 from web.summary import overview
 
 HERE = Path(__file__).resolve().parent
@@ -39,7 +40,7 @@ TEMPLATES_DIR = HERE / "templates"
 STATIC_DIR = HERE / "static"
 
 #: The routes, for the read-only test that asserts every one of them refuses any non-GET method.
-ROUTES = ("/", "/orders", "/orders/{order_id}", "/audit", "/recon", "/failures", "/health")
+ROUTES = ("/", "/orders", "/orders/{order_id}", "/audit", "/recon", "/expenses", "/taxes", "/failures", "/health")
 
 
 # --------------------------------------------------------------------------------------------------
@@ -278,7 +279,26 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     # The Audit and Reconciliation pages ARE the Orders view (table or cards, the same filters,
     # sort, search, editing) over a subset of rows with a finding beside each. `scope` names the
     # subset; the filter form carries it so an htmx swap or a bulk edit re-renders the same page.
-    SCOPES = {"": "/orders", "audit": "/audit", "recon": "/recon"}
+    SCOPES = {"": "/orders", "audit": "/audit", "recon": "/recon", "expenses": "/expenses"}
+    tax_inputs_path = (Path(repo_root_dir) if repo_root_dir else tax_inputs.Path(__file__).resolve().parents[1]) \
+        / "data" / tax_inputs.FILE_NAME
+
+    def tax_years(snapshot) -> list[int]:
+        """Every year the ledger touches (by Order Date or Payout Date) plus this one, newest first."""
+        years = {clock().year}
+        for row in snapshot.rows:
+            for name in ("order_date", "payout_date"):
+                text = row.text(name)[:4]
+                if len(text) == 4 and text.isdigit():
+                    years.add(int(text))
+        return sorted(years, reverse=True)
+
+    def tax_report_for(snapshot, year: int) -> dict:
+        from scripts.audit_sheet import Sheet
+        from scripts.tax_report import build_report
+
+        grids, _sheet_checks = audit_grids(reader, snapshot)
+        return build_report(Sheet(grids), year)
     audit_cache = AuditCache()
     app.state.audit_cache = audit_cache
 
@@ -320,6 +340,13 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             rows = [r for r in rows if r.order_id in report.keys]
             findings = recon_findings(rows, report)
             extra.update(recon=report)
+        elif scope == "expenses":
+            # The cost side of a tax year, as scripts/tax_report counts it: placed in the year,
+            # carrying money.
+            year = filters.year or str(clock().year)
+            rows = [r for r in rows if r.order_date.startswith(year) and not r.is_money_free]
+            extra.update(year=year, years=[str(y) for y in tax_years(snapshot)],
+                         tax=tax_report_for(snapshot, int(year))["totals"])
         by_order: dict[str, list] = {}
         for key, lines in (findings or {}).items():
             bucket = by_order.setdefault(key[0], [])
@@ -375,6 +402,65 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.get("/recon", response_class=HTMLResponse)
     def recon(request: Request):
         return scoped(request, "recon")
+
+    @app.get("/expenses", response_class=HTMLResponse)
+    def expenses(request: Request):
+        return scoped(request, "expenses")
+
+    # ---- Taxes: the year on Schedule C, with the hand-entered items (web/tax_inputs.py) ---------
+    def tax_prompts() -> tuple[list, list]:
+        try:
+            from config.profiles import load_profiles
+
+            profiles = load_profiles()
+        except Exception:  # noqa: BLE001 -- a broken profiles section must not hide the summary
+            profiles = []
+        try:
+            from config.cards import load_cards
+
+            cards = load_cards()
+        except Exception:  # noqa: BLE001
+            cards = []
+        return tax_inputs.membership_prompts(profiles), tax_inputs.bonus_prompts(cards)
+
+    def taxes_page(request: Request, year: int, **extra):
+        snapshot = load(request)
+        years = tax_years(snapshot)
+        inputs = load_tax_inputs(year)
+        memberships, bonuses = tax_prompts()
+        summary = tax_inputs.schedule_c(tax_report_for(snapshot, year), inputs)
+        return page(request, "taxes.html", snapshot=snapshot, year=year, years=years,
+                    inputs=inputs, summary=summary, membership_prompts=memberships,
+                    bonus_prompts=bonuses, site_names=tax_inputs.site_names(inputs), **extra)
+
+    def load_tax_inputs(year: int):
+        return tax_inputs.load_year(tax_inputs_path, year)
+
+    def requested_year(request: Request, default: int) -> int:
+        text = str(request.query_params.get("year") or "").strip()
+        return int(text) if len(text) == 4 and text.isdigit() else default
+
+    @app.get("/taxes", response_class=HTMLResponse)
+    def taxes(request: Request):
+        return taxes_page(request, requested_year(request, clock().year),
+                          notice=request.query_params.get("notice", ""),
+                          error=request.query_params.get("error", ""))
+
+    @app.post("/taxes/save")
+    async def taxes_save(request: Request):
+        form = await request.form()
+        text = str(form.get("year") or "").strip()
+        year = int(text) if len(text) == 4 and text.isdigit() else clock().year
+        memberships, bonuses = tax_prompts()
+        try:
+            inputs = tax_inputs.parse_form(form, memberships + bonuses)
+        except ValueError as exc:
+            return taxes_page(request, year, error=str(exc))
+        tax_inputs.save_year(tax_inputs_path, year, inputs)
+        act("settings", f"Tax inputs for {year} saved",
+            {"year": year, "memberships": inputs.membership_total, "bonuses": inputs.bonus_total,
+             "sites": inputs.site_total, "other": len(inputs.other)})
+        return RedirectResponse(url=f"/taxes?year={year}&notice=Saved+{year}", status_code=303)
 
     def selected_keys(form) -> list[dict]:
         keys = []

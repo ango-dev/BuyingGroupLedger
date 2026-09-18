@@ -125,8 +125,10 @@ A local web page over the ledger, in `web/`: an overview (open rows by status an
 projected versus realized profit, the COGS input gaps, the scheduler heartbeat), a filterable and
 sortable ledger table, one page per order, an Activity page (what every run
 and every dashboard change did, with the failure dossiers' reports rendered in place), an **Audit**
-page and a **Reconciliation** page (both the Orders view over the affected rows — see below), a
-Settings page (with backup and restore), a Tools menu, and `/health` as JSON for the container's
+page and a **Reconciliation** page (both the Orders view over the affected rows — see below), an
+**Expenses** page (the Orders view over a tax year's cost rows) and a **Taxes** page (the year on
+Schedule C, with the memberships, sign-up bonuses, cashback-site payouts and anything else you
+enter for it — see below), a Settings page (with backup and restore), a Tools menu, and `/health` as JSON for the container's
 healthcheck. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
 the header (remembered per browser; follows the system until you choose). The dependencies are
 `requirements-web.txt`, an optional install on a desktop and part of the one Docker image.
@@ -462,6 +464,23 @@ deploying; the next sync fills Expected Payout itself from then on. A ledger sti
 shape reads correctly on the dashboard in the meantime (an undated Actual Payout on an open row is
 still shown as projected), but the Reconciliation page cannot compare an order until its
 commitment has its own cell.
+
+### The Expenses and Taxes pages
+
+**Expenses** (`/expenses?year=YYYY`) is the Orders view over every row placed in the tax year that
+carries money — the cost side of the year as `scripts/tax_report` counts it — with the year's
+gross cost, shipping and tax, returns and gift cards, card cashback, COGS, insurance and payouts in
+the lead and a year picker in the filter bar. **Taxes** (`/taxes?year=YYYY`, `web/tax_inputs.py`)
+lays the year out on Schedule C's lines from the same cash-basis report (Part I lines 1, 4, 6, 7;
+Part II lines 15, 27a, 28, 31; Part III lines 36 and 42, with the card cashback netted from cost
+shown on its own row) and asks for what the setup implies: one **membership** per retailer login
+in your profiles (Costco Executive, Prime, Prime Business Rewards), one **sign-up bonus** per card
+on the Cards settings that is not marked *virtual*, the usual **cashback sites** plus any you add,
+and an open list of **anything else** (label, amount, income or expense). The answers are stored
+per year in `data/tax_inputs.json` (inside every backup) and placed on the summary: memberships and
+other expenses under line 27a, cashback sites, bonuses and other income under line 6. It is a
+summary for a preparer, not tax advice — every line says what it holds. Nothing on either page
+writes the ledger.
 
 ### The Settings page
 

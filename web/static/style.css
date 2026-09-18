@@ -624,6 +624,16 @@ table.audit a.current { font-weight: 600; color: var(--accent); }
 /* ---- a cell typed by hand on the dashboard: the runs keep it (ledger_db/hand_edits) ---- */
 table.sheetlike td.hand, table.card-rows td.hand { box-shadow: inset 3px 0 0 var(--committed); }
 
+/* ---- the Taxes page ---- */
+.tax-years .button.primary { color: #fff; }
+table.schedule { width: 100%; }
+table.schedule td.num, table.schedule th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.schedule tr.total td { font-weight: 600; border-top: 1px solid var(--line); }
+table.schedule td.neg { color: var(--bad); }
+.tax-form .entry-table input[type=text] { width: 100%; box-sizing: border-box; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
+.tax-form .entry-table td.narrow { width: 160px; }
+.tax-form textarea.json { margin-top: 4px; }
+
 /* ---- Motion. The rules that keep
    it cheap: only opacity, transform and colours ever animate (never a layout property, never a
    blanket transition of every property); every entrance is a one-shot of ~.2s; nothing loops except the dim of a cell

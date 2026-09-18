@@ -1,0 +1,25 @@
+{% extends "orders.html" %}
+{% from "_select.html" import choose %}
+{# The Expenses page: the Orders view over every row that is a COST of the tax year -- placed in
+   the year, carrying money (cash basis, as scripts/tax_report counts it) -- with the year's cost
+   totals in the lead and a year picker in the filter bar. #}
+{% block title %}Expenses{% endblock %}
+{% block heading %}<h1>Expenses</h1>{% endblock %}
+{% block lead %}
+<div class="lead">
+  <p class="muted small">Every row placed in <strong>{{ year }}</strong> that carries money: the cost side of the year on a cash basis (cancelled and superseded rows carry none). Payouts are on the <a href="/taxes?year={{ year }}">Taxes</a> page, where the year is laid out on Schedule C.</p>
+  <section class="tiles stats">
+    <div class="tile"><div class="label">Orders / rows</div><div class="value">{{ tax.orders }} / {{ tax.rows }}</div><div class="hint">placed in {{ year }}</div></div>
+    <div class="tile"><div class="label">Gross cost</div><div class="value money">{{ tax.gross_cost | money }}</div><div class="hint">Total Cost, before netting</div></div>
+    <div class="tile"><div class="label">Shipping + tax</div><div class="value money">{{ (tax.shipping + tax.sales_tax) | money }}</div><div class="hint">added to cost</div></div>
+    <div class="tile"><div class="label">Returns + gift cards</div><div class="value money">{{ (tax.returns + tax.gift_card) | money }}</div><div class="hint">netted from cost</div></div>
+    <div class="tile payout-committed"><div class="label">Card cashback</div><div class="value money">{{ tax.cashback | money }}</div><div class="hint">netted from cost</div></div>
+    <div class="tile"><div class="label">COGS</div><div class="value money">{{ tax.cogs | money }}</div><div class="hint">Schedule C line 4</div></div>
+    <div class="tile"><div class="label">Insurance</div><div class="value money">{{ tax.insurance | money }}</div><div class="hint">Schedule C line 15</div></div>
+    <div class="tile payout-settled"><div class="label">Paid out</div><div class="value money">{{ tax.payouts | money }}</div><div class="hint">payouts dated {{ year }}</div></div>
+  </section>
+</div>
+{% endblock %}
+{% block extra_filters %}
+  {{ choose('year', years, year, 'Tax year') }}
+{% endblock %}

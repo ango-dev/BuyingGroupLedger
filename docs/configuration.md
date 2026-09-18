@@ -185,6 +185,8 @@ Details:
 - `retailer_rates` keys are matched loosely: `"Best Buy"`, `"bestbuy"` and `"best-buy"` are the same
   key. A key that names **no** retailer this ledger scrapes logs a warning at load — a typo'd override
   would otherwise never apply and nothing would say so.
+- **`virtual: true`** marks a virtual card number (one issued off another card): it earns cashback
+  like any entry, and the dashboard's Taxes page does not ask for a sign-up bonus for it.
 - `last4` is matched **normalized**, so it doesn't matter that Amazon says "ending in 4321", Best Buy
   sends `************4321`, and Costco sends `xxxx4321`.
 - Two *different* cards can genuinely share a last 4 across accounts. Add an optional **`profile`** (a

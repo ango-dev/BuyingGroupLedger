@@ -556,6 +556,7 @@ def display_entries(path: str) -> list[dict]:
                 "index": index, "last4": entry.get("last4", ""), "name": entry.get("name", ""),
                 "cashback_rate": entry.get("cashback_rate", ""),
                 "profile": entry.get("profile", ""),
+                "virtual": bool(entry.get("virtual")),
                 "retailer_rates": list((entry.get("retailer_rates") or {}).items()),
             })
     return out
@@ -674,6 +675,10 @@ def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
         entry["profile"] = profile
     else:
         entry.pop("profile", None)
+    if str(form.get("virtual", "")).strip().lower() in ("on", "true", "1", "yes"):
+        entry["virtual"] = True
+    else:
+        entry.pop("virtual", None)
     rates = {}
     for i in _indexed(form, "rate"):
         retailer = _text(form, f"rate.{i}.retailer")

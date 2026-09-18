@@ -196,6 +196,7 @@
   "cards": [
     { "last4": "4321", "name": "Chase Freedom Unlimited", "cashback_rate": 0.015, "retailer_rates": { "Amazon": "5%", "Best Buy": "3%" } },
     { "last4": "8765", "name": "Citi Double Cash", "cashback_rate": "2%" },
-    { "// profile": "Scopes a card to one profile, when two accounts each have a card ending in the same 4 digits.", "last4": "2222", "name": "Personal Amex Gold", "cashback_rate": "4%", "profile": "profile-1" }
+    { "// profile": "Scopes a card to one profile, when two accounts each have a card ending in the same 4 digits.", "last4": "2222", "name": "Personal Amex Gold", "cashback_rate": "4%", "profile": "profile-1" },
+    { "// virtual": "A virtual card number (another card's): earns cashback as usual, but the Taxes page does not ask for a sign-up bonus for it.", "last4": "9999", "name": "Citi Double Cash (virtual)", "cashback_rate": "2%", "virtual": true }
   ]
 }
