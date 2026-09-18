@@ -1,10 +1,14 @@
 {#- Stacked horizontal bars (web/charts.StackedBars): one bar per buying group, segments by status
     in the Sheet's colours, every segment a link to the Orders page with BOTH filters applied and
-    the group label a link to the group alone. Legend + direct totals; the matrix stays available
-    as the table view. -#}
+    the group label a link to the group alone. Legend at the card's top right. -#}
 <figure class="bars" aria-label="{{ b.title }}">
   <figcaption>{{ b.title }}</figcaption>
-  <div class="bars-body">
+  <ul class="legend">
+    {% for status, color in b.legend %}
+    <li><span class="swatch" style="background: {{ color }}"></span><a href="/orders?status={{ status }}">{{ status }}</a></li>
+    {% endfor %}
+  </ul>
+  <div class="chart-body">
     {% if b.bars %}
     <svg viewBox="0 0 {{ b.width }} {{ b.height }}" width="{{ b.width }}" height="{{ b.height }}" role="img" aria-label="{{ b.title }}: {{ b.total }} open rows">
       {% for bar in b.bars %}
@@ -24,22 +28,5 @@
     {% else %}
     <p class="muted">No open rows.</p>
     {% endif %}
-    <ul class="legend">
-      {% for status, color in b.legend %}
-      <li><span class="swatch" style="background: {{ color }}"></span><a href="/orders?status={{ status }}">{{ status }}</a></li>
-      {% endfor %}
-    </ul>
   </div>
-  <details class="table-view">
-    <summary class="muted small">table</summary>
-    <table class="grid compact">
-      <thead><tr><th>Status</th>{% for g in table.groups %}<th class="num">{{ g }}</th>{% endfor %}<th class="num">Total</th></tr></thead>
-      <tbody>
-        {% for r in table.rows %}
-        <tr><td><a href="/orders?status={{ r.status }}">{{ r.status }}</a></td>{% for c in r.cells %}<td class="num">{{ c or '' }}</td>{% endfor %}<td class="num"><strong>{{ r.total }}</strong></td></tr>
-        {% endfor %}
-      </tbody>
-      <tfoot><tr><th>Total</th>{% for c in table.column_totals %}<th class="num">{{ c }}</th>{% endfor %}<th class="num">{{ table.total }}</th></tr></tfoot>
-    </table>
-  </details>
 </figure>

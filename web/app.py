@@ -121,6 +121,14 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # Cache-busting for the static assets: the newest mtime under static/ goes on every asset URL
+    # (?v=...), so a deploy is never served an older stylesheet from the browser's cache (seen
+    # live: a page rendered with the previous CSS after a pull).
+    try:
+        asset_version = str(int(max(p.stat().st_mtime for p in STATIC_DIR.iterdir() if p.is_file())))
+    except (OSError, ValueError):
+        asset_version = "0"
+    templates.env.globals["asset_version"] = asset_version
     templates.env.filters["money"] = money
     templates.env.filters["percent"] = percent
     templates.env.filters["cell"] = cell

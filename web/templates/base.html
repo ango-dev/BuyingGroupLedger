@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Ledger{% endblock %} · Buying Group Ledger</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
   <script>
     // Theme: "light" | "dark" | unset (= follow the system). Applied before first paint so the
     // page never flashes the other theme; the choice lives in this browser's localStorage only.
@@ -25,9 +25,9 @@
       try { localStorage.setItem("ledger-theme", next); } catch (e) {}
     }
   </script>
-  <script src="/static/htmx.min.js" defer></script>
-  <script src="/static/edit.js" defer></script>
-  {% if wide %}<script src="/static/sheet.js" defer></script>{% endif %}
+  <script src="/static/htmx.min.js?v={{ asset_version }}" defer></script>
+  <script src="/static/edit.js?v={{ asset_version }}" defer></script>
+  {% if wide %}<script src="/static/sheet.js?v={{ asset_version }}" defer></script>{% endif %}
 </head>
 <body class="{{ 'wide' if wide }}">
 <header class="top">

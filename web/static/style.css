@@ -76,28 +76,32 @@ header .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 
 /* --- Charts (web/charts.py, _donut.html, _bars.html): one row, same card, same height ------- */
-.charts { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; margin: 8px 0 4px; }
+/* One row of cards (wrapping only when the viewport is too narrow for four). Each card is a grid:
+   title top-left, legend top-right, the chart below spanning both. */
+.charts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 8px 0 4px; }
+@media (max-width: 1400px) { .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .charts { grid-template-columns: 1fr; } }
 .charts figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-  padding: 10px 14px 8px; flex: 1 1 300px; min-width: 280px; display: flex; flex-direction: column; }
-.charts figcaption { color: var(--muted); font-size: 0.85em; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
-.donut-body, .bars-body { display: flex; gap: 14px; align-items: center; flex: 1; }
+  padding: 12px 14px 10px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto 1fr;
+  grid-template-areas: "title legend" "body body"; column-gap: 12px; row-gap: 8px; min-width: 0; }
+.charts figcaption { grid-area: title; font-size: 1.1em; font-weight: 600; color: var(--fg); }
+.charts .legend { grid-area: legend; }
+.charts .chart-body { grid-area: body; display: flex; align-items: center; justify-content: center; min-width: 0; }
 .charts svg { flex: 0 0 auto; max-width: 100%; height: auto; }
 .charts .track { stroke: var(--line); }
 .charts a.slice circle, .charts a.slice rect { transition: opacity .12s; }
 .charts a.slice:hover circle, .charts a.slice:hover rect, .charts a.slice:focus circle, .charts a.slice:focus rect { opacity: 0.8; }
 .charts a.slice:focus { outline: none; }
-.donut-total { font-size: 22px; font-weight: 600; fill: var(--fg); }
-.donut-sub { font-size: 11px; fill: var(--muted); }
+
+
 .charts .legend { list-style: none; margin: 0; padding: 0; font-size: 0.9em; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .charts .legend li { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .charts .legend .num { min-width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; }
 .charts .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
-.charts .table-view { margin-top: 6px; }
-.charts .table-view summary { cursor: pointer; }
 .bars text { font-size: 12px; fill: var(--fg); }
 .bars a.bar-label text { fill: var(--accent); }
 .bars .bar-total { fill: var(--muted); font-variant-numeric: tabular-nums; }
-.bars .legend { flex-direction: row; flex-wrap: wrap; gap: 10px; }
+.bars .legend { flex-direction: row; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
 ul.ids { columns: 2; padding-left: 18px; margin: 8px 0 0; }
 
 table.grid { border-collapse: collapse; width: 100%; background: var(--card); }

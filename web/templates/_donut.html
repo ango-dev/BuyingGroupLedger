@@ -1,9 +1,19 @@
 {#- One donut (web/charts.Donut): an inline SVG ring whose every slice is a link to the Orders page
-    with that filter applied, a legend with direct labels (identity is never colour-alone), the
-    total in the middle, and the same numbers as a table under <details> (the table view). -#}
+    with that filter applied, the total in the middle, and a legend with direct labels at the
+    card's top right (identity is never colour-alone). -#}
 <figure class="donut" aria-label="{{ d.title }}">
   <figcaption>{{ d.title }}</figcaption>
-  <div class="donut-body">
+  <ul class="legend">
+    {% for s in d.segments %}
+    <li>
+      <span class="swatch" style="background: {{ s.color }}"></span>
+      {% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}<span>{{ s.label }}</span>{% endif %}
+      <span class="num">{{ s.count }}</span>
+      <span class="muted small">{{ (s.share * 100) | round(0) | int }}%</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <div class="chart-body">
     <svg viewBox="0 0 {{ d.size }} {{ d.size }}" width="{{ d.size }}" height="{{ d.size }}" role="img" aria-label="{{ d.title }}: {{ d.total }} rows">
       <circle class="track" cx="{{ d.center }}" cy="{{ d.center }}" r="{{ d.radius }}" fill="none" stroke-width="{{ d.stroke }}"></circle>
       {% for s in d.segments %}
@@ -17,24 +27,6 @@
       </circle>
       {% if s.href %}</a>{% endif %}
       {% endfor %}
-      <text class="donut-total" x="{{ d.center }}" y="{{ d.center - 2 }}" text-anchor="middle">{{ d.total }}</text>
-      <text class="donut-sub" x="{{ d.center }}" y="{{ d.center + 14 }}" text-anchor="middle">rows</text>
     </svg>
-    <ul class="legend">
-      {% for s in d.segments %}
-      <li>
-        <span class="swatch" style="background: {{ s.color }}"></span>
-        {% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}<span>{{ s.label }}</span>{% endif %}
-        <span class="num">{{ s.count }}</span>
-        <span class="muted small">{{ (s.share * 100) | round(0) | int }}%</span>
-      </li>
-      {% endfor %}
-    </ul>
   </div>
-  <details class="table-view">
-    <summary class="muted small">table</summary>
-    <table class="grid compact"><tbody>
-      {% for s in d.segments %}<tr><td>{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</td><td class="num">{{ s.count }}</td></tr>{% endfor %}
-    </tbody></table>
-  </details>
 </figure>

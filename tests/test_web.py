@@ -1259,5 +1259,13 @@ class TestCharts:
         assert 'href="/orders?group=MOD"' in body
         assert 'href="/orders?status=shipped&amp;group=BFMR"' in body
         assert "<title>shipped: 1" in body  # the hover tooltip
-        assert body.count("<details class=\"table-view\">") == 4  # a table view per chart
+        assert "table-view" not in body  # user: no table toggles under the charts
         assert "Rows by status" in body and "Open rows by buying group and status" in body
+        # Legend precedes the chart body in each card (it sits at the card's top right).
+        assert body.index('<ul class="legend">') < body.index('<div class="chart-body">')
+
+    def test_static_assets_carry_a_cache_busting_version(self, client):
+        """A deploy must never render with the previous stylesheet from the browser's cache."""
+        body = client.get("/").text
+        assert re.search(r'href="/static/style\.css\?v=\d+"', body)
+        assert re.search(r'src="/static/htmx\.min\.js\?v=\d+"', body)
