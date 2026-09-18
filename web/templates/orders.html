@@ -107,13 +107,9 @@
 <form id="bulk" hx-disinherit="hx-include">
   {% if editable and filters.view == 'table' %}
   <div id="bulkbar" class="bulkbar">
-    <span class="muted small"><span id="sel-count">0</span> selected · click row numbers to select, shift-click for a range, click <b>#</b> for all / to clear</span>
-    {{ choose('field', EDIT_FIELD_HEADINGS, EDIT_FIELD_HEADINGS[0][0], '', 'inline') }}
-    <input type="text" name="value" placeholder="value (blank clears)">
-    <button type="submit" hx-post="/orders/bulk" hx-target="#orders-table" hx-include="#filters"
-            hx-confirm="Set this field to this value on every selected row?">Apply to selected</button>
-    <button type="submit" class="danger" hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"
-            hx-confirm="DELETE every selected row from the sheet? This cannot be undone here.">Delete selected</button>
+    <span class="muted small"><span id="sel-count">0</span> selected · click row numbers to select, shift-click for a range, click <b>#</b> for all / to clear · Delete removes them (asked once)</span>
+    <button type="submit" id="delete-selected" class="danger" hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"
+            hx-confirm="Delete every selected row from the ledger? This cannot be undone here.">Delete selected</button>
   </div>
   {% endif %}
   <div id="orders-table">

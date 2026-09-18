@@ -173,11 +173,13 @@ Total Profit) and Last Scraped At. Status must be one of the ledger's words; dat
 `YYYY-MM-DD`. The snapshot backend is view-only (a CSV has nothing to write to); the `db` backend
 writes the Sheet and re-mirrors, so the copy follows.
 
-**Rows: select, add, bulk edit, delete.** Selection is Sheets-style: click a row number to select
-that row (it tints blue), shift-click for a range, click the `#` header for every row shown. The
-bar under the filters acts on the selection: pick a field and a value and *Apply* to set it on all
-of them in one batched write (blank clears), or *Delete selected* to remove them from the sheet
-(confirmed first; rows are removed bottom-up so the located numbers stay valid; all-or-nothing).
+**Rows: select, add, delete.** Selection is Sheets-style: click a row number to select that row
+(it tints blue), shift-click for a range, click the `#` header for every row shown (or, with
+anything selected, to clear). With rows selected, the Delete key or the *Delete selected* button
+removes them after ONE confirmation that names the count (rows are removed bottom-up so the
+located numbers stay valid; all-or-nothing). Setting one value on many rows is the grid's range
+fill: select the cells, type the value, Enter — the field/value bar that did this is gone
+(2026-09-18).
 *Add a row* takes the key columns (Order Date, Order ID, Item Name, Shipment) plus the common ones;
 it lands where the sync's own append would (after the last occupied row, blanks sent as `None` so
 the column formats survive, the two formula cells stamped), Total Cost is computed from Quantity ×

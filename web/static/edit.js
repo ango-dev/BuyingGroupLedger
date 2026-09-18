@@ -37,6 +37,7 @@
     return { r: tr.sectionRowIndex, c: td.cellIndex };
   }
   function selectable(td) { return !!td && td.tagName === "TD" && !td.classList.contains("rownum"); }
+  function rowsChecked() { return !!document.querySelector('input[name="sel"]:checked'); }
   function editable(td) { return !!td && td.classList.contains("edit") && !td.hasAttribute("data-editing"); }
 
   var sel = null;      // {r1, c1, r2, c2} or null
@@ -280,6 +281,7 @@
     else if (e.key === "Tab") { e.preventDefault(); move(0, e.shiftKey ? -1 : 1, false); }
     else if (e.key === "Enter") { e.preventDefault(); if (editable(td)) startEdit(td); }
     else if (e.key === "Escape") { e.preventDefault(); clearSelection(); }
+    else if (e.key === "Delete" && rowsChecked()) { /* the row selection owns Delete: see below */ }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); fillSelection(""); }
     else if (ctrl && (e.key === "c" || e.key === "C")) { e.preventDefault(); copySelection(); }
     else if (ctrl && (e.key === "v" || e.key === "V")) { armPaste(); }  // not prevented: the paste must happen
@@ -298,15 +300,29 @@
   });
 })();
 
-// Row selection for bulk edit / delete: the header checkbox ticks every row shown, and the
-// toolbar's counter follows the ticks (it lives in the filter bar, outside the swapped table).
+// Row selection for delete: the header checkbox ticks every row shown, the toolbar's counter
+// follows the ticks (it lives in the filter bar, outside the swapped table) and words the one
+// confirmation, and the Delete key with rows selected asks it.
 (function () {
   "use strict";
   function count() {
     var n = document.querySelectorAll('input[name="sel"]:checked').length;
     var out = document.getElementById("sel-count");
     if (out) out.textContent = String(n);
+    var button = document.getElementById("delete-selected");
+    if (button) {
+      button.setAttribute("hx-confirm", n === 1 ? "Delete the selected row from the ledger? This cannot be undone here."
+                                                : "Delete the " + n + " selected rows from the ledger? This cannot be undone here.");
+    }
   }
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Delete" || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    var button = document.getElementById("delete-selected");
+    if (!button || !document.querySelector('input[name="sel"]:checked')) return;
+    e.preventDefault();
+    button.click();  // htmx asks hx-confirm through the page's own dialog, then posts
+  });
   document.addEventListener("change", function (e) {
     if (e.target && e.target.id === "sel-all") {
       document.querySelectorAll('input[name="sel"]').forEach(function (box) { box.checked = e.target.checked; });

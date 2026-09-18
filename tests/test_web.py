@@ -1609,6 +1609,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        'matches(\'[hx-trigger*="every"]\')', "sel-cell", 'execCommand("copy")',
                        'addEventListener("paste"', 'e.key === "Delete"', "fillSelection(", "all.checked = !any",
                        "if (thenDown) move(1, 0, false)", "paint(false)",
+                       'e.key === "Delete" && rowsChecked()', 'getElementById("delete-selected")',
+                       "selected rows from the ledger?",
                        'GRID_TD = "table.sheetlike td, table.order-rows td"'):
             assert needle in js, f"edit.js lost its {needle!r} block"
 
@@ -1760,7 +1762,7 @@ class TestTableSorting:
         template = (Path(__file__).resolve().parents[1] / "web" / "templates" / "orders.html").read_text(encoding="utf-8")
         form = template[template.index('<form id="bulk"'):template.index("</form>", template.index('<form id="bulk"'))]
         assert form.startswith('<form id="bulk" hx-disinherit="hx-include">')
-        assert form.count('hx-include="#filters"') == 2  # the two bulk buttons, nothing else
+        assert form.count('hx-include="#filters"') == 1  # the Delete button, nothing else
         body = client.get("/orders").text
         bulk = body[body.index('<form id="bulk"'):body.index("</form>", body.index('<form id="bulk"'))]
         table = bulk.split('<div id="orders-table">')[1]

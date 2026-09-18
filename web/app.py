@@ -229,7 +229,6 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     templates.env.globals["EDITABLE_FIELDS"] = EDITABLE_FIELDS
     templates.env.globals["LINK_FIELDS"] = LINK_FIELDS
     templates.env.globals["MONEY_FIELDS"] = MONEY_FIELDS
-    templates.env.globals["EDIT_FIELD_HEADINGS"] = [(f, FIELD_TO_HEADER[f]) for f in EDITABLE_FIELDS]
 
     from web.queries import (CARD_COLUMNS, ORDER_COLUMNS, PER_PAGE_CHOICES, SORT_CHOICES,
                              order_cards, paginate)
@@ -532,29 +531,6 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         with the form) still applied and a notice or error line on top."""
         context = orders_context(request, params=form, notice=notice, error=error)
         return page(request, partial_for(context["filters"]), **context)
-
-    @app.post("/orders/bulk", response_class=HTMLResponse)
-    async def orders_bulk(request: Request):
-        """Set one field to one value on every selected row."""
-        form = await request.form()
-        keys = selected_keys(form)
-        field, value = str(form.get("field", "")), str(form.get("value", ""))
-        if writer is None:
-            return table_after(request, form, error="editing is off: this backend is a CSV snapshot")
-        try:
-            result = writer.write_cells(keys, field, value)
-        except EditError as exc:
-            return table_after(request, form, error=str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return table_after(request, form, error=f"{type(exc).__name__}: {exc}")
-        reader.load(force=True)
-        act("edit", f"Set {FIELD_TO_HEADER.get(field, field)} to {value!r} on {result['written']} row(s)",
-            {"field": field, "value": value, "rows": result["written"],
-             "order_ids": sorted({k.get("order_id", "") for k in keys})})
-        notice = (f"Set {FIELD_TO_HEADER.get(field, field)} on {result['written']} row(s)"
-                  + (f"; {len(result['errors'])} skipped: " + "; ".join(result["errors"])
-                     if result["errors"] else ""))
-        return table_after(request, form, notice=notice)
 
     @app.post("/orders/delete", response_class=HTMLResponse)
     async def orders_delete(request: Request):

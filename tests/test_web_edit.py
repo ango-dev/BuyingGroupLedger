@@ -349,13 +349,14 @@ class TestOrdersRoutes:
         # The row tools.
         assert 'name="sel"' in body and 'id="sel-all"' in body
         assert 'class="sel"' not in body  # the row number is the handle; no checkbox column
-        assert 'hx-post="/orders/bulk"' in body and 'hx-post="/orders/delete"' in body
+        assert 'hx-post="/orders/bulk"' not in body and 'id="delete-selected"' in body  # no field/value bar: the grid fills ranges
+        assert "Delete removes them (asked once)" in body
         # The buttons live INSIDE the form that owns the selection (live: "no rows selected").
         bulk_form = body[body.index('<form id="bulk"'):body.index("</form>", body.index('<form id="bulk"'))]
         assert 'hx-post="/orders/delete"' in bulk_form and 'name="sel"' in bulk_form
         assert 'enctype="multipart/form-data"' in body and 'name="receipt_file"' in body
         assert 'action="/orders/add"' in body
-        assert 'name="field" value="insurance"' in body and "Insurance" in body
+        assert 'name="field"' not in body  # no field picker: a range fill sets one value on many rows
 
     def test_an_edit_writes_the_sheet_and_returns_the_fresh_cell(self, sheet, tmp_path, logs_dir):
         client = self._client(sheet, tmp_path, logs_dir)
@@ -380,24 +381,11 @@ class TestOrdersRoutes:
         formula = client.post("/orders/cell", data={**KEY, "field": "cogs", "value": "1"})
         assert "not editable" in formula.text
 
-    def test_bulk_edit_re_renders_the_filtered_table_with_a_notice(self, sheet, tmp_path, logs_dir):
+    def test_the_bulk_edit_route_is_gone(self, sheet, tmp_path, logs_dir):
+        # 2026-09-18: the grid's range fill (select a range, type, Enter) replaced the field/value bar.
         client = self._client(sheet, tmp_path, logs_dir)
-        response = client.post("/orders/bulk", data={"sel": [json.dumps(KEY), json.dumps(KEY2)],
-                                                     "field": "buying_group", "value": "MOD",
-                                                     "retailer": "Costco"})
-        assert response.status_code == 200
-        assert "Set Buying Group on 2 row(s)" in response.text
-        assert len(sheet.batches) == 1
-        assert response.text.count('<tr class="status-') == 1  # the Costco filter still applies
-        assert ">MOD<" in response.text
-
-    def test_bulk_edit_errors_are_shown_not_500(self, sheet, tmp_path, logs_dir):
-        client = self._client(sheet, tmp_path, logs_dir)
-        response = client.post("/orders/bulk", data={"field": "insurance", "value": "1"})
-        assert response.status_code == 200 and "no rows selected" in response.text
-        response = client.post("/orders/bulk", data={"sel": [json.dumps(KEY)], "field": "cogs",
-                                                     "value": "1"})
-        assert "sheet formula" in response.text and sheet.batches == []
+        response = client.post("/orders/bulk", data={"sel": [json.dumps(KEY)], "field": "insurance", "value": "1"})
+        assert response.status_code in (404, 405) and sheet.batches == []
 
     def test_delete_selected(self, sheet, tmp_path, logs_dir):
         client = self._client(sheet, tmp_path, logs_dir)
@@ -405,6 +393,11 @@ class TestOrdersRoutes:
         assert response.status_code == 200 and "Deleted 1 row(s)" in response.text
         assert sheet.deleted == [3]
         assert "1399000017" not in response.text and "BBY01-1" in response.text
+        # the filtered table comes back with the page's filters still applied
+        response = client.post("/orders/delete", data={"sel": [json.dumps(KEY)], "retailer": "Costco"})
+        assert "Deleted 1 row(s)" in response.text and response.text.count('<tr class="status-') == 0
+        empty = client.post("/orders/delete", data={})
+        assert empty.status_code == 200 and "no rows selected" in empty.text
 
     def test_add_row_redirects_to_the_new_order(self, sheet, tmp_path, logs_dir):
         client = self._client(sheet, tmp_path, logs_dir)
@@ -432,9 +425,8 @@ class TestOrdersRoutes:
         (logs_dir / ".run.lock").write_text("1 2", encoding="utf-8")
         cell = client.post("/orders/cell", data={**KEY, "field": "insurance", "value": "1"})
         assert "scheduled run is in progress" in cell.text
-        bulk = client.post("/orders/bulk", data={"sel": [json.dumps(KEY)], "field": "insurance",
-                                                 "value": "1"})
-        assert "scheduled run is in progress" in bulk.text
+        gone = client.post("/orders/delete", data={"sel": [json.dumps(KEY)]})
+        assert "scheduled run is in progress" in gone.text
         added = client.post("/orders/add", data={"order_id": "N", "order_date": "2026-09-17",
                                                   "item_name": "T"})
         assert added.status_code == 423
@@ -462,7 +454,7 @@ class TestOrdersRoutes:
                                                  "item_name": "T", "shipment": "1",
                                                  "field": "insurance", "value": "1"})
         assert "editing is off" in cell.text
-        assert "editing is off" in client.post("/orders/bulk", data={"field": "insurance"}).text
+        assert "editing is off" in client.post("/orders/delete", data={"sel": ["{}"]}).text
         assert client.post("/orders/add", data={"order_id": "N"}).status_code == 409
 
 

@@ -179,8 +179,6 @@ table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-s
    row -- an opaque grey line reads as a gap between rows. */
 table.sheetlike th, table.sheetlike td { border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); border-bottom: 1px solid rgba(0, 0, 0, 0.12); padding: 3px 6px; }
 table.sheetlike th { position: sticky; top: 0; z-index: 2; background: var(--bg); box-shadow: 0 1px 0 var(--line); }
-.bulkbar select, .bulkbar input[type=text] { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
-.bulkbar input[type=text] { min-width: 200px; }
 table.sheetlike td.rownum input, table.sheetlike th.rownum input { display: none; }
 table.sheetlike td.item > span { max-width: 420px; }
 table.sheetlike td.rownum, table.sheetlike th.rownum { position: sticky; left: 0; z-index: 1; background: var(--bg); color: var(--muted); text-align: right; font-size: 0.8em; min-width: 34px; }
