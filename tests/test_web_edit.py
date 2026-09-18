@@ -530,7 +530,7 @@ class TestReceiptUpload:
     def test_unconfigured_storage_says_so(self):
         from web.receipts_upload import UploadError, store_receipt
 
-        with pytest.raises(UploadError, match="not configured"):
+        with pytest.raises(UploadError, match="is off"):
             store_receipt(retailer="Amazon", order_id="1", order_date="2026-09-17",
                           filename="a.pdf", data=b"x")
 

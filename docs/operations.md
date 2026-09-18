@@ -193,11 +193,11 @@ all-or-nothing delete the table uses. Every confirmation on the page (bulk apply
 delete) is an in-page dialog rather than the browser's own prompt.
 
 **Receipts by hand.** The add form takes a photo or PDF, and an order's page has an *Upload
-receipt* button: the file is stored in the same OCI bucket under the same key the capture uses
-(`receipts/<retailer>/<YYYY-MM>/<order id>.<ext>`), and the PAR link becomes Receipt Link — on
-every row of the order, since the link is per order. Needs the receipt store configured
-(`receipts.oci.bucket` and the PAR prefix); otherwise the page says so and nothing is uploaded.
-Accepted: pdf, png, jpg, webp, up to 25 MB.
+receipt* button: the file is stored under `receipts.dir` beside the ledger under the same key the
+capture uses (`<retailer>/<YYYY-MM>/<order id>.<ext>`), and the dashboard-relative link
+(`/receipts/...`) becomes Receipt Link — on every row of the order, since the link is per order.
+Needs receipt capture on; otherwise the page says so and nothing is stored. Accepted: pdf, png,
+jpg, webp, up to 25 MB.
 
 **While a scheduled run is in progress every write is refused** (the page says so and nothing is
 written). The sync caches sheet row numbers from its pre-sync snapshot; a row deleted or appended
@@ -227,7 +227,7 @@ run, what each retailer's scrape found and what the ledger write updated or adde
 ignored tracking numbers, key conflicts named), what the buying-group sync submitted, insured and
 read back and how many rows it updated, the emails the BFMR auto-reply sent, the end-of-run
 mirror; every alert (with its message) and every failure dossier — the Failures page lives here now:
-a dossier row opens its report, files and hosted copies in place, and dossiers written before the
+a dossier row opens its report and files in place, and dossiers written before the
 log existed are listed from disk (`/failures` redirects to the dossier rows);
 and every change made from the dashboard — cell edits (with the before and after), rows added or
 deleted, receipts uploaded, backups made / restored / deleted, settings saved (paths only, never a

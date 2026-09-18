@@ -348,63 +348,28 @@ def check_money_switches() -> list[Result]:
 
 
 def check_receipt_capture() -> list[Result]:
-    """Receipt capture is optional, so the failure worth catching is a PARTIAL config.
-
-    Fully unconfigured is fine and reported as such — orders record with a blank Receipt Link. But a
-    bucket set without a PAR prefix (or without boto3 installed) is the silent case: capture looks
-    switched on, and either every run pays to render receipts it cannot link, or the whole feature
-    no-ops while the operator believes it is working.
-
-    Config-presence only — no bucket call, no network. Preflight runs on every container start and
-    has to stay offline and free.
-    """
+    """Receipt capture stores files beside the ledger (receipts/store.py); the failure worth
+    catching is a directory the process cannot write, which would cost a cloud browser session
+    per receipt every run and store nothing. Offline and free, as every preflight check is."""
     try:
         from config.settings import settings
-        from receipts.store import is_configured, missing_settings
+        from receipts.store import receipts_dir
     except Exception as exc:  # noqa: BLE001 — a broken settings import is already reported elsewhere
         return [Result(WARN, "receipt capture", f"could not be checked ({exc}).")]
-
     if not settings.receipt_capture_enabled:
         return [Result(WARN, "receipt capture",
                        "DISABLED (RECEIPT_CAPTURE_ENABLED) — no order receipts are stored.")]
-
-    missing = missing_settings()
-    if len(missing) == len(["OCI_BUCKET", "OCI_S3_ENDPOINT_URL", "OCI_S3_ACCESS_KEY_ID",
-                            "OCI_S3_SECRET_ACCESS_KEY", "OCI_PAR_URL_PREFIX"]):
-        return [Result(WARN, "receipt capture",
-                       "not configured — orders record normally with a blank Receipt Link. Set the "
-                       "`receipts.oci` values in config.json to store proof of purchase for each order.")]
-    if missing:
-        return [Result(
-            FAIL, "receipt capture",
-            f"PARTIALLY configured — {', '.join(missing)} unset. Capture stays off, so every order "
-            f"records with a blank Receipt Link while the config reads as if it were on.",
-        )]
-
-    out = [Result(OK, "receipt capture", f"bucket {settings.oci_bucket!r} via the S3 compat endpoint")]
-    if settings.dossier_upload_enabled and settings.oci_failures_par_url_prefix:
-        out.append(Result(OK, "dossier upload", "failure dossiers are also uploaded under failures/ so "
-                          "the alert carries a link (set a 30-day lifecycle rule on that prefix)"))
-    elif settings.dossier_upload_enabled:
-        out.append(Result(WARN, "dossier upload", "enabled but `receipts.oci.failures_par_url_prefix` is "
-                          "blank -- dossiers are NOT uploaded; alerts name a path on this host only. Create "
-                          "a PAR scoped to the failures/ prefix (reads, no listing) and paste its URL."))
-    else:
-        out.append(Result(WARN, "dossier upload", "DISABLED (DOSSIER_UPLOAD_ENABLED) — alerts name a "
-                          "path on this host only."))
+    directory = receipts_dir()
     try:
-        importlib.import_module("boto3")
-    except Exception as exc:  # noqa: BLE001
-        out.append(Result(
-            FAIL, "import boto3",
-            f"{type(exc).__name__}: {exc} — receipt capture is configured but nothing can be "
-            f"uploaded (`pip install -r requirements.txt`). Orders still record.",
-        ))
-    else:
-        out.append(Result(OK, "import boto3", "receipt uploads"))
-    if not is_configured():  # belt and braces: the settings agree, so this should be unreachable
-        out.append(Result(WARN, "receipt capture", "settings look complete but the store reports "
-                                                   "itself unconfigured; check for stray whitespace."))
+        directory.mkdir(parents=True, exist_ok=True)
+        probe = directory / ".preflight"
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError as exc:
+        return [Result(FAIL, "receipt capture",
+                       f"{directory} is not writable ({exc}) — every run would open a cloud browser "
+                       "per receipt and store nothing. Fix the mount / permissions.")]
+    out = [Result(OK, "receipt capture", f"files under {directory}")]
 
     # pypdf is OPTIONAL at runtime and the finality guard fails open without it, which is precisely
     # the shape preflight exists for: receipts keep being captured and stored, so nothing looks

@@ -2,7 +2,7 @@
 # (env_file / mounted volumes). See docker-compose.yml.
 #
 # config.json IS the credential store now: the Google private key, both buying-group API keys, the
-# proxy and retailer passwords, and the OCI secret key + PAR URL all live in it. `COPY . .` would
+# proxy and retailer passwords all live in it. `COPY . .` would
 # bake the lot into the image, and the :ro bind mount would then hide it perfectly — the mounted
 # file wins at runtime, so everything behaves exactly as it should while the image quietly carries
 # a full set of live credentials wherever it is pushed or saved.

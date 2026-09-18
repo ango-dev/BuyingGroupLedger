@@ -1,18 +1,18 @@
-"""Audit the receipts already in object storage. Read-only by default.
+"""Audit the receipts already stored. Read-only by default.
 
     python -m scripts.receipt_verify                     # audit everything
     python -m scripts.receipt_verify --retailer bestbuy
     python -m scripts.receipt_verify --purge             # remove + re-arm the failures
 
-Costs nothing but HTTP: it fetches each stored object through the PAR and reads its text. No
-browser, no scrape.
+Costs nothing: it reads each stored file under `receipts.dir` (receipts/store.py) and extracts its
+text. No browser, no scrape, no network.
 
 WHY THIS EXISTS. These receipts substantiate COGS at tax time, and each is stored ONCE and never
 refreshed — so a bad one is bad permanently, and nothing else in the system would ever notice. The
 capture-time guard (receipts.capture._reject_if_not_final) stops new ones, but it cannot fix what is
 already stored, and it fails OPEN by design, so a document it could not read still got kept.
 
-It checks four things per object, each a real failure seen or nearly seen in practice:
+It checks four things per document, each a real failure seen or nearly seen in practice:
 
   - the document contains ITS OWN order id. The cross-contamination check: Costco's order page is a
     hash-route SPA where navigating A -> B can leave A's render in place, and Amazon Business's
@@ -24,15 +24,13 @@ It checks four things per object, each a real failure seen or nearly seen in pra
     whole Order Summary behind a "Show Details" toggle, which is exactly how that happened once.
   - it carries a PAYMENT method, for the same reason (Best Buy hides that behind its own disclosure).
 
-`--purge` deletes a failing object by VersionId and blanks its Receipt Link, which re-arms capture:
-the next run stores a correct one. Exits 1 on any failure, so it can gate a scheduled check.
+`--purge` deletes a failing file and blanks its Receipt Link, which re-arms capture: the next run
+stores a correct one. Exits 1 on any failure, so it can gate a scheduled check.
 """
-
 from __future__ import annotations
 
 import argparse
 import sys
-import urllib.request
 
 from receipts import store
 from receipts.sources import not_final_reason
@@ -51,15 +49,14 @@ def _text(body: bytes) -> str:
 
 
 def _fetch(key: str) -> bytes:
-    with urllib.request.urlopen(store.link_for(key), timeout=60) as resp:
-        return resp.read()
+    return store.path_for(key).read_bytes()
 
 
 def _problems(key: str, order_id: str, retailer_key: str, body: bytes) -> list[str]:
     """Everything wrong with this document, or [] if it is sound."""
     if not body:
         return ["empty object"]
-    if key.endswith(".png"):
+    if not key.lower().endswith(".pdf"):
         # A screenshot fallback: no text to read, so only its existence can be checked. Not a
         # failure — it is a real receipt, just not a verifiable one.
         return []
@@ -94,64 +91,32 @@ def _rows_by_order(grid) -> dict:
 
 
 def _purge(key: str) -> int:
-    """Delete every version AND delete marker for `key`. Returns how many were removed.
-
-    A plain delete_object on this VERSIONED bucket is not a delete — it writes a delete marker and
-    keeps the object recoverable (and billable) as a non-current version.
-    """
-    s3 = store._s3()
-    bucket = store.settings.oci_bucket
-    listing = s3.list_object_versions(Bucket=bucket, Prefix=key)
-    # Prefix is a PREFIX: ".../1234.pdf" also matches ".../1234.pdf.bak", so match the key exactly.
-    version_ids = [v["VersionId"] for v in listing.get("Versions", []) if v["Key"] == key]
-    version_ids += [d["VersionId"] for d in listing.get("DeleteMarkers", []) if d["Key"] == key]
-    for version_id in version_ids:
-        # One at a time: OCI rejects the batch DeleteObjects call, which needs a checksum header
-        # that the S3-compat client deliberately suppresses (see receipts/store.py).
-        s3.delete_object(Bucket=bucket, Key=key, VersionId=version_id)
-    return len(version_ids)
+    """Delete the stored file. Returns 1 if a file went, else 0."""
+    return 1 if store.delete(key) else 0
 
 
 def _stored_keys(only_retailer=None) -> list[str]:
-    s3 = store._s3()
-    keys = []
-    for page in s3.get_paginator("list_objects_v2").paginate(
-            Bucket=store.settings.oci_bucket, Prefix="receipts/"):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            if key.startswith("receipts/_"):   # self-test probes, not receipts
-                continue
-            parts = key.split("/")
-            if len(parts) != 4:
-                continue
-            if only_retailer and parts[1] != only_retailer:
-                continue
-            keys.append(key)
-    return sorted(keys)
+    return store.stored_keys(only_retailer)
 
 
 def run(only_retailer=None, purge=False) -> int:
     if not store.is_configured():
-        print("Receipt storage is not configured. Check with "
-              "`python -m scripts.receipt_storage_check`.")
+        print("Receipt capture is off (RECEIPT_CAPTURE_ENABLED); nothing is stored to check.")
         return 1
-
     keys = _stored_keys(only_retailer)
     if not keys:
-        print("No stored receipts to check.")
+        print(f"No stored receipts to check under {store.receipts_dir()}.")
         return 0
-
     grid = _get_worksheet().get_all_values()
     rows_by_order = _rows_by_order(grid)
-
     failures = []
     for key in keys:
         _, retailer_key, _month, filename = key.split("/")
         order_id = filename.rsplit(".", 1)[0]
         try:
             problems = _problems(key, order_id, retailer_key, _fetch(key))
-        except Exception as exc:  # noqa: BLE001 — one unreadable object must not end the audit
-            problems = [f"could not fetch through the PAR: {exc}"]
+        except Exception as exc:  # noqa: BLE001 — one unreadable file must not end the audit
+            problems = [f"could not read the file: {exc}"]
         if problems:
             failures.append((key, order_id, problems))
             print(f"[FAIL] {retailer_key}/{order_id}")
@@ -159,9 +124,7 @@ def run(only_retailer=None, purge=False) -> int:
                 print(f"       - {problem}")
         else:
             print(f"[ OK ] {retailer_key}/{order_id}")
-
     print(f"\n{len(keys) - len(failures)} sound, {len(failures)} problem(s), {len(keys)} checked")
-
     if failures and purge:
         print("\nPurging and re-arming:")
         worksheet = _get_worksheet()
@@ -171,27 +134,20 @@ def run(only_retailer=None, purge=False) -> int:
             removed = _purge(key)
             rows = rows_by_order.get(order_id, [])
             updates += [{"range": f"{col}{row}", "values": [[""]]} for row in rows]
-            print(f"  {order_id}: {removed} version(s) removed, rows {rows or '-'} cleared")
+            print(f"  {order_id}: {removed} file(s) removed, rows {rows or '-'} cleared")
         if updates:
             worksheet.batch_update(updates, value_input_option="RAW")
         print("\nThose orders will be captured again by the next run that sees them shipped.")
     elif failures:
         print("\nRe-run with --purge to remove these and let capture replace them.")
-
     return 1 if failures else 0
 
 
 def main(argv=None) -> int:
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:  # noqa: BLE001 — not every stream supports it (pytest capture, pipes)
-            pass
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--retailer", help="amazon | amazon-business | bestbuy | costco")
     parser.add_argument("--purge", action="store_true",
-                        help="delete failing receipts and blank their Receipt Link so capture "
-                             "replaces them (default is read-only)")
+                        help="delete each failing receipt and blank its Receipt Link so capture re-arms")
     args = parser.parse_args(argv)
     return run(only_retailer=args.retailer, purge=args.purge)
 

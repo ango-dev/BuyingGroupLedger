@@ -127,7 +127,7 @@ def _capture_receipts(items: list, scraper: BaseRetailerScraper, label: str) -> 
     Inert (and silent after one log line) when no bucket is configured.
     """
     try:
-        from receipts.capture import attach_receipts  # local: keeps `import main` free of boto3
+        from receipts.capture import attach_receipts  # local: keeps `import main` free of the capture stack
 
         attach_receipts(items, scraper.profile, scraper.retailer_key)
     except Exception:

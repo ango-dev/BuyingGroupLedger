@@ -45,26 +45,11 @@ alerts point at a dossier as well, including a Costco sign-in that fails inside 
 Dossiers are **redacted** (configured secrets, emails, phones, card-digit phrases) but can still hold
 names and addresses. They live under `logs/` (gitignored) and keep the newest 40. Do not commit one.
 
-**The alert carries a link, not just a path.** When the receipt bucket is configured, each dossier is
-also uploaded under `failures/<retailer>_<profile>_<timestamp>/` in the same bucket — pages and
-responses first, then `report.md` with a "Hosted copies" section linking to them — and the alert
-reads `Failure dossier: <link to report.md>`, then one line per hosted file (`page_1.html`,
-`page_1.png`, `response_1.txt`), then the local path — Object Storage has no folder page to link,
-so the alert itself is the folder. One paste hands a coding agent everything.
-
-The links use **their own PAR**, separate from the receipts one: in the OCI console create a
-Pre-Authenticated Request with Target **Objects with prefix** `failures/`, **Permit object reads**,
-listing **off**, far-future expiry, and paste its URL as given (ending `/o/failures/`) into
-`receipts.oci.failures_par_url_prefix` (`OCI_FAILURES_PAR_URL_PREFIX`). Blank = dossiers are not
-uploaded and preflight says so. Two PARs means the two can be revoked independently and the receipt
-PAR stays scoped to receipts. Same PII class as receipts, same rules — private bucket, no listing,
-and **a 30-day lifecycle rule on the `failures/` prefix** so it does not accumulate. The bucket is
-**versioned**, which needs two things: a second rule that deletes *previous object versions* under
-`failures/` (a plain Delete only demotes the current version), and an uploader that never rewrites a
-key — so a dossier uploads once and any key that already exists is linked, not re-put.
-`DOSSIER_UPLOAD_ENABLED=false` turns it off (do that if an alert channel is shared with people who
-should not see order pages). The upload is best-effort: if storage fails, the alert falls back to
-the local path.
+**The alert names the dossier, and where to read it.** It gives the local path and, when
+`web.public_url` is set (the dashboard's address as you reach it, e.g. over WireGuard), a link to
+the dashboard's Activity page, which renders every dossier in place — the report, the page HTML,
+the screenshot. Nothing is uploaded anywhere: dossiers used to be copied to an OCI bucket so an
+unreachable host could still hand the alert a link; that went with OCI on 2026-09-18.
 
 The paid Browser-Use agent fallback has been REMOVED entirely (it was flag-gated and off from
 2026-08-29 until its removal). The dossier is the failure path; there is no paid retry.

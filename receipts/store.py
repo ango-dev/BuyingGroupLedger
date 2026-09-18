@@ -1,242 +1,159 @@
-"""OCI Object Storage through its S3 Compatibility API — the three calls receipt capture needs.
+"""Where receipts live: a directory beside the ledger, served by the dashboard.
 
     exists(key)   -> is this order's receipt already stored? (decides whether a browser opens at all)
-    put(key, ...) -> upload one rendered receipt
-    link_for(key) -> the URL that goes in the sheet's Receipt Link column
+    put(key, ...) -> store one rendered receipt, return its Receipt Link
+    link_for(key) -> the URL that goes in the ledger's Receipt Link column
+    path_for(key) -> the file on disk
 
-WHY BOTO3 AGAINST A CUSTOM ENDPOINT. OCI exposes an S3-compatible endpoint at
-`https://<namespace>.compat.objectstorage.<region>.oraclecloud.com`, which boto3 speaks unchanged
-given `endpoint_url` and a customer secret key. That keeps the whole upload path a standard S3
-client with no OCI SDK, no request-signing code, and no second dependency.
+WHY A DIRECTORY, NOT OBJECT STORAGE. The bucket existed because the Pi
+was not reachable and the Sheet could not hold files. Now the dashboard serves files, the user
+reaches it over WireGuard, and `data/` is in every backup -- so receipts sit under
+`receipts.dir` (default data/receipts) as `<retailer>/<YYYY-MM>/<order id>.<ext>` and the link
+the ledger carries is RELATIVE, `/receipts/<retailer>/<YYYY-MM>/<order id>.<ext>`: the dashboard
+resolves it wherever it is served from (LAN, WireGuard, a new host after a restore), and no
+credential, PAR or hostname ever ends up in a row. The BFMR auto-reply reads such a link straight
+off the disk (respond_bfmr._fetch_pdf).
 
-WHY THE LINK IS BUILT BY STRING CONCATENATION AND NOT SIGNED. A Pre-Authenticated Request is an OCI
-NATIVE concept — it cannot be created through the S3 API, which is why there is no `create_par()`
-here. `generate_presigned_url` does work against the compat endpoint, but SigV4 presigned URLs
-expire after at most 7 days, and a ledger row is read months later. So the deployment creates ONE
-read PAR by hand in the console (Target: Bucket; Access type: Permit object reads; object listing
-left OFF, since receipts are PII and listing would let the URL's holder enumerate every order) and
-puts its URL in OCI_PAR_URL_PREFIX; every object's link is that prefix plus the object key. One
-manual step buys a link that does not rot, and revoking it is one click.
+The object KEY is unchanged from the bucket days -- receipts.sources.object_key, starting
+`receipts/` -- so every caller (capture, the backfill, the dashboard upload, the verify script,
+the migration off OCI) keeps the same idempotent identity: one document per order, found by key.
 
-("Objects with prefix" is a separate PAR target type and also works, but its URL already ends in the
-prefix while link_for appends the full key — so that value must be trimmed back to the `/o` part.)
-
-INERT WHEN UNCONFIGURED. A blank OCI_BUCKET makes every method a no-op that raises nothing, so a
-host without a bucket records orders exactly as before with a blank Receipt Link — receipts are
-additive, and losing an order to a storage misconfiguration would be a far worse trade.
+INERT WHEN OFF. `receipt_capture_enabled` false makes every method a no-op that raises nothing, so
+orders record exactly as before with a blank Receipt Link -- receipts are additive, and losing an
+order to a storage problem would be the wrong trade.
 """
-
 from __future__ import annotations
 
 import logging
-import threading
+from pathlib import Path
 
 from config.settings import settings
-from receipts.sources import CONTENT_TYPES
-
-# Receipts are PDF/PNG; failure dossiers (diagnostics/dossier.py) share this store and add three.
-_CONTENT_TYPES = {**CONTENT_TYPES, "md": "text/markdown", "html": "text/html", "txt": "text/plain",
-                  # Hand-uploaded receipt photos from the dashboard (web/receipts_upload.py). NOT in
-                  # sources.CONTENT_TYPES: that table is the capture's probe list (pdf before png).
-                  "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
 
 log = logging.getLogger(__name__)
 
-_client = None
-_client_lock = threading.Lock()
+ROOT = Path(__file__).resolve().parent.parent
+LINK_PREFIX = "/receipts/"
+KEY_PREFIX = "receipts/"
 _warned = False
 
 
 class ReceiptStoreError(Exception):
-    """The object store is configured but could not be used."""
+    """The store is on but could not be used (a disk problem, a bad key)."""
 
 
 def is_configured() -> bool:
-    """Is receipt capture switched on AND given everything it needs to store something?
-
-    All-or-nothing on purpose. A half-filled config (a bucket but no PAR prefix) would upload
-    objects and then write a broken link — or no link — into the ledger, which reads as "this order
-    has no receipt" while quietly billing bandwidth to produce one every run.
-    """
-    return bool(
-        settings.receipt_capture_enabled
-        and settings.oci_bucket
-        and settings.oci_s3_endpoint_url
-        and settings.oci_s3_access_key_id
-        and settings.oci_s3_secret_access_key
-        and settings.oci_par_url_prefix
-    )
+    """Is receipt capture switched on? The store needs nothing else."""
+    return bool(settings.receipt_capture_enabled)
 
 
 def missing_settings() -> list[str]:
-    """Which OCI settings are blank — for preflight, so a partial config is named, not guessed at."""
-    required = {
-        "OCI_BUCKET": settings.oci_bucket,
-        "OCI_S3_ENDPOINT_URL": settings.oci_s3_endpoint_url,
-        "OCI_S3_ACCESS_KEY_ID": settings.oci_s3_access_key_id,
-        "OCI_S3_SECRET_ACCESS_KEY": settings.oci_s3_secret_access_key,
-        "OCI_PAR_URL_PREFIX": settings.oci_par_url_prefix,
-    }
-    return [name for name, value in required.items() if not str(value or "").strip()]
+    """Kept for preflight's shape: a directory store has nothing that can be half-configured."""
+    return []
 
 
 def _warn_once() -> None:
     global _warned
     if not _warned:
         _warned = True
-        if not settings.receipt_capture_enabled:
-            log.info("Receipt capture is disabled (RECEIPT_CAPTURE_ENABLED).")
-        else:
-            log.info(
-                "Receipt capture is not configured (%s unset); orders record normally with a blank "
-                "Receipt Link.", ", ".join(missing_settings()) or "OCI settings",
-            )
+        log.info("Receipt capture is disabled (RECEIPT_CAPTURE_ENABLED); orders record normally with "
+                 "a blank Receipt Link.")
 
 
-def _s3():
-    """The boto3 S3 client, built once per process.
-
-    boto3 is imported HERE rather than at module scope for the same reason curl_cffi and PyJWT are
-    lazy: `import main` and the entire offline test suite must not require it. An ImportError is
-    turned into ReceiptStoreError so the caller reports "receipts unavailable" instead of a bare
-    dependency traceback.
-    """
-    global _client
-    if _client is not None:
-        return _client
-    with _client_lock:
-        if _client is not None:
-            return _client
-        try:
-            import boto3
-            from botocore.config import Config
-        except ImportError as exc:
-            raise ReceiptStoreError(
-                "boto3 is not installed, so receipts cannot be uploaded (`pip install -r "
-                "requirements.txt`). Orders are still recorded; only the Receipt Link is lost."
-            ) from exc
-
-        kwargs = dict(
-            endpoint_url=settings.oci_s3_endpoint_url,
-            aws_access_key_id=settings.oci_s3_access_key_id,
-            aws_secret_access_key=settings.oci_s3_secret_access_key,
-            # OCI's compat endpoint is namespace-scoped and does NOT serve virtual-host-style bucket
-            # subdomains, so path-style addressing is required rather than merely safer. SigV4 is
-            # what it authenticates with.
-            region_name=settings.oci_s3_region or "us-ashburn-1",
-        )
-        base = {
-            "signature_version": "s3v4",
-            "s3": {"addressing_style": "path"},
-            "retries": {"max_attempts": 3, "mode": "standard"},
-        }
-        # OCI REJECTS AWS CHUNKED ENCODING. Since botocore 1.36 the default is `when_supported`, which wraps every
-        # put_object body in aws-chunked framing with a trailing CRC32 — AWS-only, and OCI's compat
-        # endpoint refuses it, so EVERY upload fails while credentials and permissions are perfect.
-        # `when_required` sends a plain body. Applies to any S3-compatible provider, not just OCI.
-        try:
-            _client = boto3.client("s3", config=Config(
-                request_checksum_calculation="when_required",
-                response_checksum_validation="when_required",
-                **base,
-            ), **kwargs)
-        except TypeError:
-            # botocore < 1.36 has neither option — and needs neither, since it never sent
-            # aws-chunked in the first place.
-            _client = boto3.client("s3", config=Config(**base), **kwargs)
-        return _client
+def receipts_dir() -> Path:
+    """`receipts.dir`; a relative path is under the repo root (in Docker, the mounted data/)."""
+    raw = Path(str(settings.receipts_dir or "data/receipts"))
+    return raw if raw.is_absolute() else ROOT / raw
 
 
-def _reset_client_for_tests() -> None:
-    """Drop the cached client so a test can re-point the settings. Not used in production."""
-    global _client, _warned
-    _client = None
-    _warned = False
+def _relative(key: str) -> Path:
+    """The path under receipts_dir for a key, refusing anything that could climb out of it."""
+    key = str(key or "").strip().lstrip("/")
+    if key.startswith(KEY_PREFIX):
+        key = key[len(KEY_PREFIX):]
+    parts = [p for p in key.split("/") if p]
+    if not parts or any(p in (".", "..") or "\\" in p for p in parts):
+        raise ReceiptStoreError(f"refusing the receipt key {key!r}")
+    return Path(*parts)
+
+
+def path_for(key: str) -> Path:
+    return receipts_dir() / _relative(key)
+
+
+def path_for_link(link: str) -> Path | None:
+    """The file a RELATIVE Receipt Link (`/receipts/...`) points at, or None for any other link."""
+    text = str(link or "").strip()
+    if not text.startswith(LINK_PREFIX):
+        return None
+    try:
+        return path_for(text[1:])
+    except ReceiptStoreError:
+        return None
+
+
+def link_for(key: str) -> str:
+    """The ledger-facing link: relative to the dashboard, so it never carries a host or a secret."""
+    if not is_configured():
+        return ""
+    return LINK_PREFIX + _relative(key).as_posix()
 
 
 def exists(key: str) -> bool:
-    """Is an object already stored under `key`?
-
-    This is what makes capture idempotent AND cheap: it runs before any browser is created, so a
-    routine re-check run — where every order already has its receipt — answers True for all of them
-    and never opens a paid cloud browser at all.
-
-    A missing object is False; anything else (permissions, a wrong bucket, a network failure) is
-    raised, because silently answering "not there" would re-render and re-upload every order on
-    every run.
-    """
     if not is_configured():
         _warn_once()
         return False
-    client = _s3()
     try:
-        client.head_object(Bucket=settings.oci_bucket, Key=key)
-        return True
-    except Exception as exc:  # noqa: BLE001 — botocore's exception classes are built at runtime
-        if _is_not_found(exc):
-            return False
-        raise ReceiptStoreError(f"Could not check {key!r} in {settings.oci_bucket!r}: {exc}") from exc
-
-
-def _is_not_found(exc: Exception) -> bool:
-    """Distinguish 'no such object' from every other failure.
-
-    head_object signals a miss as a 404 ClientError, and botocore builds those exception classes at
-    runtime, so this reads the response rather than catching a named type.
-    """
-    response = getattr(exc, "response", None)
-    if not isinstance(response, dict):
+        return path_for(key).is_file()
+    except ReceiptStoreError:
         return False
-    status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-    code = str(response.get("Error", {}).get("Code", ""))
-    return status == 404 or code in {"404", "NoSuchKey", "NotFound"}
 
 
 def put(key: str, body: bytes, ext: str) -> str:
-    """Upload one receipt and return its Receipt Link URL."""
+    """Store one receipt and return its Receipt Link. `ext` is kept for the callers' shape; the
+    key already names the extension."""
     if not is_configured():
         _warn_once()
         return ""
     if not body:
-        raise ReceiptStoreError(f"Refusing to store an empty object at {key!r}")
-    client = _s3()
+        raise ReceiptStoreError(f"Refusing to store an empty receipt at {key!r}")
+    path = path_for(key)
     try:
-        client.put_object(
-            Bucket=settings.oci_bucket,
-            Key=key,
-            Body=body,
-            ContentType=_CONTENT_TYPES.get(ext.lstrip("."), "application/octet-stream"),
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise ReceiptStoreError(f"Could not upload {key!r} to {settings.oci_bucket!r}: {exc}") from exc
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".part")
+        tmp.write_bytes(body)
+        tmp.replace(path)
+    except OSError as exc:
+        raise ReceiptStoreError(f"Could not write {key!r} under {receipts_dir()}: {exc}") from exc
     log.info("Stored %s (%d bytes)", key, len(body))
     return link_for(key)
 
 
-def failure_link_for(key: str) -> str:
-    """The alert-facing URL for an uploaded failure dossier object, under the dossiers' OWN PAR.
-
-    That PAR is scoped to the `failures/` prefix, and the console hands out its URL already ending
-    in `/o/failures/` -- so the key's leading `failures/` must not be repeated. Both that form and a
-    URL trimmed back to `/o` are accepted. Blank prefix = no link (the dossier is not uploaded).
-    """
-    prefix = settings.oci_failures_par_url_prefix.rstrip("/")
-    if not prefix:
-        return ""
-    key = key.lstrip("/")
-    head = prefix.rsplit("/", 1)[-1]
-    if head != "o" and key.startswith(head + "/"):
-        key = key[len(head) + 1:]
-    return f"{prefix}/{key}"
+def delete(key: str) -> bool:
+    """Remove a stored receipt. True if a file went."""
+    try:
+        path = path_for(key)
+    except ReceiptStoreError:
+        return False
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
 
 
-def link_for(key: str) -> str:
-    """The sheet-facing URL for a stored object: the PAR prefix joined to the object key.
-
-    Joined defensively because a PAR URL copied out of the OCI console may or may not carry its
-    trailing slash, and getting that wrong yields a 404 link on every row rather than an error
-    anyone would notice.
-    """
-    if not is_configured():
-        return ""
-    return f"{settings.oci_par_url_prefix.rstrip('/')}/{key.lstrip('/')}"
+def stored_keys(only_retailer: str | None = None) -> list[str]:
+    """Every stored receipt's key (`receipts/<retailer>/<month>/<file>`), sorted."""
+    base = receipts_dir()
+    if not base.is_dir():
+        return []
+    keys = []
+    for path in base.rglob("*"):
+        if not path.is_file() or path.name.endswith(".part"):
+            continue
+        rel = path.relative_to(base).as_posix()
+        parts = rel.split("/")
+        if len(parts) != 3 or parts[0].startswith("_"):
+            continue  # not <retailer>/<month>/<file>: a probe, a stray
+        if only_retailer and parts[0] != only_retailer:
+            continue
+        keys.append(KEY_PREFIX + rel)
+    return sorted(keys)

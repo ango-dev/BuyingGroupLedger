@@ -149,6 +149,17 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     app.state.read_only = True
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+    @app.get("/receipts/{path:path}")
+    def receipt_file(path: str):
+        """A stored receipt (receipts/store.py): the Receipt Link column points here. The store
+        refuses a path that climbs out of its directory."""
+        from web import receipts_upload
+
+        target = receipts_upload.receipt_file_path(path)
+        if target is None or not target.is_file():
+            raise HTTPException(status_code=404)
+        return FileResponse(str(target), filename=target.name)
+
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     # Cache-busting for the static assets: the newest mtime under static/ goes on every asset URL
     # (?v=...), so a deploy is never served an older stylesheet from the browser's cache (seen
@@ -579,7 +590,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.post("/orders/add")
     async def orders_add(request: Request):
         """Append one row from the Add-a-row form, then show it. A photo / PDF in `receipt_file`
-        is stored first and its PAR link becomes the row's Receipt Link."""
+        is stored first and its link becomes the row's Receipt Link."""
         form = await request.form()
         fields = {k: str(v) for k, v in form.items() if isinstance(v, str)}
         if writer is None:

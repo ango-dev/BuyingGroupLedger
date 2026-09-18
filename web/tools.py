@@ -129,10 +129,9 @@ TOOLS: tuple[Tool, ...] = (
          "Checks", (Field("--tracking", "Tracking numbers", "list", "space-separated; blank = the ledger's open ones"),
                     Field("--mod", "Probe MaxOutDeals", "flag"),
                     Field("--skip-bfmr", "Skip BFMR", "flag"))),
-    Tool("receipt_storage_check", "scripts.receipt_storage_check", "Receipt storage check",
-         "Proves the OCI receipt path end to end: upload, link, read back. A few HTTP calls.", "Checks"),
     Tool("receipt_verify", "scripts.receipt_verify", "Receipt audit",
-         "Audits the receipts already in object storage against the ledger. Read-only unless Purge.",
+         "Audits the stored receipt files against the ledger: own order id, final, a total, a payment method. "
+         "Read-only unless Purge.",
          "Checks", (RETAILER, Field("--purge", "Purge orphans", "flag", "DELETE receipts no ledger row points at")),
          writes=True),
     Tool("costco_token", "scripts.costco_token", "Costco refresh token",
@@ -181,6 +180,10 @@ TOOLS: tuple[Tool, ...] = (
          "backend the Google Sheet checks (formulas, formats) are skipped. The Audit page shows the same findings by row.",
          "Checks", (Field("--stale-days", "Stale after (days)", "int", default="3"),
                     Field("--strict", "Strict", "flag"))),
+    Tool("migrate_receipts_local", "scripts.migrate_receipts_local", "Bring receipts home from OCI",
+         "One-time, after the 2026-09-18 OCI removal: download every receipt the ledger still links to in the old "
+         "bucket into receipts.dir and rewrite the links. Run before revoking the PAR.",
+         "Ledger Fixes", (APPLY,), writes=True),
     Tool("hand_edits", "scripts.hand_edits", "Hand-edited cells",
          "The cells typed on the dashboard that no run may overwrite. Lists them; Forget releases an order's "
          "cells (or one field of them) so the next run may write them again.",

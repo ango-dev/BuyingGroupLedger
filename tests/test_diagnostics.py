@@ -296,146 +296,38 @@ class TestSnapshotFromHtml:
         diagnostics.snapshot_html("<html></html>", "l")
 
 
-class TestDossierUpload:
-    """The alert should carry a link, not a path on a host you then SSH into. Best-effort only."""
+class TestTheAlertLine:
+    """The dossier stays on disk (OCI removed 2026-09-18); the alert names the path and, when the
+    dashboard's address is configured, the Activity page that renders it."""
 
-    class _Store:
-        def __init__(self, fail=False):
-            self.puts: list[tuple[str, int, str]] = []
-            self.fail = fail
+    def _dossier(self, tmp_path):
+        from diagnostics.dossier import FailureDossier
 
-        def is_configured(self):
-            return True
-
-        def exists(self, key):
-            return key in {k for k, _, _ in self.puts} or key in getattr(self, "preexisting", set())
-
-        def put(self, key, body, ext):
-            if self.fail:
-                raise RuntimeError("bucket unreachable")
-            self.puts.append((key, len(body), ext))
-            return f"https://par-receipts/{key}"  # the RECEIPT link; dossiers must not use it
-
-    def _written(self, tmp_path):
-        with diagnostics.collecting("amazon", "bravo", root=tmp_path, selectors={"t": "div"}) as d:
-            diagnostics.snapshot(_FakePage(), "at failure")
-            diagnostics.record_response("graphql", 500, "body")
-        d.write(RuntimeError("shape"))
+        d = FailureDossier("costco", "p1", root=tmp_path / "failures")
         return d
 
-    def _wire(self, monkeypatch, store, enabled=True):
+    def test_the_alert_line_names_the_path_and_the_activity_page(self, tmp_path, monkeypatch):
         import dataclasses
-        from receipts import store as real_store
-        monkeypatch.setattr(real_store, "settings", dataclasses.replace(
-            real_store.settings, dossier_upload_enabled=enabled,
-            oci_failures_par_url_prefix="https://par-f/o/failures/"))
-        monkeypatch.setattr(real_store, "is_configured", store.is_configured)
-        monkeypatch.setattr(real_store, "exists", store.exists)
-        monkeypatch.setattr(real_store, "put", store.put)
 
-    def test_pages_go_first_and_the_report_links_to_them(self, tmp_path, monkeypatch):
-        store = self._Store()
-        self._wire(monkeypatch, store)
-        d = self._written(tmp_path)
+        import scrapers.base as base
+        from config import settings as cs
 
-        link = d.upload()
+        monkeypatch.setattr(cs, "settings", dataclasses.replace(cs.settings, web_public_url="http://192.0.2.10:8765/"))
+        d = self._dossier(tmp_path)
+        line = base.BaseRetailerScraper._dossier_line(d, RuntimeError("boom"))
+        assert f"Failure dossier: {d.path}" in line
+        assert "open it on http://192.0.2.10:8765/activity?type=dossier&days=0" in line
+        assert d.upload() == "" and d.hosted == []
 
-        keys = [k for k, _, _ in store.puts]
-        assert link == f"https://par-f/o/failures/{d.path.name}/report.md"
-        assert keys[-1].endswith("/report.md") and all(k.startswith(f"failures/{d.path.name}/") for k in keys)
-        assert any(k.endswith("/page_1.html") for k in keys) and any(k.endswith("/page_1.png") for k in keys)
-        assert any(k.endswith("/response_1.txt") for k in keys)
-        report = (d.path / "report.md").read_text(encoding="utf-8")
-        assert "## Hosted copies" in report and f"https://par-f/o/failures/{d.path.name}/page_1.html" in report
-        assert "par-receipts" not in report
-        assert [e for _, _, e in store.puts if e == ".md"] == [".md"]
-
-    def test_the_bucket_is_versioned_so_no_key_is_ever_written_twice(self, tmp_path, monkeypatch):
-        store = self._Store()
-        self._wire(monkeypatch, store)
-        d = self._written(tmp_path)
-        first = d.upload()
-        n = len(store.puts)
-        assert d.upload() == first and len(store.puts) == n, "a second call must not re-upload"
-
-        # A key that already exists in the bucket (say, a retried run) is linked, never rewritten.
-        store2 = self._Store()
-        store2.preexisting = {f"failures/{d.path.name}/page_1.html", f"failures/{d.path.name}/report.md"}
-        self._wire(monkeypatch, store2)
-        d.upload_link = ""
-        link = d.upload()
-        assert link.endswith("/report.md")
-        assert not any(k.endswith("/page_1.html") or k.endswith("/report.md") for k, _, _ in store2.puts)
-        assert any(k.endswith("/page_1.png") for k, _, _ in store2.puts)
-
-    def test_disabled_or_unconfigured_uploads_nothing(self, tmp_path, monkeypatch):
-        store = self._Store()
-        self._wire(monkeypatch, store, enabled=False)
-        d = self._written(tmp_path)
-        assert d.upload() == "" and store.puts == []
-
-        store2 = self._Store()
-        self._wire(monkeypatch, store2, enabled=True)
-        from receipts import store as real_store
-        monkeypatch.setattr(real_store, "is_configured", lambda: False)
-        assert d.upload() == "" and store2.puts == []
-
-    def test_a_storage_failure_never_raises_and_leaves_the_local_copy(self, tmp_path, monkeypatch):
-        self._wire(monkeypatch, self._Store(fail=True))
-        d = self._written(tmp_path)
-        assert d.upload() == ""
-        assert (d.path / "report.md").exists()
-
-    def test_the_alert_line_prefers_the_link_and_keeps_the_local_path(self, tmp_path, monkeypatch):
-        from scrapers.base import BaseRetailerScraper
-        store = self._Store()
-        self._wire(monkeypatch, store)
-        with diagnostics.collecting("amazon", "bravo", root=tmp_path) as d:
-            pass
-        line = BaseRetailerScraper._dossier_line(d, RuntimeError("x"))
-        assert line.startswith("\n\nFailure dossier: https://par-f/o/failures/")
-        assert "(local copy:" in line
-
-    def test_the_alert_line_lists_every_hosted_file(self, tmp_path, monkeypatch):
-        from scrapers.base import BaseRetailerScraper
-        self._wire(monkeypatch, self._Store())
-        d = self._written(tmp_path)
-        line = BaseRetailerScraper._dossier_line(d, RuntimeError("x"))
-        assert f"\n  page_1.html: https://par-f/o/failures/{d.path.name}/page_1.html" in line
-        assert f"\n  page_1.png: https://par-f/o/failures/{d.path.name}/page_1.png" in line
-        assert f"\n  response_1.txt: https://par-f/o/failures/{d.path.name}/response_1.txt" in line
-        assert line.rstrip().endswith(f"(local copy: {d.path})")
-
-    def test_the_alert_line_falls_back_to_the_path(self, tmp_path, monkeypatch):
-        from scrapers.base import BaseRetailerScraper
-        self._wire(monkeypatch, self._Store(fail=True))
-        with diagnostics.collecting("amazon", "bravo", root=tmp_path) as d:
-            pass
-        line = BaseRetailerScraper._dossier_line(d, RuntimeError("x"))
-        assert line == f"\n\nFailure dossier: {d.path}"
-
-
-class TestFailureLinkJoining:
-    @pytest.fixture(autouse=True)
-    def _mp(self, monkeypatch):
-        self.monkeypatch = monkeypatch
-
-    def _with(self, prefix):
+    def test_without_a_public_url_the_line_says_where(self, tmp_path, monkeypatch):
         import dataclasses
-        from receipts import store
-        self.monkeypatch.setattr(store, "settings", dataclasses.replace(
-            store.settings, oci_failures_par_url_prefix=prefix, dossier_upload_enabled=True))
-        return store.failure_link_for("failures/amazon_x_1/report.md")
 
-    def test_the_console_form_ending_in_the_prefix_is_not_doubled(self):
-        assert self._with("https://h/p/T/n/ns/b/b/o/failures/") == "https://h/p/T/n/ns/b/b/o/failures/amazon_x_1/report.md"
+        import scrapers.base as base
+        from config import settings as cs
 
-    def test_a_url_trimmed_to_o_gets_the_full_key(self):
-        assert self._with("https://h/p/T/n/ns/b/b/o") == "https://h/p/T/n/ns/b/b/o/failures/amazon_x_1/report.md"
+        monkeypatch.setattr(cs, "settings", dataclasses.replace(cs.settings, web_public_url=""))
+        d = self._dossier(tmp_path)
+        line = base.BaseRetailerScraper._dossier_line(d, RuntimeError("boom"))
+        assert "open it on the dashboard's Activity page" in line and "http" not in line
 
-    def test_blank_means_no_link_and_no_upload(self, tmp_path):
-        assert self._with("") == ""
-        with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
-            pass
-        d.write(RuntimeError("x"))
-        assert d.upload() == ""
+

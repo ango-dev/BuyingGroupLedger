@@ -26,9 +26,6 @@ SECRET_FIELDS = (
     "bfmr_api_key",
     "bfmr_api_secret",
     "maxoutdeals_api_key",
-    "oci_s3_access_key_id",
-    "oci_s3_secret_access_key",
-    "oci_par_url_prefix",        # grants read of EVERY stored receipt
 )
 
 
@@ -44,7 +41,6 @@ class TestSettings:
         loaded = dataclasses.replace(
             settings,
             bfmr_api_key="SECRET-BFMR-KEY",
-            oci_par_url_prefix="https://oci/p/SECRET-PAR-TOKEN/n/ns/b/bkt/o",
             gmail_app_password="SECRET-GMAIL-PW",
         )
         text = repr(loaded)

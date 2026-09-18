@@ -92,14 +92,9 @@ ENV_TO_CONFIG = {
     "MAXOUTDEALS_USER_ID": "buying_groups.mod.user_id",
     "MAXOUTDEALS_EMAIL": "buying_groups.mod.email",
     "RECEIPT_CAPTURE_ENABLED": "receipts.capture_enabled",
-    "OCI_BUCKET": "receipts.oci.bucket",
-    "OCI_S3_ENDPOINT_URL": "receipts.oci.s3_endpoint_url",
-    "OCI_S3_REGION": "receipts.oci.s3_region",
-    "OCI_S3_ACCESS_KEY_ID": "receipts.oci.s3_access_key_id",
-    "OCI_S3_SECRET_ACCESS_KEY": "receipts.oci.s3_secret_access_key",
-    "OCI_PAR_URL_PREFIX": "receipts.oci.par_url_prefix",
-    "DOSSIER_UPLOAD_ENABLED": "receipts.dossier_upload_enabled",
-    "OCI_FAILURES_PAR_URL_PREFIX": "receipts.oci.failures_par_url_prefix",
+    # Where the receipt files live (receipts/store.py): a directory beside the ledger, inside every
+    # backup, served by the dashboard at /receipts/. OCI Object Storage was removed 2026-09-18.
+    "RECEIPTS_DIR": "receipts.dir",
     # The read-only web dashboard (web/). None of these is read by the scheduler; see
     # docs/operations.md, "The web dashboard".
     "WEB_ENABLED": "web.enabled",
@@ -111,6 +106,9 @@ ENV_TO_CONFIG = {
     # How long the Tools page keeps a profile-login browser session open after the user walks
     # away before closing it (closing = saving the cookies).
     "WEB_TOOL_SESSION_MINUTES": "web.tool_session_minutes",
+    # Where YOU open the dashboard from (e.g. over WireGuard): alerts link a failure dossier to its
+    # Activity page through it. Blank = alerts name the local path only.
+    "WEB_PUBLIC_URL": "web.public_url",
     # WHERE THE LEDGER LIVES: "db" (the SQLite file; every writer and reader runs off it -- the
     # default since 2026-09-18) or "sheet" (the Google Sheet -- DEPRECATED). See
     # docs/operations.md, "Moving off the Sheet".
@@ -350,49 +348,14 @@ class Settings:
     maxoutdeals_user_id: str = _get_str("MAXOUTDEALS_USER_ID")
     maxoutdeals_email: str = _get_str("MAXOUTDEALS_EMAIL")
 
-    # --- Receipt capture -> OCI Object Storage (see receipts/) ----------------------------------
-    # Uploads go through OCI's S3 COMPATIBILITY API, so the credentials are an OCI "customer secret
-    # key" (an access-key/secret pair minted under your user), NOT the API signing key.
-    #
-    # OCI_BUCKET IS THE MASTER SWITCH. Blank = receipt capture is completely inert: no browser is
-    # opened, no object is written, the Receipt Link column stays blank, and nothing raises. That is
-    # deliberately the default, so a host that has not been given a bucket degrades to "no receipts"
-    # rather than failing runs. RECEIPT_CAPTURE_ENABLED is the separate off switch, for turning the
-    # feature off WITHOUT deleting working credentials.
+    # --- Receipt capture (see receipts/) ------------------------------------------------------------
+    # Every newly-seen order's receipt is rendered to PDF and kept under `receipts_dir` beside the
+    # ledger, linked from Receipt Link with a dashboard-relative URL. The switch keeps the feature
+    # off without removing anything; off = orders record with a blank Receipt Link, nothing raises.
     receipt_capture_enabled: bool = _get_bool(
         "RECEIPT_CAPTURE_ENABLED", True)
-    oci_bucket: str = _get_str("OCI_BUCKET")
-    oci_s3_endpoint_url: str = _get_str("OCI_S3_ENDPOINT_URL")
-    oci_s3_region: str = _get_str("OCI_S3_REGION")
-    oci_s3_access_key_id: str = field(
-        default=_get_str("OCI_S3_ACCESS_KEY_ID"), repr=False)
-    oci_s3_secret_access_key: str = field(
-        default=_get_str("OCI_S3_SECRET_ACCESS_KEY"),
-        repr=False)
-    # A Pre-Authenticated Request URL, created ONCE by hand in the OCI console — Target: Bucket,
-    # Access type: Permit object reads, object listing left OFF. PARs are NOT part of the S3
-    # compatibility API — minting one needs OCI's native API and a different credential set
-    # entirely — and boto3's generate_presigned_url caps at 7 days, which is not long-lived. One
-    # manual PAR sidesteps both: every object's link is this prefix + the object key, and revoking
-    # it is one click.
-    #
-    # TREAT IT AS A SECRET. Anyone holding this URL can read every receipt under the prefix, and a
-    # receipt carries your name, delivery address, card last 4 and order totals.
-    oci_par_url_prefix: str = field(
-        default=_get_str("OCI_PAR_URL_PREFIX"), repr=False)
-    # Failure dossiers ride the same bucket under `failures/`, so the alert can carry a link instead
-    # of a path on a host you then have to SSH into. Same PII class as the receipts already there (a
-    # page DOM can hold names and addresses), so the same rule: private bucket, PAR without listing.
-    # Turn it OFF if an alert channel is shared with people who should not see order pages. Inert
-    # whenever the receipt bucket is unconfigured; a failed upload falls back to the local path.
-    dossier_upload_enabled: bool = _get_bool("DOSSIER_UPLOAD_ENABLED", True)
-    # A SEPARATE PAR for the dossiers, scoped to the `failures/` prefix (Target: Objects with prefix
-    # `failures/`, Permit object reads, listing OFF). Kept apart from the receipt PAR on purpose: the
-    # two can be revoked independently, and the receipt PAR stays scoped to receipts. Blank = dossiers
-    # are not uploaded (the alert names the local path). Either the `/o` form or the full
-    # `/o/failures/` form the console hands out is accepted. Treat as a secret, like the other PAR.
-    oci_failures_par_url_prefix: str = field(
-        default=_get_str("OCI_FAILURES_PAR_URL_PREFIX"), repr=False)
+    # Relative to the repo root (in Docker, the mounted data/ volume, so a rebuild keeps them).
+    receipts_dir: str = _get_str("RECEIPTS_DIR", "data/receipts")
 
     # --- container scheduling (read by docker/entrypoint.sh) --------------------------------------
     # How many hours between scheduled runs. Each run spends one of MaxOutDeals' 10 daily
@@ -436,6 +399,9 @@ class Settings:
     # The Tools page's profile-login session: closed (cookies saved) after this many minutes if
     # the user leaves it open. web/tools.ProfileSessions.
     web_tool_session_minutes: int = _get_int("WEB_TOOL_SESSION_MINUTES", 60)
+    # The dashboard's address as the user reaches it (e.g. http://192.0.2.10:8765 over WireGuard),
+    # for the links alerts carry. Blank = no link, just the path on the host.
+    web_public_url: str = _get_str("WEB_PUBLIC_URL", "")
 
     # --- scheduled backups (docker/entrypoint.sh adds the cron line; scripts/backup.py) ---------
     # A zip of config.json / .state.json / .env / data/ (the ledger) into backups/, on the

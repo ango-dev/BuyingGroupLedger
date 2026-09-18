@@ -31,7 +31,7 @@ next to it, so this is the only thing to read.
 > exported variable win.
 
 <details>
-<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (52 of them)</summary>
+<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (46 of them)</summary>
 
 The list is generated from `ENV_TO_CONFIG` in [config/settings.py](../config/settings.py), which is the
 single place a name is mapped, and `tests/test_config_loader.py` fails if this table drifts from it.
@@ -68,14 +68,7 @@ fails closed on a typo rather than turning itself on.
 | `MAXOUTDEALS_USER_ID` | `buying_groups.mod.user_id` |
 | `BUYING_GROUP_SYNC_ENABLED` † | `buying_groups.sync_enabled` |
 | `RECEIPT_CAPTURE_ENABLED` † | `receipts.capture_enabled` |
-| `OCI_BUCKET` | `receipts.oci.bucket` |
-| `OCI_PAR_URL_PREFIX` | `receipts.oci.par_url_prefix` |
-| `DOSSIER_UPLOAD_ENABLED` † | `receipts.dossier_upload_enabled` |
-| `OCI_FAILURES_PAR_URL_PREFIX` | `receipts.oci.failures_par_url_prefix` |
-| `OCI_S3_ACCESS_KEY_ID` | `receipts.oci.s3_access_key_id` |
-| `OCI_S3_ENDPOINT_URL` | `receipts.oci.s3_endpoint_url` |
-| `OCI_S3_REGION` | `receipts.oci.s3_region` |
-| `OCI_S3_SECRET_ACCESS_KEY` | `receipts.oci.s3_secret_access_key` |
+| `RECEIPTS_DIR` | `receipts.dir` |
 | `PREFLIGHT_STRICT` † | `container.preflight_strict` |
 | `RUN_INTERVAL_HOURS` | `container.run_interval_hours` |
 | `RUN_ON_START` † | `container.run_on_start` |
@@ -87,6 +80,7 @@ fails closed on a typo rather than turning itself on.
 | `WEB_BIND_HOST` | `web.bind_host` |
 | `WEB_PORT` | `web.port` |
 | `WEB_TOOL_SESSION_MINUTES` | `web.tool_session_minutes` |
+| `WEB_PUBLIC_URL` | `web.public_url` |
 | `LEDGER_BACKEND` | `ledger.backend` |
 | `LEDGER_DB_PATH` | `database.path` |
 | `LEDGER_DB_MIRROR_AFTER_RUN` † | `database.mirror_after_run` |

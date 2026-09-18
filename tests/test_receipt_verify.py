@@ -95,53 +95,17 @@ class TestRowsByOrder:
 
 
 class TestPurge:
-    """A plain delete on a versioned bucket is NOT a delete — it writes a marker and keeps the
-    object recoverable and billable. Purging has to name every VersionId."""
+    """Purging deletes the stored file (the store is a directory since 2026-09-18)."""
 
-    class FakeS3:
-        def __init__(self):
-            self.deleted = []
-
-        def list_object_versions(self, Bucket, Prefix):  # noqa: N803 — boto3's kwarg spelling
-            return {
-                "Versions": [
-                    {"Key": Prefix, "VersionId": "v1"},
-                    {"Key": Prefix, "VersionId": "v2"},
-                    {"Key": Prefix + ".bak", "VersionId": "other"},   # Prefix is a PREFIX
-                ],
-                "DeleteMarkers": [{"Key": Prefix, "VersionId": "m1"}],
-            }
-
-        def delete_object(self, Bucket, Key, VersionId=None):  # noqa: N803
-            self.deleted.append((Key, VersionId))
-
-    @staticmethod
-    def _wire(monkeypatch):
-        """Settings is a FROZEN dataclass (deliberately — a credential must not be mutable
-        mid-run), so swap the whole object rather than one field."""
+    def test_the_file_goes_and_a_missing_one_counts_zero(self, tmp_path, monkeypatch):
         import dataclasses
 
-        fake = TestPurge.FakeS3()
-        monkeypatch.setattr(rv.store, "_s3", lambda: fake)
-        monkeypatch.setattr(rv.store, "settings",
-                            dataclasses.replace(rv.store.settings, oci_bucket="b"))
-        return fake
-
-    def test_every_version_and_marker_is_removed_by_id(self, monkeypatch):
-        fake = self._wire(monkeypatch)
-
-        removed = rv._purge("receipts/amazon/2026-08/A1.pdf")
-
-        assert removed == 3
-        assert [v for _, v in fake.deleted] == ["v1", "v2", "m1"]
-        assert all(v is not None for _, v in fake.deleted), "a delete without a VersionId is a marker"
-
-    def test_a_similarly_named_object_is_left_alone(self, monkeypatch):
-        fake = self._wire(monkeypatch)
-
-        rv._purge("receipts/amazon/2026-08/A1.pdf")
-
-        assert all(k == "receipts/amazon/2026-08/A1.pdf" for k, _ in fake.deleted)
+        monkeypatch.setattr(rv.store, "settings", dataclasses.replace(
+            rv.store.settings, receipt_capture_enabled=True, receipts_dir=str(tmp_path)))
+        rv.store.put("receipts/bestbuy/2026-09/A1.pdf", b"%PDF", "pdf")
+        assert rv._purge("receipts/bestbuy/2026-09/A1.pdf") == 1
+        assert rv._purge("receipts/bestbuy/2026-09/A1.pdf") == 0
+        assert rv._stored_keys() == []
 
 
 class TestReadOnlyByDefault:

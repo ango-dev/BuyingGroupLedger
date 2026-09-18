@@ -1769,3 +1769,22 @@ class TestTableSorting:
         first = body.index('data-field="total_cost">')
         assert "$2,000.00" in body[first:first + 40]
         assert "▼" in body[body.index("Total Cost"):body.index("Total Cost") + 30]
+
+
+class TestReceiptFiles:
+    """The Receipt Link column points at /receipts/... on the dashboard (receipts/store.py)."""
+
+    def test_a_stored_receipt_is_served_and_a_climbing_path_is_not(self, client, tmp_path, monkeypatch):
+        import dataclasses
+
+        from receipts import store
+
+        monkeypatch.setattr(store, "settings", dataclasses.replace(
+            store.settings, receipt_capture_enabled=True, receipts_dir=str(tmp_path / "receipts")))
+        link = store.put("receipts/bestbuy/2026-09/BBY01-1.pdf", b"%PDF-1.4 x", "pdf")
+        assert link == "/receipts/bestbuy/2026-09/BBY01-1.pdf"
+        response = client.get(link)
+        assert response.status_code == 200 and response.content == b"%PDF-1.4 x"
+        assert client.get("/receipts/bestbuy/2026-09/missing.pdf").status_code == 404
+        assert client.get("/receipts/../config.json").status_code in (404, 400)
+        assert client.get("/receipts/bestbuy/..%2F..%2Fconfig.json").status_code in (404, 400)

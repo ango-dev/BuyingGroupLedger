@@ -37,7 +37,7 @@ This page is the overview. Each topic has its own page under [`docs/`](docs/):
 | [Configuration](docs/configuration.md) | `config.json`, the environment override layer and every variable, warehouse jigs, card cashback rates |
 | [Profiles and sign-in](docs/profiles-and-auth.md) | Creating a cloud-browser profile, auto-auth with an authenticator app, where secrets go |
 | [Buying groups](docs/buying-groups.md) | Posting tracking to BFMR and MaxOutDeals, insurance filing, payouts and `paid`/`return` |
-| [Receipt capture](docs/receipts.md) | Proof of purchase rendered to PDF in your own OCI bucket |
+| [Receipt capture](docs/receipts.md) | Proof of purchase rendered to PDF, kept beside the ledger |
 | [Diagnostics](docs/diagnostics.md) | Failure dossiers, preflight, the read-only sheet audit, the offline tests |
 | [Importing history](docs/importing-history.md) | `import_history.py` (reconciles the source's profit column before writing), and pasting by hand |
 | [Operations](docs/operations.md) | Cron / Task Scheduler, Docker, moving hosts — with [DEPLOY.md](DEPLOY.md) as the server runbook |
@@ -156,7 +156,7 @@ output/csv_writer.py    per-run CSV
 alerts/notifier.py      email + Discord alerts
 sync_tracking.py        post tracking numbers to buying groups + pull payouts back (dry-run default)
 buying_groups/          provider contract + BFMR + MaxOutDeals adapters + Buying Group -> provider registry
-receipts/               receipt URL/key rules, OCI store (S3 compat), capture orchestration
+receipts/               receipt URL/key rules, the file store, capture orchestration
 scripts/preflight.py    offline check for silent misconfiguration
 scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
 scripts/tax_report.py   read-only cash-basis tax report for one year (two dates: payout vs order)

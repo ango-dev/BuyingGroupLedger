@@ -72,8 +72,13 @@ def _alert(apply: bool, subject: str, message: str) -> None:
 
 
 def _fetch_pdf(url: str) -> bytes:
-    """The receipt bytes, straight from the object store via the sheet's own link (the PAR-based
-    URL needs no S3 credentials — scripts/receipt_verify.py set the pattern)."""
+    """The receipt bytes: a dashboard-relative Receipt Link (`/receipts/...`, receipts/store.py)
+    is read straight off the disk; anything else is fetched over HTTP (a link typed by hand)."""
+    from receipts import store
+
+    local = store.path_for_link(url)
+    if local is not None:
+        return local.read_bytes()
     with urllib.request.urlopen(url, timeout=60) as resp:
         return resp.read()
 

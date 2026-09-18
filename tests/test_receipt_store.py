@@ -1,264 +1,119 @@
-"""The object-storage half: staying inert when unconfigured, and telling a miss from a failure.
+"""The receipt store is a directory beside the ledger (receipts/store.py, 2026-09-18: OCI removed)
+and the links it writes are dashboard-relative; plus the one-time migration off the bucket."""
+from __future__ import annotations
 
-No boto3 is installed for these — a fake client is injected — which is also the point: the whole
-upload path is lazily imported so `import main` and this suite stay free of the dependency.
-"""
+import dataclasses
 
 import pytest
 
 from receipts import store
-
-
-@pytest.fixture(autouse=True)
-def _clean_client():
-    """Every test re-points the settings, so the cached client must not leak between them."""
-    store._reset_client_for_tests()
-    yield
-    store._reset_client_for_tests()
-
-
-def _configure(monkeypatch, **overrides):
-    """Swap in a fully-populated Settings. `Settings` is a frozen dataclass — deliberately, so a
-    credential can't be mutated mid-run — so this replaces the object rather than its fields."""
-    import dataclasses
-
-    values = {
-        "receipt_capture_enabled": True,
-        "oci_bucket": "ledger-receipts",
-        "oci_s3_endpoint_url": "https://ns.compat.objectstorage.us-ashburn-1.oraclecloud.com",
-        "oci_s3_region": "us-ashburn-1",
-        "oci_s3_access_key_id": "AKIA",
-        "oci_s3_secret_access_key": "secret",
-        "oci_par_url_prefix": "https://objectstorage.us-ashburn-1.oraclecloud.com/p/tok/n/ns/b/b/o",
-    }
-    values.update(overrides)
-    monkeypatch.setattr(store, "settings", dataclasses.replace(store.settings, **values))
-
-
-class FakeS3:
-    """Records calls; raises botocore-shaped errors so _is_not_found is exercised for real."""
-
-    def __init__(self, present=(), head_error=None):
-        self.present = set(present)
-        self.head_error = head_error
-        self.puts = []
-
-    def head_object(self, Bucket, Key):  # noqa: N803 — boto3's own kwarg spelling
-        if self.head_error is not None:
-            raise self.head_error
-        if Key not in self.present:
-            raise _client_error(404, "404")
-        return {"ContentLength": 1}
-
-    def put_object(self, Bucket, Key, Body, ContentType):  # noqa: N803
-        self.puts.append({"Bucket": Bucket, "Key": Key, "Body": Body, "ContentType": ContentType})
-        return {}
-
-
-def _client_error(status, code):
-    exc = Exception("boom")
-    exc.response = {"ResponseMetadata": {"HTTPStatusCode": status}, "Error": {"Code": code}}
-    return exc
-
-
-class TestInertWhenUnconfigured:
-    """Receipts are additive. A host with no bucket must record orders exactly as it did before —
-    blank Receipt Link, no exception, no browser, nothing to notice."""
-
-    def test_a_blank_bucket_disables_everything(self, monkeypatch):
-        _configure(monkeypatch, oci_bucket="")
-
-        assert not store.is_configured()
-        assert store.exists("receipts/amazon/2026-08/1.pdf") is False
-        assert store.put("receipts/amazon/2026-08/1.pdf", b"x", "pdf") == ""
-        assert store.link_for("receipts/amazon/2026-08/1.pdf") == ""
-
-    def test_a_partial_config_is_treated_as_unconfigured_not_half_working(self, monkeypatch):
-        """A bucket without a PAR prefix would upload objects and then write no link — paying to
-        render receipts nobody can reach, on every run, forever."""
-        _configure(monkeypatch, oci_par_url_prefix="")
-
-        assert not store.is_configured()
-        assert store.missing_settings() == ["OCI_PAR_URL_PREFIX"]
-
-    def test_the_off_switch_leaves_credentials_alone(self, monkeypatch):
-        _configure(monkeypatch, receipt_capture_enabled=False)
-
-        assert not store.is_configured()
-        assert store.missing_settings() == []  # nothing is MISSING; it is switched off
-
-    def test_missing_settings_names_every_blank_one(self, monkeypatch):
-        _configure(monkeypatch, oci_bucket="", oci_s3_access_key_id="")
-
-        assert store.missing_settings() == ["OCI_BUCKET", "OCI_S3_ACCESS_KEY_ID"]
-
-
-class TestExists:
-    def test_a_stored_object_is_found(self, monkeypatch):
-        _configure(monkeypatch)
-        monkeypatch.setattr(store, "_s3", lambda: FakeS3(present={"receipts/a/2026-08/1.pdf"}))
-
-        assert store.exists("receipts/a/2026-08/1.pdf") is True
-
-    def test_a_404_is_a_miss_not_an_error(self, monkeypatch):
-        _configure(monkeypatch)
-        monkeypatch.setattr(store, "_s3", lambda: FakeS3())
-
-        assert store.exists("receipts/a/2026-08/1.pdf") is False
-
-    def test_any_other_failure_raises_rather_than_reporting_a_miss(self, monkeypatch):
-        """Reporting 'not there' on a permissions or network failure would silently re-render and
-        re-upload every order on every run — a recurring bandwidth bill with no symptom."""
-        _configure(monkeypatch)
-        monkeypatch.setattr(store, "_s3", lambda: FakeS3(head_error=_client_error(403, "AccessDenied")))
-
-        with pytest.raises(store.ReceiptStoreError):
-            store.exists("receipts/a/2026-08/1.pdf")
-
-    def test_a_non_botocore_exception_also_raises(self, monkeypatch):
-        _configure(monkeypatch)
-        monkeypatch.setattr(store, "_s3", lambda: FakeS3(head_error=RuntimeError("dns")))
-
-        with pytest.raises(store.ReceiptStoreError):
-            store.exists("receipts/a/2026-08/1.pdf")
-
-
-class TestPut:
-    def test_the_object_and_its_content_type_are_sent(self, monkeypatch):
-        _configure(monkeypatch)
-        fake = FakeS3()
-        monkeypatch.setattr(store, "_s3", lambda: fake)
-
-        link = store.put("receipts/amazon/2026-08/1.pdf", b"%PDF-1.4", "pdf")
-
-        assert fake.puts == [{
-            "Bucket": "ledger-receipts", "Key": "receipts/amazon/2026-08/1.pdf",
-            "Body": b"%PDF-1.4", "ContentType": "application/pdf",
-        }]
-        assert link.endswith("/receipts/amazon/2026-08/1.pdf")
-
-    def test_a_png_gets_the_image_content_type(self, monkeypatch):
-        _configure(monkeypatch)
-        fake = FakeS3()
-        monkeypatch.setattr(store, "_s3", lambda: fake)
-
-        store.put("receipts/amazon/2026-08/1.png", b"\x89PNG", "png")
-
-        assert fake.puts[0]["ContentType"] == "image/png"
-
-    def test_an_empty_body_is_refused(self, monkeypatch):
-        """A zero-byte object still makes exists() true, so it would permanently mask a real receipt."""
-        _configure(monkeypatch)
-        monkeypatch.setattr(store, "_s3", lambda: FakeS3())
-
-        with pytest.raises(store.ReceiptStoreError):
-            store.put("receipts/amazon/2026-08/1.pdf", b"", "pdf")
-
-    def test_an_upload_failure_is_wrapped(self, monkeypatch):
-        _configure(monkeypatch)
-
-        class Exploding(FakeS3):
-            def put_object(self, **kw):
-                raise RuntimeError("bucket is full")
-
-        monkeypatch.setattr(store, "_s3", lambda: Exploding())
-
-        with pytest.raises(store.ReceiptStoreError, match="Could not upload"):
-            store.put("receipts/amazon/2026-08/1.pdf", b"x", "pdf")
-
-
-class TestLinkFor:
-    """The sheet link is string concatenation because a PAR cannot be minted through the S3 API, and
-    a boto3 presigned URL expires within 7 days while a ledger row is read months later."""
-
-    def test_a_par_prefix_without_a_trailing_slash(self, monkeypatch):
-        _configure(monkeypatch, oci_par_url_prefix="https://oci/p/tok/n/ns/b/bkt/o")
-
-        assert store.link_for("receipts/a/1.pdf") == "https://oci/p/tok/n/ns/b/bkt/o/receipts/a/1.pdf"
-
-    def test_a_par_prefix_with_a_trailing_slash_does_not_double_it(self, monkeypatch):
-        """Copying the PAR out of the OCI console may or may not include the slash, and a double
-        slash yields a 404 on every row rather than an error anyone would see."""
-        _configure(monkeypatch, oci_par_url_prefix="https://oci/p/tok/n/ns/b/bkt/o/")
-
-        assert store.link_for("receipts/a/1.pdf") == "https://oci/p/tok/n/ns/b/bkt/o/receipts/a/1.pdf"
-
-    def test_a_leading_slash_on_the_key_is_absorbed_too(self, monkeypatch):
-        _configure(monkeypatch, oci_par_url_prefix="https://oci/o/")
-
-        assert store.link_for("/receipts/a/1.pdf") == "https://oci/o/receipts/a/1.pdf"
-
-
-class TestLazyImport:
-    def test_boto3_is_not_imported_at_module_scope(self):
-        """Same rule curl_cffi and PyJWT follow: `import main` and this suite must not need it, or a
-        missing dependency turns into an import-time crash on every run instead of a degraded one."""
-        import ast
-        import pathlib
-
-        source = pathlib.Path(store.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        top_level = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
-        names = {a.name.split(".")[0] for n in top_level if isinstance(n, ast.Import) for a in n.names}
-        names |= {(n.module or "").split(".")[0] for n in top_level if isinstance(n, ast.ImportFrom)}
-
-        assert "boto3" not in names and "botocore" not in names
-
-
-class TestClientCompatibilityWithNonAwsS3:
-    """OCI is S3-COMPATIBLE, not S3, and two boto3 defaults are wrong against it.
-
-    Both were found live on 2026-08-15 and both fail in the silent direction — credentials and
-    permissions perfectly fine, every upload rejected.
-    """
-
-    def test_chunked_encoding_is_disabled(self, monkeypatch):
-        """botocore >= 1.36 defaults request_checksum_calculation to "when_supported", which frames
-        every put_object body as aws-chunked with a trailing CRC32. OCI answers `NotImplemented:
-        AWS chunked encoding not supported` — so EVERY receipt upload fails."""
-        _configure(monkeypatch)
-        captured = {}
-
-        def fake_client(service, config=None, **kw):
-            captured["config"] = config
-            return FakeS3()
-
-        import boto3
-        monkeypatch.setattr(boto3, "client", fake_client)
-        store._s3()
-
-        assert captured["config"].request_checksum_calculation == "when_required"
-
-    def test_path_style_addressing_is_used(self, monkeypatch):
-        """OCI's compat endpoint is namespace-scoped and does not serve virtual-host-style bucket
-        subdomains, so the default would address a hostname that does not resolve."""
-        _configure(monkeypatch)
-        captured = {}
-
-        def fake_client(service, config=None, **kw):
-            captured["config"] = config
-            return FakeS3()
-
-        import boto3
-        monkeypatch.setattr(boto3, "client", fake_client)
-        store._s3()
-
-        assert captured["config"].s3["addressing_style"] == "path"
-        assert captured["config"].signature_version == "s3v4"
-
-    def test_an_older_botocore_without_the_checksum_options_still_builds_a_client(self, monkeypatch):
-        """Those Config kwargs do not exist before botocore 1.36. Raising there would take receipt
-        capture down on an older host that never needed the fix in the first place."""
-        _configure(monkeypatch)
-        import boto3
-        from botocore.config import Config
-
-        def old_config(**kw):
-            if "request_checksum_calculation" in kw:
-                raise TypeError("unexpected keyword argument")
-            return Config(**kw)
-
-        monkeypatch.setattr("botocore.config.Config", old_config)
-        monkeypatch.setattr(boto3, "client", lambda service, config=None, **kw: FakeS3())
-
-        assert store._s3() is not None
+from scripts import migrate_receipts_local as mig
+
+KEY = "receipts/bestbuy/2026-09/BBY01-1.pdf"
+
+
+@pytest.fixture
+def on(tmp_path, monkeypatch):
+    monkeypatch.setattr(store, "settings", dataclasses.replace(
+        store.settings, receipt_capture_enabled=True, receipts_dir=str(tmp_path / "receipts")))
+    return tmp_path / "receipts"
+
+
+class TestInertWhenOff:
+    def test_off_means_no_op_everywhere(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(store, "settings", dataclasses.replace(
+            store.settings, receipt_capture_enabled=False, receipts_dir=str(tmp_path)))
+        assert not store.is_configured() and store.missing_settings() == []
+        assert store.exists(KEY) is False and store.put(KEY, b"x", "pdf") == "" and store.link_for(KEY) == ""
+        assert not list(tmp_path.rglob("*"))
+
+
+class TestTheDirectory:
+    def test_put_exists_link_and_path(self, on):
+        assert store.exists(KEY) is False
+        link = store.put(KEY, b"%PDF-1.4 x", "pdf")
+        assert link == "/receipts/bestbuy/2026-09/BBY01-1.pdf"
+        assert store.exists(KEY) and store.path_for(KEY) == on / "bestbuy" / "2026-09" / "BBY01-1.pdf"
+        assert store.path_for(KEY).read_bytes() == b"%PDF-1.4 x"
+        assert store.path_for_link(link) == store.path_for(KEY)
+        assert store.path_for_link("https://elsewhere/x.pdf") is None and store.path_for_link("") is None
+        assert store.link_for("/receipts/amazon/2026-08/1.png") == "/receipts/amazon/2026-08/1.png"
+        assert not list(on.rglob("*.part"))
+
+    def test_an_empty_body_is_refused(self, on):
+        with pytest.raises(store.ReceiptStoreError, match="empty"):
+            store.put(KEY, b"", "pdf")
+
+    def test_a_climbing_key_is_refused(self, on):
+        for bad in ("receipts/../../etc/passwd", "receipts/a/..\\b/c.pdf", "", "receipts/./x"):
+            with pytest.raises(store.ReceiptStoreError):
+                store.path_for(bad)
+        assert store.exists("receipts/../x") is False and store.delete("receipts/../x") is False
+        assert store.path_for_link("/receipts/../secret") is None
+
+    def test_stored_keys_and_delete(self, on):
+        store.put(KEY, b"a", "pdf")
+        store.put("receipts/amazon/2026-08/113-1.png", b"b", "png")
+        (on / "_probe.txt").parent.mkdir(exist_ok=True)
+        (on / "_probe.txt").write_bytes(b"x")  # not <retailer>/<month>/<file>
+        assert store.stored_keys() == ["receipts/amazon/2026-08/113-1.png", KEY]
+        assert store.stored_keys("bestbuy") == [KEY]
+        assert store.delete(KEY) is True and store.delete(KEY) is False and store.stored_keys("bestbuy") == []
+
+    def test_a_relative_dir_is_under_the_repo_root(self, monkeypatch):
+        monkeypatch.setattr(store, "settings", dataclasses.replace(store.settings, receipts_dir="data/receipts"))
+        assert store.receipts_dir() == store.ROOT / "data" / "receipts"
+
+
+class TestTheMigrationOffOci:
+    HEADER = ["Order ID", "Receipt Link"]
+
+    def test_the_key_is_read_off_the_par_link(self):
+        assert mig.key_from_link("https://objectstorage.us-x.oraclecloud.com/p/TOK/n/ns/b/b/o/receipts/bestbuy/2026-09/BBY01-1.pdf") \
+            == "receipts/bestbuy/2026-09/BBY01-1.pdf"
+        assert mig.key_from_link("/receipts/bestbuy/2026-09/BBY01-1.pdf") is None
+        assert mig.key_from_link("https://drive.example/file/abc") is None
+        assert mig.key_from_link("https://host/o/receipts/only/two.pdf") is None
+
+    def test_plan_groups_rows_by_link_and_reports_the_odd_ones(self):
+        grid = [self.HEADER,
+                ["O1", "https://h/o/receipts/bestbuy/2026-09/O1.pdf"],
+                ["O1", "https://h/o/receipts/bestbuy/2026-09/O1.pdf"],
+                ["O2", "/receipts/amazon/2026-08/O2.pdf"],
+                ["O3", "https://drive.example/x"],
+                ["O4", ""], ["", "https://h/o/receipts/x/y/z.pdf"]]
+        moves, notes = mig.plan_migration(grid)
+        assert moves == {"https://h/o/receipts/bestbuy/2026-09/O1.pdf": ("receipts/bestbuy/2026-09/O1.pdf", [2, 3])}
+        assert len(notes) == 1 and "O3" in notes[0]
+
+    def test_apply_downloads_stores_and_rewrites(self, on):
+        from ledger_db.store import LedgerDb
+        from ledger_db.worksheet import DbWorksheet
+        from models.order import FIELDNAMES
+        from sheets.ledger_sync import HEADER
+
+        ws = DbWorksheet(LedgerDb(on.parent / "ledger.sqlite3"))
+        row = lambda oid, ship, link: [{"order_id": oid, "order_date": "2026-09-01", "item_name": "x",  # noqa: E731
+                                        "shipment": ship, "receipt_url": link}.get(f, "") for f in FIELDNAMES]
+        ws.update(range_name="A2", values=[row("O1", "1", "https://h/o/receipts/bestbuy/2026-09/O1.pdf"),
+                                           row("O1", "2", "https://h/o/receipts/bestbuy/2026-09/O1.pdf"),
+                                           row("O2", "1", "https://h/o/receipts/costco/2026-09/O2.pdf")])
+        moves, _notes = mig.plan_migration(ws.get_all_values())
+        fetched = []
+
+        def fetch_fn(url):
+            fetched.append(url)
+            if "O2" in url:
+                raise OSError("403")
+            return b"%PDF-1.4 O1"
+
+        moved, failures = mig.apply_migration(ws, moves, fetch_fn=fetch_fn)
+        assert moved == 1 and len(failures) == 1 and "O2" in failures[0]
+        links = [r[HEADER.index("Receipt Link")] for r in ws.get_all_values()[1:]]
+        assert links == ["/receipts/bestbuy/2026-09/O1.pdf", "/receipts/bestbuy/2026-09/O1.pdf",
+                         "https://h/o/receipts/costco/2026-09/O2.pdf"]
+        assert store.path_for("receipts/bestbuy/2026-09/O1.pdf").read_bytes() == b"%PDF-1.4 O1"
+        # a re-run only touches what is left, and never re-downloads what is stored
+        moves2, _ = mig.plan_migration(ws.get_all_values())
+        assert list(moves2) == ["https://h/o/receipts/costco/2026-09/O2.pdf"]
+        assert fetched == ["https://h/o/receipts/bestbuy/2026-09/O1.pdf", "https://h/o/receipts/costco/2026-09/O2.pdf"]

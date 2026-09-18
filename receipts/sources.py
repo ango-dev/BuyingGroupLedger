@@ -1,6 +1,6 @@
 """Where each retailer's receipt lives, and where its captured copy is stored.
 
-Pure string work — no network, no browser, no boto3 — so every rule here is provable offline. The
+Pure string work — no network, no browser, no storage — so every rule here is provable offline. The
 two functions answer the two questions the capture step asks per order: which page do I render, and
 under what object name does it go.
 

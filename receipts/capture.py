@@ -116,7 +116,7 @@ def _expand_sections(page, retailer_key: str) -> None:
 def pdf_text(body: bytes) -> str:
     """Extract a PDF's text, or "" if it cannot be read.
 
-    pypdf is imported HERE, not at module scope, for the same reason boto3/curl_cffi/PyJWT are:
+    pypdf is imported HERE, not at module scope, for the same reason curl_cffi/PyJWT are:
     `import main` and the whole offline suite must not require it. Returns "" rather than raising on
     ANY failure, which is what makes every caller fail open.
     """

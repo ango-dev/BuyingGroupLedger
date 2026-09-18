@@ -126,7 +126,7 @@ def _help_for(example: dict, path: str) -> str:
     if not isinstance(node, dict):
         return ""
     # The key's own comment, else the section-level "// " note the example uses for a group of
-    # keys that share one explanation (the BFMR headers, the OCI credential pair).
+    # keys that share one explanation (the BFMR headers).
     return str(node.get(f"// {parts[-1]}", "") or node.get("// ", "") or "")
 
 
@@ -434,7 +434,8 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
     "alerts": ("Alerts", "Where a failed run, a logged-out session or a stale heartbeat is reported."),
     "buying_groups": ("Buying groups", "BFMR and MaxOutDeals: API access, insurance, and the "
                       "combined-package auto-reply."),
-    "receipts": ("Receipts", "Receipt capture and the OCI bucket the PDFs and dossiers upload to."),
+    "receipts": ("Receipts", "Receipt capture: each order's proof of purchase, kept as a file beside "
+                 "the ledger and served by this dashboard."),
     "web": ("Dashboard", "This web dashboard: its ledger source, bind address and port. "
             "Read once at dashboard start."),
     "database": ("Database", "The SQLite mirror of the ledger. Read once at dashboard start."),

@@ -93,7 +93,6 @@ class TestDerivation:
     def test_secrets_are_the_fields_with_repr_false(self):
         secrets = {s.env for s in settings_form.schema() if s.secret}
         for env in ("GMAIL_APP_PASSWORD", "BFMR_API_KEY", "BFMR_API_SECRET", "MAXOUTDEALS_API_KEY",
-                    "OCI_S3_SECRET_ACCESS_KEY", "OCI_PAR_URL_PREFIX", "OCI_FAILURES_PAR_URL_PREFIX",
                     "DISCORD_WEBHOOK_URL"):
             assert env in secrets, env
         assert "GOOGLE_SHEET_ID" not in secrets and "LOOKBACK_DAYS" not in secrets

@@ -127,13 +127,14 @@ class BaseRetailerScraper(abc.ABC):
         except Exception:  # noqa: BLE001 — the dossier must never turn into the failure
             log.exception("Failed to write the failure dossier.")
             return "\n\n(The failure dossier could not be written; see logs/run.log.)"
-        link = dossier.upload()
-        if link:
-            # Every hosted file, not just the report: the reader wants the page HTML and the
-            # screenshot in hand from the alert alone. (Object Storage has no folder page to link.)
-            files = "".join(f"\n  {name}: {url}" for name, url in dossier.hosted)
-            return f"\n\nFailure dossier: {link}{files}\n(local copy: {path})"
-        return f"\n\nFailure dossier: {path}"
+        # The dossier lives on this host; the dashboard's Activity page renders it (report, page
+        # HTML, screenshot), reachable over the user's own VPN -- so the alert names the page
+        # when the dashboard's address is configured, and the path either way.
+        from config.settings import settings
+
+        public = str(getattr(settings, "web_public_url", "") or "").rstrip("/")
+        where = f"{public}/activity?type=dossier&days=0" if public else "the dashboard's Activity page"
+        return f"\n\nFailure dossier: {path}\n(open it on {where})"
 
     def _on_deterministic_failure(self, exc: Exception, dossier, *, hint: str = "") -> list[OrderItem]:
         """A NON-login failure on the deterministic path: write the dossier, alert, stop.

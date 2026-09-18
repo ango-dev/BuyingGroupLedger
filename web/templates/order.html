@@ -19,7 +19,7 @@
     <dt>Receipt Link</dt><dd>{% for u in order.receipt_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">no receipt captured</span>{% endfor %}
       {% if editable %}
       <form method="post" action="/orders/{{ order.order_id }}/receipt" enctype="multipart/form-data" class="receipt-upload">
-        {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'a photo or PDF uploads as soon as you pick it; the PAR link is written to every row of this order', autosubmit=True) }}
+        {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'a photo or PDF uploads as soon as you pick it; the link is written to every row of this order', autosubmit=True) }}
         <noscript><button type="submit">Upload receipt</button></noscript>
       </form>
       {% endif %}

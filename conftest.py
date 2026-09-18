@@ -57,20 +57,18 @@ def _block_paid_cloud_browsers(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _receipts_inert_by_default(monkeypatch):
-    """Receipt capture reads live OCI credentials from .env, so it must be switched OFF for tests.
-
-    Without this the suite's behaviour depends on whether the machine running it happens to have a
-    bucket configured — tests would pass on CI and hit real object storage on the developer's box.
-    Patches the SETTINGS rather than is_configured(), so everything downstream follows naturally and
-    the tests that DO exercise storage (which replace store.settings or is_configured themselves)
-    still win.
-    """
+def _receipts_inert_by_default(monkeypatch, tmp_path_factory):
+    """Receipt capture is switched OFF for tests and its directory pointed at a temp dir, so no test
+    can write into the developer's data/receipts. Patches the SETTINGS rather than
+    is_configured(), so everything downstream follows and the tests that DO exercise storage
+    (which replace store.settings or is_configured themselves) still win."""
     import dataclasses
 
     from receipts import store
 
-    monkeypatch.setattr(store, "settings", dataclasses.replace(store.settings, oci_bucket=""))
+    monkeypatch.setattr(store, "settings", dataclasses.replace(
+        store.settings, receipt_capture_enabled=False,
+        receipts_dir=str(tmp_path_factory.mktemp("receipts"))))
 
 
 @pytest.fixture(autouse=True)

@@ -167,7 +167,7 @@ def _write_links(worksheet, updates, apply):
 def run(apply=False, only_retailer=None, limit=None):
     if not store.is_configured():
         print("Receipt storage is not configured; nothing to do. "
-              "Check with `python -m scripts.receipt_storage_check`.")
+              "Turn it on with receipts.capture_enabled in config.json.")
         return 1
 
     worksheet = _get_worksheet()
