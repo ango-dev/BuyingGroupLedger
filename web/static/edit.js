@@ -97,3 +97,46 @@
   document.addEventListener("htmx:afterSwap", count);
   document.addEventListener("DOMContentLoaded", count);
 })();
+
+// Sheets-style row selection: click a row number to select that row (its checkbox ticks and the
+// row tints), click again to unselect, shift-click to select the range from the last click.
+(function () {
+  "use strict";
+  var last = null;
+  function rowsShown() { return Array.prototype.slice.call(document.querySelectorAll("table.sheetlike tbody tr")); }
+  function setRow(tr, on) {
+    var box = tr.querySelector('input[name="sel"]');
+    if (!box) return;
+    box.checked = on;
+    tr.classList.toggle("selected", on);
+  }
+  function syncClasses() {
+    rowsShown().forEach(function (tr) {
+      var box = tr.querySelector('input[name="sel"]');
+      tr.classList.toggle("selected", !!(box && box.checked));
+    });
+  }
+  document.addEventListener("click", function (e) {
+    var td = e.target.closest ? e.target.closest("td.rownum") : null;
+    if (!td) return;
+    var tr = td.parentElement;
+    var box = tr.querySelector('input[name="sel"]');
+    if (!box) return;
+    e.preventDefault();
+    var rows = rowsShown();
+    if (e.shiftKey && last && rows.indexOf(last) >= 0) {
+      var a = rows.indexOf(last), b = rows.indexOf(tr);
+      var from = Math.min(a, b), to = Math.max(a, b);
+      for (var i = from; i <= to; i++) setRow(rows[i], true);
+    } else {
+      setRow(tr, !box.checked);
+    }
+    last = tr;
+    box.dispatchEvent(new Event("change", { bubbles: true }));
+    window.getSelection && window.getSelection().removeAllRanges();
+  });
+  document.addEventListener("change", function (e) {
+    if (e.target && (e.target.name === "sel" || e.target.id === "sel-all")) syncClasses();
+  });
+  document.addEventListener("htmx:afterSwap", function () { last = null; syncClasses(); });
+})();

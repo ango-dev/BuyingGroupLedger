@@ -188,6 +188,11 @@ button.danger:hover { background: var(--bad); color: #fff; }
 .add-form input, .add-form select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 .add-form input.wide { min-width: 360px; }
 table.sheetlike td.sel, table.sheetlike th.sel { width: 26px; text-align: center; padding: 0 4px; }
+/* Sheets-style: the row number is the row's handle; a selected row tints blue over its colour. */
+table.sheetlike td.rownum { cursor: pointer; user-select: none; }
+table.sheetlike td.rownum:hover { color: var(--accent); }
+table.sheetlike tr.selected td { box-shadow: inset 0 0 0 200px rgba(29, 78, 216, 0.16); }
+table.sheetlike tr.selected td.rownum { background: var(--accent); color: #fff; }
 table.sheetlike tr[class*="status-"] td.sel { background: var(--bg); text-decoration: none; }
 body.wide .banner { margin: 8px 8px 0; border-radius: 6px; }
 

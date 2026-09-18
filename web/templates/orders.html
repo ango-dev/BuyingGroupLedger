@@ -73,6 +73,7 @@
       <label>Buying Group <input name="buying_group" value="{{ af.get('buying_group', '') }}" list="groups"></label>
       <datalist id="groups">{% for v in facets.groups %}<option value="{{ v }}">{% endfor %}</datalist>
       <label>Tracking Number <input name="tracking_number" value="{{ af.get('tracking_number', '') }}"></label>
+      <label>Receipt Link <input name="receipt_url" value="{{ af.get('receipt_url', '') }}" placeholder="https://..." class="wide"></label>
       <label>Card Last 4 <input name="card_last4" value="{{ af.get('card_last4', '') }}" size="4"></label>
       <label>Profile <input name="profile_label" value="{{ af.get('profile_label', '') }}" list="profiles"></label>
       <datalist id="profiles">{% for v in facets.profiles %}<option value="{{ v }}">{% endfor %}</datalist>
