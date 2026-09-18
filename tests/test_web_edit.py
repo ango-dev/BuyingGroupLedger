@@ -1,10 +1,17 @@
-"""Cell editing on the Orders page: web/ledger_writer.py (the ONE sheet-write path) and
-POST /orders/cell, over a fake worksheet that records writes and refuses every other method."""
+"""Editing on the Orders page: web/ledger_writer.py (the ONE sheet-write path) and the routes over
+it -- one cell, the same cell across selected rows, a new row, deleted rows -- over a fake
+worksheet that records writes and refuses every other method. Plus the run-lock gate: while a
+scheduled run holds logs/.run.lock, every write is refused."""
 
 from __future__ import annotations
 
 import dataclasses
+import json
+import os
+import re
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -12,11 +19,13 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from models.order import FIELDNAMES  # noqa: E402
-from sheets.ledger_sync import HEADER, _COL  # noqa: E402
+from sheets.ledger_sync import HEADER, _COL, _cogs_formula, _profit_formula  # noqa: E402
 from web import ledger_writer  # noqa: E402
 from web.app import create_app  # noqa: E402
 from web.ledger_reader import SheetReader, SnapshotReader  # noqa: E402
-from web.ledger_writer import ConflictError, EditError, SheetCellWriter, validate  # noqa: E402
+from web.ledger_writer import (  # noqa: E402
+    ConflictError, EditError, RunInProgress, SheetCellWriter, run_in_progress, validate,
+)
 
 NOW = datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc)
 
@@ -25,37 +34,68 @@ def row(**values) -> list[str]:
     return [str(values.get(f, "")) for f in FIELDNAMES]
 
 
+def _col_index(letters: str) -> int:
+    index = 0
+    for ch in letters:
+        index = index * 26 + (ord(ch) - ord("A") + 1)
+    return index - 1
+
+
 class SheetFake:
-    """get_values + update only; any other method is an AssertionError."""
+    """get_values, update, batch_update, delete_rows, row_count/add_rows; anything else is an
+    AssertionError. Writes are applied to the grid so a re-read sees them."""
 
     title = "Orders"
 
     def __init__(self, grid):
         self.grid = [list(r) for r in grid]
         self.writes: list[tuple] = []
+        self.batches: list[tuple] = []
+        self.deleted: list[int] = []
+        self.row_count = 1000
+        self.added_rows = 0
 
     def get_values(self, range_name=None, value_render_option=None, **kwargs):
         assert value_render_option is not None
         return [list(r) for r in self.grid]
 
-    def update(self, range_name, values, value_input_option=None):
-        self.writes.append((range_name, values, value_input_option))
+    def _put(self, range_name, values):
         column = "".join(c for c in range_name if c.isalpha())
         n = int("".join(c for c in range_name if c.isdigit()))
-        index = 0
-        for ch in column:
-            index = index * 26 + (ord(ch) - ord("A") + 1)
+        start = _col_index(column)
+        while len(self.grid) < n:
+            self.grid.append([""] * len(HEADER))
         r = self.grid[n - 1]
-        while len(r) <= index - 1:
-            r.append("")
-        v = values[0][0]
-        r[index - 1] = "TRUE" if v is True else "FALSE" if v is False else str(v)
+        for offset, v in enumerate(values[0]):
+            while len(r) <= start + offset:
+                r.append("")
+            if v is None:
+                continue  # RAW None = leave the cell alone
+            r[start + offset] = "TRUE" if v is True else "FALSE" if v is False else str(v)
+
+    def update(self, range_name, values, value_input_option=None):
+        self.writes.append((range_name, values, value_input_option))
+        self._put(range_name, values)
+
+    def batch_update(self, data, value_input_option=None):
+        self.batches.append((data, value_input_option))
+        for entry in data:
+            self._put(entry["range"], entry["values"])
+
+    def delete_rows(self, start, end=None):
+        self.deleted.append(start)
+        del self.grid[start - 1]
+
+    def add_rows(self, count):
+        self.row_count += count
+        self.added_rows += count
 
     def __getattr__(self, name):
-        raise AssertionError(f"the writer called worksheet.{name}() -- only get_values/update are allowed")
+        raise AssertionError(f"the writer called worksheet.{name}() -- not allowed")
 
 
 KEY = {"order_id": "BBY01-1", "order_date": "2026-09-08", "item_name": "MacBook", "shipment": "1"}
+KEY2 = {"order_id": "1399000017", "order_date": "2026-08-20", "item_name": "iPad", "shipment": "1"}
 
 
 @pytest.fixture
@@ -69,12 +109,22 @@ def sheet():
         row(order_date="2026-08-20", status="paid", retailer="Costco", item_name="iPad",
             shipment="1", quantity="2", order_id="1399000017", total_cost="400",
             payout_amount="500", payout_date="2026-09-01"),
+        # A trailing row whose only content is the checkbox column's materialised FALSE: the
+        # append must land ON it, not after it (ledger_sync._last_occupied_row).
+        row(tracking_submitted="False"),
     ])
 
 
 @pytest.fixture
-def writer(sheet):
-    return SheetCellWriter(opener=lambda: sheet)
+def logs_dir(tmp_path):
+    d = tmp_path / "logs"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
+def writer(sheet, logs_dir):
+    return SheetCellWriter(opener=lambda: sheet, logs_dir=logs_dir)
 
 
 class TestValidate:
@@ -157,63 +207,236 @@ class TestSheetCellWriter:
         assert len(sheet.writes) == 1
 
 
-class TestOrdersCellRoute:
-    def _client(self, sheet, tmp_path, writer=None, reader=None):
+class TestBulkEdit:
+    def test_one_read_one_batch_for_every_located_row(self, writer, sheet):
+        result = writer.write_cells([KEY, KEY2], "buying_group", "MOD")
+        assert result == {"written": 2, "errors": [], "field": "buying_group", "value": "MOD"}
+        assert len(sheet.batches) == 1
+        data, option = sheet.batches[0]
+        assert option == "RAW"
+        assert [d["range"] for d in data] == [f"{_COL['buying_group']}2", f"{_COL['buying_group']}3"]
+        assert sheet.grid[1][FIELDNAMES.index("buying_group")] == "MOD"
+
+    def test_a_blank_clears_with_user_entered_and_a_bad_key_is_reported_not_fatal(self, writer, sheet):
+        result = writer.write_cells([KEY, {**KEY, "order_id": "nope"}], "insurance", "")
+        assert result["written"] == 1 and len(result["errors"]) == 1
+        assert "nope" in result["errors"][0]
+        assert sheet.batches[0][1] == "USER_ENTERED"
+
+    def test_validation_and_emptiness(self, writer, sheet):
+        with pytest.raises(EditError, match="no rows selected"):
+            writer.write_cells([], "insurance", "1")
+        with pytest.raises(EditError, match="sheet formula"):
+            writer.write_cells([KEY], "cogs", "1")
+        assert sheet.batches == []
+
+
+class TestAppendRow:
+    def test_lands_after_the_last_occupied_row_with_formulas_and_computed_total(self, writer, sheet):
+        result = writer.add_row({"order_id": "NEW-1", "order_date": "2026-09-17",
+                                    "item_name": "Thing", "quantity": "2", "cost_per_item": "$10.50",
+                                    "retailer": "Costco", "buying_group": "BFMR"})
+        # Row 4 held only a materialised FALSE checkbox, so the append lands ON it.
+        assert result == {"row_number": 4, "key": {"order_id": "NEW-1", "order_date": "2026-09-17",
+                                                    "item_name": "Thing", "shipment": "1"}}
+        rng, values, option = sheet.writes[0]
+        assert rng == "A4" and option == "RAW"
+        written = dict(zip(FIELDNAMES, values[0]))
+        assert written["shipment"] == 1 and written["status"] == "ordered"
+        assert written["quantity"] == 2 and written["cost_per_item"] == 10.5
+        assert written["total_cost"] == 21.0
+        assert written["insurance"] is None  # blank -> None, never "" (keeps the column format)
+        assert written["cogs"] is None and written["total_profit"] is None
+        data, option = sheet.batches[0]
+        assert option == "USER_ENTERED"
+        assert data == [{"range": f"{_COL['cogs']}4", "values": [[_cogs_formula(4)]]},
+                        {"range": f"{_COL['total_profit']}4", "values": [[_profit_formula(4)]]}]
+
+    def test_grows_the_grid_when_the_append_would_fall_off_it(self, writer, sheet):
+        sheet.row_count = 3
+        writer.add_row({"order_id": "NEW-1", "order_date": "2026-09-17", "item_name": "T"})
+        assert sheet.added_rows > 0 and sheet.row_count >= 4
+
+    def test_requirements_and_duplicates(self, writer, sheet):
+        with pytest.raises(EditError, match="Order ID is required"):
+            writer.add_row({"order_date": "2026-09-17", "item_name": "T"})
+        with pytest.raises(EditError, match="YYYY-MM-DD"):
+            writer.add_row({"order_id": "X", "order_date": "17/09/2026", "item_name": "T"})
+        with pytest.raises(EditError, match="Item Name is required"):
+            writer.add_row({"order_id": "X", "order_date": "2026-09-17"})
+        with pytest.raises(EditError, match="Shipment must be a number"):
+            writer.add_row({"order_id": "X", "order_date": "2026-09-17", "item_name": "T",
+                               "shipment": "one"})
+        with pytest.raises(EditError, match="Status must be one of"):
+            writer.add_row({"order_id": "X", "order_date": "2026-09-17", "item_name": "T",
+                               "status": "done"})
+        with pytest.raises(EditError, match="already on the sheet"):
+            writer.add_row(KEY)
+        assert sheet.writes == []
+
+
+class TestDeleteRows:
+    def test_deletes_bottom_up(self, writer, sheet):
+        result = writer.remove_rows([KEY, KEY2])
+        assert result == {"deleted": 2, "row_numbers": [3, 2]}
+        assert sheet.deleted == [3, 2]
+        assert [r[FIELDNAMES.index("order_id")] for r in sheet.grid[1:]] == [""]
+
+    def test_all_or_nothing(self, writer, sheet):
+        with pytest.raises(ConflictError):
+            writer.remove_rows([KEY, {**KEY, "order_id": "nope"}])
+        assert sheet.deleted == []
+        with pytest.raises(EditError, match="no rows selected"):
+            writer.remove_rows([])
+
+
+class TestRunLockGate:
+    def test_lock_semantics_match_main(self, logs_dir):
+        import main
+
+        assert ledger_writer.LOCK_STALE_SECONDS == main._LOCK_STALE_SECONDS
+        assert ledger_writer.LOCK_FILE_NAME == main._LOCK_FILE.name
+        assert run_in_progress(logs_dir) is False
+        lock = logs_dir / ".run.lock"
+        lock.write_text("1 2", encoding="utf-8")
+        assert run_in_progress(logs_dir) is True
+        old = time.time() - ledger_writer.LOCK_STALE_SECONDS - 1
+        os.utime(lock, (old, old))
+        assert run_in_progress(logs_dir) is False  # a stale lock is a crashed run, not a live one
+
+    def test_every_write_is_refused_while_a_run_is_live(self, writer, sheet, logs_dir):
+        (logs_dir / ".run.lock").write_text("1 2", encoding="utf-8")
+        for call in (lambda: writer.write_cell(KEY, "insurance", "1"),
+                     lambda: writer.write_cells([KEY], "insurance", "1"),
+                     lambda: writer.add_row({"order_id": "X", "order_date": "2026-09-17",
+                                                "item_name": "T"}),
+                     lambda: writer.remove_rows([KEY])):
+            with pytest.raises(RunInProgress, match="scheduled run is in progress"):
+                call()
+        assert sheet.writes == [] and sheet.batches == [] and sheet.deleted == []
+
+
+# --------------------------------------------------------------------------------------------------
+# The routes
+# --------------------------------------------------------------------------------------------------
+
+
+class TestOrdersRoutes:
+    def _client(self, sheet, tmp_path, logs_dir, writer=None):
         from config.settings import settings
 
-        reader = reader or SheetReader(ttl_seconds=300, opener=lambda: (sheet, "Ledger"))
-        app = create_app(reader, logs_dir=tmp_path, failures_dir=tmp_path,
+        reader = SheetReader(ttl_seconds=300, opener=lambda: (sheet, "Ledger"))
+        app = create_app(reader, logs_dir=logs_dir, failures_dir=tmp_path,
                          backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
                          settings=dataclasses.replace(settings, container_run_interval_hours=6),
-                         writer=writer or SheetCellWriter(opener=lambda: sheet))
+                         writer=writer or SheetCellWriter(opener=lambda: sheet, logs_dir=logs_dir))
         return TestClient(app)
 
-    def test_the_orders_page_is_wide_editable_and_coloured_by_status(self, sheet, tmp_path):
-        client = self._client(sheet, tmp_path)
+    def test_the_orders_page_is_wide_editable_and_coloured_by_status(self, sheet, tmp_path, logs_dir):
+        client = self._client(sheet, tmp_path, logs_dir)
         body = client.get("/orders").text
         assert '<body class="wide">' in body
         assert 'class="grid ledger sheetlike"' in body
-        assert body.count("<th ") == len(FIELDNAMES) + 1  # every column, plus the row number
+        assert body.count("<th ") == len(FIELDNAMES) + 2  # every column, the row number, the selector
         assert 'data-field="insurance"' in body and 'class="num edit"' in body
-        import re
-
         order_id_td = re.search(r'<td class="([^"]*)"\s+data-field="order_id"', body)
         assert order_id_td and "edit" not in order_id_td.group(1)  # a key column: never editable
         cogs_td = re.search(r'<td class="([^"]*)"\s+data-field="cogs"', body)
         assert cogs_td and "edit" not in cogs_td.group(1)  # a formula: never editable
         assert '<tr class="status-shipped' in body and '<tr class="status-paid' in body
         assert "double-click a cell to edit" in body
-        assert "/static/edit.js" in body
-        assert "/static/sheet.js" in body  # the frozen filter bar + header measurement
-        assert "/static/sheet.js" not in client.get("/").text  # only the wide page needs it
+        assert "/static/edit.js" in body and "/static/sheet.js" in body
+        assert "/static/sheet.js" not in client.get("/").text
+        # The row tools.
+        assert 'name="sel"' in body and 'id="sel-all"' in body
+        assert 'hx-post="/orders/bulk"' in body and 'hx-post="/orders/delete"' in body
+        assert 'action="/orders/add"' in body
+        assert '<option value="insurance">Insurance</option>' in body
 
-    def test_an_edit_writes_the_sheet_and_returns_the_fresh_cell(self, sheet, tmp_path):
-        client = self._client(sheet, tmp_path)
+    def test_an_edit_writes_the_sheet_and_returns_the_fresh_cell(self, sheet, tmp_path, logs_dir):
+        client = self._client(sheet, tmp_path, logs_dir)
         response = client.post("/orders/cell", data={**KEY, "field": "insurance", "value": "9.5",
                                                       "expected": "6.4"})
         assert response.status_code == 200
         assert sheet.writes == [(f"{_COL['insurance']}2", [[9.5]], "RAW")]
         assert "$9.50" in response.text and "data-error" not in response.text
         assert 'data-raw="9.5"' in response.text
-        # The reader re-read after the write: the page now shows the new value.
-        assert "$9.50" in client.get("/orders").text
+        assert "$9.50" in client.get("/orders").text  # the reader re-read after the write
 
-    def test_a_refused_edit_comes_back_in_the_cell_with_the_reason(self, sheet, tmp_path):
-        client = self._client(sheet, tmp_path)
+    def test_a_refused_edit_comes_back_in_the_cell_with_the_reason(self, sheet, tmp_path, logs_dir):
+        client = self._client(sheet, tmp_path, logs_dir)
         response = client.post("/orders/cell", data={**KEY, "field": "payout_date",
                                                       "value": "yesterday", "expected": ""})
         assert response.status_code == 200
         assert "YYYY-MM-DD" in response.text and 'data-error=' in response.text
         assert sheet.writes == []
-
         conflict = client.post("/orders/cell", data={**KEY, "field": "insurance", "value": "1",
                                                       "expected": "0"})
         assert "now reads" in conflict.text and sheet.writes == []
-
         formula = client.post("/orders/cell", data={**KEY, "field": "cogs", "value": "1"})
         assert "not editable" in formula.text
 
-    def test_the_snapshot_backend_is_view_only(self, tmp_path):
+    def test_bulk_edit_re_renders_the_filtered_table_with_a_notice(self, sheet, tmp_path, logs_dir):
+        client = self._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/bulk", data={"sel": [json.dumps(KEY), json.dumps(KEY2)],
+                                                     "field": "buying_group", "value": "MOD",
+                                                     "retailer": "Costco"})
+        assert response.status_code == 200
+        assert "Set Buying Group on 2 row(s)" in response.text
+        assert len(sheet.batches) == 1
+        assert response.text.count('<tr class="status-') == 1  # the Costco filter still applies
+        assert ">MOD<" in response.text
+
+    def test_bulk_edit_errors_are_shown_not_500(self, sheet, tmp_path, logs_dir):
+        client = self._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/bulk", data={"field": "insurance", "value": "1"})
+        assert response.status_code == 200 and "no rows selected" in response.text
+        response = client.post("/orders/bulk", data={"sel": [json.dumps(KEY)], "field": "cogs",
+                                                     "value": "1"})
+        assert "sheet formula" in response.text and sheet.batches == []
+
+    def test_delete_selected(self, sheet, tmp_path, logs_dir):
+        client = self._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/delete", data={"sel": [json.dumps(KEY2)]})
+        assert response.status_code == 200 and "Deleted 1 row(s)" in response.text
+        assert sheet.deleted == [3]
+        assert "1399000017" not in response.text and "BBY01-1" in response.text
+
+    def test_add_row_redirects_to_the_new_order(self, sheet, tmp_path, logs_dir):
+        client = self._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/add", data={"order_id": "NEW-1", "order_date": "2026-09-17",
+                                                     "item_name": "Thing", "quantity": "1",
+                                                     "cost_per_item": "5"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert "q=NEW-1" in response.headers["location"]
+        assert sheet.writes[0][0] == "A4"
+        page = client.get(response.headers["location"]).text
+        assert "Added NEW-1 at sheet row 4" in page and "NEW-1" in page
+
+    def test_add_row_errors_keep_the_form_open_with_the_values(self, sheet, tmp_path, logs_dir):
+        client = self._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/add", data={"order_id": "NEW-1", "order_date": "bad",
+                                                     "item_name": "Thing"})
+        assert response.status_code == 400
+        assert "YYYY-MM-DD" in response.text
+        assert '<details class="add-row" open>' in response.text
+        assert 'value="NEW-1"' in response.text
+        assert sheet.writes == []
+
+    def test_writes_are_refused_while_a_run_is_live(self, sheet, tmp_path, logs_dir):
+        client = self._client(sheet, tmp_path, logs_dir)
+        (logs_dir / ".run.lock").write_text("1 2", encoding="utf-8")
+        cell = client.post("/orders/cell", data={**KEY, "field": "insurance", "value": "1"})
+        assert "scheduled run is in progress" in cell.text
+        bulk = client.post("/orders/bulk", data={"sel": [json.dumps(KEY)], "field": "insurance",
+                                                 "value": "1"})
+        assert "scheduled run is in progress" in bulk.text
+        added = client.post("/orders/add", data={"order_id": "N", "order_date": "2026-09-17",
+                                                  "item_name": "T"})
+        assert added.status_code == 423
+        assert sheet.writes == [] and sheet.batches == [] and sheet.deleted == []
+
+    def test_the_snapshot_backend_is_view_only(self, tmp_path, logs_dir):
         import csv
 
         path = tmp_path / "sheet_backup_20260917T000000Z.csv"
@@ -224,30 +447,36 @@ class TestOrdersCellRoute:
                            status="shipped", total_cost="1"))
         from config.settings import settings
 
-        app = create_app(SnapshotReader(path), logs_dir=tmp_path, failures_dir=tmp_path,
+        app = create_app(SnapshotReader(path), logs_dir=logs_dir, failures_dir=tmp_path,
                          backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
                          settings=dataclasses.replace(settings, container_run_interval_hours=6))
         client = TestClient(app)
         body = client.get("/orders").text
         assert "view only (snapshot backend)" in body and 'class="num edit"' not in body
-        response = client.post("/orders/cell", data={"order_id": "X", "order_date": "2026-09-01",
-                                                      "item_name": "T", "shipment": "1",
-                                                      "field": "insurance", "value": "1"})
-        assert "editing is off" in response.text
+        assert 'name="sel"' not in body and 'action="/orders/add"' not in body
+        cell = client.post("/orders/cell", data={"order_id": "X", "order_date": "2026-09-01",
+                                                 "item_name": "T", "shipment": "1",
+                                                 "field": "insurance", "value": "1"})
+        assert "editing is off" in cell.text
+        assert "editing is off" in client.post("/orders/bulk", data={"field": "insurance"}).text
+        assert client.post("/orders/add", data={"order_id": "N"}).status_code == 409
 
 
 class TestTheWritePathIsSingular:
     def test_only_ledger_writer_names_the_write_scope_or_a_write_method(self):
         """web/ may write the Sheet in exactly one file. Everything else in web/ is scanned by
-        tests/test_web.py's read-only guarantee; this pins the exemption to that one file."""
-        from pathlib import Path
-
+        tests/test_web.py's read-only guarantee; this pins the exemption to that one file and
+        what it may do: locate, update, batch-update, delete rows -- never create a tab, never
+        gspread's append_row (rows land where the upsert's own append would)."""
         root = Path(__file__).resolve().parents[1] / "web"
         for path in root.rglob("*.py"):
             text = path.read_text(encoding="utf-8")
             if path.name == "ledger_writer.py":
                 assert "SCOPES" in text and "worksheet.update(" in text
-                assert "append_row" not in text and "batch_update" not in text
-                assert "add_worksheet" not in text  # an edit never creates a tab
+                assert "worksheet.delete_rows(" in text and "worksheet.batch_update(" in text
+                assert "append_row(" not in text.replace("def append_row(", "").replace(
+                    "writer.add_row(", "")
+                assert "add_worksheet" not in text
             else:
-                assert "worksheet.update(" not in text, path.name
+                for token in ("worksheet.update(", "delete_rows(", "batch_update("):
+                    assert token not in text, f"{path.name} mentions {token}"

@@ -152,6 +152,25 @@ Total Profit) and Last Scraped At. Status must be one of the ledger's words; dat
 `YYYY-MM-DD`. The snapshot backend is view-only (a CSV has nothing to write to); the `db` backend
 writes the Sheet and re-mirrors, so the copy follows.
 
+**Rows: add, bulk edit, delete.** Tick rows (the header box ticks every row shown), pick a field
+and a value in the filter bar and *Apply* to set it on all of them in one batched write (blank
+clears), or *Delete selected* to remove them from the sheet (confirmed first; rows are removed
+bottom-up so the located numbers stay valid; all-or-nothing). *Add a row* takes the key columns
+(Order Date, Order ID, Item Name, Shipment) plus the common ones; it lands where the sync's own
+append would (after the last occupied row, blanks sent as `None` so the column formats survive, the
+two formula cells stamped), Total Cost is computed from Quantity × Cost Per Item, and the row sorts
+into date order on the next sync. A key that already exists is refused.
+
+**While a scheduled run is in progress every write is refused** (the page says so and nothing is
+written). The sync caches sheet row numbers from its pre-sync snapshot; a row deleted or appended
+underneath it would put its updates on the wrong rows. The signal is the run lock the scheduler
+already keeps (`logs/.run.lock`, stale after three hours, the same rule as `main.py`), so the
+refusal lasts as long as the run does.
+
+**Open rows** on the overview are `ordered`, `shipped` **or `delivered`** (the buying group has not
+paid yet), which is deliberately wider than the scrapers' terminal statuses; a gift-card row is
+never open.
+
 **Three backends, one adapter** (`web/ledger_reader.py`), chosen in `config.json`'s `web` section or
 by `WEB_LEDGER_SOURCE=snapshot|sheet|db` (the variable table in [configuration.md](configuration.md)
 lists every `WEB_*` setting):

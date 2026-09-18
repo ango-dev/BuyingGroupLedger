@@ -478,11 +478,15 @@ class TestPayoutSemantics:
         r = _row(status=status, payout_amount="5")
         assert not r.is_committed and r.cogs is None and r.profit is None
 
-    def test_open_follows_terminal_statuses(self):
-        for status in ("ordered", "shipped"):
+    def test_open_is_ordered_shipped_or_delivered_and_never_a_gift_card(self):
+        """delivered counts as open -- the group has not paid yet. Wider than
+        the scrapers' TERMINAL_STATUSES on purpose."""
+        for status in ("ordered", "shipped", "delivered"):
             assert _row(status=status).is_open
-        for status in TERMINAL_STATUSES:
+        for status in ("cancelled", "paid", "return", "superseded"):
             assert not _row(status=status).is_open
+        assert "delivered" in TERMINAL_STATUSES  # the scrapers still never re-read it
+        assert not _row(status="delivered", buying_group="Gift Card").is_open
 
 
 class TestFormulasInPython:
@@ -566,15 +570,15 @@ class TestOverview:
     def test_counts(self, summary):
         assert summary["rows"] == len(LEDGER_ROWS)
         assert summary["orders"] == 8
-        assert summary["open_rows"] == 3  # rows 2, 3, 4
+        assert summary["open_rows"] == 4  # rows 2, 3, 4 and the delivered row 8 (not the gift card)
 
     def test_open_rows_by_status_and_group(self, summary):
         table = summary["open_table"]
         assert table["groups"] == ["BFMR"]
         assert [(r["status"], r["cells"], r["total"]) for r in table["rows"]] == [
-            ("ordered", [2], 2), ("shipped", [1], 1),
+            ("ordered", [2], 2), ("shipped", [1], 1), ("delivered", [1], 1),
         ]
-        assert table["column_totals"] == [3] and table["total"] == 3
+        assert table["column_totals"] == [4] and table["total"] == 4
 
     def test_projected_profit_is_the_committed_rows(self, summary):
         # Row 3 alone: 1230 - 1000*0.96 - 6.4 = 263.60
@@ -704,7 +708,7 @@ class TestOverviewPage:
         body = response.text
         assert "Projected profit" in body and "$263.60" in body
         assert "Realized profit" in body and "$193.00" in body
-        assert "Open rows by buying group and status" in body
+        assert "Open Rows" in body
         assert "Blank Card Last 4" in body and "111-0000002-0000002" in body
         assert "no automatic writes" in body
 
@@ -1260,9 +1264,9 @@ class TestCharts:
         assert 'href="/orders?status=shipped&amp;group=BFMR"' in body
         assert "<title>shipped: 1" in body  # the hover tooltip
         assert "table-view" not in body  # user: no table toggles under the charts
-        assert "Rows by status" in body and "Open rows by buying group and status" in body
-        # Legend precedes the chart body in each card (it sits at the card's top right).
-        assert body.index('<ul class="legend">') < body.index('<div class="chart-body">')
+        assert "Rows by status" in body and "Open Rows" in body
+        # The legend sits beside the chart, inside the chart body.
+        assert body.index('<div class="chart-body">') < body.index('<ul class="legend">')
 
     def test_static_assets_carry_a_cache_busting_version(self, client):
         """A deploy must never render with the previous stylesheet from the browser's cache."""

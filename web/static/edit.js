@@ -78,3 +78,22 @@
     if (td) { td.focus(); }
   });
 })();
+
+// Row selection for bulk edit / delete: the header checkbox ticks every row shown, and the
+// toolbar's counter follows the ticks (it lives in the filter bar, outside the swapped table).
+(function () {
+  "use strict";
+  function count() {
+    var n = document.querySelectorAll('input[name="sel"]:checked').length;
+    var out = document.getElementById("sel-count");
+    if (out) out.textContent = String(n);
+  }
+  document.addEventListener("change", function (e) {
+    if (e.target && e.target.id === "sel-all") {
+      document.querySelectorAll('input[name="sel"]').forEach(function (box) { box.checked = e.target.checked; });
+    }
+    if (e.target && (e.target.id === "sel-all" || e.target.name === "sel")) count();
+  });
+  document.addEventListener("htmx:afterSwap", count);
+  document.addEventListener("DOMContentLoaded", count);
+})();

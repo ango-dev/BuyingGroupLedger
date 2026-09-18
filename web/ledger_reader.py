@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from config.warehouses import is_deliberately_unrouted
-from models.order import FIELDNAMES, MONEY_FREE_STATUSES, TERMINAL_STATUSES
+from models.order import FIELDNAMES, MONEY_FREE_STATUSES
 from sheets.ledger_sync import HEADER, _NUMERIC_FIELDS, _parse_checkbox, _parse_display_number
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,6 +48,9 @@ FIELD_TO_HEADER = dict(zip(FIELDNAMES, HEADER))
 #: while the package is still open (docs/data-model.md, "Payout Amount holds two kinds of number").
 #: The same rule scripts/audit_sheet.check_cogs_inputs_complete counts a row settled by.
 SETTLED_STATUSES = ("paid", "return")
+#: The dashboard's OPEN rows: the group has not paid yet. Delivered counts --
+#: the scrapers' TERMINAL_STATUSES is a different question (whether a row is ever re-read).
+OPEN_STATUSES = ("ordered", "shipped", "delivered")
 
 
 def _is_formula(text: str) -> bool:
@@ -128,8 +131,11 @@ class LedgerRow:
     # --- lifecycle --------------------------------------------------------------------------------
     @property
     def is_open(self) -> bool:
-        """Still in the retailer lifecycle: not one of models.order.TERMINAL_STATUSES."""
-        return self.status not in TERMINAL_STATUSES
+        """Still waiting on the buying group: ordered, shipped OR delivered. This is the DASHBOARD's notion of open -- the money is
+        not in yet -- and deliberately wider than models.order.TERMINAL_STATUSES, which is the
+        scrapers' notion (a delivered row is never re-read). A gift-card row is never open: it is
+        routed nowhere and nothing is pending on it."""
+        return self.status in OPEN_STATUSES and not self.is_gift_card
 
     @property
     def is_money_free(self) -> bool:

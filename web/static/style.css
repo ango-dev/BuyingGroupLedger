@@ -76,18 +76,20 @@ header .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 
 /* --- Charts (web/charts.py, _donut.html, _bars.html): one row, same card, same height ------- */
-/* One row of cards (wrapping only when the viewport is too narrow for four). Each card is a grid:
-   title top-left, legend top-right, the chart below spanning both. */
+/* One row of cards (wrapping only when the viewport is too narrow for four). Each card: the
+   title on top, then the chart with its legend beside it. */
 .charts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 8px 0 4px; }
 @media (max-width: 1400px) { .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .charts { grid-template-columns: 1fr; } }
 .charts figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-  padding: 12px 14px 10px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto 1fr;
-  grid-template-areas: "title legend" "body body"; column-gap: 12px; row-gap: 8px; min-width: 0; }
-.charts figcaption { grid-area: title; font-size: 1.1em; font-weight: 600; color: var(--fg); }
-.charts .legend { grid-area: legend; }
-.charts .chart-body { grid-area: body; display: flex; align-items: center; justify-content: center; min-width: 0; }
-.charts svg { flex: 0 0 auto; max-width: 100%; height: auto; }
+  padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.charts figcaption { font-size: 1.1em; font-weight: 600; color: var(--fg); }
+/* Chart on the left, legend beside it. The SVG may SHRINK (min-width 0, flex 1) so a wide bar
+   chart never pushes the legend out of the card; a donut keeps its fixed size. */
+.charts .chart-body { display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1; }
+.charts svg { flex: 1 1 auto; min-width: 0; max-width: 100%; height: auto; }
+.charts .donut svg { flex: 0 0 auto; }
+.charts .legend { flex: 0 0 auto; }
 .charts .track { stroke: var(--line); }
 .charts a.slice circle, .charts a.slice rect { transition: opacity .12s; }
 .charts a.slice:hover circle, .charts a.slice:hover rect, .charts a.slice:focus circle, .charts a.slice:focus rect { opacity: 0.8; }
@@ -101,7 +103,7 @@ header .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .bars text { font-size: 12px; fill: var(--fg); }
 .bars a.bar-label text { fill: var(--accent); }
 .bars .bar-total { fill: var(--muted); font-variant-numeric: tabular-nums; }
-.bars .legend { flex-direction: row; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.bars .legend { flex-direction: column; }
 ul.ids { columns: 2; padding-left: 18px; margin: 8px 0 0; }
 
 table.grid { border-collapse: collapse; width: 100%; background: var(--card); }
@@ -172,6 +174,22 @@ table.sheetlike td.error { outline: 2px solid var(--bad); outline-offset: -2px; 
 .filters label { display: flex; flex-direction: column; font-size: 0.85em; color: var(--muted); gap: 3px; }
 .filters select, .filters input { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 .filters input[type=search] { min-width: 320px; }
+/* bulk edit / delete controls live in the filter bar; the add-row form sits under it */
+.toolbar-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+.filters .bulk { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.filters .bulk input[type=text] { min-width: 180px; }
+button.danger { color: var(--bad); border-color: var(--bad); }
+button.danger:hover { background: var(--bad); color: #fff; }
+.add-row { margin: 8px 8px 0; }
+.add-row summary { cursor: pointer; color: var(--accent); }
+.add-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 8px 0 4px; padding: 10px 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.add-form label { display: flex; flex-direction: column; font-size: 0.85em; color: var(--muted); gap: 3px; }
+.add-form input, .add-form select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.add-form input.wide { min-width: 360px; }
+table.sheetlike td.sel, table.sheetlike th.sel { width: 26px; text-align: center; padding: 0 4px; }
+table.sheetlike tr[class*="status-"] td.sel { background: var(--bg); text-decoration: none; }
+body.wide .banner { margin: 8px 8px 0; border-radius: 6px; }
 
 .tag { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 0.8em; border: 1px solid var(--line); }
 .tag.committed { color: var(--committed); border-color: var(--committed); }

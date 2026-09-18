@@ -181,6 +181,6 @@ def open_rows_bars(open_table: dict, *, width: int = 360, bar_height: int = 18, 
                         segments=segments, y=y))
     height = max(len(ordered) * (bar_height + gap) - gap, bar_height)
     legend = [(s, STATUS_COLORS.get(s, OTHER_COLOR)) for s in statuses]
-    return StackedBars(title="Open rows by buying group and status", bars=bars, legend=legend,
+    return StackedBars(title="Open Rows", bars=bars, legend=legend,
                        width=width, height=height, label_width=label_width, bar_height=bar_height,
                        total=int(open_table.get("total", 0)))

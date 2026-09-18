@@ -1,18 +1,7 @@
 {#- One donut (web/charts.Donut): an inline SVG ring whose every slice is a link to the Orders page
-    with that filter applied, the total in the middle, and a legend with direct labels at the
-    card's top right (identity is never colour-alone). -#}
+    with that filter applied, the total in the middle, and a legend with direct labels beside it (identity is never colour-alone). -#}
 <figure class="donut" aria-label="{{ d.title }}">
   <figcaption>{{ d.title }}</figcaption>
-  <ul class="legend">
-    {% for s in d.segments %}
-    <li>
-      <span class="swatch" style="background: {{ s.color }}"></span>
-      {% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}<span>{{ s.label }}</span>{% endif %}
-      <span class="num">{{ s.count }}</span>
-      <span class="muted small">{{ (s.share * 100) | round(0) | int }}%</span>
-    </li>
-    {% endfor %}
-  </ul>
   <div class="chart-body">
     <svg viewBox="0 0 {{ d.size }} {{ d.size }}" width="{{ d.size }}" height="{{ d.size }}" role="img" aria-label="{{ d.title }}: {{ d.total }} rows">
       <circle class="track" cx="{{ d.center }}" cy="{{ d.center }}" r="{{ d.radius }}" fill="none" stroke-width="{{ d.stroke }}"></circle>
@@ -28,5 +17,15 @@
       {% if s.href %}</a>{% endif %}
       {% endfor %}
     </svg>
+    <ul class="legend">
+      {% for s in d.segments %}
+      <li>
+        <span class="swatch" style="background: {{ s.color }}"></span>
+        {% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}<span>{{ s.label }}</span>{% endif %}
+        <span class="num">{{ s.count }}</span>
+        <span class="muted small">{{ (s.share * 100) | round(0) | int }}%</span>
+      </li>
+      {% endfor %}
+    </ul>
   </div>
 </figure>

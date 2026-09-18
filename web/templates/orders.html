@@ -36,9 +36,56 @@
   <input type="hidden" name="sort" value="{{ filters.sort }}">
   <input type="hidden" name="dir" value="{{ 'desc' if filters.desc else 'asc' }}">
   <noscript><button type="submit">Apply</button></noscript>
+  {% if editable %}
+  <span class="toolbar-sep"></span>
+  <label>Bulk edit <span class="muted small">(<span id="sel-count">0</span> selected)</span>
+    <span class="bulk">
+      <select name="field" form="bulk">
+        {% for f, heading in EDIT_FIELD_HEADINGS %}<option value="{{ f }}">{{ heading }}</option>{% endfor %}
+      </select>
+      <input type="text" name="value" form="bulk" placeholder="value (blank clears)">
+      <button type="submit" form="bulk" hx-post="/orders/bulk" hx-include="#filters, #bulk" hx-target="#orders-table"
+              hx-confirm="Set this field to this value on every selected row?">Apply</button>
+      <button type="submit" form="bulk" class="danger" hx-post="/orders/delete" hx-include="#filters, #bulk" hx-target="#orders-table"
+              hx-confirm="DELETE every selected row from the sheet? This cannot be undone here.">Delete selected</button>
+    </span>
+  </label>
+  {% endif %}
 </form>
 
+{% if editable %}
+  {# Outside the filter form: a form cannot nest inside another. #}
+  <details class="add-row" {{ 'open' if add_open }}>
+    <summary>Add a row</summary>
+    <form method="post" action="/orders/add" class="add-form">
+      {% set af = add_form or {} %}
+      <label>Order Date <input name="order_date" value="{{ af.get('order_date', '') }}" placeholder="YYYY-MM-DD" required></label>
+      <label>Order ID <input name="order_id" value="{{ af.get('order_id', '') }}" required></label>
+      <label>Item Name <input name="item_name" value="{{ af.get('item_name', '') }}" required class="wide"></label>
+      <label>Shipment <input name="shipment" value="{{ af.get('shipment', '1') }}" size="3"></label>
+      <label>Status
+        <select name="status">{% for s in ('ordered', 'shipped', 'delivered', 'cancelled', 'paid', 'return') %}<option value="{{ s }}" {{ 'selected' if af.get('status') == s }}>{{ s }}</option>{% endfor %}</select>
+      </label>
+      <label>Retailer <input name="retailer" value="{{ af.get('retailer', '') }}" list="retailers"></label>
+      <datalist id="retailers">{% for v in facets.retailers %}<option value="{{ v }}">{% endfor %}</datalist>
+      <label>Quantity <input name="quantity" value="{{ af.get('quantity', '') }}" size="4"></label>
+      <label>Cost Per Item <input name="cost_per_item" value="{{ af.get('cost_per_item', '') }}" size="8"></label>
+      <label>Buying Group <input name="buying_group" value="{{ af.get('buying_group', '') }}" list="groups"></label>
+      <datalist id="groups">{% for v in facets.groups %}<option value="{{ v }}">{% endfor %}</datalist>
+      <label>Tracking Number <input name="tracking_number" value="{{ af.get('tracking_number', '') }}"></label>
+      <label>Card Last 4 <input name="card_last4" value="{{ af.get('card_last4', '') }}" size="4"></label>
+      <label>Profile <input name="profile_label" value="{{ af.get('profile_label', '') }}" list="profiles"></label>
+      <datalist id="profiles">{% for v in facets.profiles %}<option value="{{ v }}">{% endfor %}</datalist>
+      <button type="submit">Add row</button>
+      <span class="muted small">Total Cost is computed from Quantity × Cost Per Item; everything else can be edited in the table afterwards. The row lands at the bottom and sorts into place on the next sync.</span>
+    </form>
+  </details>
+{% endif %}
+
+{% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
+<form id="bulk">
 <div id="orders-table">
   {% include "_orders_table.html" %}
 </div>
+</form>
 {% endblock %}

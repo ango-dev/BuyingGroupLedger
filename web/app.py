@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -167,29 +168,109 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     if writer is None and reader.backend != "snapshot":
         from web.ledger_writer import SheetCellWriter
 
-        writer = SheetCellWriter()
+        writer = SheetCellWriter(logs_dir=logs_dir)
     app.state.writer = writer
+    import json
+
     from web.ledger_writer import EDITABLE_FIELDS, EditError
     from web.queries import LINK_FIELDS, MONEY_FIELDS
 
     templates.env.globals["EDITABLE_FIELDS"] = EDITABLE_FIELDS
     templates.env.globals["LINK_FIELDS"] = LINK_FIELDS
     templates.env.globals["MONEY_FIELDS"] = MONEY_FIELDS
+    templates.env.globals["EDIT_FIELD_HEADINGS"] = [(f, FIELD_TO_HEADER[f]) for f in EDITABLE_FIELDS]
+
+    def orders_context(request: Request, params=None, **extra) -> dict:
+        snapshot = load(request)
+        filters = Filters.from_query(params if params is not None else request.query_params)
+        rows = sort_rows(filter_rows(snapshot.rows, filters), filters)
+        return {
+            "snapshot": snapshot, "filters": filters, "rows": rows, "total": len(snapshot.rows),
+            "facets": facets(snapshot.rows), "columns": column_headings(),
+            "editable": writer is not None, "wide": True, **extra,
+        }
 
     @app.get("/orders", response_class=HTMLResponse)
     def orders(request: Request):
-        snapshot = load(request)
-        filters = Filters.from_query(request.query_params)
-        rows = sort_rows(filter_rows(snapshot.rows, filters), filters)
-        context = {
-            "snapshot": snapshot, "filters": filters, "rows": rows, "total": len(snapshot.rows),
-            "facets": facets(snapshot.rows), "columns": column_headings(),
-            "editable": writer is not None, "wide": True,
-        }
+        context = orders_context(request, notice=request.query_params.get("notice", ""))
         # htmx asks for just the table; a plain browser request gets the whole page.
         if request.headers.get("HX-Request", "").lower() == "true":
             return page(request, "_orders_table.html", **context)
         return page(request, "orders.html", **context)
+
+    def selected_keys(form) -> list[dict]:
+        keys = []
+        for raw in form.getlist("sel"):
+            try:
+                key = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(key, dict):
+                keys.append(key)
+        return keys
+
+    def table_after(request: Request, form, *, notice: str = "", error: str = ""):
+        """The table re-rendered from a forced re-read, with the page's filters (posted along
+        with the form) still applied and a notice or error line on top."""
+        return page(request, "_orders_table.html",
+                    **orders_context(request, params=form, notice=notice, error=error))
+
+    @app.post("/orders/bulk", response_class=HTMLResponse)
+    async def orders_bulk(request: Request):
+        """Set one field to one value on every selected row."""
+        form = await request.form()
+        keys = selected_keys(form)
+        field, value = str(form.get("field", "")), str(form.get("value", ""))
+        if writer is None:
+            return table_after(request, form, error="editing is off: this backend is a CSV snapshot")
+        try:
+            result = writer.write_cells(keys, field, value)
+        except EditError as exc:
+            return table_after(request, form, error=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return table_after(request, form, error=f"{type(exc).__name__}: {exc}")
+        reader.load(force=True)
+        notice = (f"Set {FIELD_TO_HEADER.get(field, field)} on {result['written']} row(s)"
+                  + (f"; {len(result['errors'])} skipped: " + "; ".join(result["errors"])
+                     if result["errors"] else ""))
+        return table_after(request, form, notice=notice)
+
+    @app.post("/orders/delete", response_class=HTMLResponse)
+    async def orders_delete(request: Request):
+        """Delete every selected row (the page confirms first)."""
+        form = await request.form()
+        keys = selected_keys(form)
+        if writer is None:
+            return table_after(request, form, error="editing is off: this backend is a CSV snapshot")
+        try:
+            result = writer.remove_rows(keys)
+        except EditError as exc:
+            return table_after(request, form, error=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return table_after(request, form, error=f"{type(exc).__name__}: {exc}")
+        reader.load(force=True)
+        return table_after(request, form, notice=f"Deleted {result['deleted']} row(s)")
+
+    @app.post("/orders/add")
+    async def orders_add(request: Request):
+        """Append one row from the Add-a-row form, then show it."""
+        form = await request.form()
+        fields = {k: str(v) for k, v in form.items()}
+        if writer is None:
+            raise HTTPException(status_code=409, detail="editing is off: this backend is a CSV snapshot")
+        try:
+            result = writer.add_row(fields)
+        except EditError as exc:
+            context = orders_context(request, params={}, error=str(exc), add_form=fields,
+                                     add_open=True)
+            response = page(request, "orders.html", **context)
+            response.status_code = exc.status
+            return response
+        reader.load(force=True)
+        notice = f"Added {result['key']['order_id']} at sheet row {result['row_number']}"
+        return RedirectResponse(
+            url="/orders?" + urlencode({"q": result["key"]["order_id"], "notice": notice}),
+            status_code=303)
 
     @app.post("/orders/cell", response_class=HTMLResponse)
     async def orders_cell(request: Request):
