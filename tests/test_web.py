@@ -768,6 +768,13 @@ class TestOverviewPage:
         assert "Blank Card Last 4" in body and "111-0000002-0000002" in body
         assert "no automatic writes" in body
 
+    def test_the_header_carries_the_wordmark_logo_and_favicon(self, client):
+        body = client.get("/").text
+        assert '<link rel="icon" type="image/svg+xml" href="/static/logo.svg' in body
+        assert 'class="logo"' in body and 'Buying Group <strong>Ledger</strong>' in body
+        logo = client.get("/static/logo.svg")
+        assert logo.status_code == 200 and "<svg" in logo.text
+
     def test_lifetime_and_month_sections_are_linked_tiles(self, client):
         body = client.get("/").text
         assert "<h2>Lifetime" in body and "Calendar month" in body

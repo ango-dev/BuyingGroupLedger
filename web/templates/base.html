@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Ledger{% endblock %} · Buying Group Ledger</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
   <script>
     // Theme: "light" | "dark" | unset (= follow the system). Applied before first paint so the
@@ -32,7 +33,10 @@
 <header class="top">
   <nav>
     {% set path = request.url.path %}
-    <a href="/" class="brand">Buying Group Ledger</a>
+    <a href="/" class="brand" title="Overview">
+      <img src="/static/logo.svg?v={{ asset_version }}" alt="" class="logo" width="28" height="28">
+      <span class="wordmark">Buying Group <strong>Ledger</strong></span>
+    </a>
     <a href="/" class="{{ 'active' if path == '/' }}">Overview</a>
     <a href="/orders" class="{{ 'active' if path.startswith('/orders') }}">Orders</a>
     <a href="/failures" class="{{ 'active' if path.startswith('/failures') }}">Failures</a>
