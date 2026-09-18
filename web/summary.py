@@ -88,13 +88,11 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
               "cards excluded)", link(state="unpaid"), tone="floating"),
         _tile("Projected profit", projected["profit"], "money",
               f"{projected['rows']} row(s), {projected['orders']} order(s) {scope} with a "
-              f"committed payout (${projected['payout']:,.2f}) and no Payout Date",
-              link(state="committed"), tone="committed"),
+              "committed payout and no Payout Date", link(state="committed"), tone="committed"),
         _tile("Realized profit", realized["profit"], "money",
               f"Total Profit of the {realized['rows']} settled row(s), {realized['orders']} "
-              f"order(s) {'paid out ' + scope[7:] if scope.startswith('placed ') else scope} "
-              f"(${realized['payout']:,.2f} paid)", link(state="settled", paid=True),
-              tone="settled"),
+              f"order(s) {'paid out ' + scope[7:] if scope.startswith('placed ') else scope}",
+              link(state="settled", paid=True), tone="settled"),
     ]
 
 
