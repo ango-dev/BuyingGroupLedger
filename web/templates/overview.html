@@ -22,9 +22,6 @@
 
 <h2>Lifetime <span class="muted small">— every row; click a tile to open its rows, hover for the definition</span></h2>
 {{ tiles(summary.lifetime) }}
-<p class="muted small reconcile">Total Profit column sum: <strong class="money">{{ summary.column_sum.profit | money }}</strong>
-  — what SUM() over the sheet's Total Profit gives ({{ summary.column_sum.rows }} cells): realized + projected{% if summary.column_sum.other %} + {{ summary.column_sum.other | money }} on rows with a payout cell but neither state{% endif %}.
-  <a href="/orders?sort=total_profit&amp;dir=desc">Open the column ›</a></p>
 
 {% set m = summary.month %}
 <h2 class="month-head">Calendar Month
