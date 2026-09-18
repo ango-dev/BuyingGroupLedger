@@ -230,7 +230,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     VIEW_COOKIE, PER_COOKIE, FILTERS_COOKIE = "ledger-view", "ledger-per", "ledger-filters"
     COOKIE_MAX_AGE = 365 * 24 * 3600
     #: Never remembered: a page number is where you were, not how you look at the ledger.
-    TRANSIENT = {"page", "notice", "error"}
+    TRANSIENT = {"page", "notice", "error", "remember", "refresh"}
 
     def remembered(request: Request, params) -> QueryParams:
         """The request's params with the remembered view / page size filled in when the request
@@ -253,8 +253,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return QueryParams(items)
 
     def remember(request: Request, response, filters: Filters):
-        """Persist a view / page size the request chose explicitly, and the whole filter / sort
-        state of any request that names one (the bare /orders replays it)."""
+        """Persist the view / page size and the whole filter / sort state -- but ONLY from the
+        filter form's own requests (they carry `remember=1`). A link that names a filter in its
+        URL, an overview tile or a bookmark, is applied for that visit and never rewrites the
+        memory."""
+        if request.query_params.get("remember") != "1":
+            return response
         if "view" in request.query_params:
             response.set_cookie(VIEW_COOKIE, filters.view, max_age=COOKIE_MAX_AGE, samesite="lax")
         if "per" in request.query_params:

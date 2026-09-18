@@ -8,6 +8,8 @@
 <form id="filters" class="filters" method="get" action="/orders"
       hx-get="/orders" hx-target="#orders-table" hx-push-url="true"
       hx-trigger="change, keyup changed delay:300ms from:#q, submit">
+  {# Only the form's OWN requests write the remembered filters / view. #}
+  <input type="hidden" name="remember" value="1">
   {% for param, label, options, chosen in (('retailer', 'Retailer', facets.retailers, filters.retailers), ('profile', 'Profile', facets.profiles, filters.profiles), ('status', 'Status', facets.statuses, filters.statuses), ('group', 'Buying group', facets.groups, filters.groups)) %}
   <details class="multi" data-param="{{ param }}">
     <summary><span class="lbl">{{ label }}</span> <span class="summary-text"><span class="summary-value">{{ 'all' if not chosen else (chosen | join(', ') if chosen | length <= 2 else (chosen | length) ~ ' selected') }}</span><span class="caret">▾</span></span></summary>

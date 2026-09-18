@@ -657,7 +657,7 @@ class TestViewMemory:
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
         assert '<article class="card' not in client.get("/orders").text  # the default is the table
 
-        chosen = client.get("/orders", params={"view": "cards", "per": "12"})
+        chosen = client.get("/orders", params={"view": "cards", "per": "12", "remember": "1"})
         assert chosen.cookies.get("ledger-view") == "cards" and chosen.cookies.get("ledger-per") == "12"
 
         # An overview link names only a filter; it opens in the remembered view.
@@ -666,7 +666,7 @@ class TestViewMemory:
         assert 'name="view" value="cards" checked' in body
         # htmx swaps follow it too, and an explicit choice overrides and updates the memory.
         assert '<article class="card' in client.get("/orders", headers={"HX-Request": "true"}).text
-        back = client.get("/orders", params={"view": "table"})
+        back = client.get("/orders", params={"view": "table", "remember": "1"})
         assert back.cookies.get("ledger-view") == "table"
         assert '<article class="card' not in client.get("/orders").text
 
@@ -674,7 +674,7 @@ class TestViewMemory:
         """set up the filters or sorts, and the default page remembers them."""
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
         chosen = client.get("/orders", params={"status": "shipped", "sort": "total_cost", "dir": "asc",
-                                               "q": "", "page": "2"})
+                                               "q": "", "page": "2", "remember": "1"})
         cookie = chosen.cookies.get("ledger-filters")
         assert "status=shipped" in cookie and "sort=total_cost" in cookie and "page=" not in cookie
         body = client.get("/orders").text  # the nav link: no query at all
@@ -683,13 +683,16 @@ class TestViewMemory:
         # a link that names a filter is taken as it is, not merged with the memory
         body = client.get("/orders", params={"status": "paid"}).text
         assert 'name="status" value="paid" checked' in body and 'value="shipped" checked' not in body
+        # ... and, having no `remember` mark (it is not the form), it does not rewrite the memory
+        assert 'value="shipped" checked' in client.get("/orders").text
+        assert "remember=" not in chosen.cookies.get("ledger-filters") and "page=" not in chosen.cookies.get("ledger-filters")
         # clearing the filters is remembered too
-        client.get("/orders", params={"q": "", "sort": "order_date", "dir": "desc"})
+        client.get("/orders", params={"q": "", "sort": "order_date", "dir": "desc", "remember": "1"})
         assert 'value="shipped" checked' not in client.get("/orders").text
 
     def test_reset_forgets_the_remembered_filters(self, sheet, tmp_path, logs_dir):
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
-        client.get("/orders", params={"status": "shipped", "view": "cards"})
+        client.get("/orders", params={"status": "shipped", "view": "cards", "remember": "1"})
         assert 'value="shipped" checked' in client.get("/orders").text
         assert 'href="/orders?reset=1"' in client.get("/orders").text
         reset = client.get("/orders", params={"reset": "1"}, follow_redirects=False)
