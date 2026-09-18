@@ -149,7 +149,7 @@ body.wide .count { margin: 4px 8px; flex: 0 0 auto; }
 body.wide .bulkbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px;
   background: var(--card); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 body.wide .sheet { overflow: auto; flex: 1 1 auto; min-height: 0; background: var(--card); border-top: 1px solid var(--line); }
-body.wide footer { display: none; }
+body.wide > footer { display: none; }  /* the PAGE footer only: a card's <footer> must stay visible */
 table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: collapse; }
 /* Grid lines are TRANSLUCENT so they take the row's own colour, as the sheet's do over a coloured
    row -- an opaque grey line reads as a gap between rows. */
