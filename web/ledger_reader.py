@@ -33,7 +33,7 @@ from typing import Callable, Protocol
 
 from config.warehouses import is_deliberately_unrouted
 from models.order import FIELDNAMES, MONEY_FREE_STATUSES, TERMINAL_STATUSES
-from sheets.ledger_sync import HEADER, _parse_checkbox, _parse_display_number
+from sheets.ledger_sync import HEADER, _NUMERIC_FIELDS, _parse_checkbox, _parse_display_number
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
@@ -61,15 +61,23 @@ class LedgerRow:
     cells: dict[str, str]
     #: 1-based sheet row number (the header is row 1), for cross-referencing audit output.
     row_number: int
+    #: The STORED value of each numeric cell (an UNFORMATTED read), when the source has one. A
+    #: formatted read shows "$1,299.99" rounded to the cent while the cell may hold 1299.9875;
+    #: summing displayed cents drifts from the sheet's own SUM by a few cents, which is exactly
+    #: the kind of number a user compares. A CSV backup has no such grid: the text is parsed.
+    numbers: dict[str, float | None] = field(default_factory=dict)
 
     # --- raw access -------------------------------------------------------------------------------
     def text(self, name: str) -> str:
         return str(self.cells.get(name, "") or "").strip()
 
     def number(self, name: str) -> float | None:
-        """The cell as a number, through the upsert's own display-format parser. None when blank,
-        non-numeric, or a formula LITERAL (a CSV backup stores "=IF(...)" for COGS / Total Profit;
-        the parser would otherwise scrape digits out of the cell references)."""
+        """The cell as a number: the stored value when the source read one, else the display text
+        through the upsert's own display-format parser. None when blank, non-numeric, or a formula
+        LITERAL (a CSV backup stores "=IF(...)" for COGS / Total Profit; the parser would otherwise
+        scrape digits out of the cell references)."""
+        if name in self.numbers:
+            return self.numbers[name]
         text = self.text(name)
         if not text or _is_formula(text):
             return None
@@ -147,16 +155,20 @@ class LedgerRow:
 
     @property
     def is_settled(self) -> bool:
-        """Real money received: a payout WITH its date, or a paid/return status (MOD's paid rows
-        carry no date). See SETTLED_STATUSES."""
-        return bool(self.payout_amount) and (
+        """The group's outcome is IN: a Payout Amount cell (any amount, $0.00 included -- a return
+        or clawback that paid nothing is a settled LOSS, and the sheet's Total Profit shows it)
+        together with its date, or a paid/return status (MOD's paid rows carry no date). See
+        SETTLED_STATUSES. Found live: four $0.00 settlements (-822.39 of real losses)
+        were being left out of realized profit, so the dashboard disagreed with the sheet's SUM."""
+        return self.payout_amount is not None and (
             bool(self.payout_date) or self.status in SETTLED_STATUSES
         )
 
     @property
     def is_committed(self) -> bool:
-        """A projected payout: the amount BFMR has committed to, not yet paid (amount present, date
-        blank, status not a buying-group outcome). Total Profit on such a row is PROJECTED."""
+        """A projected payout: the amount BFMR has committed to, not yet paid (a non-zero amount,
+        date blank, status not a buying-group outcome -- the allocator never writes a zero
+        commitment). Total Profit on such a row is PROJECTED."""
         return (
             bool(self.payout_amount)
             and not self.is_settled
@@ -251,13 +263,19 @@ class Snapshot:
         return [row for row in self.rows if row.order_id == order_id]
 
 
+#: The columns whose STORED value a live read carries over (see LedgerRow.numbers).
+NUMERIC_COLUMNS = frozenset(_NUMERIC_FIELDS) | {"cogs", "total_profit"}
+
+
 def rows_from_grid(grid: list[list], *, backend: str, source: str,
-                   loaded_at: datetime | None = None) -> Snapshot:
+                   loaded_at: datetime | None = None,
+                   unformatted: list[list] | None = None) -> Snapshot:
     """Turn a header + rows grid (a CSV's rows, or a worksheet's get_values) into a Snapshot.
 
     Cells are found BY HEADER NAME. A column the header does not carry reads as blank; a column the
     schema does not know is ignored (and reported through Snapshot.extra_columns). Short rows read
-    as blank past their end -- the same rule as the upsert and the audit.
+    as blank past their end -- the same rule as the upsert and the audit. `unformatted`, when a
+    live read supplies it, gives every numeric cell its stored value (LedgerRow.numbers).
     """
     if not grid:
         raise ValueError(f"{source}: empty -- no header row")
@@ -274,7 +292,21 @@ def rows_from_grid(grid: list[list], *, backend: str, source: str,
         if not cells.get("order_id", "").strip():
             skipped += 1
             continue
-        rows.append(LedgerRow(cells=cells, row_number=offset))
+        numbers: dict[str, float | None] = {}
+        if unformatted is not None and offset - 1 < len(unformatted):
+            stored = unformatted[offset - 1]
+            for fld, idx in positions.items():
+                if fld not in NUMERIC_COLUMNS:
+                    continue
+                value = stored[idx] if idx < len(stored) else ""
+                if isinstance(value, bool) or value is None or value == "":
+                    numbers[fld] = None
+                elif isinstance(value, (int, float)):
+                    numbers[fld] = float(value)
+                else:  # text in a numeric column ("*" on an unresolved split): parse like display
+                    parsed = _parse_display_number(str(value))
+                    numbers[fld] = float(parsed) if parsed is not None else None
+        rows.append(LedgerRow(cells=cells, row_number=offset, numbers=numbers))
     return Snapshot(
         rows=rows, header=header, backend=backend, source=source,
         loaded_at=loaded_at or datetime.now(timezone.utc), skipped_rows=skipped,
@@ -400,8 +432,12 @@ class SheetReader:
 
             worksheet, spreadsheet_title = self._opener()
             grid = worksheet.get_values(value_render_option=ValueRenderOption.formatted)
+            # A second, UNFORMATTED read for the numeric cells' stored values (LedgerRow.numbers):
+            # the displayed cents drift from the sheet's own SUM. Dates and keys still come from
+            # the formatted grid, so a date column formatted as a Date can never turn into a serial.
+            stored = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
             source = f"{spreadsheet_title} / {getattr(worksheet, 'title', '')}".strip(" /")
-            snapshot = rows_from_grid(grid, backend=self.backend, source=source)
+            snapshot = rows_from_grid(grid, backend=self.backend, source=source, unformatted=stored)
             snapshot.meta = {"spreadsheet": spreadsheet_title,
                              "worksheet": getattr(worksheet, "title", "")}
             self._cached, self._cached_at = snapshot, self._clock()

@@ -12,7 +12,7 @@ import time
 from typing import TYPE_CHECKING
 
 from models.order import FIELDNAMES
-from sheets.ledger_sync import _BOOL_FIELDS, _NUMERIC_FIELDS, _coerce
+from sheets.ledger_sync import _BOOL_FIELDS, _INT_FIELDS, _NUMERIC_FIELDS, _coerce
 
 from ledger_db.store import FORMULA_FIELDS, LedgerDb
 
@@ -26,9 +26,19 @@ def typed_record(row: "LedgerRow") -> dict:
     for field in FIELDNAMES:
         if field in FORMULA_FIELDS:
             record[field] = row.cogs if field == "cogs" else row.profit
-        elif field in _NUMERIC_FIELDS or field in _BOOL_FIELDS:
+        elif field in _BOOL_FIELDS:
             text = row.text(field)
             record[field] = _coerce(field, text) if text else None
+        elif field in _NUMERIC_FIELDS:
+            # The STORED value when the source read one (a live sheet: 1299.9875, not the
+            # displayed $1,299.99), else the display text through the upsert's own coercion. A
+            # non-number in a numeric column ("*" on an unresolved split) is kept as text.
+            number = row.number(field)
+            text = row.text(field)
+            if number is not None:
+                record[field] = int(number) if field in _INT_FIELDS and number.is_integer() else number
+            else:
+                record[field] = _coerce(field, text) if text else None
         else:
             record[field] = row.text(field)
     record["sheet_row"] = row.row_number

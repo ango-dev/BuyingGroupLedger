@@ -298,8 +298,34 @@ class TestSheetReader:
         assert snapshot.backend == "sheet"
         assert snapshot.source == "Ledger 2026 / Orders"
         assert snapshot.rows[0].order_id == "S1"
-        assert worksheet.reads == ["FORMATTED_VALUE"]
+        # One formatted read (text, dates, keys) and one unformatted (the stored numbers).
+        assert worksheet.reads == ["FORMATTED_VALUE", "UNFORMATTED_VALUE"]
         assert opens == [1]
+
+    def test_numbers_come_from_the_stored_values_not_the_displayed_cents(self):
+        """A cell holding 1299.9875 displays as $1,299.99; summing displays drifts from the
+        sheet's own SUM. Dates and keys still come from the formatted grid."""
+        formatted = [list(HEADER), row(order_id="S1", order_date="2026-09-01", status="paid",
+                                       item_name="Thing", shipment="1", total_cost="$1,299.99",
+                                       payout_amount="$0.00", payout_date="2026-09-02",
+                                       total_profit="-$1,299.99")]
+        stored = [list(HEADER), row(order_id="S1", order_date=46000, status="paid",
+                                    item_name="Thing", shipment=1, total_cost=1299.9875,
+                                    payout_amount=0, payout_date="2026-09-02",
+                                    total_profit=-1299.9875)]
+
+        class TwoGrids(ReadOnlyWorksheet):
+            def get_values(self, range_name=None, value_render_option=None, **kwargs):
+                mode = str(getattr(value_render_option, "value", value_render_option))
+                self.reads.append(mode)
+                return [list(r) for r in (formatted if "FORMATTED" == mode.split("_")[0] and mode == "FORMATTED_VALUE" else stored)]
+
+        reader = SheetReader(ttl_seconds=0, opener=lambda: (TwoGrids([]), "T"))
+        only = reader.load().rows[0]
+        assert only.total_cost == 1299.9875 and only.profit == -1299.9875
+        assert only.order_date == "2026-09-01"  # the formatted text, never the serial
+        assert only.text("total_cost") == "$1,299.99"  # the display is what the page shows
+        assert only.payout_amount == 0.0 and only.is_settled  # a $0.00 settlement counts
 
     def test_the_cache_serves_reads_inside_the_ttl_and_refreshes_after(self):
         reader, worksheet, opens, clock = self._reader(ttl=300)
@@ -313,7 +339,7 @@ class TestSheetReader:
 
         assert second is not first
         assert opens == [1, 1]
-        assert worksheet.reads == ["FORMATTED_VALUE", "FORMATTED_VALUE"]
+        assert worksheet.reads == ["FORMATTED_VALUE", "UNFORMATTED_VALUE"] * 2
 
     def test_force_refreshes_inside_the_ttl(self):
         reader, _, opens, clock = self._reader(ttl=300)
@@ -434,6 +460,19 @@ class TestPayoutSemantics:
         r = _row(status="delivered", payout_date="2026-09-01")
         assert r.payout_state == "none"
 
+    def test_a_zero_payout_with_a_date_or_outcome_is_a_settled_loss(self):
+        """four $0.00 settlements (a return, three clawbacks) carried real
+        losses in Total Profit and the sheet's SUM counted them; the dashboard must too."""
+        dated = _row(status="return", total_cost="100", payout_amount="$0.00",
+                     payout_date="2026-09-03")
+        assert dated.is_settled and dated.payout_state == "settled" and dated.profit == -100.0
+        paid = _row(status="paid", total_cost="475", payout_amount="0")
+        assert paid.is_settled and paid.profit == -475.0
+        # A $0 with neither date nor outcome is nothing: not committed (the allocator never
+        # writes a zero), not settled.
+        neither = _row(status="delivered", total_cost="10", payout_amount="0")
+        assert neither.payout_state == "none"
+
     @pytest.mark.parametrize("status", MONEY_FREE_STATUSES)
     def test_money_free_rows_are_never_committed(self, status):
         r = _row(status=status, payout_amount="5")
@@ -546,6 +585,10 @@ class TestOverview:
         # Row 5: 500 - 400*0.91 = 136.00; row 6: 330 - 300*0.91 = 57.00
         assert summary["realized"] == {"rows": 2, "orders": 2, "payout": 830.0, "cogs": 637.0,
                                        "profit": 193.0}
+
+    def test_the_column_sum_is_realized_plus_projected_plus_the_rest(self, summary):
+        """What SUM() over the sheet's Total Profit gives, so the page reconciles with the sheet."""
+        assert summary["column_sum"] == {"rows": 3, "profit": round(263.6 + 193.0, 2), "other": 0.0}
 
     def test_cogs_input_gaps_skip_money_free_rows(self, summary):
         gaps = summary["gaps"]

@@ -170,10 +170,15 @@ pinned against `sheets.ledger_sync._cogs_formula`'s own cell references by a tes
 
 **Projected versus realized.** Since 2026-09-11 a Payout Amount with a blank Payout Date on an open
 row is BFMR's *committed* price, not money received ([data model](data-model.md)). The dashboard
-reads the `(Payout Date, Status)` pair exactly as the audit does: a payout is **settled** when its
-date is set or the status is `paid` / `return` (MOD's paid rows carry no date), and **committed**
-otherwise. Projected profit sums the committed rows, realized profit the settled ones, and a
-committed cell is tagged `proj.` in every table. There is no `Expected Payout` column (parked in
+reads the `(Payout Date, Status)` pair exactly as the audit does: a payout cell is **settled** when
+its date is set or the status is `paid` / `return` (MOD's paid rows carry no date) — a `$0.00`
+settlement included, since a return or clawback that paid nothing is a real loss the sheet's Total
+Profit shows — and a non-zero amount with neither is **committed**. Projected profit sums the
+committed rows, realized profit the settled ones, and a committed cell is tagged `proj.` in every
+table. The **Total Profit column sum** tile is what `SUM()` over the sheet's column gives (realized
++ projected, plus anything with a payout cell in neither state), so the page reconciles with the
+sheet at a glance; numbers come from the sheet's stored values, not the displayed cents, so the
+sums agree to the cent. There is no `Expected Payout` column (parked in
 `the design notes`); this is a view over the existing cell.
 
 **Running it locally** (main PC, against a snapshot; nothing to configure):

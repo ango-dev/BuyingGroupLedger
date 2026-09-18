@@ -62,9 +62,17 @@ def overview(snapshot: Snapshot) -> dict:
     counts = Counter(r.status for r in rows)
     status_counts = [(s, counts[s]) for s in _status_order(counts.keys())]
 
-    # Projected = committed payouts (amount, no date, no buying-group outcome); realized = settled.
+    # Projected = committed payouts (amount, no date, no buying-group outcome); realized = settled
+    # ($0.00 settlements included: a return that paid nothing is a real loss).
     projected = _money_block([r for r in rows if r.is_committed])
     realized = _money_block([r for r in rows if r.is_settled])
+    # What SUM() over the sheet's Total Profit column gives: every row whose formula shows a
+    # number -- realized + projected + anything else with a payout cell. Shown so the page can be
+    # reconciled against the sheet at a glance.
+    column = [r for r in rows if r.profit is not None]
+    column_sum = {"rows": len(column), "profit": round(sum(r.profit for r in column), 2),
+                  "other": round(sum(r.profit for r in column if not r.is_settled
+                                     and not r.is_committed), 2)}
 
     # The audit's cogs_inputs_complete gap: a row carrying cost whose COGS cannot net a rebate.
     costed = [r for r in rows if not r.is_money_free and r.total_cost is not None]
@@ -82,6 +90,7 @@ def overview(snapshot: Snapshot) -> dict:
         "status_counts": status_counts,
         "projected": projected,
         "realized": realized,
+        "column_sum": column_sum,
         "gaps": {"card_last4": no_card, "cashback_rate": no_rate},
         "by_retailer": sorted(by_retailer.items()),
         "by_group": sorted(by_group.items()),

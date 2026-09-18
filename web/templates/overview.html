@@ -23,6 +23,11 @@
     <div class="value money">{{ summary.realized.profit | money }}</div>
     <div class="hint">{{ summary.realized.rows }} row(s), {{ summary.realized.orders }} order(s) settled ({{ summary.realized.payout | money }} paid): Payout Date set, or status paid / return</div>
   </div>
+  <div class="tile">
+    <div class="label">Total Profit column sum</div>
+    <div class="value money">{{ summary.column_sum.profit | money }}</div>
+    <div class="hint">what SUM() over the sheet's Total Profit gives ({{ summary.column_sum.rows }} cells): realized + projected{% if summary.column_sum.other %} + {{ summary.column_sum.other | money }} on rows with a payout cell but neither state{% endif %}</div>
+  </div>
   <div class="tile {{ 'warn' if heartbeat.stale else '' }}">
     <div class="label">Scheduler heartbeat</div>
     <div class="value">{{ heartbeat.age_text or '—' }}</div>
