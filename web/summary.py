@@ -58,20 +58,21 @@ def _spend(rows: list[LedgerRow]) -> float:
     return round(sum(r.total_cost or 0.0 for r in rows if not r.is_money_free), 2)
 
 
-def average_cashback(rows: list[LedgerRow]) -> tuple[float | None, int, int]:
-    """The ACTUAL cashback rate, cost-weighted: sum(Total Cost - COGS) / sum(Total Cost) over the rows
-    that carry money, cost and a COGS. Total Cost - COGS is the cashback the ledger really netted
-    on the row -- the sheet's own COGS formula applied to what was actually charged (shipping and
-    tax earn it too; a gift card or rewards spent do not; a return takes its share back) -- so
-    this is what the cards paid, not what the rate cells promise. Returns (rate as a fraction or
-    None, rows counted, rows that carry cost but no Cashback Rate -- counted at 0%, and named)."""
-    counted = [r for r in rows if not r.is_money_free and r.total_cost and r.cogs is not None]
-    unrated = [r for r in counted if r.number("cashback_rate") is None]
+def actual_return(rows: list[LedgerRow]) -> tuple[float | None, int]:
+    """What a dollar spent ACTUALLY came back as, after everything:
+
+        sum(Payout Amount - COGS - Insurance) / sum(Total Cost)  =  sum(Total Profit) / sum(Total Cost)
+
+    over the SETTLED rows (the payout is in; a committed one is a promise). Cost-weighted by
+    construction: dollars over dollars, so a $2,000 order pulls harder than a $300 one. COGS is
+    the sheet's own formula, so the cashback on shipping and tax, the gift card and rewards
+    netting and a return's share are all already in it; insurance is the BFMR premium; the payout
+    is what the group paid after its commission. Returns (rate as a fraction or None, rows)."""
+    counted = [r for r in rows if r.is_settled and r.total_cost and r.profit is not None]
     cost = sum(r.total_cost for r in counted)
     if not cost:
-        return None, 0, len(unrated)
-    earned = sum(r.total_cost - r.cogs for r in counted)
-    return round(earned / cost, 4), len(counted), len(unrated)
+        return None, 0
+    return round(sum(r.profit for r in counted) / cost, 4), len(counted)
 
 
 def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
@@ -82,7 +83,7 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
     builds the tile's Orders-page href for that period."""
     open_rows = [r for r in placed if r.is_open]
     unpaid = [r for r in placed if r.is_unpaid]
-    rate, rated, unrated = average_cashback(placed)
+    rate, rated = actual_return(paid)
     projected = _money_block([r for r in placed if r.is_committed])
     realized = _money_block(paid)
     return [
@@ -94,11 +95,11 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
         _tile("Spend", _spend(placed), "money",
               f"Total Cost over every row {scope} that carries money (cancelled / superseded "
               "excluded)", link(sort="total_cost", dir="desc")),
-        _tile("Average cashback", rate, "percent",
-              f"actual: (Total Cost \u2212 COGS) / Total Cost, cost-weighted over the {rated} "
-              f"row(s) {scope} that carry money"
-              + (f"; {unrated} of them have no Cashback Rate and count at 0%" if unrated else ""),
-              link(sort="cashback_rate", dir="desc")),
+        _tile("Actual return", rate, "percent",
+              f"(Payout \u2212 COGS \u2212 Insurance) / Total Cost over the {rated} settled row(s) "
+              f"{scope}: cashback after shipping, tax, gift cards and rewards, less insurance, "
+              "against what the group actually paid; cost-weighted",
+              link(state="settled", sort="total_profit", dir="desc")),
         _tile("Paid out", realized["payout"], "money",
               f"{realized['rows']} settled row(s) in {realized['orders']} order(s) {scope}: "
               "Payout Date set, or status paid / return", link(state="settled"), tone="settled"),

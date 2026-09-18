@@ -615,17 +615,10 @@ class TestOverview:
 
     def test_both_sections_carry_the_same_six_tiles_in_the_same_order(self, summary):
         labels = [t["label"] for t in summary["lifetime"]]
-        assert labels == ["Rows / orders", "Open rows", "Spend", "Average cashback", "Paid out",
+        assert labels == ["Rows / orders", "Open rows", "Spend", "Actual return", "Paid out",
                           "Floating", "Projected profit", "Realized profit"]
         assert [t["label"] for t in summary["month"]["tiles"]] == labels
         assert [t["kind"] for t in summary["month"]["tiles"]] == [t["kind"] for t in summary["lifetime"]]
-
-    @staticmethod
-    def _rows():
-        import tempfile
-
-        path = Path(tempfile.mkdtemp()) / "sheet_backup_20260917T000000Z.csv"
-        return SnapshotReader(write_snapshot(path, *LEDGER_ROWS)).load().rows
 
     def test_lifetime_tiles_count_every_row(self, summary):
         by_label = {t["label"]: t for t in summary["lifetime"]}
@@ -643,18 +636,12 @@ class TestOverview:
         # the paid rows, not the money-free ones. NOT spend minus paid out.
         assert by_label["Floating"]["value"] == round(1259.99 + 1000 + 2000 + 100, 2)
         assert by_label["Floating"]["href"] == "/orders?state=unpaid"
-        # Average cashback is ACTUAL: sum(Total Cost - COGS) / sum(Total Cost) over the rows that
-        # carry money (the Fitbit has cost but no rate: it counts at 0% and is named; the
-        # money-free rows have no cost). COGS is the sheet's own formula, so shipping / tax /
-        # gift-card / rewards netting are in it -- this is not the rate cells' average.
-        money = [r for r in self._rows() if not r.is_money_free and r.total_cost]
-        earned = sum(r.total_cost - r.cogs for r in money)
-        cost = sum(r.total_cost for r in money)
-        assert by_label["Average cashback"]["value"] == round(earned / cost, 4)
-        assert by_label["Average cashback"]["kind"] == "percent"
-        assert "7 row(s)" in by_label["Average cashback"]["hint"]
-        assert "1 of them have no Cashback Rate and count at 0%" in by_label["Average cashback"]["hint"]
-        assert by_label["Average cashback"]["href"] == "/orders?sort=cashback_rate&dir=desc"
+        # Actual return: sum(Total Profit) / sum(Total Cost) over the SETTLED rows -- rows 5 and 6:
+        # (136 + 57) / (400 + 300). Cost-weighted by construction (dollars over dollars).
+        assert by_label["Actual return"]["value"] == round(193.0 / 700.0, 4)
+        assert by_label["Actual return"]["kind"] == "percent"
+        assert "2 settled row(s)" in by_label["Actual return"]["hint"]
+        assert by_label["Actual return"]["href"] == "/orders?state=settled&sort=total_profit&dir=desc"
         assert by_label["Floating"]["value"] != round(by_label["Spend"]["value"] - by_label["Paid out"]["value"], 2)
 
     def test_the_month_section_is_by_order_date_alone(self, snapshot_path):
@@ -665,9 +652,7 @@ class TestOverview:
         assert tiles["Rows / orders"][0] == 3 and tiles["Open rows"] == 3
         assert tiles["Projected profit"] == 263.6
         assert tiles["Floating"] == round(1259.99 + 1000 + 2000, 2)  # the Fitbit was placed in August
-        september_rows = [r for r in self._rows() if r.order_date.startswith("2026-09")]
-        assert tiles["Average cashback"] == round(
-            sum(r.total_cost - r.cogs for r in september_rows) / sum(r.total_cost for r in september_rows), 4)
+        assert tiles["Actual return"] is None  # nothing placed in September is settled yet
         # Nothing placed in September is settled yet (row 5 was paid in September but placed in
         # August: the month is by Order Date alone).
         assert tiles["Paid out"] == 0.0 and tiles["Realized profit"] == 0.0
@@ -679,6 +664,7 @@ class TestOverview:
         tiles = {t["label"]: t["value"] for t in august["tiles"]}
         assert tiles["Rows / orders"][0] == 6 and tiles["Open rows"] == 1  # the Fitbit
         assert tiles["Paid out"] == 830.0 and tiles["Realized profit"] == 193.0  # rows 5 and 6
+        assert tiles["Actual return"] == round(193.0 / 700.0, 4)
         assert tiles["Projected profit"] == 0.0
         assert (august["prev"], august["next"]) == ("", "2026-09")
         # a month with no rows still renders, with both arrows
@@ -810,7 +796,7 @@ class TestOverviewPage:
         assert 'href="/orders?state=open"' in body
         assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
         assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body
-        assert ">Average cashback<" in body and "4.86%" in body  # rendered as a percentage
+        assert ">Actual return<" in body and "27.57%" in body  # rendered as a percentage
         assert 'href="/orders?month=2026-09"' in body
         assert 'href="/orders?month=2026-09&amp;state=open"' in body
         assert 'href="/orders?month=2026-09&amp;state=settled"' in body
