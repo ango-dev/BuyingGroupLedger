@@ -620,6 +620,13 @@ class TestOverview:
         assert [t["label"] for t in summary["month"]["tiles"]] == labels
         assert [t["kind"] for t in summary["month"]["tiles"]] == [t["kind"] for t in summary["lifetime"]]
 
+    @staticmethod
+    def _rows():
+        import tempfile
+
+        path = Path(tempfile.mkdtemp()) / "sheet_backup_20260917T000000Z.csv"
+        return SnapshotReader(write_snapshot(path, *LEDGER_ROWS)).load().rows
+
     def test_lifetime_tiles_count_every_row(self, summary):
         by_label = {t["label"]: t for t in summary["lifetime"]}
         assert by_label["Rows / orders"]["value"] == (len(LEDGER_ROWS), 8)
@@ -636,13 +643,17 @@ class TestOverview:
         # the paid rows, not the money-free ones. NOT spend minus paid out.
         assert by_label["Floating"]["value"] == round(1259.99 + 1000 + 2000 + 100, 2)
         assert by_label["Floating"]["href"] == "/orders?state=unpaid"
-        # Average cashback is cost-weighted over the rows that carry money and a rate (the Fitbit
-        # has cost but no rate and is not counted; the money-free rows have neither).
-        earned = 1259.99 * 0.05 + 1000 * 0.04 + 2000 * 0.04 + 400 * 0.09 + 300 * 0.09 + 40 * 0.05
-        cost = 1259.99 + 1000 + 2000 + 400 + 300 + 40
+        # Average cashback is ACTUAL: sum(Total Cost - COGS) / sum(Total Cost) over the rows that
+        # carry money (the Fitbit has cost but no rate: it counts at 0% and is named; the
+        # money-free rows have no cost). COGS is the sheet's own formula, so shipping / tax /
+        # gift-card / rewards netting are in it -- this is not the rate cells' average.
+        money = [r for r in self._rows() if not r.is_money_free and r.total_cost]
+        earned = sum(r.total_cost - r.cogs for r in money)
+        cost = sum(r.total_cost for r in money)
         assert by_label["Average cashback"]["value"] == round(earned / cost, 4)
         assert by_label["Average cashback"]["kind"] == "percent"
-        assert "6 row(s)" in by_label["Average cashback"]["hint"] and "1 row(s) with cost but no rate" in by_label["Average cashback"]["hint"]
+        assert "7 row(s)" in by_label["Average cashback"]["hint"]
+        assert "1 of them have no Cashback Rate and count at 0%" in by_label["Average cashback"]["hint"]
         assert by_label["Average cashback"]["href"] == "/orders?sort=cashback_rate&dir=desc"
         assert by_label["Floating"]["value"] != round(by_label["Spend"]["value"] - by_label["Paid out"]["value"], 2)
 
@@ -654,7 +665,9 @@ class TestOverview:
         assert tiles["Rows / orders"][0] == 3 and tiles["Open rows"] == 3
         assert tiles["Projected profit"] == 263.6
         assert tiles["Floating"] == round(1259.99 + 1000 + 2000, 2)  # the Fitbit was placed in August
-        assert tiles["Average cashback"] == round((1259.99 * 0.05 + 3000 * 0.04) / 4259.99, 4)
+        september_rows = [r for r in self._rows() if r.order_date.startswith("2026-09")]
+        assert tiles["Average cashback"] == round(
+            sum(r.total_cost - r.cogs for r in september_rows) / sum(r.total_cost for r in september_rows), 4)
         # Nothing placed in September is settled yet (row 5 was paid in September but placed in
         # August: the month is by Order Date alone).
         assert tiles["Paid out"] == 0.0 and tiles["Realized profit"] == 0.0
@@ -797,7 +810,7 @@ class TestOverviewPage:
         assert 'href="/orders?state=open"' in body
         assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
         assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body
-        assert ">Average cashback<" in body and "4.96%" in body  # rendered as a percentage
+        assert ">Average cashback<" in body and "4.86%" in body  # rendered as a percentage
         assert 'href="/orders?month=2026-09"' in body
         assert 'href="/orders?month=2026-09&amp;state=open"' in body
         assert 'href="/orders?month=2026-09&amp;state=settled"' in body

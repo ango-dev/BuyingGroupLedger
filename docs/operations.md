@@ -199,9 +199,11 @@ paid yet), which is deliberately wider than the scrapers' terminal statuses; a g
 never open.
 
 **The overview's two stat sections** carry the same eight tiles in the same order — rows and
-orders, open rows, spend (Total Cost over rows that carry money), average cashback (the effective
-rate: cost-weighted over the rows that carry money and a Cashback Rate, so a big order counts for
-more than a small one; rows with cost but no rate are named and left out), paid out (settled payouts),
+orders, open rows, spend (Total Cost over rows that carry money), average cashback (the
+**actual** rate: (Total Cost − COGS) / Total Cost summed over the rows that carry money, so a big
+order counts for more than a small one and what counts is what the sheet's COGS formula really
+netted — shipping and tax earn it, a gift card or rewards spent do not, a return takes its share
+back; rows with cost but no Cashback Rate count at 0% and the hint names them), paid out (settled payouts),
 **floating** (Total Cost of the rows the buying group has not paid yet: no settled payout; gift
 cards excluded), projected profit (committed, undated payouts) and realized profit (settled rows) —
 so the two read side by side. Floating is not spend minus paid out: that gap also holds the

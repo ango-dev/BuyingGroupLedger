@@ -59,19 +59,19 @@ def _spend(rows: list[LedgerRow]) -> float:
 
 
 def average_cashback(rows: list[LedgerRow]) -> tuple[float | None, int, int]:
-    """The EFFECTIVE cashback rate: weighted by
-    Total Cost over the rows that carry money and a Cashback Rate, so a 9% rate on a $300 row
-    does not count as much as a 4% rate on a $2,000 one. Returns (rate as a fraction or None,
-    rows counted, rows that carry money but no rate)."""
-    rated = [r for r in rows if not r.is_money_free and r.number("cashback_rate") is not None
-             and r.total_cost]
-    unrated = [r for r in rows if not r.is_money_free and r.total_cost
-               and r.number("cashback_rate") is None]
-    cost = sum(r.total_cost for r in rated)
+    """The ACTUAL cashback rate, cost-weighted: sum(Total Cost - COGS) / sum(Total Cost) over the rows
+    that carry money, cost and a COGS. Total Cost - COGS is the cashback the ledger really netted
+    on the row -- the sheet's own COGS formula applied to what was actually charged (shipping and
+    tax earn it too; a gift card or rewards spent do not; a return takes its share back) -- so
+    this is what the cards paid, not what the rate cells promise. Returns (rate as a fraction or
+    None, rows counted, rows that carry cost but no Cashback Rate -- counted at 0%, and named)."""
+    counted = [r for r in rows if not r.is_money_free and r.total_cost and r.cogs is not None]
+    unrated = [r for r in counted if r.number("cashback_rate") is None]
+    cost = sum(r.total_cost for r in counted)
     if not cost:
         return None, 0, len(unrated)
-    earned = sum(r.total_cost * (r.number("cashback_rate") or 0.0) for r in rated)
-    return round(earned / cost, 4), len(rated), len(unrated)
+    earned = sum(r.total_cost - r.cogs for r in counted)
+    return round(earned / cost, 4), len(counted), len(unrated)
 
 
 def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
@@ -95,8 +95,9 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
               f"Total Cost over every row {scope} that carries money (cancelled / superseded "
               "excluded)", link(sort="total_cost", dir="desc")),
         _tile("Average cashback", rate, "percent",
-              f"cost-weighted over the {rated} row(s) {scope} with a Cashback Rate"
-              + (f"; {unrated} row(s) with cost but no rate not counted" if unrated else ""),
+              f"actual: (Total Cost \u2212 COGS) / Total Cost, cost-weighted over the {rated} "
+              f"row(s) {scope} that carry money"
+              + (f"; {unrated} of them have no Cashback Rate and count at 0%" if unrated else ""),
               link(sort="cashback_rate", dir="desc")),
         _tile("Paid out", realized["payout"], "money",
               f"{realized['rows']} settled row(s) in {realized['orders']} order(s) {scope}: "
