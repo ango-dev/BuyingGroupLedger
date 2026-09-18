@@ -311,3 +311,17 @@
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
 })();
+
+// The profile session's countdown on the Tools page.
+(function () {
+  "use strict";
+  var el = document.querySelector("time.countdown");
+  if (!el) return;
+  var left = parseInt(el.dataset.seconds || "0", 10);
+  function show() {
+    var m = Math.floor(left / 60), s = left % 60;
+    el.textContent = left <= 0 ? "now" : (m + " min " + (s < 10 ? "0" : "") + s + " s");
+  }
+  show();
+  setInterval(function () { if (left > 0) { left -= 1; show(); if (left === 0) location.reload(); } }, 1000);
+})();

@@ -487,6 +487,119 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return RedirectResponse(url=f"/orders/{order_id}?" + urlencode({"notice": notice}),
                                 status_code=303)
 
+    # --- the Tools page: scripts run from the browser, the profile login embedded
+    from web import tools as tools_module
+    from web.ledger_writer import run_in_progress as _run_in_progress
+
+    tool_runner = tools_module.JobRunner(logs_dir, clock=clock)
+    profile_sessions = tools_module.ProfileSessions(
+        logs_dir, minutes=int(getattr(settings, "web_tool_session_minutes", 60) or 60), clock=clock)
+    app.state.tool_runner = tool_runner
+    app.state.profile_sessions = profile_sessions
+
+    def tools_page(request: Request, *, message: str = "", error: str = "", status: int = 200):
+        runner = app.state.tool_runner
+        sessions = app.state.profile_sessions
+        expired = sessions.expire_if_due()
+        if expired:
+            act("tool", f"Profile session for {expired['label']} closed: {expired['reason']}; {expired['saved']}",
+                {k: v for k, v in expired.items() if k not in ("guidance", "live_url")})
+        clear = request.query_params.get("clear", "")
+        if clear:
+            for job in [j for j in runner.jobs.values() if j.tool_key == clear and not j.running]:
+                runner.jobs.pop(job.id, None)
+        jobs = {}
+        for job in sorted(runner.jobs.values(), key=lambda j: j.started_at):
+            jobs[job.tool_key] = job  # the newest per tool
+        try:
+            sheet_mode = not settings.ledger_is_db()
+        except RuntimeError:
+            sheet_mode = False
+        shown = [t for t in tools_module.TOOLS if sheet_mode or not t.sheet_only]
+        session = sessions.current()
+        response = page_no_snapshot(
+            request, "tools.html", message=message, error=error, tools=shown,
+            groups=tools_module.GROUPS, jobs=jobs, session=session,
+            remaining=sessions.remaining_seconds(session) if session else 0,
+            session_minutes=sessions.minutes, profile_labels=settings_form.profile_labels())
+        response.status_code = status
+        return response
+
+    @app.get("/tools", response_class=HTMLResponse)
+    def tools_get(request: Request):
+        return tools_page(request, message=request.query_params.get("message", ""),
+                          error=request.query_params.get("error", ""))
+
+    @app.post("/tools/run/{key}", response_class=HTMLResponse)
+    async def tools_run(request: Request, key: str):
+        try:
+            t = tools_module.tool(key)
+        except KeyError:
+            raise HTTPException(status_code=404)
+        form = await request.form()
+        try:
+            argv = t.argv(form)
+        except ValueError as exc:
+            return tools_page(request, error=f"{t.title}: {exc}", status=400)
+        if t.writes and _run_in_progress(logs_dir):
+            return tools_page(request, error=f"{t.title} writes the ledger and a scheduled run is in "
+                                             "progress (logs/.run.lock); try again when it finishes.",
+                              status=423)
+        try:
+            job = app.state.tool_runner.start(t, argv)
+        except RuntimeError as exc:
+            return tools_page(request, error=str(exc), status=409)
+        act("tool", f"Ran {t.title}: python -m {t.module} {' '.join(argv)}".strip(),
+            {"tool": t.key, "argv": argv, "job": job.id, "writes": t.writes})
+        return RedirectResponse(url=f"/tools#t-{t.key}", status_code=303)
+
+    @app.get("/tools/jobs/{job_id}", response_class=HTMLResponse)
+    def tools_job(request: Request, job_id: str):
+        job = app.state.tool_runner.jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404)
+        body = templates.get_template("_tool_job.html").render(job=job)
+        poll = (f' hx-get="/tools/jobs/{job.id}" hx-trigger="every 2s" hx-swap="outerHTML"'
+                if job.running else "")
+        if not job.running:
+            act("tool", f"{tools_module.tool(job.tool_key).title} finished"
+                        + (f" with exit {job.returncode}" if job.returncode else "")
+                        + (f": {job.error}" if job.error else ""),
+                {"tool": job.tool_key, "job": job.id, "returncode": job.returncode}) \
+                if not getattr(job, "_recorded", False) else None
+            job._recorded = True
+        return HTMLResponse(f'<div class="tool-output" id="job-{job.id}"{poll}>{body}</div>')
+
+    @app.post("/tools/profile/start", response_class=HTMLResponse)
+    async def tools_profile_start(request: Request):
+        form = await request.form()
+        label = str(form.get("label", "")).strip()
+        add = [r.strip() for r in str(form.get("add_retailers", "")).replace(",", " ").split() if r.strip()]
+        try:
+            state = app.state.profile_sessions.start(label, add)
+        except (ValueError, RuntimeError) as exc:
+            return tools_page(request, error=str(exc), status=400)
+        except Exception as exc:  # noqa: BLE001 -- the SDK's message is the useful part
+            return tools_page(request, error=f"Could not open the session: {type(exc).__name__}: {exc}",
+                              status=502)
+        act("tool", f"Profile session opened for {label} (Browser-Use profile {state['profile_id']}"
+                    f"{', new' if state['created'] else ''}); closes after {app.state.profile_sessions.minutes} min",
+            {"label": label, "profile_id": state["profile_id"], "session_id": state["session_id"],
+             "add_retailers": add})
+        return RedirectResponse(url="/tools#t-profile", status_code=303)
+
+    @app.post("/tools/profile/finish", response_class=HTMLResponse)
+    def tools_profile_finish(request: Request):
+        closed = app.state.profile_sessions.finish()
+        if not closed:
+            return tools_page(request, error="No profile session is open.", status=400)
+        act("tool", f"Profile session for {closed['label']} closed: {closed['reason']}; {closed['saved']}",
+            {k: v for k, v in closed.items() if k not in ("guidance", "live_url")})
+        message = f"Session closed and cookies saved for {closed['label']}; {closed['saved']}."
+        if closed.get("warning"):
+            message += f" ({closed['warning']})"
+        return RedirectResponse(url=f"/tools?message={message.replace(' ', '+')}#t-profile", status_code=303)
+
     # --- the activity feed ------------------------------------------------------
     from web.activity_view import ActivityFilters
 

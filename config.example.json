@@ -111,7 +111,9 @@
     "// bind_host": "WEB_BIND_HOST — loopback by default; there is no authentication, so bind wider (0.0.0.0 behind Tailscale) deliberately. The compose service publishes on 127.0.0.1 unless WEB_PUBLISH_HOST says otherwise.",
     "bind_host": "127.0.0.1",
     "// port": "WEB_PORT",
-    "port": 8765
+    "port": 8765,
+    "// tool_session_minutes": "WEB_TOOL_SESSION_MINUTES — the Tools page's profile-login browser session is closed for you (cookies saved) after this many minutes if you leave it open.",
+    "tool_session_minutes": 60
   },
 
   "// ledger": "Where the ledger lives. `db` (the default) = the SQLite file in `database.path`: the scrapers' upsert, the sort, the buying-group sync, the BFMR auto-reply, the dashboard's editor and every script write and read it, and nothing touches the Sheet. `sheet` = the Google Sheet, DEPRECATED: every writer targets the Sheet and the file is a mirror of it. A host coming from `sheet` needs its file current first (the end-of-run mirror keeps it so; `python -m scripts.mirror_sheet_to_db` does it by hand) before it starts on `db`. The Sheet code stays until you delete it.",

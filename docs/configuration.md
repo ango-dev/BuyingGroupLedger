@@ -85,6 +85,7 @@ fails closed on a typo rather than turning itself on.
 | `WEB_SHEET_CACHE_TTL_SECONDS` | `web.sheet_cache_ttl_seconds` |
 | `WEB_BIND_HOST` | `web.bind_host` |
 | `WEB_PORT` | `web.port` |
+| `WEB_TOOL_SESSION_MINUTES` | `web.tool_session_minutes` |
 | `LEDGER_BACKEND` | `ledger.backend` |
 | `LEDGER_DB_PATH` | `database.path` |
 | `LEDGER_DB_MIRROR_AFTER_RUN` † | `database.mirror_after_run` |

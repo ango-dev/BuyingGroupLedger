@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_select.html" import choose %}
+{% block title %}Tools{% endblock %}
+{% block content %}
+<h1>Tools</h1>
+{% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
+{% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
+<p class="muted">The scripts worth running from here, each exactly as it runs on the command line. A tool that
+writes the ledger asks first and is refused while a scheduled run is in progress; one that spends
+says what it costs. Output appears below the tool as it runs, and every run is in the Activity feed.</p>
+
+{# ---- the profile login: the live browser embedded ---- #}
+<section class="panel" id="t-profile">
+  <header><h2>Log a Profile In</h2>
+    <p class="muted">Opens a live cloud browser on the profile, through its proxy, right here. Log into the
+    retailers, then <strong>Close &amp; save</strong> — closing the session is what saves the cookies. Leave the
+    page and the session stays open; it is closed for you after {{ session_minutes }} minutes
+    (<em>Settings → Dashboard → Tool session minutes</em>).</p></header>
+  {% if session %}
+  <div class="session">
+    <div class="session-bar">
+      <span><strong>{{ session.label }}</strong> <span class="muted small">via {{ session.proxy }} · Browser-Use profile <span class="mono">{{ session.profile_id }}</span>{% if session.created %} (new){% endif %}</span></span>
+      <span class="muted small">closes in <time class="countdown" data-seconds="{{ remaining }}">{{ (remaining // 60) }} min</time></span>
+      <a class="button small" href="{{ session.live_url }}" target="_blank" rel="noopener">Open in a new tab ↗</a>
+      <form method="post" action="/tools/profile/finish" data-confirm="Close the session and save the cookies to the profile now?">
+        <button type="submit" class="primary small">Close &amp; save</button>
+      </form>
+    </div>
+    <ul class="guidance">{% for line in session.guidance %}<li>{{ line }}</li>{% endfor %}</ul>
+    <iframe class="live" src="{{ session.live_url }}" allow="clipboard-read; clipboard-write" referrerpolicy="no-referrer" title="live browser session"></iframe>
+  </div>
+  {% else %}
+  <form method="post" action="/tools/profile/start" class="inline-form" data-confirm="Open a live browser session for this profile? It costs a cloud browser session while open.">
+    {{ choose('label', profile_labels, profile_labels[0] if profile_labels else '', 'Profile') }}
+    <label class="field-block">Add retailers <input type="text" name="add_retailers" placeholder="optional, space-separated keys"></label>
+    <button type="submit" class="primary">Open a live session</button>
+  </form>
+  {% if not profile_labels %}<p class="muted small">No profiles in config.json yet: add one under Settings → Profiles (label, proxy, retailers) first.</p>{% endif %}
+  {% endif %}
+</section>
+
+{% for group in groups %}
+{% set items = tools | selectattr('group', 'equalto', group) | list %}
+{% if items %}
+<h2>{{ group }}</h2>
+<div class="tool-cards">
+  {% for t in items %}
+  {% set job = jobs.get(t.key) %}
+  <section class="tool-card {{ 'writes' if t.writes }}" id="t-{{ t.key }}">
+    <header>
+      <h3>{{ t.title }}</h3>
+      <span class="mono small muted">python -m {{ t.module }}</span>
+      {% if t.writes %}<span class="tag stale">writes</span>{% endif %}
+      {% if t.spends %}<span class="tag stale" title="{{ t.spends }}">spends</span>{% endif %}
+      {% if t.sheet_only %}<span class="tag">sheet only</span>{% endif %}
+    </header>
+    <p class="muted">{{ t.blurb }}</p>
+    <form method="post" action="/tools/run/{{ t.key }}" class="tool-form" {% if t.writes %}data-confirm="Run {{ t.title }} with these settings?{% if t.spends %} It spends {{ t.spends }}.{% endif %}"{% endif %}>
+      {% for f in t.fields %}
+        {% set fname = f.name or f.label %}
+        {% if f.kind == 'flag' %}
+          <label class="check"><input type="checkbox" name="{{ fname }}" value="on"> {{ f.label }}{% if f.help %} <span class="muted small">— {{ f.help }}</span>{% endif %}</label>
+        {% elif f.kind == 'select' %}
+          <span class="field-block">{{ f.label }} {{ choose(fname, f.choices | map('string') | list, f.default, '', 'cell') }}</span>
+        {% else %}
+          <label class="field-block">{{ f.label }}{% if f.required %} *{% endif %} <input type="text" name="{{ fname }}" value="{{ f.default }}" placeholder="{{ f.help }}" {{ 'required' if f.required }}></label>
+        {% endif %}
+      {% endfor %}
+      <button type="submit" class="small {{ 'danger' if t.writes else 'primary' }}" {{ 'disabled' if job and job.running }}>{{ 'Running…' if job and job.running else 'Run' }}</button>
+    </form>
+    {% if job %}
+    <div class="tool-output" id="job-{{ job.id }}" {% if job.running %}hx-get="/tools/jobs/{{ job.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+      {% include "_tool_job.html" %}
+    </div>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% endif %}
+{% endfor %}
+{% endblock %}

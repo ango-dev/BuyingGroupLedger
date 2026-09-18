@@ -44,6 +44,7 @@ KINDS: dict[str, str] = {
     "edit": "Dashboard edit",
     "backup": "Backup",
     "settings": "Settings",
+    "tool": "Tool run",
 }
 
 _run_id: str | None = None

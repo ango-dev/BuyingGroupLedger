@@ -556,3 +556,24 @@ table.activity { width: 100%; table-layout: auto; }
 .dropzone.compact { padding: 8px 10px; min-width: 220px; }
 .receipt-upload { margin-top: 6px; }
 .add-form .field-block { display: flex; flex-direction: column; gap: 2px; }
+
+/* ---- the Tools page ---- */
+.tool-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.tool-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tool-card > header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tool-card > header h3 { margin: 0; font-size: 1.02em; }
+.tool-card > p { margin: 0; font-size: 0.92em; }
+.tool-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
+.tool-form .field-block { display: flex; flex-direction: column; gap: 3px; font-size: 0.85em; color: var(--muted); }
+.tool-form .field-block input { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 140px; }
+.tool-form label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; }
+.tool-form button { align-self: end; }
+.tool-output { border-top: 1px solid var(--line); padding-top: 8px; }
+.job-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+.job-log { max-height: 320px; overflow: auto; margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 0.8em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.session { display: flex; flex-direction: column; gap: 8px; }
+.session-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.session-bar form { margin: 0; margin-left: auto; }
+.session .guidance { margin: 0; padding-left: 18px; font-size: 0.9em; color: var(--muted); }
+.session iframe.live { width: 100%; height: 70vh; min-height: 480px; border: 1px solid var(--line); border-radius: 8px; background: #000; }
+.tag.kind-tool { background: #d8e6f0; }

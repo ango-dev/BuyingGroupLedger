@@ -1,0 +1,11 @@
+{#- One job's status and output (web/tools.Job); polled while it runs. -#}
+<div class="job-head">
+  <span class="tag {{ 'kind kind-run' if job.running else ('kind kind-ledger' if job.returncode == 0 else 'stale') }}">
+    {% if job.running %}running{% elif job.error %}could not start{% elif job.returncode == 0 %}finished{% else %}exit {{ job.returncode }}{% endif %}
+  </span>
+  <span class="mono small muted">{{ job.id }}</span>
+  <time class="local small muted" datetime="{{ job.started_at.isoformat(timespec='seconds') }}">{{ job.started_at.strftime('%H:%M:%S') }}Z</time>
+  {% if not job.running %}<a class="small" href="/tools?message=&amp;clear={{ job.tool_key }}#t-{{ job.tool_key }}">clear</a>{% endif %}
+</div>
+{% if job.error %}<p class="banner warn">{{ job.error }}</p>{% endif %}
+<pre class="job-log">{{ job.output() }}</pre>

@@ -195,6 +195,20 @@ underneath it would put its updates on the wrong rows. The signal is the run loc
 already keeps (`logs/.run.lock`, stale after three hours, the same rule as `main.py`), so the
 refusal lasts as long as the run does.
 
+**The Tools page** runs the scripts worth running from a browser, each exactly as it runs on the
+command line (`python -m scripts.<name> <args>`, the arguments its own `--help` declares): the
+preflight check, the tax report, the buying-group probe, the receipt checks, the Costco token
+tool, the backfills and ledger fixes, the Sheet mirror, and the Sheet audit while the ledger is
+the Sheet. A tool that writes the ledger asks in-page first, runs dry by default where the script
+has a dry run, and is refused while a scheduled run holds the run lock; one that spends (a cloud
+browser session, a buying-group call) says so on its card. Output streams into the card; every run
+is an Activity event. **Log a profile in** is the interactive one: it opens a live Browser-Use
+session on the profile through its proxy and embeds it in the page (an *open in a new tab* link
+is there for a browser that refuses the frame); log into the retailers, then *Close & save* —
+closing the session is what saves the cookies, and the profile id is written to config.json. Leave
+the page and the session stays open; it is closed for you after `web.tool_session_minutes`
+(default 60). The recon probes and the one-off migrations stay on the command line.
+
 **The Activity page** is the app's own account of what it did, newest first: for every scheduled
 run, what each retailer's scrape found and what the ledger write updated or added (split boxes,
 ignored tracking numbers, key conflicts named), what the buying-group sync submitted, insured and

@@ -108,6 +108,9 @@ ENV_TO_CONFIG = {
     "WEB_SHEET_CACHE_TTL_SECONDS": "web.sheet_cache_ttl_seconds",
     "WEB_BIND_HOST": "web.bind_host",
     "WEB_PORT": "web.port",
+    # How long the Tools page keeps a profile-login browser session open after the user walks
+    # away before closing it (closing = saving the cookies).
+    "WEB_TOOL_SESSION_MINUTES": "web.tool_session_minutes",
     # WHERE THE LEDGER LIVES: "db" (the SQLite file; every writer and reader runs off it -- the
     # default since 2026-09-18) or "sheet" (the Google Sheet -- DEPRECATED). See
     # docs/operations.md, "Moving off the Sheet".
@@ -423,6 +426,9 @@ class Settings:
     # a deliberate choice (0.0.0.0 behind Tailscale, or the compose service's published port).
     web_bind_host: str = _get_str("WEB_BIND_HOST", "127.0.0.1")
     web_port: int = _get_int("WEB_PORT", 8765)
+    # The Tools page's profile-login session: closed (cookies saved) after this many minutes if
+    # the user leaves it open. web/tools.ProfileSessions.
+    web_tool_session_minutes: int = _get_int("WEB_TOOL_SESSION_MINUTES", 60)
 
     def ledger_is_db(self) -> bool:
         """True when the SQLite file is the ledger (`ledger.backend` = `db`), False for the
