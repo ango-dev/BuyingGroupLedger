@@ -475,3 +475,8 @@ td:hover .cell-edit { opacity: 1; }
 td .cell-edit:hover { color: var(--accent); border-color: var(--accent); }
 td .cell-empty { font-size: 0.85em; cursor: text; opacity: 0; }
 td:hover .cell-empty { opacity: 0.8; }
+/* ---- in-page tooltips (static/tooltip.js): one small panel, never in the way ---- */
+.tip { position: fixed; z-index: 1000; max-width: 320px; padding: 6px 9px; font-size: 0.8em; line-height: 1.35;
+  color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12); pointer-events: none; opacity: 0; transition: opacity .12s; white-space: normal; }
+.tip.on { opacity: 1; }

@@ -782,6 +782,14 @@ class TestOverviewPage:
         assert "Blank Card Last 4" in body and "111-0000002-0000002" in body
         assert "no automatic writes" in body
 
+    def test_every_page_loads_the_in_page_tooltip_layer(self, client):
+        body = client.get("/").text
+        assert 'src="/static/tooltip.js' in body
+        js = client.get("/static/tooltip.js").text
+        assert 'removeAttribute("title")' in js and "data-tip" in js  # the native bubble never shows
+        css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
+        assert ".tip {" in css and ".tip.on" in css
+
     def test_the_header_carries_the_wordmark_logo_and_favicon(self, client):
         body = client.get("/").text
         assert '<link rel="icon" type="image/svg+xml" href="/static/logo.svg' in body
