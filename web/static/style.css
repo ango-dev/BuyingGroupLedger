@@ -232,8 +232,11 @@ body.wide .cards-wrap { overflow: auto; flex: 1 1 auto; min-height: 0; padding: 
 .card .facts-grid dd.neg { color: var(--bad); font-weight: 600; }
 .card .facts-grid dd.pos { color: var(--ok); font-weight: 600; }
 .card footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
-.card footer { flex-wrap: wrap; }
-.card footer .links { display: flex; gap: 6px; flex-wrap: nowrap; }
+/* all four footer buttons on ONE line: nothing wraps, the buttons are a
+   touch smaller and the cards a touch wider so the row fits at the minimum card width */
+.card footer { flex-wrap: nowrap; gap: 6px; }
+.card footer .links { display: flex; gap: 5px; flex-wrap: nowrap; min-width: 0; }
+.card footer .button.small, .card footer button.small { padding: 2px 7px; font-size: 0.8em; white-space: nowrap; }
 /* the card's footer links are buttons of the same cut as its Delete order button, in the accent
    colour so they stand out from the card's text (Delete alone is red) */
 a.button { display: inline-block; font: inherit; font-weight: 600; color: var(--accent); background: var(--card);
@@ -354,7 +357,7 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
 .card details.card-edit summary { cursor: pointer; }
 .card details.card-edit[open] summary { margin-bottom: 6px; }
 .card .row-count { margin: -4px 0 0; }
-.cards { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+.cards { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
 /* the order page's shipment tables: the same editable cells, the same affordances */
 .card-rows-wrap { overflow-x: auto; max-width: 100%; }
 table.order-rows { width: max-content; min-width: 100%; }
