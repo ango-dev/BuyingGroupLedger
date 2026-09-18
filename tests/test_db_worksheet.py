@@ -279,7 +279,7 @@ class TestTheFlag:
         ws, title = audit.open_ledger_readonly()
         assert isinstance(ws, DbWorksheet) and ws.read_only and title == "l.sqlite3"
         source = inspect.getsource(audit).split("def open_worksheet_readonly")[1].split("import gspread")[0]
-        assert 'ledger_backend", "sheet") == "db"' in source and "open_ledger_readonly()" in source
+        assert "settings.ledger_is_db()" in source and "open_ledger_readonly()" in source
 
     def test_the_dashboard_reads_the_database_with_no_upstream_under_db(self, tmp_path):
         from web.ledger_reader import DbReader, reader_from_settings
