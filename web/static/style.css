@@ -558,10 +558,12 @@ table.activity { width: 100%; table-layout: auto; }
 .add-form .field-block { display: flex; flex-direction: column; gap: 2px; }
 
 /* ---- the Tools page ---- */
-.tool-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; margin-bottom: 18px; }
-.tool-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.tool-card > header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.tool-card > header h3 { margin: 0; font-size: 1.02em; }
+.tool-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-width: 960px; }
+.tool-card > header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0; }
+.tool-card > header h2 { margin: 0; }
+#tool-picker { margin-bottom: 14px; }
+#tool-picker .picker-hint { align-self: center; max-width: 640px; }
+.session-panel { border-color: var(--accent); }
 .tool-card > p { margin: 0; font-size: 0.92em; }
 .tool-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
 .tool-form .field-block { display: flex; flex-direction: column; gap: 3px; font-size: 0.85em; color: var(--muted); }

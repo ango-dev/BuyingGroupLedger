@@ -517,8 +517,17 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             sheet_mode = False
         shown = [t for t in tools_module.TOOLS if sheet_mode or not t.sheet_only]
         session = sessions.current()
+        # One tool at a time, picked from a dropdown
+        options = [("profile", "Accounts · Log a profile in")] + [
+            (t.key, f"{t.group} · {t.title}") for t in shown]
+        selected = str(request.query_params.get("tool") or "profile")
+        if selected != "profile" and selected not in {t.key for t in shown}:
+            selected = "profile"
+        chosen = next((t for t in shown if t.key == selected), None)
+        hint = (chosen.blurb if chosen else "opens a live browser on a profile for a manual login")
         response = page_no_snapshot(
-            request, "tools.html", message=message, error=error, tools=shown,
+            request, "tools.html", message=message, error=error, tools=shown, options=options,
+            selected=selected, tool=chosen, hint=hint,
             groups=tools_module.GROUPS, jobs=jobs, session=session,
             remaining=sessions.remaining_seconds(session) if session else 0,
             session_minutes=sessions.minutes, profile_labels=settings_form.profile_labels())
@@ -551,7 +560,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return tools_page(request, error=str(exc), status=409)
         act("tool", f"Ran {t.title}: python -m {t.module} {' '.join(argv)}".strip(),
             {"tool": t.key, "argv": argv, "job": job.id, "writes": t.writes})
-        return RedirectResponse(url=f"/tools#t-{t.key}", status_code=303)
+        return RedirectResponse(url=f"/tools?tool={t.key}#t-{t.key}", status_code=303)
 
     @app.get("/tools/jobs/{job_id}", response_class=HTMLResponse)
     def tools_job(request: Request, job_id: str):
@@ -586,7 +595,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     f"{', new' if state['created'] else ''}); closes after {app.state.profile_sessions.minutes} min",
             {"label": label, "profile_id": state["profile_id"], "session_id": state["session_id"],
              "add_retailers": add})
-        return RedirectResponse(url="/tools#t-profile", status_code=303)
+        return RedirectResponse(url="/tools?tool=profile#t-profile", status_code=303)
 
     @app.post("/tools/profile/finish", response_class=HTMLResponse)
     def tools_profile_finish(request: Request):

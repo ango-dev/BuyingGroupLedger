@@ -219,12 +219,19 @@ class TestTheRoutes:
     def test_the_page_lists_the_tools_and_the_nav_links_it(self, client):
         body = client.get("/tools").text
         assert "<h1>Tools</h1>" in body and 'href="/tools"' in body
+        # one picker with every tool; the profile login is the default panel
+        assert 'data-param="tool"' in body and 'name="tool" value="profile" checked' in body
         for key in ("preflight", "tax_report", "backfill_tracking", "costco_token"):
-            assert f'id="t-{key}"' in body and f'action="/tools/run/{key}"' in body
-        assert 'id="t-audit_sheet"' not in body  # sheet-only, and the ledger is the database
+            assert f'name="tool" value="{key}"' in body
+            assert f'id="t-{key}"' not in body  # not shown until picked
+        assert 'value="audit_sheet"' not in body  # sheet-only, and the ledger is the database
         assert "Log a Profile In" in body and 'action="/tools/profile/start"' in body
         assert "after 30 minutes" in body
         assert 'name="label" value="p1" checked' in body
+        picked = client.get("/tools", params={"tool": "backfill_tracking"}).text
+        assert 'id="t-backfill_tracking"' in picked and 'action="/tools/run/backfill_tracking"' in picked
+        assert "Log a Profile In" not in picked and 'name="tool" value="backfill_tracking" checked' in picked
+        assert 'name="tool" value="profile" checked' in client.get("/tools", params={"tool": "nope"}).text
 
     def test_running_a_tool_records_it_and_shows_its_output(self, client):
         response = client.post("/tools/run/preflight", data={"--strict": "on"}, follow_redirects=False)
@@ -241,7 +248,8 @@ class TestTheRoutes:
             time.sleep(0.05)
         partial = client.get(f"/tools/jobs/{job.id}").text
         assert "ran" in partial and "finished" in partial and "hx-trigger" not in partial
-        assert 'id="job-' in client.get("/tools").text
+        assert 'id="job-' in client.get("/tools", params={"tool": "preflight"}).text
+        assert response.headers["location"] == "/tools?tool=preflight#t-preflight"
         assert client.get("/tools/jobs/nope").status_code == 404
         bad = client.post("/tools/run/tax_report", data={"Year": "soon"})
         assert bad.status_code == 400 and "whole number" in bad.text
