@@ -498,7 +498,15 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             rows=settings_form.view(rows_schema, os.environ),
             sections=settings_form.sections_in_order(rows_schema), section_forms=forms,
             open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE),
-            restart=restart if restart in ("container", "dashboard") else "")
+            restart=restart if restart in ("container", "dashboard") else "",
+            section_title=settings_form.section_title, field_label=settings_form.field_label,
+            entries={path: settings_form.display_entries(path)
+                     for path in settings_form.CARD_SECTIONS},
+            retailer_keys=settings_form.RETAILER_KEYS,
+            auth_retailers=settings_form.AUTH_RETAILERS,
+            profile_labels=settings_form.profile_labels(),
+            service_account_email=str(settings_form.config_value(
+                "google.service_account.client_email") or ""))
         response.status_code = status
         return response
 
@@ -533,6 +541,36 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                                  section_texts={path: text}, status=400)
         message = f"Saved {path} ({count} entr{'y' if count == 1 else 'ies'})."
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}", status_code=303)
+
+    # One entry of a card section: add, replace, delete. Errors re-render the page with the section open and nothing written.
+    async def _save_entry(request: Request, path: str, index: int | None):
+        form = await request.form()
+        try:
+            _landed, label = settings_form.apply_entry(path, index, form)
+        except settings_form.SettingsError as exc:
+            return settings_page(request, errors=exc.errors, open_section=path, status=400)
+        verb = "Added" if index is None else "Saved"
+        message = f"{verb} {path[:-1]} {label}."
+        return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
+                                status_code=303)
+
+    @app.post("/settings/section/{path}/entry", response_class=HTMLResponse)
+    async def settings_add_entry(request: Request, path: str):
+        return await _save_entry(request, path, None)
+
+    @app.post("/settings/section/{path}/entry/{index}", response_class=HTMLResponse)
+    async def settings_save_entry(request: Request, path: str, index: int):
+        return await _save_entry(request, path, index)
+
+    @app.post("/settings/section/{path}/entry/{index}/delete", response_class=HTMLResponse)
+    async def settings_delete_entry(request: Request, path: str, index: int):
+        try:
+            label = settings_form.delete_entry(path, index)
+        except settings_form.SettingsError as exc:
+            return settings_page(request, errors=exc.errors, open_section=path, status=400)
+        message = f"Removed {path[:-1]} {label}."
+        return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
+                                status_code=303)
 
     @app.post("/settings/restart", response_class=HTMLResponse)
     def settings_restart(request: Request):

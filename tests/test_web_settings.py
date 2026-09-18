@@ -332,3 +332,117 @@ class TestRestartPrompts:
         assert "dashboard restart" in row
         row = body[body.index('for="f-LOOKBACK_DAYS"'):body.index('for="f-DEFAULT_CASHBACK_RATE"')]
         assert "restart" not in row
+
+
+# --------------------------------------------------------------------------------------------------
+# The revamped page: panels, a side index, and ENTRY CARDS for profiles / warehouses / cards
+
+# --------------------------------------------------------------------------------------------------
+
+
+class TestEntryCards:
+    def test_the_page_is_panels_with_an_index_and_a_card_per_entry(self, client):
+        body = client.get("/settings").text
+        assert 'class="settings-nav"' in body and 'href="#s-scraping"' in body
+        assert 'id="s-scraping"' in body and "<h2>Scraping</h2>" in body
+        assert 'id="s-profiles"' in body and 'id="s-cards"' in body and 'id="s-warehouses"' in body
+        # one card per entry, its own form; a dashed card to add one; the JSON editor kept behind
+        assert 'action="/settings/section/profiles/entry/0"' in body
+        assert 'action="/settings/section/cards/entry/0"' in body
+        assert 'action="/settings/section/cards/entry"' in body and "+ Add card" in body
+        assert 'action="/settings/section/cards/entry/0/delete"' in body
+        assert 'action="/settings/section/cards"' in body and "Edit cards as JSON" in body
+        assert "USB Prime Business" in body and 'value="0315"' in body
+        assert "No warehouses yet." in body
+        assert 'src="/static/settings.js' in body and 'id="settings-confirm"' in body
+        # the scalar form's save bar
+        assert 'id="scalar-form"' in body and 'id="dirty"' in body
+
+    def test_a_card_can_be_added_edited_and_removed(self, client):
+        response = client.post("/settings/section/cards/entry", data={
+            "name": "Citi Double Cash", "last4": "8765", "cashback_rate": "2%", "profile": "",
+            "rate.0.retailer": "amazon", "rate.0.rate": "5%", "rate.1.retailer": "", "rate.1.rate": ""},
+            follow_redirects=False)
+        assert response.status_code == 303 and "Added+card" in response.headers["location"]
+        assert config_value("cards")[1] == {"last4": "8765", "name": "Citi Double Cash",
+                                            "cashback_rate": "2%", "retailer_rates": {"amazon": "5%"}}
+        response = client.post("/settings/section/cards/entry/1", data={
+            "name": "Citi Double Cash", "last4": "8765", "cashback_rate": "0.02", "profile": "p1",
+            "rate.0.retailer": "", "rate.0.rate": "5%"}, follow_redirects=False)
+        assert response.status_code == 303 and "Saved+card" in response.headers["location"]
+        assert config_value("cards")[1] == {"last4": "8765", "name": "Citi Double Cash",
+                                            "cashback_rate": 0.02, "profile": "p1"}
+        response = client.post("/settings/section/cards/entry/0/delete", follow_redirects=False)
+        assert response.status_code == 303 and "Removed+card+USB" in response.headers["location"]
+        assert [c["last4"] for c in config_value("cards")] == ["8765"]
+
+    def test_an_invalid_entry_is_400_and_writes_nothing(self, client):
+        bad = client.post("/settings/section/cards/entry", data={"name": "Bare", "last4": "1111",
+                                                                  "cashback_rate": "2"})
+        assert bad.status_code == 400 and "Nothing was saved" in bad.text and "outside 0-1" in bad.text
+        assert len(config_value("cards")) == 1
+        gone = client.post("/settings/section/cards/entry/7/delete")
+        assert gone.status_code == 400 and "does not exist" in gone.text
+        jig = client.post("/settings/section/warehouses/entry", data={"buying_group": "BFMR",
+                                                                       "jig.0.label": "no fields"})
+        assert jig.status_code == 400 and "no match fields" in jig.text
+        assert config_value("warehouses") in (None, [])
+
+    def test_a_profile_keeps_its_secrets_and_comment_keys_across_an_edit(self, client, config):
+        config(profiles=[{"label": "p1", "profile_id": "", "retailers": ["costco"], "// note": "kept",
+                          "proxy": {"host": "h", "port": 1, "username": "u", "password": "pw"},
+                          "auth": {"bestbuy": {"method": "password", "username": "me",
+                                               "password": "secret", "totp_secret": "SEED"}}}])
+        body = client.get("/settings").text
+        for secret in ("pw", "secret", "SEED"):
+            assert f'value="{secret}"' not in body
+        assert 'name="proxy_password__clear"' in body and 'name="auth.bestbuy.totp_secret"' in body
+        # a browser submit: blank passwords, the retailers ticked, a second sign-in added
+        response = client.post("/settings/section/profiles/entry/0", data={
+            "label": "p1", "profile_id": "BU-1", "retailers": ["costco", "bestbuy"],
+            "proxy_host": "h", "proxy_port": "1", "proxy_username": "u", "proxy_password": "",
+            "auth.bestbuy.username": "me", "auth.bestbuy.password": "", "auth.bestbuy.totp_secret": "",
+            "auth_new_retailer": "amazon-business", "auth_new_username": "ab", "auth_new_password": "x"},
+            follow_redirects=False)
+        assert response.status_code == 303
+        saved = config_value("profiles")[0]
+        assert saved["// note"] == "kept" and saved["profile_id"] == "BU-1"
+        assert saved["retailers"] == ["bestbuy", "costco"]
+        assert saved["proxy"]["password"] == "pw"
+        assert saved["auth"]["bestbuy"] == {"method": "password", "username": "me",
+                                            "password": "secret", "totp_secret": "SEED"}
+        assert saved["auth"]["amazon-business"]["password"] == "x"
+        # clear the proxy password, remove the bestbuy sign-in, drop the proxy entirely next
+        client.post("/settings/section/profiles/entry/0", data={
+            "label": "p1", "retailers": "costco", "proxy_host": "h", "proxy_port": "1",
+            "proxy_password__clear": "1", "auth.bestbuy.__remove": "1",
+            "auth.amazon-business.username": "ab", "auth.amazon-business.password": ""})
+        saved = config_value("profiles")[0]
+        assert saved["proxy"]["password"] == "" and list(saved["auth"]) == ["amazon-business"]
+        client.post("/settings/section/profiles/entry/0", data={"label": "p1", "proxy_host": ""})
+        assert "proxy" not in config_value("profiles")[0]
+
+    def test_a_warehouse_form_carries_a_blank_jig_row_that_is_ignored(self, client):
+        response = client.post("/settings/section/warehouses/entry", data={
+            "buying_group": "BFMR", "jig.0.label": "BFMR-A", "jig.0.street": "13 Sample",
+            "jig.0.zip": "03050", "jig.0.contains": "suite 4, dock",
+            "jig.1.label": "", "jig.1.street": "", "jig.1.zip": "", "jig.1.name_contains": "",
+            "jig.1.contains": ""}, follow_redirects=False)
+        assert response.status_code == 303
+        assert config_value("warehouses") == [{"buying_group": "BFMR", "jigs": [
+            {"label": "BFMR-A", "street": "13 Sample", "zip": "03050",
+             "contains": ["suite 4", "dock"]}]}]
+        body = client.get("/settings").text
+        assert 'name="jig.1.label"' in body and 'placeholder="new jig"' in body
+        client.post("/settings/section/warehouses/entry/0", data={
+            "buying_group": "BFMR", "jig.0.label": "BFMR-A", "jig.0.street": "13 Sample",
+            "jig.0.__remove": "1", "jig.1.label": "B", "jig.1.zip": "99999"})
+        assert config_value("warehouses")[0]["jigs"] == [{"label": "B", "zip": "99999"}]
+
+    def test_titles_and_labels_fall_back_to_the_key(self):
+        assert settings_form.section_title("scraping")[0] == "Scraping"
+        assert settings_form.section_title("brand_new") == ("Brand new", "")
+        by_env = {s.env: s for s in settings_form.schema()}
+        assert settings_form.field_label(by_env["LOOKBACK_DAYS"]) == ("Lookback days", "")
+        assert settings_form.field_label(by_env["BFMR_API_KEY"]) == ("Api key", "bfmr")
+        assert settings_form.RETAILER_KEYS == ("amazon", "amazon-business", "bestbuy", "costco")

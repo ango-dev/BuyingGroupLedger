@@ -315,3 +315,294 @@ def apply_section(path: str, text: str) -> int:
     _set_path(data, path, value)
     save_config(data)
     return len(value)
+
+
+# --------------------------------------------------------------------------------------------------
+# Presentation: section titles and field labels (a fallback derives both from the key)
+# --------------------------------------------------------------------------------------------------
+
+#: Friendly titles and one-line blurbs for the page's panels. A section missing here still renders,
+#: titled from its key -- this is presentation only, never a second list of settings.
+SECTION_TITLES: dict[str, tuple[str, str]] = {
+    "browser_use": ("Browser-Use", "The cloud browser Best Buy and the Amazons drive over CDP."),
+    "container": ("Schedule", "How often the container runs, and whether it runs at start. "
+                  "Read once at container start."),
+    "scraping": ("Scraping", "How far back each run looks, and the money rules the ledger applies."),
+    "google": ("Google Sheet", "The ledger spreadsheet and the service account that reads and "
+               "writes it."),
+    "alerts": ("Alerts", "Where a failed run, a logged-out session or a stale heartbeat is reported."),
+    "buying_groups": ("Buying groups", "BFMR and MaxOutDeals: API access, insurance, and the "
+                      "combined-package auto-reply."),
+    "receipts": ("Receipts", "Receipt capture and the OCI bucket the PDFs and dossiers upload to."),
+    "web": ("Dashboard", "This web dashboard: its ledger source, bind address and port. "
+            "Read once at dashboard start."),
+    "database": ("Database", "The SQLite mirror of the ledger. Read once at dashboard start."),
+    "profiles": ("Profiles", "One browser identity per entry: the Browser-Use profile, its proxy, "
+                 "the retailers it is logged into and the sign-in it can perform unattended."),
+    "warehouses": ("Warehouses", "Each buying group and the address jigs that route an order to "
+                   "it. An order matching no jig is tagged Unclassified."),
+    "cards": ("Cards", "Cards by their last 4 digits, with the cashback rate the profit formula "
+              "nets from COGS -- overall, and per retailer."),
+    "google.service_account": ("Service account", "The JSON key Google issued for the service "
+                               "account; share the sheet with its client_email."),
+}
+
+
+def section_title(section: str) -> tuple[str, str]:
+    return SECTION_TITLES.get(section, (section.replace("_", " ").capitalize(), ""))
+
+
+def field_label(setting: Setting) -> tuple[str, str]:
+    """("Lookback days", "") for scraping.lookback_days; ("Api key", "bfmr") for
+    buying_groups.bfmr.api_key -- the last part humanised, the sub-group beside it."""
+    parts = setting.key.split(".")
+    return parts[-1].replace("_", " ").capitalize(), ".".join(parts[:-1])
+
+
+# --------------------------------------------------------------------------------------------------
+# Entry cards: profiles / warehouses / cards edited one entry at a time. Each card is a form; a submitted card is
+# rebuilt from its fields ON TOP of the stored entry, so comment keys and anything the form does
+# not show survive, validated by the section's model, and written through save_config like
+# everything else. Secrets (proxy and sign-in passwords, TOTP seeds) are never rendered: blank
+# keeps the stored value, a "clear" box blanks it.
+# --------------------------------------------------------------------------------------------------
+
+#: The retailer keys a profile can be logged into (scripts.preflight is the authority).
+from scripts.preflight import KNOWN_RETAILER_KEYS as RETAILER_KEYS  # noqa: E402
+
+#: The retailers with an unattended sign-in (models.profile.RetailerAuth's docstring).
+AUTH_RETAILERS = ("bestbuy", "amazon-business")
+#: The sections that have entry cards (the rest of SECTIONS stay JSON-only).
+CARD_SECTIONS = ("profiles", "warehouses", "cards")
+
+
+def _entries(path: str) -> list:
+    value = config_value(path)
+    return list(value) if isinstance(value, list) else []
+
+
+def _is_set(value) -> bool:
+    return bool(str(value or "").strip())
+
+
+def display_entries(path: str) -> list[dict]:
+    """What the cards show: the stored entries with every secret replaced by whether it is set."""
+    out = []
+    for index, raw in enumerate(_entries(path)):
+        entry = strip_comments(raw) if isinstance(raw, dict) else {}
+        if not isinstance(entry, dict):
+            continue
+        if path == "profiles":
+            proxy = entry.get("proxy") or {}
+            auth = entry.get("auth") or {}
+            out.append({
+                "index": index, "label": entry.get("label", ""),
+                "profile_id": entry.get("profile_id", ""),
+                "retailers": list(entry.get("retailers") or []),
+                "proxy": {"host": proxy.get("host", ""), "port": proxy.get("port", ""),
+                          "username": proxy.get("username", ""),
+                          "password_set": _is_set(proxy.get("password"))} if proxy else None,
+                "auth": [{"retailer": key, "username": (a or {}).get("username", ""),
+                          "password_set": _is_set((a or {}).get("password")),
+                          "totp_set": _is_set((a or {}).get("totp_secret"))}
+                         for key, a in auth.items()],
+            })
+        elif path == "warehouses":
+            out.append({
+                "index": index, "buying_group": entry.get("buying_group", ""),
+                "jigs": [{"label": j.get("label", ""), "street": j.get("street", ""),
+                          "zip": j.get("zip", ""), "name_contains": j.get("name_contains", ""),
+                          "contains": ", ".join(j.get("contains") or [])}
+                         for j in (entry.get("jigs") or []) if isinstance(j, dict)],
+            })
+        elif path == "cards":
+            out.append({
+                "index": index, "last4": entry.get("last4", ""), "name": entry.get("name", ""),
+                "cashback_rate": entry.get("cashback_rate", ""),
+                "profile": entry.get("profile", ""),
+                "retailer_rates": list((entry.get("retailer_rates") or {}).items()),
+            })
+    return out
+
+
+def profile_labels() -> list[str]:
+    return [str(e.get("label", "")) for e in _entries("profiles") if isinstance(e, dict)]
+
+
+def _text(form: Mapping[str, str], name: str) -> str:
+    return str(form.get(name, "") or "").strip()
+
+
+def _secret(form: Mapping[str, str], name: str, stored) -> str:
+    """Blank keeps `stored`; `<name>__clear` blanks it; anything typed replaces it."""
+    if _text(form, f"{name}__clear") in ("1", "on", "true"):
+        return ""
+    typed = str(form.get(name, "") or "")
+    return typed.strip() if typed.strip() else str(stored or "")
+
+
+def _rate_value(text: str):
+    """A rate as typed: "2%" stays text (the models accept it), a number becomes a float."""
+    text = text.strip()
+    if not text:
+        return None
+    return text if text.endswith("%") else float(text)
+
+
+def _indexed(form: Mapping[str, str], prefix: str) -> list[int]:
+    """The row indexes a form carries for `prefix` ("jig" -> jig.0.*, jig.1.*), in order."""
+    seen: set[int] = set()
+    for key in form.keys():
+        if key.startswith(prefix + "."):
+            head = key[len(prefix) + 1:].split(".", 1)[0]
+            if head.isdigit():
+                seen.add(int(head))
+    return sorted(seen)
+
+
+def _profile_from_form(form: Mapping[str, str], base: dict) -> dict:
+    entry = dict(base)
+    entry["label"] = _text(form, "label")
+    entry["profile_id"] = _text(form, "profile_id")
+    chosen = form.getlist("retailers") if hasattr(form, "getlist") else form.get("retailers", [])
+    if isinstance(chosen, str):
+        chosen = [chosen]
+    entry["retailers"] = [r for r in RETAILER_KEYS if r in chosen]
+    old_proxy = base.get("proxy") or {}
+    host = _text(form, "proxy_host")
+    if host:
+        proxy = dict(old_proxy)
+        proxy["host"] = host
+        port = _text(form, "proxy_port")
+        proxy["port"] = int(port) if port.isdigit() else port
+        proxy["username"] = _text(form, "proxy_username")
+        proxy["password"] = _secret(form, "proxy_password", old_proxy.get("password"))
+        entry["proxy"] = proxy
+    else:
+        entry.pop("proxy", None)
+    auth = dict(base.get("auth") or {})
+    for retailer in list(auth):
+        if _text(form, f"auth.{retailer}.__remove") in ("1", "on", "true"):
+            auth.pop(retailer)
+            continue
+        if f"auth.{retailer}.username" not in form:
+            continue  # not on the form (a key the page does not know): kept as stored
+        old = dict(auth.get(retailer) or {})
+        old["method"] = old.get("method") or "password"
+        old["username"] = _text(form, f"auth.{retailer}.username")
+        old["password"] = _secret(form, f"auth.{retailer}.password", old.get("password"))
+        old["totp_secret"] = _secret(form, f"auth.{retailer}.totp_secret", old.get("totp_secret"))
+        auth[retailer] = old
+    new_retailer = _text(form, "auth_new_retailer")
+    if new_retailer and new_retailer not in auth:
+        auth[new_retailer] = {"method": "password", "username": _text(form, "auth_new_username"),
+                              "password": _text(form, "auth_new_password"),
+                              "totp_secret": _text(form, "auth_new_totp_secret")}
+    if auth:
+        entry["auth"] = auth
+    else:
+        entry.pop("auth", None)
+    return entry
+
+
+def _warehouse_from_form(form: Mapping[str, str], base: dict) -> dict:
+    entry = dict(base)
+    entry["buying_group"] = _text(form, "buying_group")
+    jigs = []
+    for i in _indexed(form, "jig"):
+        if _text(form, f"jig.{i}.__remove") in ("1", "on", "true"):
+            continue
+        jig = {"label": _text(form, f"jig.{i}.label"), "street": _text(form, f"jig.{i}.street"),
+               "zip": _text(form, f"jig.{i}.zip"),
+               "name_contains": _text(form, f"jig.{i}.name_contains"),
+               "contains": [c.strip() for c in _text(form, f"jig.{i}.contains").split(",")
+                            if c.strip()]}
+        if not any([jig["label"], jig["street"], jig["zip"], jig["name_contains"], jig["contains"]]):
+            continue  # the blank "new jig" row
+        jigs.append({k: v for k, v in jig.items() if v not in ("", [])})
+    entry["jigs"] = jigs
+    return entry
+
+
+def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
+    entry = dict(base)
+    entry["last4"] = _text(form, "last4")
+    entry["name"] = _text(form, "name")
+    rate = _rate_value(_text(form, "cashback_rate"))
+    if rate is None:
+        entry.pop("cashback_rate", None)
+    else:
+        entry["cashback_rate"] = rate
+    profile = _text(form, "profile")
+    if profile:
+        entry["profile"] = profile
+    else:
+        entry.pop("profile", None)
+    rates = {}
+    for i in _indexed(form, "rate"):
+        retailer = _text(form, f"rate.{i}.retailer")
+        value = _rate_value(_text(form, f"rate.{i}.rate"))
+        if retailer and value is not None:
+            rates[retailer] = value
+    if rates:
+        entry["retailer_rates"] = rates
+    else:
+        entry.pop("retailer_rates", None)
+    return entry
+
+
+_BUILDERS = {"profiles": _profile_from_form, "warehouses": _warehouse_from_form,
+             "cards": _card_from_form}
+
+
+def entry_label(path: str, entry: dict) -> str:
+    entry = entry if isinstance(entry, dict) else {}
+    if path == "profiles":
+        return str(entry.get("label") or "(unlabelled profile)")
+    if path == "warehouses":
+        return str(entry.get("buying_group") or "(unnamed group)")
+    name = entry.get("name") or "(unnamed card)"
+    return f"{name} \u2026{entry.get('last4', '')}" if entry.get("last4") else str(name)
+
+
+def apply_entry(path: str, index: int | None, form: Mapping[str, str]) -> tuple[int, str]:
+    """Add (index None) or replace one entry of a card section from its form. Returns the index
+    it landed at and its label. Raises SettingsError, nothing written."""
+    if path not in CARD_SECTIONS:
+        raise SettingsError([f"{path!r} has no entry cards"])
+    model = next(m for p, _shape, m, _help in SECTIONS if p == path)
+    entries = _entries(path)
+    if index is not None and not 0 <= index < len(entries):
+        raise SettingsError([f"{path}[{index}] does not exist (the page may be stale; reload it)"])
+    base = dict(entries[index]) if index is not None and isinstance(entries[index], dict) else {}
+    try:
+        entry = _BUILDERS[path](form, base)
+        model.model_validate(strip_comments(entry))
+    except SettingsError:
+        raise
+    except Exception as exc:  # noqa: BLE001 -- pydantic's / int()'s message is the useful part
+        where = f"{path}[{index}]" if index is not None else f"new {path[:-1]}"
+        raise SettingsError([f"{where}: {exc}"]) from exc
+    if index is None:
+        entries.append(entry)
+        index = len(entries) - 1
+    else:
+        entries[index] = entry
+    data = load_config()
+    _set_path(data, path, entries)
+    save_config(data)
+    return index, entry_label(path, entry)
+
+
+def delete_entry(path: str, index: int) -> str:
+    """Remove one entry; returns its label. Raises SettingsError when it does not exist."""
+    if path not in CARD_SECTIONS:
+        raise SettingsError([f"{path!r} has no entry cards"])
+    entries = _entries(path)
+    if not 0 <= index < len(entries):
+        raise SettingsError([f"{path}[{index}] does not exist (the page may be stale; reload it)"])
+    removed = entries.pop(index)
+    data = load_config()
+    _set_path(data, path, entries)
+    save_config(data)
+    return entry_label(path, removed)

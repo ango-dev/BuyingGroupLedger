@@ -22,76 +22,257 @@
 {% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
 
 <p class="muted">Edits <code>{{ config_path }}</code> in place (your <code>//</code> comment keys are kept).
-The scheduled run reads the file fresh on its next start, so a change applies to the next run with no
-restart. The dashboard itself reads settings once at start: after changing a <code>web</code> or
-<code>database</code> value, use <em>Restart dashboard</em> below. A setting whose variable is exported
-in the environment is marked <span class="tag stale">env override</span>: the file value is saved but
-the environment still wins for the running process.</p>
-<p class="muted"><strong>This page has no login.</strong> Whoever can open it can read and change every
-credential here. Keep the dashboard on loopback or your own network.</p>
+A scheduled run reads the file fresh at its start, so most changes apply to the next run with no
+restart; a field tagged <span class="tag">container restart</span> or <span class="tag">dashboard restart</span>
+says when one is needed. A field tagged <span class="tag stale">env override</span> is exported in the
+environment: the file value is saved but the environment still wins for the running process.
+<strong>This page has no login</strong> — whoever can open it can read and change every credential
+here, so keep the dashboard on loopback or your own network.</p>
 
-<form method="post" action="/settings" class="settings">
-  {% for section in sections %}
-  <details class="dossier" open>
-    <summary><strong>{{ section }}</strong></summary>
-    <div class="dossier-body">
-      <table class="grid settings-table">
-        <tbody>
-        {% for row in rows if row.setting.section == section %}
+<div class="settings-layout">
+  <nav class="settings-nav" aria-label="settings sections">
+    <div class="group">Settings</div>
+    {% for section in sections %}<a href="#s-{{ section }}">{{ section_title(section)[0] }}</a>{% endfor %}
+    <div class="group">Lists</div>
+    <a href="#s-profiles">Profiles</a>
+    <a href="#s-warehouses">Warehouses</a>
+    <a href="#s-cards">Cards</a>
+    <a href="#s-google.service_account">Service account</a>
+    <div class="group">Apply</div>
+    <a href="#s-apply">Restart</a>
+  </nav>
+
+  <div class="settings-main">
+    {# ---- every scalar setting, derived from config/settings.py (see web/settings_form.py) ---- #}
+    <form method="post" action="/settings" class="settings" id="scalar-form">
+      {% for section in sections %}
+      {% set title, blurb = section_title(section) %}
+      <section class="panel" id="s-{{ section }}">
+        <header><h2>{{ title }}</h2>{% if blurb %}<p class="muted">{{ blurb }}</p>{% endif %}</header>
+        <div class="fields">
+          {% for row in rows if row.setting.section == section %}
           {% set s = row.setting %}
-          <tr>
-            <th scope="row">
-              <label for="f-{{ s.env }}" class="mono">{{ s.key }}</label>
-              <div class="muted mono small">{{ s.env }}</div>
-              {% if row.overridden %}<span class="tag stale" title="exported in the environment; the file value is saved but does not reach the running process">env override</span>{% endif %}
-              {% if row.restart == 'container' %}<span class="tag" title="the container reads this once at start: docker compose restart to apply">container restart</span>
-              {% elif row.restart == 'dashboard' %}<span class="tag" title="the dashboard reads this once at start: Restart dashboard to apply">dashboard restart</span>{% endif %}
-            </th>
-            <td class="input">
+          {% set label, sub = field_label(s) %}
+          <div class="field">
+            <div class="field-label">
+              <label for="f-{{ s.env }}">{% if sub %}<span class="sub">{{ sub }} · </span>{% endif %}{{ label }}</label>
+              <div class="meta">
+                <span class="mono small muted">{{ s.env }}</span>
+                {% if row.overridden %}<span class="tag stale" title="exported in the environment; the file value is saved but does not reach the running process">env override</span>{% endif %}
+                {% if row.restart == 'container' %}<span class="tag" title="the container reads this once at start: docker compose restart to apply">container restart</span>
+                {% elif row.restart == 'dashboard' %}<span class="tag" title="the dashboard reads this once at start: Restart dashboard to apply">dashboard restart</span>{% endif %}
+              </div>
+            </div>
+            <div class="field-input">
               {% if s.kind == 'bool' %}
-                <input type="checkbox" id="f-{{ s.env }}" name="{{ s.env }}" value="on" {{ 'checked' if row.value is sameas true or row.value in ('true', 'True', '1', 'yes', 'on') }}>
+                <label class="switch"><input type="checkbox" id="f-{{ s.env }}" name="{{ s.env }}" value="on" {{ 'checked' if row.value is sameas true or row.value in ('true', 'True', '1', 'yes', 'on') }}> <span class="muted small">enabled</span></label>
               {% elif s.secret %}
                 <input type="password" id="f-{{ s.env }}" name="{{ s.env }}" value="" autocomplete="new-password"
                        placeholder="{{ '•••••••• (set; blank keeps it)' if row.secret_set else '(not set)' }}">
-                {% if row.secret_set %}<label class="small"><input type="checkbox" name="{{ s.env }}__clear" value="1"> clear</label>{% endif %}
+                {% if row.secret_set %}<label class="small clear"><input type="checkbox" name="{{ s.env }}__clear" value="1"> clear</label>{% endif %}
               {% elif s.kind in ('int', 'float') %}
                 <input type="number" id="f-{{ s.env }}" name="{{ s.env }}" value="{{ row.value }}" step="{{ '1' if s.kind == 'int' else 'any' }}">
               {% else %}
                 <input type="text" id="f-{{ s.env }}" name="{{ s.env }}" value="{{ row.value }}" {% if s.kind == 'rate' %}placeholder="0.02 or 2%"{% endif %}>
               {% endif %}
               {% if s.help %}<div class="muted small help">{{ s.help }}</div>{% endif %}
-            </td>
-          </tr>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+      <div class="savebar">
+        <span class="dirty" id="dirty">No unsaved changes</span>
+        <button type="submit" class="primary">Save settings</button>
+      </div>
+    </form>
+
+    {# ---- the list sections: one card per entry, a dashed card to add one ---- #}
+    {% macro secret_input(name, is_set, label) %}
+      <label>{{ label }}
+        <input type="password" name="{{ name }}" value="" autocomplete="new-password" placeholder="{{ '•••••••• (set; blank keeps it)' if is_set else '(not set)' }}">
+        {% if is_set %}<span class="small"><input type="checkbox" name="{{ name }}__clear" value="1"> clear</span>{% endif %}
+      </label>
+    {% endmacro %}
+
+    {% macro profile_fields(p) %}
+      <div class="grid2">
+        <label>Label <input type="text" name="label" value="{{ p.label if p else '' }}" required placeholder="profile-1"></label>
+        <label>Browser-Use profile id <input type="text" name="profile_id" value="{{ p.profile_id if p else '' }}" class="mono"></label>
+      </div>
+      <fieldset>
+        <legend>Logged into</legend>
+        <div class="chips">
+          {% for r in retailer_keys %}<label><input type="checkbox" name="retailers" value="{{ r }}" {{ 'checked' if p and r in p.retailers }}> {{ r }}</label>{% endfor %}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Proxy <span class="muted">(blank host = no proxy)</span></legend>
+        <div class="grid2">
+          <label>Host <input type="text" name="proxy_host" value="{{ p.proxy.host if p and p.proxy else '' }}"></label>
+          <label>Port <input type="number" name="proxy_port" value="{{ p.proxy.port if p and p.proxy else '' }}"></label>
+          <label>Username <input type="text" name="proxy_username" value="{{ p.proxy.username if p and p.proxy else '' }}"></label>
+          {{ secret_input('proxy_password', p and p.proxy and p.proxy.password_set, 'Password') }}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Unattended sign-in</legend>
+        {% if p %}{% for a in p.auth %}
+        <div class="subrow {{ 'head' if loop.first }}">
+          <label>{{ a.retailer }} · username <input type="text" name="auth.{{ a.retailer }}.username" value="{{ a.username }}"></label>
+          {{ secret_input('auth.' ~ a.retailer ~ '.password', a.password_set, 'password') }}
+          {{ secret_input('auth.' ~ a.retailer ~ '.totp_secret', a.totp_set, 'TOTP seed') }}
+          <label class="rm"><input type="checkbox" name="auth.{{ a.retailer }}.__remove" value="1"> remove</label>
+        </div>
+        {% endfor %}{% endif %}
+        <div class="subrow {{ 'head' if not p or not p.auth }}">
+          <label>add for
+            <select name="auth_new_retailer">
+              <option value="">— retailer —</option>
+              {% for r in auth_retailers %}{% if not p or r not in (p.auth | map(attribute='retailer') | list) %}<option value="{{ r }}">{{ r }}</option>{% endif %}{% endfor %}
+            </select>
+          </label>
+          <label>username <input type="text" name="auth_new_username"></label>
+          <label>password <input type="password" name="auth_new_password" autocomplete="new-password"></label>
+          <label>TOTP seed <input type="password" name="auth_new_totp_secret" autocomplete="new-password"></label>
+        </div>
+        <p class="muted small">Password sign-in with an authenticator-app seed, for bestbuy and amazon-business. Enrol the app, not SMS.</p>
+      </fieldset>
+    {% endmacro %}
+
+    {% macro warehouse_fields(w) %}
+      <div class="grid1">
+        <label>Buying group <input type="text" name="buying_group" value="{{ w.buying_group if w else '' }}" required placeholder="BFMR — the value written to the ledger"></label>
+      </div>
+      <fieldset>
+        <legend>Address jigs <span class="muted">(a jig matches when every filled field appears in the address)</span></legend>
+        {% set jigs = (w.jigs if w else []) + [{'label': '', 'street': '', 'zip': '', 'name_contains': '', 'contains': ''}] %}
+        {% for j in jigs %}
+        {% set i = loop.index0 %}
+        <div class="subrow {{ 'head' if loop.first }}">
+          <label>label <input type="text" name="jig.{{ i }}.label" value="{{ j.label }}" placeholder="{{ 'new jig' if loop.last else '' }}"></label>
+          <label>street <input type="text" name="jig.{{ i }}.street" value="{{ j.street }}"></label>
+          <label>zip <input type="text" name="jig.{{ i }}.zip" value="{{ j.zip }}"></label>
+          {% if not loop.last %}<label class="rm"><input type="checkbox" name="jig.{{ i }}.__remove" value="1"> remove</label>{% else %}<span></span>{% endif %}
+          <label>name contains <input type="text" name="jig.{{ i }}.name_contains" value="{{ j.name_contains }}"></label>
+          <label style="grid-column: span 2">also contains <input type="text" name="jig.{{ i }}.contains" value="{{ j.contains }}" placeholder="comma-separated extra substrings"></label>
+        </div>
         {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </details>
-  {% endfor %}
-  <div class="inline-form">
-    <button type="submit">Save settings</button>
+      </fieldset>
+    {% endmacro %}
+
+    {% macro card_fields(c) %}
+      <div class="grid2">
+        <label>Name <input type="text" name="name" value="{{ c.name if c else '' }}" required placeholder="Chase Freedom Unlimited"></label>
+        <label>Last 4 <input type="text" name="last4" value="{{ c.last4 if c else '' }}" required maxlength="4" pattern="[0-9]{4}" class="mono"></label>
+        <label>Cashback rate <input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="0.02 or 2% (blank = the default rate)"></label>
+        <label>Only for profile
+          <select name="profile">
+            <option value="">any account</option>
+            {% for l in profile_labels %}<option value="{{ l }}" {{ 'selected' if c and c.profile == l }}>{{ l }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <fieldset>
+        <legend>Per-retailer rates <span class="muted">(override the card's rate at one retailer)</span></legend>
+        {% set pairs = (c.retailer_rates if c else []) + [('', '')] %}
+        {% for retailer, rate in pairs %}
+        <div class="subrow {{ 'head' if loop.first }}">
+          <label>retailer
+            <select name="rate.{{ loop.index0 }}.retailer">
+              <option value="">{{ '— add —' if loop.last else '— remove —' }}</option>
+              {% for r in retailer_keys %}<option value="{{ r }}" {{ 'selected' if r == retailer }}>{{ r }}</option>{% endfor %}
+              {% if retailer and retailer not in retailer_keys %}<option value="{{ retailer }}" selected>{{ retailer }}</option>{% endif %}
+            </select>
+          </label>
+          <label>rate <input type="text" name="rate.{{ loop.index0 }}.rate" value="{{ rate }}" placeholder="5%"></label>
+          <span></span><span></span>
+        </div>
+        {% endfor %}
+      </fieldset>
+    {% endmacro %}
+
+    {% macro entry_section(path, singular, items, fields) %}
+    {% set title, blurb = section_title(path) %}
+    <section class="panel" id="s-{{ path }}">
+      <header><h2>{{ title }} <span class="muted small">{{ items | length }}</span></h2><p class="muted">{{ blurb }}</p></header>
+      <div class="entry-cards">
+        {% for e in items %}
+        <form method="post" action="/settings/section/{{ path }}/entry/{{ e.index }}" class="entry-card" autocomplete="off">
+          <header>
+            <h3>{% if path == 'profiles' %}{{ e.label or '(unlabelled)' }}{% elif path == 'warehouses' %}{{ e.buying_group or '(unnamed)' }}{% else %}{{ e.name or '(unnamed)' }} <span class="mono muted">…{{ e.last4 }}</span>{% endif %}</h3>
+            {% if path == 'profiles' %}<span class="muted small">{{ e.retailers | join(', ') or 'no retailers' }}{% if e.proxy %} · proxy{% endif %}{% if e.auth %} · sign-in: {{ e.auth | map(attribute='retailer') | join(', ') }}{% endif %}</span>
+            {% elif path == 'warehouses' %}<span class="muted small">{{ e.jigs | length }} jig(s)</span>
+            {% else %}<span class="muted small">{{ e.cashback_rate or 'default rate' }}{% if e.profile %} · {{ e.profile }}{% endif %}</span>{% endif %}
+          </header>
+          {{ fields(e) }}
+          <footer>
+            <button type="submit" class="small primary">Save {{ singular }}</button>
+          </footer>
+        </form>
+        <form method="post" action="/settings/section/{{ path }}/entry/{{ e.index }}/delete" class="entry-delete" data-confirm="Remove {{ singular }} {% if path == 'profiles' %}{{ e.label }}{% elif path == 'warehouses' %}{{ e.buying_group }}{% else %}{{ e.name }} …{{ e.last4 }}{% endif %} from config.json?" style="display: contents">
+          <button type="submit" class="danger small entry-delete-button" title="remove this {{ singular }}">✕ Remove</button>
+        </form>
+        {% else %}
+        <p class="settings-empty">No {{ path }} yet.</p>
+        {% endfor %}
+        <details class="entry-card new" {{ 'open' if open_section == path }}>
+          <summary>+ Add {{ singular }}</summary>
+          <form method="post" action="/settings/section/{{ path }}/entry" autocomplete="off">
+            {{ fields(none) }}
+            <footer><button type="submit" class="small primary">Add {{ singular }}</button></footer>
+          </form>
+        </details>
+      </div>
+      <details class="advanced" {{ 'open' if open_section == path and errors }}>
+        <summary>Edit {{ path }} as JSON</summary>
+        {% for spath, shape, help, text in section_forms if spath == path %}
+        <form method="post" action="/settings/section/{{ path }}" class="settings-section">
+          <textarea name="text" rows="14" class="mono json" spellcheck="false">{{ text }}</textarea>
+          <div class="inline-form"><button type="submit" class="small">Save {{ path }} JSON</button>
+            <span class="muted small">validated entry by entry before anything is written; secrets are shown in full here</span></div>
+        </form>
+        {% endfor %}
+      </details>
+    </section>
+    {% endmacro %}
+
+    {{ entry_section('profiles', 'profile', entries['profiles'], profile_fields) }}
+    {{ entry_section('warehouses', 'warehouse', entries['warehouses'], warehouse_fields) }}
+    {{ entry_section('cards', 'card', entries['cards'], card_fields) }}
+
+    {% for path, shape, help, text in section_forms if path == 'google.service_account' %}
+    {% set title, blurb = section_title(path) %}
+    <section class="panel" id="s-{{ path }}">
+      <header><h2>{{ title }}</h2><p class="muted">{{ blurb }}</p></header>
+      <p>{% if service_account_email %}Share the sheet with <code>{{ service_account_email }}</code>.{% else %}<span class="muted">No service account yet — paste the JSON key Google issued.</span>{% endif %}</p>
+      <form method="post" action="/settings/section/{{ path }}" class="settings-section">
+        <textarea name="text" rows="8" class="mono json" spellcheck="false">{{ text }}</textarea>
+        <div class="inline-form"><button type="submit" class="small">Save service account</button></div>
+      </form>
+    </section>
+    {% endfor %}
+
+    <section class="panel" id="s-apply">
+      <header><h2>Apply</h2><p class="muted">Which settings need a restart is tagged on each field above.</p></header>
+      <form method="post" action="/settings/restart" class="inline-form"
+            data-confirm="Restart the dashboard process now? In Docker it comes back within seconds; run `python -m web` again on a desktop.">
+        <button type="submit">Restart dashboard</button>
+        <span class="muted">re-reads config.json for the web and database settings; the scheduler is untouched</span>
+      </form>
+    </section>
   </div>
-</form>
+</div>
 
-<h2>Structured sections</h2>
-<p class="muted">Lists and objects are edited as JSON and validated entry by entry before anything
-is written. Values here are shown in full, including proxy and retailer passwords.</p>
-{% for path, shape, help, text in section_forms %}
-<form method="post" action="/settings/section/{{ path }}" class="settings-section">
-  <details class="dossier" {{ 'open' if open_section == path }}>
-    <summary><strong class="mono">{{ path }}</strong> <span class="muted">— {{ help }}</span></summary>
-    <div class="dossier-body">
-      <textarea name="text" rows="{{ 6 if shape == 'object' else 16 }}" class="mono json" spellcheck="false">{{ text }}</textarea>
-      <div class="inline-form"><button type="submit">Save {{ path }}</button></div>
+<dialog id="settings-confirm" class="confirm">
+  <form method="dialog">
+    <p class="question"></p>
+    <div class="inline-form">
+      <button type="submit" value="cancel">Cancel</button>
+      <button type="submit" value="ok" class="danger">Confirm</button>
     </div>
-  </details>
-</form>
-{% endfor %}
-
-<h2>Apply</h2>
-<form method="post" action="/settings/restart" class="inline-form"
-      onsubmit="return confirm('Restart the dashboard process now? In Docker it comes back within seconds; run `python -m web` again on a desktop.')">
-  <button type="submit">Restart dashboard</button>
-  <span class="muted">re-reads config.json for the web and database settings; the scheduler is untouched</span>
-</form>
+  </form>
+</dialog>
+<script src="/static/settings.js?v={{ asset_version }}" defer></script>
 {% endblock %}

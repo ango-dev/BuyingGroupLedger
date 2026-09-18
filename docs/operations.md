@@ -312,14 +312,27 @@ the command line. After a restore, restart the app so the restored `config.json`
 
 ### The Settings page
 
-`/settings` edits `config.json` in place — every scalar setting (grouped by section, booleans as
-checkboxes, secrets as password fields that show only whether a value is set; blank keeps it, *clear*
-blanks it) and the structured sections (`profiles`, `warehouses`, `cards`,
-`google.service_account`) as JSON, each entry validated by its own model before anything is
-written. Your `//` comment keys survive, because the write goes through the same
-`config.loader.save_config` that `scripts/create_profile.py` uses. A setting whose variable is
-exported in the environment is marked *env override*: the file is saved, but the environment still
-wins for the running process, as everywhere else.
+`/settings` edits `config.json` in place. A side index lists the panels; each panel is one
+section of the file with its fields in a label / input grid (the variable name and any restart or
+*env override* tag under the label, the example file's comment as help under the input). Booleans
+are checkboxes; secrets are password fields that show only whether a value is set (blank keeps it,
+*clear* blanks it). The sticky bar at the end of the scalar form says whether there are unsaved
+edits and saves them all at once.
+
+**Profiles, warehouses and cards are entry cards.** Each entry is its own card with a form: a
+profile's label, Browser-Use id, the retailers it is logged into (chips), its proxy and its
+unattended sign-ins (one row per retailer; add one from the blank row, tick *remove* to drop one);
+a warehouse's buying group and its jigs (one row each, the last row blank for a new jig); a card's
+name, last 4, rate, profile scope and per-retailer rates. *Save* on a card rewrites that one entry
+— rebuilt from the form on top of the stored entry, so comment keys and anything the form does
+not show survive — validated by the section's model before anything is written; *✕ Remove* asks
+in-page and deletes it; the dashed *+ Add* card appends one. Passwords and TOTP seeds are never
+rendered: blank keeps them. *Edit … as JSON* under each section is the whole list as text, for
+anything the cards do not cover. The service account stays a JSON paste, with the `client_email`
+to share the sheet with shown above it. Your `//` comment keys survive, because the write goes
+through the same `config.loader.save_config` that `scripts/create_profile.py` uses. A setting
+whose variable is exported in the environment is marked *env override*: the file is saved, but
+the environment still wins for the running process, as everywhere else.
 
 **When a change takes effect.** Three scopes, and the page tells you which one a save touched:
 
@@ -337,7 +350,11 @@ writes it).
 comments, so a scalar setting added the documented way appears with the right widget and its help
 text; `tests/test_web_settings.py` fails if any variable is missing from the page. A new structured
 section, a special widget, or a changed section model must be added to `SECTIONS` by hand
-([CLAUDE.md](../CLAUDE.md) states the rule).
+([CLAUDE.md](../CLAUDE.md) states the rule) — and, for it to get entry cards rather than the JSON
+editor alone, a display / form-builder pair in `web/settings_form.py` (`display_entries`,
+`_BUILDERS`) and a fields macro in `settings.html`. A field added to `ProfileConfig`, `Warehouse`
+or `Card` needs the same: the card's form only knows the fields it renders (anything else is kept
+as stored, never lost, but not editable until the form shows it).
 
 **No login.** Whoever can open the page can read and change every credential. Keep the dashboard on
 loopback or your own network; the LAN publish is opt-in for that reason.
