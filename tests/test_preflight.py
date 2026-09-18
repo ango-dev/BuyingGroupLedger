@@ -352,7 +352,7 @@ class TestRunInterval:
         assert result.level == WARN
         assert "12 runs/day" in result.detail
         # Says what actually breaks, and what does not.
-        assert "Payout Amount" in result.detail
+        assert "Actual Payout" in result.detail
         assert "tracking submission is unaffected" in result.detail
         # And what to do instead: 24/10 rounded up = 3h.
         assert "Use 3h or longer" in result.detail

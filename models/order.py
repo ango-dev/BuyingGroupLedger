@@ -49,8 +49,8 @@ def normalize_shipment(value: str) -> str:
 # ledger_sync._STATUS_RANK is what protects that edit: status only ever moves FORWARD, so MOD's
 # endless "still received" reports cannot walk it back to "paid".
 #
-# NOTE "paid" overlaps the Payout Amount column, which records the same fact more precisely. Prefer
-# filling Payout Amount when you have it. Setting Status to "paid" on a row that has NOT been
+# NOTE "paid" overlaps the Actual Payout column, which records the same fact more precisely. Prefer
+# filling Actual Payout when you have it. Setting Status to "paid" on a row that has NOT been
 # delivered also discards its shipment state, so only use it on an order that already finished.
 #
 # "superseded" (2026-09-09, the design notes) is a shipment row whose tracking number Amazon RE-ISSUED
@@ -168,6 +168,14 @@ FIELDNAMES = [
     # insurance-READ endpoints are documented but NOT DEPLOYED), and written as 0 for MOD, which
     # never charges a premium.
     "insurance",
+    # The buying group's COMMITTED payout for this row (BFMR's tracker price, prorated by Total
+    # Cost), written by sync_tracking the moment the purchase links the order and left alone once
+    # the row settles -- beside the ACTUAL payout so the two read together and the dashboard's
+    # Reconciliation page can compare them. Column added 2026-09-18 (last), moved here the same
+    # day: under `ledger.backend` = `db` the store migrates its table by name on start; the
+    # deprecated Sheet needs `python -m scripts.reorder_sheet --apply`. Always blank from a
+    # scraper; excluded from both formulas.
+    "expected_payout",
     "payout_amount",
     "payout_date",
     # --- returns: a PARTIAL return is ONE hand edit on the original
@@ -212,13 +220,6 @@ FIELDNAMES = [
     # match.
     "package_id",
     "last_scraped_at",
-    # The buying group's COMMITTED payout for this row: BFMR's tracker price, prorated by Total
-    # Cost, written by sync_tracking the moment the purchase links the order and left alone once
-    # the row settles -- so the dashboard's Reconciliation page can compare what was PAID (Payout
-    # Amount) with what was PROMISED. Column 35, appended last (2026-09-18; the design parked in
-    # the design notes since 2026-09-11, built now that the Sheet is deprecated and the web UI needs the two
-    # figures apart). Always blank from a scraper; excluded from both formulas.
-    "expected_payout",
 ]
 
 

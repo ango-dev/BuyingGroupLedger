@@ -133,7 +133,7 @@ class TestDoesNotClobber:
 
 class TestFormulaRows:
     def test_every_real_row_gets_a_formula_even_with_no_payout(self):
-        # The formula reads blank until Payout Amount is filled, so stamping early costs nothing and
+        # The formula reads blank until Actual Payout is filled, so stamping early costs nothing and
         # means the number appears the moment a payout is entered.
         p = plan(
             sheet_row(**{"Order ID": "A1", "Card Last 4": "4321"}),

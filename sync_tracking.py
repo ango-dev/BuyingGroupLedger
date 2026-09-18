@@ -1,13 +1,13 @@
 """Post tracking numbers to the buying groups, and read their payouts back into the ledger.
 
 This is the step that turns the ledger from a tracker into a P&L. The scrapers fill everything up to
-`Total Cost`; `Insurance`, `Payout Amount` and `Payout Date` have been hand-entered until now, and
-`Total Profit` (a live sheet formula) reads BLANK until `Payout Amount` is filled — so the profit
+`Total Cost`; `Insurance`, `Actual Payout` and `Payout Date` have been hand-entered until now, and
+`Total Profit` (a live sheet formula) reads BLANK until `Actual Payout` is filled — so the profit
 column is inert for any row nobody has typed into. This module fills those three cells from the
 buying group that actually paid.
 
-SINCE 2026-09-11 `Payout Amount` FILLS EARLY, WITH THE COMMITTED PRICE. BFMR publishes the payout price it has committed to from the moment a purchase exists, so
-that lands in Payout Amount as soon as the reservation is linked to an order — with NO Payout Date,
+SINCE 2026-09-11 `Actual Payout` FILLS EARLY, WITH THE COMMITTED PRICE. BFMR publishes the payout price it has committed to from the moment a purchase exists, so
+that lands in Actual Payout as soon as the reservation is linked to an order — with NO Payout Date,
 which together with a non-terminal Status is what now says "committed, not settled". Total Profit
 therefore shows the PROJECTED profit on open BFMR rows, deliberately. A later read that disagrees
 means BFMR moved the price: the cell is updated to the new commitment and an alert names old ->
@@ -86,12 +86,12 @@ from sheets.ledger_sync import (
 log = logging.getLogger("sync_tracking")
 
 #: The three columns this module owns. Everything else on the row belongs to the scrapers.
-#: NB Payout Amount holds two kinds of number now (2026-09-11): the group's COMMITTED price while
+#: NB Actual Payout holds two kinds of number now (2026-09-11): the group's COMMITTED price while
 #: the package is open (no Payout Date beside it), and the settled figure once paid (the date and
 #: status land with it). The pair (Payout Date, Status) — never the amount alone — is what tells
 #: them apart, which is why the settled test at plan time requires `paid` status, not just money.
 INSURANCE_COL = "Insurance"
-PAYOUT_AMOUNT_COL = "Payout Amount"
+PAYOUT_AMOUNT_COL = "Actual Payout"
 #: The group's COMMITTED payout (2026-09-18): its own column, so the settlement never overwrites
 #: it and the dashboard's Reconciliation page can compare the two. Optional in a header (an older
 #: Sheet); read through optional_cell, and only ever written when HEADER carries it.
@@ -408,7 +408,7 @@ def allocate_payouts(
     Rows whose costs are all zero (or missing) split the payout evenly rather than dividing by zero;
     that only happens for rows the scraper never priced, and an even split is at least defensible.
 
-    Returns {row_number: {"Insurance": ..., "Payout Amount": ..., "Payout Date": ...}}.
+    Returns {row_number: {"Insurance": ..., "Actual Payout": ..., "Payout Date": ...}}.
     """
     status_by_row = status_by_row or {}
     insurance_by_row = insurance_by_row or {}
@@ -494,7 +494,7 @@ def allocate_payouts(
                 cells: dict = {}
                 if sub["date"]:
                     cells[PAYOUT_DATE_COL] = sub["date"]
-                # An UNPAID package gets no Payout Amount at all — not a zero. `_profit_formula`
+                # An UNPAID package gets no Actual Payout at all — not a zero. `_profit_formula`
                 # treats a blank as "not paid out yet" and renders blank, but a literal 0 makes it
                 # compute `0 - Total Cost - ...`, a large fictitious LOSS on a healthy order. Same
                 # trap as the insurance cell below; both track None separately from 0.
@@ -594,7 +594,7 @@ def allocate_expected_payouts(
 
     The forward-looking half of the payout write. BFMR publishes the payout price from the moment
     a purchase exists, so Expected Payout carries it from purchase link onward (its OWN column
-    since 2026-09-18 -- from 2026-09-11 to then it shared Payout Amount with a blank date; the
+    since 2026-09-18 -- from 2026-09-11 to then it shared Actual Payout with a blank date; the
     dashboard's Reconciliation page needs the promise kept beside the payment, so
     scripts/migrate_expected_payout moves the old commitments over), and a tracker read that
     disagrees with the cell is BFMR CHANGING the committed price. That is the event this function
@@ -1086,7 +1086,7 @@ def _merge_writes(target: dict[int, dict], incoming: dict[int, dict]) -> None:
 
 
 def _write_payout_cells(worksheet, writes: dict[int, dict], apply: bool) -> None:
-    """Write Insurance / Payout Amount / Payout Date / Expected Payout, then RE-STAMP the profit formula.
+    """Write Insurance / Actual Payout / Payout Date / Expected Payout, then RE-STAMP the profit formula.
 
     The re-stamp is not optional. `_write_profit_formulas` exists because a RAW write over a row
     carrying the Total Profit formula freezes it into whatever number it last evaluated to, and this

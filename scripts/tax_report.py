@@ -8,7 +8,7 @@
 TWO DATES DRIVE THE YEAR, and that is the whole reason this is a script rather than a column. On a
 cash basis, money IN counts when it arrives and money OUT counts when it is spent:
 
-  - receipts    = Payout Amount, on rows whose **Payout Date** falls in the year
+  - receipts    = Actual Payout, on rows whose **Payout Date** falls in the year
   - COGS        = the COGS cell, on rows whose **Order Date** falls in the year (cancelled and
                   superseded rows carry no money and are excluded)
   - insurance   = Insurance, on rows whose **Order Date** falls in the year -- the premium is charged
@@ -96,7 +96,7 @@ def build_report(sheet: Sheet, year: int) -> dict:
         status = str(cell("Status", f)).strip().lower()
         order_year = _year_of(cell("Order Date"))
         payout_year = _year_of(cell("Payout Date"))
-        payout = _money(cell("Payout Amount"))
+        payout = _money(cell("Actual Payout"))
         retailer = str(cell("Retailer", f)).strip() or "(no retailer)"
         group = str(cell("Buying Group", f)).strip() or "(untagged)"
         order_id = str(cell("Order ID", f)).strip()

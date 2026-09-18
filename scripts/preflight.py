@@ -494,7 +494,7 @@ def check_run_interval() -> list[Result]:
         WARN, "run interval",
         f"every {hours}h = {per_day} runs/day, but MaxOutDeals allows only {limit} payout reads per "
         f"day and each run spends one. Roughly {per_day - limit} run(s)/day will fail to read "
-        f"payouts, so Payout Amount / Insurance / paid status stop updating until the daily reset "
+        f"payouts, so Actual Payout / Insurance / paid status stop updating until the daily reset "
         f"(tracking submission is unaffected). A manual `sync_tracking` spends one too, even as a "
         f"DRY RUN. Use {-(-24 // limit)}h or longer to stay inside the quota.",
     )]

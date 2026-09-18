@@ -63,7 +63,7 @@ class TestCellParsing:
 
 HEADER = ["Order Date", "Status", "Item", "Quantity", "Retailer", "Order Number", "Tracking Number",
           "Delivery Date", "Total Cost", "Card Used", "Cashback", "SUB", "SUB Rate", "Buying Group",
-          "Insurance", "Payout Date", "Payout Amount", "Total Profit"]
+          "Insurance", "Payout Date", "Actual Payout", "Total Profit"]
 
 GOOD = ["2/21/2026", "Paid", "ASUS Vivobook", "1", "Costco", "1399000009", "1Z1", "2/25/2026", "$714.98",
         "Triple Cash 4351", "1%", "TRUE", "12.5%", "BFMR", "-$3.86", "2/26/2026", "$715.00", "$92.68"]

@@ -75,7 +75,7 @@ def _spend(rows: list[LedgerRow]) -> float:
 def actual_return(rows: list[LedgerRow]) -> tuple[float | None, int]:
     """What a dollar spent ACTUALLY came back as, after everything:
 
-        sum(Payout Amount - COGS - Insurance) / sum(Total Cost)  =  sum(Total Profit) / sum(Total Cost)
+        sum(Actual Payout - COGS - Insurance) / sum(Total Cost)  =  sum(Total Profit) / sum(Total Cost)
 
     over the SETTLED rows (the payout is in; a committed one is a promise). Cost-weighted by
     construction: dollars over dollars, so a $2,000 order pulls harder than a $300 one. COGS is

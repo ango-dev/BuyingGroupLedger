@@ -471,7 +471,7 @@ class TestPayoutSemantics:
     @pytest.mark.parametrize("status", ["ordered", "shipped", "delivered"])
     def test_a_legacy_undated_payout_amount_still_reads_as_a_commitment(self, status):
         """A CSV backup or a Sheet from before Expected Payout (2026-09-18) carried the
-        commitment in Payout Amount with a blank date; it still shows as projected."""
+        commitment in Actual Payout with a blank date; it still shows as projected."""
         r = _row(status=status, payout_amount="1230")
         assert r.is_committed and not r.is_settled and r.payout_state == "committed"
         assert r.projected_payout == 1230.0

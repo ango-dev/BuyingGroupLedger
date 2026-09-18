@@ -3,7 +3,7 @@
 WHY THIS SCRIPT EXISTS AT ALL, and why it needs tests: presentation on this sheet is bound to a column
 POSITION, not to a column name, and `scripts/reorder_sheet.py` moves values without moving either the
 cell number formats or the TABLE COLUMN TYPES. After the 2026-08-25 reorder that left a PERCENT type
-on Payout Amount (a $631 payout rendered as "63100%") and moved the BOOLEAN checkbox off
+on Actual Payout (a $631 payout rendered as "63100%") and moved the BOOLEAN checkbox off
 Tracking Submitted onto Delivery Address.
 
 The table type is the one that matters: it OVERRIDES the cell number format, so writing a PERCENT
@@ -61,7 +61,7 @@ class TestTableColumnTypes:
         columns = plan_table_columns(_table(), list(HEADER))
         by_name = {HEADER[c["columnIndex"]]: c.get("columnType") for c in columns}
         assert by_name["Cashback Rate"] == "PERCENT"
-        assert by_name["Payout Amount"] == "CURRENCY"
+        assert by_name["Actual Payout"] == "CURRENCY"
         assert by_name["Tracking Submitted"] == "BOOLEAN"
         assert by_name["COGS"] == "CURRENCY"
 

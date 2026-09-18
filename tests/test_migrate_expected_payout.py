@@ -76,10 +76,10 @@ class TestApply:
         apply_migration(ws, moves)
         values = ws.get_all_values()
         by = dict(zip(HEADER, values[1]))
-        assert by["Expected Payout"] == "1230" and by["Payout Amount"] == ""
+        assert by["Expected Payout"] == "1230" and by["Actual Payout"] == ""
         assert by["Total Profit"] == "", "no payout, no profit -- the commitment is not income"
         settled = dict(zip(HEADER, values[2]))
-        assert settled["Payout Amount"] == "500" and settled["Expected Payout"] == ""
+        assert settled["Actual Payout"] == "500" and settled["Expected Payout"] == ""
         # Running it again finds nothing.
         assert plan_migration(ws.get_all_values()) == ([], [])
 
@@ -89,8 +89,8 @@ class TestApply:
         monkeypatch.setattr(module, "_get_worksheet", lambda: ws)
         assert main([]) == 0
         out = capsys.readouterr().out
-        assert "row 2: order O1: Payout Amount 1,230.00 -> Expected Payout" in out and "Dry run" in out
-        assert dict(zip(HEADER, ws.get_all_values()[1]))["Payout Amount"] == "1230"
+        assert "row 2: order O1: Actual Payout 1,230.00 -> Expected Payout" in out and "Dry run" in out
+        assert dict(zip(HEADER, ws.get_all_values()[1]))["Actual Payout"] == "1230"
         assert main(["--apply"]) == 0
         assert "Moved 1 commitment(s)" in capsys.readouterr().out
         assert dict(zip(HEADER, ws.get_all_values()[1]))["Expected Payout"] == "1230"

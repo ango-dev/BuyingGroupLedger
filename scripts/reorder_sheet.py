@@ -49,6 +49,10 @@ log = logging.getLogger("reorder_sheet")
 _FIELD_FOR_HEADER = dict(zip(HEADER, FIELDNAMES))
 
 
+#: Headings renamed in HEADER: old -> new. The reorder carries the column across under its new name.
+RENAMED = {"Payout Amount": "Actual Payout"}  # 2026-09-18
+
+
 def plan_reorder(header: list[str], data_rows: list[list]) -> dict:
     """Read-only: work out the rewritten sheet. Returns the new header+rows and what changed.
 
@@ -57,7 +61,11 @@ def plan_reorder(header: list[str], data_rows: list[list]) -> dict:
     reported as `dropped` — it would be lost, so the caller can refuse rather than silently discard it.
     """
     old_index = {name: i for i, name in enumerate(header)}
-    dropped = [name for name in header if name and name not in HEADER]
+    # A renamed column keeps its values: the old heading maps onto the new one.
+    for old_name, new_name in RENAMED.items():
+        if old_name in old_index and new_name not in old_index:
+            old_index[new_name] = old_index[old_name]
+    dropped = [name for name in header if name and name not in HEADER and name not in RENAMED]
     added = [name for name in HEADER if name not in old_index]
 
     def cell(row, name):

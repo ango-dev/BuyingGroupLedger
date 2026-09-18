@@ -11,7 +11,7 @@ def _row(n, *, order_date, payout_date="", payout="", status="paid", cogs=798.0,
     return row_cells(n, **{
         "Order ID": Cell(order_id or f"O{n}"), "Order Date": Cell(order_date), "Status": Cell(status),
         "Retailer": Cell(retailer), "Buying Group": Cell(group),
-        "Payout Date": Cell(payout_date), "Payout Amount": Cell(payout, fmt="currency"),
+        "Payout Date": Cell(payout_date), "Actual Payout": Cell(payout, fmt="currency"),
         "COGS": Cell(cogs, fmt="currency", formula=_cogs_formula(n)),
         "Insurance": Cell(insurance, fmt="currency"),
         "Total Profit": Cell("", formula=_profit_formula(n)),

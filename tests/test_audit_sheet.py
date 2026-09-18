@@ -144,7 +144,7 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
         "Card": Cell("Amex Business Gold"),
         "Cashback Rate": Cell(0.04, fmt="percent"),
         "Insurance": Cell("", fmt="currency"),
-        "Payout Amount": Cell("", fmt="currency"),
+        "Actual Payout": Cell("", fmt="currency"),
         "Payout Date": Cell(""),
         "COGS": Cell(798.0, fmt="currency", formula=_cogs_formula(row_number)),
         "Total Profit": Cell("", formula=_profit_formula(row_number)),
@@ -382,7 +382,7 @@ def test_a_stale_formula_from_before_a_reorder_is_caught():
     """A stale formula still evaluates and still shows a plausible dollar figure.
 
     The perturbed column is derived from _COL rather than written as a literal letter: this test used
-    to say .replace("Q2", "X2"), and when the 2026-08-13 reorder moved Payout Amount off Q that became
+    to say .replace("Q2", "X2"), and when the 2026-08-13 reorder moved Actual Payout off Q that became
     a silent no-op — the formula was left untouched, the check passed, and the test still "passed"
     while asserting nothing at all.
     """
@@ -675,7 +675,7 @@ class TestOpenRowStaleness:
 
 _SUPERSEDED_MONEY_BLANKS = {
     "Quantity": Cell(""), "Cost Per Item": Cell(""), "Total Cost": Cell(""), "Shipping": Cell(""),
-    "Insurance": Cell(""), "Payout Amount": Cell(""), "Payout Date": Cell(""), "Gift Card": Cell(""),
+    "Insurance": Cell(""), "Actual Payout": Cell(""), "Payout Date": Cell(""), "Gift Card": Cell(""),
     "Sales Tax": Cell(""), "Rewards Used": Cell(""),
 }
 
@@ -739,7 +739,7 @@ class TestReviewFindings:
         cell renders blank -- identical to a not-yet-paid-out row. An error-string scan sees nothing;
         the blank-profit-with-a-payout pairing is what actually catches it."""
         sheet = build(row_cells(2, **{
-            "Payout Amount": Cell(1500.0, fmt="currency"),
+            "Actual Payout": Cell(1500.0, fmt="currency"),
             "Total Profit": Cell("", formula=_profit_formula(2)),
         }))
         assert result_for(sheet, "profit_blank_despite_payout").status == "FAIL"
@@ -757,7 +757,7 @@ class TestReviewFindings:
 
     def test_an_unresolved_split_that_has_been_paid_out_books_the_whole_payout_as_profit(self):
         sheet = build(row_cells(2, Quantity=Cell("*"), **{
-            "Total Cost": Cell(""), "Payout Amount": Cell(1500.0, fmt="currency"),
+            "Total Cost": Cell(""), "Actual Payout": Cell(1500.0, fmt="currency"),
         }))
         assert result_for(sheet, "unresolved_split_quantity").status == "FAIL"
 
@@ -838,16 +838,16 @@ class TestBuyingGroupPayouts:
         number. Writing the full amount to each books the group's money twice, and Total Profit
         re-derives nothing -- it just reads as a larger, plausible profit."""
         a = row_cells(2, **{"Order ID": Cell("O-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1"),
-                            "Total Cost": Cell(600.0), "Payout Amount": Cell(1000.0)})
+                            "Total Cost": Cell(600.0), "Actual Payout": Cell(1000.0)})
         b = row_cells(3, **{"Order ID": Cell("O-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1"),
-                            "Total Cost": Cell(400.0), "Payout Amount": Cell(1000.0)})
+                            "Total Cost": Cell(400.0), "Actual Payout": Cell(1000.0)})
         assert result_for(build(a, b), "payout_is_cost_weighted").status == "WARN"  # WARN since 2026-08-30: a real per-item payout looks the same by ratio
 
     def test_a_correctly_split_payout_passes(self):
         a = row_cells(2, **{"Order ID": Cell("O-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1"),
-                            "Total Cost": Cell(600.0), "Payout Amount": Cell(600.0)})
+                            "Total Cost": Cell(600.0), "Actual Payout": Cell(600.0)})
         b = row_cells(3, **{"Order ID": Cell("O-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1"),
-                            "Total Cost": Cell(400.0), "Payout Amount": Cell(400.0)})
+                            "Total Cost": Cell(400.0), "Actual Payout": Cell(400.0)})
         assert result_for(build(a, b), "payout_is_cost_weighted").status == "PASS"
 
     def test_a_paid_row_with_a_zero_payout_is_a_fictitious_loss(self):
@@ -857,18 +857,18 @@ class TestBuyingGroupPayouts:
         Insurance`. Live BFMR reported three packages as paid while `amount_paid` was
         still "0.00", and the sheet booked -$1,678.46 against a $1,796 order.
         """
-        sheet = build(row_cells(2, Status=Cell("paid"), **{"Payout Amount": Cell(0)}))
+        sheet = build(row_cells(2, Status=Cell("paid"), **{"Actual Payout": Cell(0)}))
         result = result_for(sheet, "paid_rows_have_a_payout")
         assert result.status == "FAIL" and "fictitious" in result.details[0]
 
     def test_a_paid_row_awaiting_settlement_only_warns(self):
         """A group can mark a package paid minutes before it settles, and the next sync fills it -- so
         a blank is worth noticing but is not yet wrong. Staleness catches one that never fills."""
-        sheet = build(row_cells(2, Status=Cell("paid"), **{"Payout Amount": Cell("")}))
+        sheet = build(row_cells(2, Status=Cell("paid"), **{"Actual Payout": Cell("")}))
         assert result_for(sheet, "paid_rows_have_a_payout").status == "WARN"
 
     def test_a_paid_row_with_its_payout_passes(self):
-        sheet = build(row_cells(2, Status=Cell("paid"), **{"Payout Amount": Cell(1200.0, fmt="currency")}))
+        sheet = build(row_cells(2, Status=Cell("paid"), **{"Actual Payout": Cell(1200.0, fmt="currency")}))
         assert result_for(sheet, "paid_rows_have_a_payout").status == "PASS"
 
     def test_an_unpaid_row_without_a_payout_is_not_flagged(self):
@@ -1012,14 +1012,14 @@ class TestCogsInputsComplete:
 
     def test_a_payout_without_cogs_fails(self):
         # Income recorded with no cost against it -- profit overstated.
-        sheet = build(row_cells(2, **{"COGS": Cell(""), "Payout Amount": Cell(800.0)}))
+        sheet = build(row_cells(2, **{"COGS": Cell(""), "Actual Payout": Cell(800.0)}))
 
         assert result_for(sheet, "cogs_inputs_complete").status == "FAIL"
 
     def test_cogs_without_a_payout_is_reported_but_never_fails(self):
         """The normal state of a shipped-but-unpaid order, and at a year boundary it IS the straddle
         -- the cost and income sides fall in different tax years. Worth seeing, never worth failing."""
-        sheet = build(row_cells(2, Status=Cell("shipped"), **{"Payout Amount": Cell("")}))
+        sheet = build(row_cells(2, Status=Cell("shipped"), **{"Actual Payout": Cell("")}))
 
         result = result_for(sheet, "cogs_inputs_complete")
 
@@ -1030,14 +1030,14 @@ class TestCogsInputsComplete:
         # It carries no money by design; flagging it would fail every audit forever.
         sheet = build(row_cells(2, Status=Cell("cancelled"), **{
             "COGS": Cell(""), "Total Cost": Cell(""), "Cashback Rate": Cell(""),
-            "Payout Amount": Cell(""),
+            "Actual Payout": Cell(""),
         }))
 
         assert result_for(sheet, "cogs_inputs_complete").status == "PASS"
 
     def test_a_superseded_row_is_exempt(self):
         sheet = build(row_cells(2, Status=Cell("superseded"), **{
-            "COGS": Cell(""), "Total Cost": Cell(""), "Payout Amount": Cell(""),
+            "COGS": Cell(""), "Total Cost": Cell(""), "Actual Payout": Cell(""),
         }))
 
         assert result_for(sheet, "cogs_inputs_complete").status == "PASS"
@@ -1046,7 +1046,7 @@ class TestCogsInputsComplete:
         """A gift card will NEVER have a payout of its own -- the income arrives through the order it
         funded, whose cost was netted down by the card. Counting it as a straddle would misreport the
         year-boundary number it exists to surface."""
-        sheet = build(row_cells(2, **{"Buying Group": Cell("Gift Card"), "Payout Amount": Cell("")}))
+        sheet = build(row_cells(2, **{"Buying Group": Cell("Gift Card"), "Actual Payout": Cell("")}))
 
         result = result_for(sheet, "cogs_inputs_complete")
 
@@ -1162,7 +1162,7 @@ class TestProfitValueMatchesInputs:
     def _row(self, profit, payout=900.0, cogs=798.0, insurance=7.4, status="paid"):
         return row_cells(2, **{
             "Status": Cell(status),
-            "Payout Amount": Cell(payout, fmt="currency"),
+            "Actual Payout": Cell(payout, fmt="currency"),
             "COGS": Cell(cogs, fmt="currency", formula=_cogs_formula(2)),
             "Insurance": Cell(insurance, fmt="currency"),
             "Total Profit": Cell(profit, formula=_profit_formula(2)),
@@ -1243,7 +1243,7 @@ class TestDisplayRoundTripsToStored:
         assert result_for(sheet, "display_round_trips_to_stored").status == "FAIL"
 
     def test_a_format_that_hides_the_number_is_the_erase_case(self):
-        sheet = build(row_cells(2, **{"Payout Amount": Cell(631.0, fmt="hidden")}))
+        sheet = build(row_cells(2, **{"Actual Payout": Cell(631.0, fmt="hidden")}))
         r = result_for(sheet, "display_round_trips_to_stored")
         assert r.status == "FAIL" and "DISPLAYS BLANK" in r.details[0] and "erase" in r.details[0]
 
@@ -1318,8 +1318,8 @@ class TestCompareEmitsResults:
         assert "compare_identity_changed" not in r and "compare_rows_removed" not in r
 
     def test_a_payout_landing_on_a_delivered_row_is_the_normal_sync(self):
-        before = [self._row(2, Status=Cell("delivered"), **{"Payout Amount": Cell("", fmt="currency")})]
-        after = [self._row(2, Status=Cell("paid"), **{"Payout Amount": Cell(900.0, fmt="currency"), "Payout Date": Cell("2026-08-30")})]
+        before = [self._row(2, Status=Cell("delivered"), **{"Actual Payout": Cell("", fmt="currency")})]
+        after = [self._row(2, Status=Cell("paid"), **{"Actual Payout": Cell(900.0, fmt="currency"), "Payout Date": Cell("2026-08-30")})]
         r = self._classify(before, after)
         assert "compare_terminal_money_changed" not in r and "compare_status_regressed" not in r
         assert r["compare_updated"].status == "PASS" and "3 cell(s) updated" in r["compare_updated"].summary
@@ -1392,7 +1392,7 @@ class TestImportedShapesAreNotFailures:
     def test_a_zero_cost_bonus_with_a_payout_has_cogs_zero_not_missing(self):
         sheet = build(row_cells(2, **{"Status": Cell("paid"), "Cost Per Item": Cell(0.0), "Total Cost": Cell(0.0),
                                      "COGS": Cell(0.0, fmt="currency", formula=_cogs_formula(2)),
-                                     "Payout Amount": Cell(250.0, fmt="currency"), "Payout Date": Cell("2026-03-19")}))
+                                     "Actual Payout": Cell(250.0, fmt="currency"), "Payout Date": Cell("2026-03-19")}))
         r = result_for(sheet, "cogs_inputs_complete")
         assert "with no COGS" not in " ".join(r.details)
 
@@ -1415,16 +1415,16 @@ class TestImportedShapesAreNotFailures:
     def test_an_uneven_package_split_is_a_warning_to_read_not_a_failure(self):
         sheet = build(
             row_cells(2, **{"Order ID": Cell("A"), "Tracking Number": Cell("T"), "Total Cost": Cell(59.98),
-                            "Payout Amount": Cell(74.0, fmt="currency")}),
+                            "Actual Payout": Cell(74.0, fmt="currency")}),
             row_cells(3, **{"Order ID": Cell("A"), "Tracking Number": Cell("T"), "Total Cost": Cell(597.0),
-                            "Payout Amount": Cell(600.0, fmt="currency"), "Item Name": Cell("Watch")}),
+                            "Actual Payout": Cell(600.0, fmt="currency"), "Item Name": Cell("Watch")}),
         )
         assert result_for(sheet, "payout_is_cost_weighted").status == "WARN"
 
 
 def test_a_gift_card_row_paid_with_a_zero_payout_is_by_rule():
     sheet = build(row_cells(2, **{"Status": Cell("paid"), "Buying Group": Cell("Gift Card"),
-                                 "Payout Amount": Cell(0.0, fmt="currency"), "Payout Date": Cell("2026-07-08")}))
+                                 "Actual Payout": Cell(0.0, fmt="currency"), "Payout Date": Cell("2026-07-08")}))
     assert result_for(sheet, "paid_rows_have_a_payout").status == "PASS"
 
 

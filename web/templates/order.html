@@ -34,7 +34,7 @@
   <div class="tile"><div class="label">COGS</div><div class="value money">{{ order.totals.cogs | money }}</div></div>
   <div class="tile"><div class="label">Insurance</div><div class="value money">{{ order.totals.insurance | money }}</div></div>
   <div class="tile payout-{{ order.payout_state | replace(' ', '-') }}">
-    <div class="label">Payout Amount</div>
+    <div class="label">Actual Payout</div>
     <div class="value money">{{ (order.totals.expected if order.payout_state == 'committed' and order.totals.expected else order.totals.payout) | money }}</div>
     <div class="hint">
       {% if order.payout_state == 'settled' %}settled{% if order.payout_dates %} on {{ order.payout_dates | join(', ') }}{% endif %}

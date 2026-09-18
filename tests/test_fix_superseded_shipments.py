@@ -22,7 +22,7 @@ def row(tracking, shipment, item="iPad Pro", order_id=OID, retailer="Amazon Busi
     values = {"Order ID": order_id, "Retailer": retailer, "Item Name": item,
               "Shipment": shipment, "Tracking Number": tracking, "Order Date": "2026-08-12",
               "Status": status, "Quantity": quantity, "Cost Per Item": "949", "Total Cost": total_cost,
-              "Payout Amount": payout, "Insurance": insurance, "Cashback Rate": "0.05",
+              "Actual Payout": payout, "Insurance": insurance, "Cashback Rate": "0.05",
               "Tracking Submitted": "True"}
     values.update(extra)
     return sheet_row(**values)

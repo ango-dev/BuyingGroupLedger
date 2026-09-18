@@ -30,7 +30,7 @@ WHAT HAPPENS TO THE DEAD ROW:
   row's key can never collide with a real box. Tracking number, dates, card, rate and the
   Tracking Submitted tick are kept. `superseded` is terminal and RETIRED: never re-scraped, never a
   merge target, never submitted/insured/paid (sync_tracking skips it). REFUSED, before anything is
-  written, for a dead row that already carries money from a group (Payout Amount / Payout Date /
+  written, for a dead row that already carries money from a group (Actual Payout / Payout Date /
   Insurance non-blank) or whose status is not ordered/shipped/delivered — money exchanged on that
   number is a human decision, not something to blank.
 
@@ -99,7 +99,7 @@ SUPERSEDED = "superseded"
 #: already acted on the row, and that is a hand decision.
 _MARKABLE_STATUSES = ("ordered", "shipped", "delivered")
 #: Money from a BUYING GROUP on the dead number. Blanking it would erase a real settlement.
-_SETTLED_COLUMNS = ("Payout Amount", "Payout Date", "Insurance")
+_SETTLED_COLUMNS = ("Actual Payout", "Payout Date", "Insurance")
 #: The money cells a marked / restored row loses, by sheet header name.
 _BLANKED_COLUMNS = tuple(HEADER[FIELDNAMES.index(f)] for f in _SUPERSEDED_BLANK_FIELDS)
 _SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)

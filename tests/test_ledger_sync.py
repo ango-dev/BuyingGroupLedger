@@ -1541,7 +1541,7 @@ class TestBlankCellsDoNotStripNumberFormatting:
     Measured against the live sheet 2026-08-14:
         RAW ""  -> format cleared      RAW None -> format preserved
 
-    That is why Insurance / Payout Amount / Total Profit kept reverting to raw floats while Total Cost
+    That is why Insurance / Actual Payout / Total Profit kept reverting to raw floats while Total Cost
     never did: the scrapers always emit those three blank, so every append rewrote them as "" and
     stripped the currency format off the new row, and _write_profit_formulas then stamped the formula
     into an unformatted cell. Formatting the COLUMN cannot fix it -- the write clears it afterwards.

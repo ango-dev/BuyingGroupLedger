@@ -40,12 +40,14 @@ DATA_DIR = ROOT / "data"
 #: What every --apply script names its pre-write backup (scripts/sort_ledger.py and friends).
 SNAPSHOT_GLOB = "sheet_backup_*.csv"
 
-HEADER_TO_FIELD = dict(zip(HEADER, FIELDNAMES))
+#: Headings a ledger may still carry from before a rename; read as the field they became.
+LEGACY_HEADERS = {"Payout Amount": "payout_amount"}  # -> "Actual Payout", 2026-09-18
+HEADER_TO_FIELD = {**LEGACY_HEADERS, **dict(zip(HEADER, FIELDNAMES))}
 FIELD_TO_HEADER = dict(zip(FIELDNAMES, HEADER))
 
 #: A payout is SETTLED when it carries its date or a buying-group outcome status -- never on the
-#: amount alone, because since 2026-09-11 the sync fills Payout Amount with BFMR's COMMITTED price
-#: while the package is still open (docs/data-model.md, "Payout Amount holds two kinds of number").
+#: amount alone, because since 2026-09-11 the sync fills Actual Payout with BFMR's COMMITTED price
+#: while the package is still open (docs/data-model.md, "Actual Payout holds two kinds of number").
 #: The same rule scripts/audit_sheet.check_cogs_inputs_complete counts a row settled by.
 SETTLED_STATUSES = ("paid", "return")
 #: The dashboard's OPEN rows: the group has not paid yet. Delivered counts --
@@ -167,7 +169,7 @@ class LedgerRow:
 
     @property
     def is_settled(self) -> bool:
-        """The group's outcome is IN: a Payout Amount cell (any amount, $0.00 included -- a return
+        """The group's outcome is IN: a Actual Payout cell (any amount, $0.00 included -- a return
         or clawback that paid nothing is a settled LOSS, and the sheet's Total Profit shows it)
         together with its date, or a paid/return status (MOD's paid rows carry no date). See
         SETTLED_STATUSES. Found live: four $0.00 settlements (-822.39 of real losses)
@@ -180,7 +182,7 @@ class LedgerRow:
     def is_committed(self) -> bool:
         """A projected payout: the group has committed to an amount (Expected Payout, since
         2026-09-18) and has not paid yet. A ledger from before the column -- a CSV backup, a Sheet
-        not yet migrated -- carried the commitment IN Payout Amount with a blank date, and that
+        not yet migrated -- carried the commitment IN Actual Payout with a blank date, and that
         legacy shape still reads as committed here. A zero is never a commitment (the allocator
         never writes one)."""
         if self.is_money_free or self.is_settled:
@@ -220,7 +222,7 @@ class LedgerRow:
 
     @property
     def payout_state(self) -> str:
-        """"settled" | "committed" | "none" -- the three states a Payout Amount cell can be in."""
+        """"settled" | "committed" | "none" -- the three states a Actual Payout cell can be in."""
         if self.is_settled:
             return "settled"
         if self.is_committed:
@@ -266,7 +268,7 @@ def cogs_of(row: LedgerRow) -> float | None:
 
 
 def profit_of(row: LedgerRow) -> float | None:
-    """sheets.ledger_sync._profit_formula, in Python: Payout Amount - COGS - Insurance, blank until
+    """sheets.ledger_sync._profit_formula, in Python: Actual Payout - COGS - Insurance, blank until
     a payout exists and blank on a money-free row."""
     if row.is_money_free:
         return None

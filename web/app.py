@@ -78,8 +78,8 @@ def cell(row, name: str) -> str:
         return money(row.cogs)
     if name == "total_profit":
         return money(row.profit)
-    if name in ("total_cost", "insurance", "payout_amount", "cost_per_item", "shipping",
-                "sales_tax", "gift_card", "rewards_used"):
+    if name in ("total_cost", "insurance", "payout_amount", "expected_payout", "cost_per_item",
+                "shipping", "sales_tax", "gift_card", "rewards_used"):
         return money(row.number(name))
     if name == "cashback_rate":
         return percent(row.number(name))

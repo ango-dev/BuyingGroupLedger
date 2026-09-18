@@ -2,12 +2,12 @@
 
 _Part of the [Buying Group Ledger](../README.md) docs._
 
-`sync_tracking.py` posts each shipped package's tracking number to the right group and reads the payout back into **Insurance**, **Payout Amount** and **Payout Date**. Dry run by default.
+`sync_tracking.py` posts each shipped package's tracking number to the right group and reads the payout back into **Insurance**, **Actual Payout** and **Payout Date**. Dry run by default.
 
 Scraping tells you what you bought. The buying group is who pays you for it — so `sync_tracking.py`
 posts each shipped package's tracking number to the right group, and reads their payout back into the
-**Insurance**, **Payout Amount** and **Payout Date** columns, which is what makes **Total Profit**
-light up (the formula stays blank until Payout Amount is filled).
+**Insurance**, **Actual Payout** and **Payout Date** columns, which is what makes **Total Profit**
+light up (the formula stays blank until Actual Payout is filled).
 
 > ### ⚠️ You still submit BFMR order numbers by hand
 >
@@ -119,7 +119,7 @@ about, so the buying group is the authority on them:
 2026-09-18). BFMR's tracker carries the payout price it has committed to (`payout_price`/
 `total_payout`) from the moment a purchase exists — before shipping, before payment — so the sync
 writes it into **Expected Payout** the moment your hand-typed order number links the reservation,
-prorated by Total Cost across the order's rows. Payout Amount stays blank until the package
+prorated by Total Cost across the order's rows. Actual Payout stays blank until the package
 settles, and the dashboard shows the *projected* profit on open BFMR rows from the commitment. Two
 alerts come with it: if a later run finds BFMR **changed** the committed price, the cells are
 updated to the new figure and the alert names old → new; and if the **settled** amount disagrees
@@ -144,7 +144,7 @@ posted yet. An inferred `0` never overwrites a figure you typed yourself.
 **BFMR insurance is filed automatically** when enabled. It never declares a package value (BFMR works
 it out from the shipment, so there's no way to over-declare and overpay), never files twice, and only
 covers shipments worth at least `BFMR_MIN_INSURANCE_VALUE`. The **premium** is read back into the
-Insurance column and the **gross** payout into Payout Amount — rather than netting the two — so the
+Insurance column and the **gross** payout into Actual Payout — rather than netting the two — so the
 deduction is visible rather than silently shrinking your payout. MOD never charges a premium, so its
 rows record a real `0`.
 

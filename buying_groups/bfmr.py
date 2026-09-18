@@ -654,7 +654,7 @@ class BFMRClient(HttpClient):
 
         They are split rather than summed. Summing nets to the right bottom line — and did — but it
         made a real cost invisible: the sheet would book $2,199.80 with no hint that $10.20 of
-        insurance had been deducted from a $2,210 payout. Splitting puts the gross in Payout Amount
+        insurance had been deducted from a $2,210 payout. Splitting puts the gross in Actual Payout
         and the premium in Insurance, which the Total Profit formula already subtracts, so the
         arithmetic is unchanged and the deduction is finally legible.
 
@@ -685,7 +685,7 @@ class BFMRClient(HttpClient):
                 fee_row_premiums[number] = len(records)
                 # `total_payout`, not `amount_paid`: the premium is committed when the package is
                 # insured, whereas `amount_paid` stays "0.00" until BFMR settles the whole package.
-                # Recording it early costs nothing — Total Profit stays blank until Payout Amount
+                # Recording it early costs nothing — Total Profit stays blank until Actual Payout
                 # lands anyway — and it means the cost is visible while the package is still open.
                 premium = parse_money(entry.get("total_payout"))
                 records.append(PayoutRecord(
@@ -703,7 +703,7 @@ class BFMRClient(HttpClient):
             # is that `status` does NOT wait for it, so the two disagree for a while.
             #
             # A zero here is therefore "not settled yet", NOT "paid nothing". The distinction is the
-            # whole ballgame: _profit_formula renders BLANK while Payout Amount is empty, but a literal
+            # whole ballgame: _profit_formula renders BLANK while Actual Payout is empty, but a literal
             # 0 makes it compute `0 - Total Cost - Insurance` — a large fictitious LOSS on a perfectly
             # healthy order. Live it put **-$1,678.46** against a $1,796 order that BFMR had not yet
             # paid. No buying group pays $0 for a package it accepted, so reading 0 as "not yet" can
@@ -729,7 +729,7 @@ class BFMRClient(HttpClient):
                 tracking_number=number,
                 # `amount_paid`, not `total_payout`: the latter is what the deal is WORTH and is
                 # populated from the moment a purchase exists — that figure travels separately as
-                # `expected_amount` below, and reaches Payout Amount only through the deliberate
+                # `expected_amount` below, and reaches Actual Payout only through the deliberate
                 # commitment path (fetch_expected_payouts + sync_tracking), which never stamps a
                 # Payout Date. THIS field is the settlement: `amount_paid` reads "0.00" until BFMR
                 # actually pays, and it lands together with the date and the `paid` status. And
@@ -811,7 +811,7 @@ class BFMRClient(HttpClient):
 
         Entries with nothing left to expect are skipped: a cancelled purchase will never pay, a
         returned one won't either, and a SETTLED one (paid with real money recorded) is owned by
-        the actual figure in Payout Amount from that run onward. A paid-flagged entry whose
+        the actual figure in Actual Payout from that run onward. A paid-flagged entry whose
         `amount_paid` still reads "0.00" is NOT settled (BFMR flips the status early — see
         fetch_payouts) and keeps contributing its commitment.
         """
@@ -1264,7 +1264,7 @@ def _expected_of(entry: dict) -> float | None:
 
     `total_payout` is exactly this number ("what the deal is WORTH", populated from the moment a
     purchase exists — see fetch_payouts, where that very property is why it must never land in
-    Payout Amount). `payout_price × qty` is the fallback for an entry whose total doesn't parse,
+    Actual Payout). `payout_price × qty` is the fallback for an entry whose total doesn't parse,
     mirroring `_per_unit_payout` in the other direction.
     """
     total = parse_money(entry.get("total_payout"))

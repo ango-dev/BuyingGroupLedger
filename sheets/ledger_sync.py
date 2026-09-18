@@ -66,7 +66,8 @@ HEADER = [
     "COGS",  # a live sheet formula, written by _cogs_formula: cost + shipping, net of cashback
     # --- what came back ---
     "Insurance",  # a buying-group premium — an EXPENSE, deliberately not part of COGS
-    "Payout Amount",
+    "Expected Payout",  # the group's COMMITTED payout (sync_tracking), kept apart from the paid one
+    "Actual Payout",  # what the group PAID (was "Payout Amount" until 2026-09-18)
     "Payout Date",
     # A partial return is ONE hand edit, kept beside the payout it corrects: Quantity / Total Cost
     # stay GROSS and the COGS formula nets Return Qty x Cost Per Item out (see models/order.py).
@@ -84,7 +85,6 @@ HEADER = [
                    # Best Buy groupId): matched on before the tracking number. TEXT, never typed.
                    # Added 2026-09-09, moved before Last Scraped At 2026-09-10 — see models/order.py.
     "Last Scraped At",
-    "Expected Payout",  # the group's COMMITTED payout (sync_tracking), kept apart from the paid one
 ]
 
 # Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
@@ -211,7 +211,7 @@ def _cogs_formula(row_number: int) -> str:
 def _profit_formula(row_number: int) -> str:
     """The live Total Profit formula for one sheet row.
 
-        Total Profit = Payout Amount - COGS - Insurance
+        Total Profit = Actual Payout - COGS - Insurance
 
     This READS THE COGS CELL rather than re-deriving cost from its parts. It is algebraically the
     same number as the older self-contained version — expand COGS and you get
@@ -219,12 +219,12 @@ def _profit_formula(row_number: int) -> str:
     cost side instead of two that could drift apart. It also makes the row read the way the money
     actually works: what came in, minus what the goods cost, minus the fee.
 
-    It's a formula, not a Python-computed number, because Insurance and Payout Amount arrive after the
+    It's a formula, not a Python-computed number, because Insurance and Actual Payout arrive after the
     scrape (from the buying-group sync, or typed in). A value computed at scrape time would be stale
     the moment either lands, and a delivered row is terminal — never re-scraped — so it would stay
     stale forever.
 
-    Returns "" (blank cell, not 0) until Payout Amount is filled, so an un-paid-out row doesn't
+    Returns "" (blank cell, not 0) until Actual Payout is filled, so an un-paid-out row doesn't
     display a large fake loss that would poison a column sum. COGS deliberately does NOT do this.
 
     A CANCELLED ROW also reports nothing, for the same reason COGS does — see _cogs_formula.
@@ -582,7 +582,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     # display-stable). But _merge_row also carries a matched row's UNTOUCHED cells forward from it,
     # and a display format can lose information on the way: a 0-decimal currency shows 1300.45 as
     # "1300", a 0-decimal percent shows 0.0375 as "4%", and a custom format that renders a number as
-    # nothing turns a hand-typed Payout Amount into "" -- which the next re-check then writes back,
+    # nothing turns a hand-typed Actual Payout into "" -- which the next re-check then writes back,
     # erasing it. So numeric and checkbox cells are preserved from the stored VALUES instead; text
     # and date columns keep coming from the formatted grid (Order Date is in the key). Best-effort:
     # if the second read fails, preserved cells fall back to the formatted text, as before.
@@ -1488,7 +1488,7 @@ def _blank_to_none(row: list) -> list:
         RAW None          -> number format preserved
         USER_ENTERED ""   -> number format preserved
 
-    This is why `Insurance`, `Payout Amount` and `Total Profit` kept reverting to raw floats while
+    This is why `Insurance`, `Actual Payout` and `Total Profit` kept reverting to raw floats while
     `Total Cost` never did: the scrapers always emit those three blank, so every append rewrote them
     as "" and wiped the currency format off the new row, and `_write_profit_formulas` then stamped the
     formula into an unformatted cell. Total Cost always carries a number, so it was never stripped.

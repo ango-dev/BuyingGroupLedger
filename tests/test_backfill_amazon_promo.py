@@ -83,7 +83,7 @@ class TestDoesNotClobber:
 
     def test_only_the_money_columns_are_ever_touched(self):
         rows = [sheet_row(**{"Order ID": "A1", "Order Date": "2026-08-12", "Item Name": "iPad",
-                             "Shipment": 1, "Status": "paid", "Payout Amount": 999,
+                             "Shipment": 1, "Status": "paid", "Actual Payout": 999,
                              "Cashback Rate": 0.05})]
         p = plan(rows, keyed(rebuilt_item(cashback_rate=0.06, status="delivered")))
 

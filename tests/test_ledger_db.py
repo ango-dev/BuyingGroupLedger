@@ -93,6 +93,23 @@ class TestSchema:
         assert len(rows) == 1 and rows[0]["order_id"] == "x" and rows[0]["total_cost"] == 12.5
         assert rows[0]["expected_payout"] is None
 
+    def test_a_reordered_schema_carries_every_row_across_by_name(self, tmp_path):
+        """Expected Payout moved from last to beside Actual Payout (2026-09-18): the file IS the
+        ledger, so the table is rebuilt in the new order with every value under its own name."""
+        path = tmp_path / "old.sqlite3"
+        names = [name for name, _ in columns()]
+        old = [n for n in names if n != "expected_payout"]
+        old.insert(old.index("sheet_row"), "expected_payout")  # the old position: last field
+        with sqlite3.connect(path) as conn:
+            conn.execute('CREATE TABLE "ledger_rows" (' + ", ".join(f'"{n}" TEXT' for n in old) + ")")
+            conn.execute('INSERT INTO "ledger_rows" ("order_id", "order_date", "item_name", "shipment", '
+                         '"payout_amount", "expected_payout", "sheet_row") VALUES ("x", "d", "i", "1", 500, 520, 2)')
+        db = LedgerDb(path)
+        with db.connect() as conn:
+            assert [r[1] for r in conn.execute('PRAGMA table_info("ledger_rows")')] == names
+        rows = db.fetch_rows()
+        assert rows[0]["payout_amount"] == 500.0 and rows[0]["expected_payout"] == 520.0
+
     def test_an_empty_table_with_a_foreign_column_is_rebuilt(self, tmp_path):
         path = tmp_path / "old.sqlite3"
         with sqlite3.connect(path) as conn:

@@ -11,7 +11,7 @@ It reproduces exactly what a scrape would have written, from data the sheet alre
   - Card + Cashback Rate  <- resolved from that row's recorded Card Last 4, scoped by its Profile and
                              Retailer, through the same config.cards.resolve_card the scrapers use.
   - Total Profit          <- the live formula, stamped on every data row (it reads blank until you
-                             fill Payout Amount, so stamping a not-yet-paid row costs nothing).
+                             fill Actual Payout, so stamping a not-yet-paid row costs nothing).
 
 SAFE BY DEFAULT: only fills cells that are currently BLANK, so a card name you typed by hand is never
 overwritten. Pass --refresh to also correct non-blank cells that disagree with cards.json (use that

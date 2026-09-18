@@ -182,7 +182,7 @@ TOOLS: tuple[Tool, ...] = (
          "Checks", (Field("--stale-days", "Stale after (days)", "int", default="3"),
                     Field("--strict", "Strict", "flag"))),
     Tool("migrate_expected_payout", "scripts.migrate_expected_payout", "Move commitments to Expected Payout",
-         "One-time, after the 2026-09-18 column: move each open row's committed payout out of Payout Amount into "
+         "One-time, after the 2026-09-18 column: move each open row's committed payout out of Actual Payout into "
          "Expected Payout, so the Reconciliation page can compare the promise with the payment.",
          "Ledger Fixes", (APPLY,), writes=True),
 )

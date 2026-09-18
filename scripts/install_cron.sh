@@ -40,7 +40,7 @@ MOD_DAILY_PAYOUT_READS=10
 if [ "$RUNS_PER_DAY" -gt "$MOD_DAILY_PAYOUT_READS" ]; then
     echo "WARNING: every ${HOURS}h is ${RUNS_PER_DAY} runs/day, but MaxOutDeals allows only" >&2
     echo "         ${MOD_DAILY_PAYOUT_READS} payout reads per day and each run spends one." >&2
-    echo "         Payout Amount / Insurance / paid status will stop updating once the quota is" >&2
+    echo "         Actual Payout / Insurance / paid status will stop updating once the quota is" >&2
     echo "         gone (tracking submission is unaffected). A manual sync_tracking spends one" >&2
     echo "         too, even as a DRY RUN. Use 3h or longer to stay inside it." >&2
     echo >&2

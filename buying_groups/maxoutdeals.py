@@ -90,7 +90,7 @@ RECEIVED_ITEMS_DAILY_LIMIT = 10
 #:
 #: So COMMISSION is only the per-unit MARGIN, not the payout. This distinction is the difference
 #: between a right and a catastrophically wrong profit column: `_profit_formula` computes
-#: `Payout Amount - Total Cost - ...`, so feeding it COMMISSION (6) instead of EXT TOTAL (905) for a
+#: `Actual Payout - Total Cost - ...`, so feeding it COMMISSION (6) instead of EXT TOTAL (905) for a
 #: $899 PS5 would book a $893 LOSS on a profitable order — a plausible-looking number that nothing
 #: downstream would ever flag.
 _PAYOUT_COLUMN = "EXT TOTAL"

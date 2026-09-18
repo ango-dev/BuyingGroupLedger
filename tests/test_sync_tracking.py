@@ -251,7 +251,7 @@ class TestPayoutAllocation:
         assert [w[PAYOUT_AMOUNT_COL] for w in writes.values()] == [50.0, 50.0]
 
     def test_an_unpaid_package_gets_no_payout_cell_at_all(self):
-        """Not a zero. `_profit_formula` reads a blank Payout Amount as "not paid out yet" and
+        """Not a zero. `_profit_formula` reads a blank Actual Payout as "not paid out yet" and
         renders blank; a literal 0 makes it compute `0 - Total Cost - ...`, i.e. a large fictitious
         LOSS on a perfectly healthy order."""
         plan = self._plan()
@@ -669,7 +669,7 @@ class TestSettledPackagesAreNotReSubmitted:
         put("Status", status)
         put("Total Cost", "100.00")
         put("Buying Group", "MOD")
-        put("Payout Amount", payout)
+        put("Actual Payout", payout)
         return header, [row]
 
     def test_a_paid_package_with_money_is_settled(self):
@@ -994,8 +994,8 @@ class TestOrderScopedAllocation:
              "payout_date": "2026-06-05", "status": "paid"},
             {"tracking_number": "T1", "order_id": "B-RETURNED", "status": "return"},
         ])
-        assert writes[4]["Payout Amount"] == 2392.0 and writes[4]["Status"] == "paid"
-        assert "Payout Amount" not in writes[5] and writes[5]["Status"] == "return"
+        assert writes[4]["Actual Payout"] == 2392.0 and writes[4]["Status"] == "paid"
+        assert "Actual Payout" not in writes[5] and writes[5]["Status"] == "return"
 
     def test_a_fee_row_without_an_order_shares_insurance_across_the_whole_package(self):
         writes = self._writes([
@@ -1004,21 +1004,21 @@ class TestOrderScopedAllocation:
         ])
         assert writes[4]["Insurance"] == round(10.0 * 2392.0 / 2691.0, 2)
         assert writes[5]["Insurance"] == round(10.0 * 299.0 / 2691.0, 2)
-        assert writes[4]["Payout Amount"] == 2392.0 and "Payout Amount" not in writes[5]
+        assert writes[4]["Actual Payout"] == 2392.0 and "Actual Payout" not in writes[5]
 
     def test_an_unknown_order_folds_back_to_tracking_level(self):
         writes = self._writes([
             {"tracking_number": "T1", "order_id": "SOMEONE-ELSE", "payout_amount": 100.0, "status": "paid"},
         ], order_of_row={4: "A", 5: "B"})
         # nobody claims it by order, so it spreads across the package as before
-        assert round(writes[4]["Payout Amount"] + writes[5]["Payout Amount"], 2) == 100.0
+        assert round(writes[4]["Actual Payout"] + writes[5]["Actual Payout"], 2) == 100.0
 
     def test_records_without_order_ids_behave_exactly_as_before(self):
         writes = self._writes([
             {"tracking_number": "T1", "payout_amount": 269.1, "payout_date": "2026-06-30", "status": "paid"},
         ])
-        assert writes[4]["Payout Amount"] == round(269.1 * 2392.0 / 2691.0, 2)
-        assert writes[5]["Payout Amount"] == round(269.1 * 299.0 / 2691.0, 2)
+        assert writes[4]["Actual Payout"] == round(269.1 * 2392.0 / 2691.0, 2)
+        assert writes[5]["Actual Payout"] == round(269.1 * 299.0 / 2691.0, 2)
 
 
 class TestExpectedPayoutPlanning:
@@ -1027,7 +1027,7 @@ class TestExpectedPayoutPlanning:
     The commitment is keyed by ORDER, not tracking — BFMR publishes the price from the moment the
     user's hand-typed order number creates the purchase, which is before any tracking number
     exists — so rows still awaiting shipment must already be in the order index. It lands in the
-    existing Payout Amount cell, so the planner also reads the cell as
+    existing Actual Payout cell, so the planner also reads the cell as
     it stands (the baseline the change alert compares against) and the Payout Date (blank = not
     settled, the gate that keeps the commitment pass off real money).
     """
@@ -1162,7 +1162,7 @@ class TestExpectedPayoutAllocation:
         assert changes == [], "a settlement is not a repricing"
 
     def test_a_zero_commitment_is_never_written(self):
-        """Same rule as the settlement path: a literal 0 in Payout Amount makes Total Profit
+        """Same rule as the settlement path: a literal 0 in Actual Payout makes Total Profit
         compute a large fictitious loss."""
         writes, changes = self._alloc(
             [{"tracking_number": "", "order_id": "O1", "expected_amount": 0.0}],

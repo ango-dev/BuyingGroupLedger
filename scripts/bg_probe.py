@@ -20,7 +20,7 @@ FOUR QUESTIONS IT EXISTS TO ANSWER:
    assumed. The signal is several tracker rows sharing one `purchase_id`.
 
 3. **MOD's payout column.** Its CSV carries both `COMMISSION` and `EXT TOTAL` and the docs describe
-   neither. Picking wrong writes a plausible but incorrect number into Payout Amount, which feeds
+   neither. Picking wrong writes a plausible but incorrect number into Actual Payout, which feeds
    Total Profit — a wrong figure that nothing downstream would ever flag.
 
 4. **BFMR's rate limit.** Every endpoint documents a 429; none states the actual limit.

@@ -17,9 +17,8 @@ rarely-scanned reference/audit columns parked at the end:
 `Order Date · Status · Retailer · Item Name · Shipment · Quantity ·
 Order ID · Tracking Number · Tracking Submitted · Delivery Date · Buying Group ·
 Cost Per Item · Total Cost · Shipping · Sales Tax · Gift Card · Rewards Used · Card · Cashback Rate · COGS ·
-Insurance · Payout Amount · Payout Date · Return Qty · Return Date · Total Profit ·
-Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Package ID · Last Scraped At ·
-Expected Payout`
+Insurance · Expected Payout · Actual Payout · Payout Date · Return Qty · Return Date · Total Profit ·
+Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Package ID · Last Scraped At`
 
 **Package ID** (column 33, beside Card Last 4) is the retailer's *own* identity for the physical package a row belongs
 to: Amazon's `shipmentId` (read from the card's "Track package" link, or from the "View your item"
@@ -32,27 +31,30 @@ its own row however Amazon re-orders its cards; a multi-SKU carton shares one id
 is told apart by item name. A blank id never blocks a match. `audit_sheet`'s
 `package_id_per_shipment` fails if one id ever sits under two Shipment numbers of one order.
 
-**Expected Payout (column 35, since 2026-09-18) is the buying group's COMMITMENT; Payout Amount
-is the money.** While a BFMR package is **open**, the sync fills Expected Payout with the payout
+**Expected Payout (since 2026-09-18, beside it) is the buying group's COMMITMENT; Actual Payout
+(named Payout Amount until 2026-09-18) is the money.** While a BFMR package is **open**, the sync fills Expected Payout with the payout
 price BFMR has committed to (`payout_price`/`total_payout`, on its tracker from the moment a
 purchase exists — before shipping, before payment), prorated by Total Cost like a real payout.
-Payout Amount stays blank until the package **settles**, when the real amount, Payout Date and
+Actual Payout stays blank until the package **settles**, when the real amount, Payout Date and
 `paid` status land; the commitment is left where it is, so the two figures sit side by side and
 the dashboard's **Reconciliation** page can list every order paid more or less than promised.
 When BFMR **changes** the committed price, Expected Payout is rewritten to the new figure and an
 alert names old → new; a settled amount that disagrees with the commitment is alerted once, on
 the run that writes it. MOD publishes no price through its API, so its Expected Payout stays
-blank and its orders are never "reconciled". Total Profit is blank until Payout Amount is filled
+blank and its orders are never "reconciled". Total Profit is blank until Actual Payout is filled
 (the formula never sees a commitment); the dashboard shows the *projected* profit (Expected Payout
 − COGS − Insurance) on committed rows instead. Anything keyed on "has this been paid?" reads the
 **(Payout Date, Status)** pair — the cash-basis tax report keys income on Payout Date, the audit's
 straddle line (`cogs_inputs_complete`) counts a dated-or-`paid` payout as settled. *From
-2026-09-11 to 2026-09-18 the commitment shared the Payout Amount cell with a blank date;
+2026-09-11 to 2026-09-18 the commitment shared the Actual Payout cell with a blank date;
 `python -m scripts.migrate_expected_payout --apply` (also under Tools → Ledger Fixes) moves the
 open rows' commitments into the new column once, and a ledger still holding that shape reads
 correctly on the dashboard in the meantime.*
 
-> **Changing the column order is a MIGRATION, not an edit**, and it takes two steps.
+> **Changing the column order is a MIGRATION, not an edit.** Under `ledger.backend` = `db` the
+> SQLite store does it itself on the next start — the table is rebuilt in the new order with every
+> value carried across by name (never dropped) — so a reorder or a rename in `FIELDNAMES` / `HEADER`
+> costs nothing on the host. The deprecated Sheet is the case that takes two steps.
 > `python -m scripts.reorder_sheet --apply` moves the row *values*; `python -m
 > scripts.apply_sheet_formats --apply` then puts the presentation back. Both are dry-run by default.
 >
@@ -97,7 +99,7 @@ on its next re-check; type `'2026-08-12`, or format the column as plain text fir
 the row is indistinguishable from a scraped one: it sorts into place and gets its Total Profit formula
 on the next append-triggered sort (`scripts/sort_ledger.py --apply` if you don't want to wait). Don't
 hand-write **Total Profit** — it's position-bound and re-stamped on every sort. **Insurance** is yours
-to fill in and is never overwritten by anything. **Payout Amount** and **Payout Date** are hand-entered
+to fill in and is never overwritten by anything. **Actual Payout** and **Payout Date** are hand-entered
 too, but the buying-group sync fills them in once the group pays (it never blanks a cell it has no
 figure for, so a value you typed only changes if the group reports a different one). A note or spacer row belongs *below* the last order, where the sort leaves it alone; put one
 inside the block and it gets shuffled in among the orders. `scripts/audit_sheet.py` flags all of this.
@@ -214,14 +216,14 @@ etc.) — they're never resold, so they never hit the ledger.
   as though a reimbursement were about to be lost — training you to ignore the one alert that means
   exactly that. The tag also **wins over the delivery address**, so a card shipped to your own home
   isn't classified `Personal` and deleted. Hand-entered gift-card rows should carry the same tag.
-- **Insurance**, **Payout Date** and **Payout Amount** are filled by the buying-group sync (see [Buying groups](buying-groups.md)) — or by hand until you enable it. The scrapers always write them blank, and
+- **Insurance**, **Payout Date** and **Actual Payout** are filled by the buying-group sync (see [Buying groups](buying-groups.md)) — or by hand until you enable it. The scrapers always write them blank, and
   the upsert's blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.
 - **COGS** and **Total Profit** are **live Google Sheets formulas**, not scraped numbers:
 
   ```
   COGS         = (Total Cost − Return Qty × Cost Per Item − Gift Card + Shipping + Sales Tax
                   − Rewards Used) × (1 − Cashback Rate) + Rewards Used
-  Total Profit = Payout Amount − COGS − Insurance
+  Total Profit = Actual Payout − COGS − Insurance
   ```
 
   Blank cells count as 0, so a row with no return, no gift card, no recorded tax and no rewards
@@ -236,9 +238,9 @@ etc.) — they're never resold, so they never hit the ledger.
   Unlike Total Profit, **COGS does not blank on an unpaid row**: the cost was incurred whether or not
   the group has paid yet, and the year-end cost side has to count it.
 
-  It's a formula so it recalculates the instant you type an Insurance or Payout Amount — a value
+  It's a formula so it recalculates the instant you type an Insurance or Actual Payout — a value
   computed at scrape time would go stale immediately, and a `delivered` row is terminal and never
-  re-scraped, so it would stay stale forever. The cell reads blank (not `0`) until Payout Amount is
+  re-scraped, so it would stay stale forever. The cell reads blank (not `0`) until Actual Payout is
   filled, so un-paid-out rows don't drag a column sum down with fake losses.
 
   **Shipping, Gift Card and Sales Tax are allocated pro-rata across an order's rows** (`the order
@@ -256,7 +258,7 @@ python -m scripts.tax_report 2026 --from-snapshot before.json   # offline, from 
 ```
 
 Read-only (it goes through the audit's read-only scope). **Two dates drive the year, on a cash
-basis:** receipts are Payout Amounts whose *Payout Date* falls in the year; COGS and insurance are
+basis:** receipts are Actual Payouts whose *Payout Date* falls in the year; COGS and insurance are
 taken from rows whose *Order Date* does, cancelled rows excluded. A December order paid in January is
 therefore a cost in one year and income in the next, and the report's "straddling" block says how
 much money sits on each side of the boundary — the number a preparer asks about. Insurance is

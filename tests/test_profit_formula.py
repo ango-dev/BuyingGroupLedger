@@ -2,10 +2,10 @@ import re
 """The Total Profit cell is a LIVE sheet formula, not a scraped value. Shipping, by contrast, is a
 Python-computed NUMBER written once per sync (see TestShippingReproration below) — not a formula.
 
-    Total Profit = Payout Amount + Cashback - Total Cost - Shipping - Insurance
+    Total Profit = Actual Payout + Cashback - Total Cost - Shipping - Insurance
     Cashback     = (Total Cost + Shipping) * Cashback Rate
 
-Insurance and Payout Amount are typed in by hand (the BFMR/MaxOutDeals step fills them later), so a
+Insurance and Actual Payout are typed in by hand (the BFMR/MaxOutDeals step fills them later), so a
 value computed at scrape time would be stale the moment either is entered — and a delivered row is
 terminal, never re-scraped, so it would stay stale forever. Total Profit therefore stays a live
 formula. Shipping doesn't have that problem (it depends only on scraped data, which is only ever
@@ -40,12 +40,13 @@ class TestFormulaShape:
 
     def test_formula_shape_is_pinned(self):
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
+        # (Expected Payout moved before Actual Payout on 2026-09-18: V->W, X->Y, deliberately)
         # here rather than quietly producing wrong money on the sheet.
         assert ledger_sync._cogs_formula(7) == (
-            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-X7*L7-P7+N7+O7-Q7)*(1-S7)+Q7,"")))'
+            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-Y7*L7-P7+N7+O7-Q7)*(1-S7)+Q7,"")))'
         )
         assert ledger_sync._profit_formula(7) == (
-            '=IF(B7="cancelled","",IF(V7="","",IFERROR(V7-T7-U7,"")))'
+            '=IF(B7="cancelled","",IF(W7="","",IFERROR(W7-T7-U7,"")))'
         )
 
     def test_profit_is_algebraically_what_it_always_was(self):
@@ -147,7 +148,7 @@ class TestFormulaShape:
         # The self-checking half of the pin above: assert by HEADER NAME, so the intent survives a
         # future append even though the letters would change.
         profit = ledger_sync._profit_formula(7)
-        for name in ("COGS", "Insurance", "Payout Amount", "Status"):
+        for name in ("COGS", "Insurance", "Actual Payout", "Status"):
             letter = ledger_sync._col_letter(HEADER.index(name))
             assert f"{letter}7" in profit, f"{name} ({letter}) missing from the profit formula"
         # The cost side now lives in COGS, so profit must NOT re-derive it — two copies of the same
@@ -166,13 +167,13 @@ class TestFormulaShape:
             assert f"{letter}7" in cogs, f"{name} ({letter}) missing from the COGS formula"
         # Insurance is an EXPENSE, not part of the cost of the goods. Order ID: no SUMIF here —
         # Shipping already holds this row's final cost-weighted share by the time this runs.
-        for name in ("Insurance", "Payout Amount", "Order ID", "Card"):
+        for name in ("Insurance", "Actual Payout", "Order ID", "Card"):
             letter = ledger_sync._col_letter(HEADER.index(name))
             assert f"{letter}7" not in refs(cogs), f"{name} should not be part of the COGS math"
 
     def test_blank_payout_leaves_the_cell_blank(self):
         # Not 0: an un-paid-out row would otherwise show a large fake loss and poison a column sum.
-        payout = ledger_sync._col_letter(HEADER.index("Payout Amount"))
+        payout = ledger_sync._col_letter(HEADER.index("Actual Payout"))
         assert f'IF({payout}7="","",' in ledger_sync._profit_formula(7)
         # COGS deliberately does NOT gate on payout: the cost was incurred whether or not the buying
         # group has paid yet, and the year-end cost side has to count it.
@@ -437,7 +438,7 @@ class TestShippingReproration:
 
 
 class TestProfitColumnsUpsert:
-    """Insurance / Payout Date / Payout Amount are typed in by the user, so a re-scrape must not wipe
+    """Insurance / Payout Date / Actual Payout are typed in by the user, so a re-scrape must not wipe
     them. They ride the same blank-never-overwrites rule that protects item name and cost."""
 
     def test_hand_entered_values_survive_a_rescrape(self, sheet, tmp_path):

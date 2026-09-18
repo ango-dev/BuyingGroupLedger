@@ -1525,7 +1525,7 @@ class TestBfmrPayoutsAndStatus:
         still reads "0.00".
 
         Writing that zero is far worse than writing nothing. `_profit_formula` renders BLANK while
-        Payout Amount is empty, but a literal 0 makes it compute `0 - Total Cost - Insurance` -- a
+        Actual Payout is empty, but a literal 0 makes it compute `0 - Total Cost - Insurance` -- a
         large fictitious LOSS on a perfectly healthy order. Live three packages landed this
         way, one showing **-$1,678.46** against a $1,796 order BFMR simply had not paid yet.
 
@@ -1680,7 +1680,7 @@ class TestBfmrPayoutsAndStatus:
         self, bfmr, transport
     ):
         """`total_payout` is what the deal is WORTH and exists from the moment a purchase does.
-        Writing it would fill Payout Amount — and light up Total Profit — for money that has not
+        Writing it would fill Actual Payout — and light up Total Profit — for money that has not
         arrived. `amount_paid` reads "0.00" until BFMR actually pays."""
         transport.responses = [self._payout_row(
             status="shipped", total_payout="1,756.00", amount_paid="0.00", date_paid=None,

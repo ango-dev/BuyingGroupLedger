@@ -3,7 +3,7 @@
 WHY THIS EXISTS. Number formats are attached to a cell POSITION, and `scripts/reorder_sheet.py`
 moves VALUES between positions without touching formatting — so after a reorder every format is left
 behind on whatever column now occupies that letter. The 2026-08-25 reorder, for example, moved
-Cashback Rate from O to L, which left a PERCENT format sitting on Payout Amount and a CURRENCY format
+Cashback Rate from O to L, which left a PERCENT format sitting on Actual Payout and a CURRENCY format
 on Cashback Rate. That is cosmetic rather than corrupting (`_parse_display_number` round-trips "386%"
 back to 3.86 — see the design notes), but a sheet that shows costs as percentages is unusable.
 
@@ -33,7 +33,7 @@ log = logging.getLogger("apply_sheet_formats")
 
 #: Columns that must display as money, by NAME. Everything the year-end totals are read off.
 CURRENCY_COLUMNS = (
-    "Cost Per Item", "Total Cost", "Shipping", "COGS", "Insurance", "Payout Amount", "Total Profit", "Expected Payout",
+    "Cost Per Item", "Total Cost", "Shipping", "COGS", "Insurance", "Actual Payout", "Total Profit", "Expected Payout",
     "Gift Card", "Sales Tax", "Rewards Used",
 )
 #: Columns that must display as a percentage. Cashback Rate STORES a fraction (0.04) and shows "4%".
@@ -47,7 +47,7 @@ _PERCENT = {"type": "PERCENT", "pattern": "0.##%"}
 #: the authority here and the cell formats above are only a fallback for if the table is ever removed.
 #:
 #: Like formats, a column type is bound to a POSITION, so reorder_sheet leaves every type behind on
-#: whatever column inherits its letter. After the 2026-08-25 reorder that put PERCENT on Payout Amount
+#: whatever column inherits its letter. After the 2026-08-25 reorder that put PERCENT on Actual Payout
 #: (a $631 payout displayed as "63100%") and, worse, moved the BOOLEAN checkbox off Tracking Submitted
 #: onto Delivery Address.
 #:
@@ -56,7 +56,7 @@ _PERCENT = {"type": "PERCENT", "pattern": "0.##%"}
 #: on its next re-check. That is the design notes, and it cost a migration to undo the first time.
 TABLE_COLUMN_TYPES = {
     "Cost Per Item": "CURRENCY", "Total Cost": "CURRENCY", "Shipping": "CURRENCY",
-    "COGS": "CURRENCY", "Insurance": "CURRENCY", "Payout Amount": "CURRENCY", "Expected Payout": "CURRENCY",
+    "COGS": "CURRENCY", "Insurance": "CURRENCY", "Actual Payout": "CURRENCY", "Expected Payout": "CURRENCY",
     "Total Profit": "CURRENCY", "Gift Card": "CURRENCY", "Sales Tax": "CURRENCY",
     "Rewards Used": "CURRENCY",
     "Cashback Rate": "PERCENT",

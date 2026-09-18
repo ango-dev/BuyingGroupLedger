@@ -19,7 +19,7 @@ OLD_HEADER = [
     "Retailer", "Profile", "Order ID", "Order Date", "Status", "Order Link", "Tracking Number",
     "Tracking Link", "Delivery Date", "Delivery Address", "Item Name", "Quantity", "Cost Per Item",
     "Shipping", "Total Cost", "Card Last 4", "Last Scraped At", "Shipment", "Buying Group",
-    "Card", "Cashback Rate", "Insurance", "Payout Date", "Payout Amount", "Total Profit",
+    "Card", "Cashback Rate", "Insurance", "Payout Date", "Actual Payout", "Total Profit",
 ]
 
 

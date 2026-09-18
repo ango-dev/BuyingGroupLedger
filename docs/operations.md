@@ -272,7 +272,7 @@ is not the current order. A CSV backup stores `COGS` and `Total Profit` as formu
 two columns the page computes the same arithmetic as the sheet formula (`web.ledger_reader.cogs_of`,
 pinned against `sheets.ledger_sync._cogs_formula`'s own cell references by a test).
 
-**Projected versus realized.** Since 2026-09-11 a Payout Amount with a blank Payout Date on an open
+**Projected versus realized.** Since 2026-09-11 a Actual Payout with a blank Payout Date on an open
 row is BFMR's *committed* price, not money received ([data model](data-model.md)). The dashboard
 reads the `(Payout Date, Status)` pair exactly as the audit does: a payout cell is **settled** when
 its date is set or the status is `paid` / `return` (MOD's paid rows carry no date) — a `$0.00`
@@ -439,7 +439,7 @@ Neither writes anything.
   shown under its check in the summary. The report is rebuilt whenever the rows change (a cell
   edit, a sync, a mirror) and shared between a page load and its htmx swaps.
 - **Reconciliation** (`/recon`, `web/recon_view.py`): every order the buying group paid **more or
-  less** than it committed to — Payout Amount against Expected Payout, compared as order totals
+  less** than it committed to — Actual Payout against Expected Payout, compared as order totals
   over the same settled rows (two cents of tolerance plus a cent per row for proration drift), the
   biggest gap first, with short-paid / over-paid / net totals in the lead. A row with no
   commitment (MOD publishes none) is not compared. Fix a figure by editing the cell; take a real
@@ -451,9 +451,9 @@ replay or rewrite its remembered filters.
 **One-time migration for ledgers from before 2026-09-18.** The commitment used to live in Payout
 Amount with a blank date. `python -m scripts.migrate_expected_payout` (Tools → Ledger Fixes →
 *Move commitments to Expected Payout*) lists each open row's commitment and `--apply` moves it
-into Expected Payout, clearing Payout Amount and re-stamping the profit formula. Run it once after
+into Expected Payout, clearing Actual Payout and re-stamping the profit formula. Run it once after
 deploying; the next sync fills Expected Payout itself from then on. A ledger still holding the old
-shape reads correctly on the dashboard in the meantime (an undated Payout Amount on an open row is
+shape reads correctly on the dashboard in the meantime (an undated Actual Payout on an open row is
 still shown as projected), but the Reconciliation page cannot compare an order until its
 commitment has its own cell.
 

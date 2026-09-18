@@ -818,7 +818,7 @@ def check_display_round_trips_to_stored(sheet: Sheet, opts: Options) -> Result:
     identity: sync_csv_to_sheet reads the sheet FORMATTED (get_all_values), and _merge_row writes a
     preserved cell straight back -- so a 0-dp currency format turns a stored 1300.45 into 1300 on the
     next re-check, a 0-dp percent turns 0.0375 into 0.04, and a format that renders a number as BLANK
-    is the worst case: blank-new + blank-old and the hand-typed Payout Amount is ERASED. This check
+    is the worst case: blank-new + blank-old and the hand-typed Actual Payout is ERASED. This check
     is read-only; it names the cells so the FORMAT gets fixed before a run touches them.
     """
     offenders, checked = [], 0
@@ -892,7 +892,7 @@ def check_shipment_numbers_contiguous(sheet: Sheet, opts: Options) -> Result:
 
 @check("profit_value_matches_inputs")
 def check_profit_value_matches_inputs(sheet: Sheet, opts: Options) -> Result:
-    """Recompute Total Profit = Payout Amount - COGS - Insurance in Python and compare to the cell.
+    """Recompute Total Profit = Actual Payout - COGS - Insurance in Python and compare to the cell.
 
     The literal check compares formula TEXT, and text can be right while the number is wrong (a
     formula that survives a reorder syntactically but reads a neighbouring column) or wrong while the
@@ -903,7 +903,7 @@ def check_profit_value_matches_inputs(sheet: Sheet, opts: Options) -> Result:
     wrong, checked = [], 0
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
-        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount"))
+        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Actual Payout"))
         if status in MONEY_FREE_STATUSES or payout is None:
             continue
         shown = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Total Profit"))
@@ -1563,7 +1563,7 @@ def check_payout_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
     each would book the group's money twice. This asserts the split actually happened: rows sharing
     `(Order ID, Tracking Number)` must show the same Payout/Cost ratio.
 
-    Nothing else can catch a double-booked payout. `Total Profit` reads Payout Amount straight from
+    Nothing else can catch a double-booked payout. `Total Profit` reads Actual Payout straight from
     the cell and re-derives nothing, so a doubled payout just reads as a larger, plausible profit.
     """
     packages: dict[tuple, list[tuple[int, float, float]]] = {}
@@ -1571,7 +1571,7 @@ def check_payout_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
         key = sheet.tracking_key(sheet.grids.formatted, row_number)
         if key is None:
             continue
-        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount"))
+        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Actual Payout"))
         cost = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Total Cost"))
         if payout is None or not cost:
             continue
@@ -1615,10 +1615,10 @@ def check_paid_rows_have_a_payout(sheet: Sheet, opts: Options) -> Result:
         status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
         if status != "paid":
             continue
-        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount"))
+        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Actual Payout"))
         order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
         if payout is None:
-            blanks.append(f"row {row_number}: order {order_id} is paid but has no Payout Amount")
+            blanks.append(f"row {row_number}: order {order_id} is paid but has no Actual Payout")
         # A gift-card row is `paid` with a REAL $0 payout by rule: no buying
         # group is ever involved, the income arrives through the order the card funds.
         if is_deliberately_unrouted(sheet.cell(sheet.grids.formatted, row_number, "Buying Group")):
@@ -1655,13 +1655,13 @@ def check_profit_blank_despite_payout(sheet: Sheet, opts: Options) -> Result:
     indistinguishable, to the eye, from the deliberate blank of a not-yet-paid-out row. So the whole
     profit column can silently go blank and an error scan sees nothing.
 
-    The distinguishing signal is the pairing: `_profit_formula` returns "" only when Payout Amount is
+    The distinguishing signal is the pairing: `_profit_formula` returns "" only when Actual Payout is
     empty. Blank profit + non-blank payout therefore means the formula failed, and money that should
     be reported isn't.
     """
     offenders = []
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-        payout = sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount")
+        payout = sheet.cell(sheet.grids.unformatted, row_number, "Actual Payout")
         profit = sheet.cell(sheet.grids.unformatted, row_number, "Total Profit")
         if payout == "" or payout is None:
             continue
@@ -1719,7 +1719,7 @@ def check_unresolved_split_quantity(sheet: Sheet, opts: Options) -> Result:
         if quantity != "*":
             continue
         order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
-        payout = sheet.cell(sheet.grids.unformatted, row_number, "Payout Amount")
+        payout = sheet.cell(sheet.grids.unformatted, row_number, "Actual Payout")
         if payout not in ("", None):
             billed.append(f"row {row_number}: order {order_id} is paid out ({payout!r}) with no cost -- profit is overstated by the full payout")
         else:
@@ -1750,7 +1750,7 @@ def check_cogs_inputs_complete(sheet: Sheet, opts: Options) -> Result:
       that has shipped but not been paid yet, and at a year boundary it is exactly the straddle that
       makes the cost and income sides fall in different tax years. Worth seeing, never worth
       failing. "Settled" is a payout WITH its Payout Date or a paid/return status -- not the amount
-      alone, because since 2026-09-11 the sync fills Payout Amount with the group's COMMITTED price
+      alone, because since 2026-09-11 the sync fills Actual Payout with the group's COMMITTED price
       while the package is still open (see sync_tracking), and a commitment is not income.
 
     Gift-card rows are exempt from the third shape entirely: a gift card is a real cost that will
@@ -1767,7 +1767,7 @@ def check_cogs_inputs_complete(sheet: Sheet, opts: Options) -> Result:
             continue  # carries no money by design -- see ledger_sync._blank_money_for_status
         cogs = _parse_display_number(sheet.cell(unf, row_number, "COGS"))
         rate = _parse_display_number(sheet.cell(unf, row_number, "Cashback Rate"))
-        payout = _parse_display_number(sheet.cell(unf, row_number, "Payout Amount"))
+        payout = _parse_display_number(sheet.cell(unf, row_number, "Actual Payout"))
         order_id = sheet.cell(grid, row_number, "Order ID")
 
         if cogs and rate is None:
@@ -2040,7 +2040,7 @@ def diff_snapshots(before: Grids, after: Grids, ignore=_DIFF_IGNORED_COLUMNS) ->
 
 # Scraped cost columns. A change here on a TERMINAL row cannot have come from a scraper (terminal
 # rows are never re-read), so it is either a hand edit or a writer bug -- worth a look either way.
-# Payout Amount / Payout Date / Insurance / Status / Tracking Submitted are deliberately NOT here:
+# Actual Payout / Payout Date / Insurance / Status / Tracking Submitted are deliberately NOT here:
 # the buying-group sync writes those onto delivered rows every run, and that is the normal case.
 _SCRAPED_MONEY_COLUMNS = ("Quantity", "Cost Per Item", "Total Cost", "Shipping", "Cashback Rate",
                           "Gift Card", "Sales Tax", "Rewards Used")
