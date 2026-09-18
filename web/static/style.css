@@ -287,3 +287,24 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
   color: var(--fg); white-space: nowrap; padding: 2px 4px; border-radius: 4px; }
 .filters details.multi .menu label:hover { background: var(--bg); }
 .filters details.multi .menu label.all { border-bottom: 1px solid var(--line); padding-bottom: 5px; margin-bottom: 3px; }
+
+/* --- The row list inside a card: the same editable cells as the big table, in a scroll box the
+   card owns, so a wide list never spills into the neighbouring card ------------------------------ */
+.card .card-rows-wrap { overflow-x: auto; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+.card table.card-rows { font-size: 0.86em; width: max-content; min-width: 100%; }
+.card table.card-rows th { position: static; padding: 3px 6px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.card table.card-rows td { padding: 3px 6px; white-space: nowrap; }
+.card table.card-rows td.item > span { display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card table.card-rows td.edit { cursor: cell; }
+.card table.card-rows td.edit:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
+.card table.card-rows td[data-editing] { padding: 0; }
+.card table.card-rows td.error { outline: 2px solid var(--bad); outline-offset: -2px; }
+/* the Status cell wears the same colour the table gives the whole row */
+.card tr.status-ordered td[data-field="status"]    { background: #EA9999; color: #1a1a1a; }
+.card tr.status-shipped td[data-field="status"]    { background: #F9CB9C; color: #1a1a1a; }
+.card tr.status-delivered td[data-field="status"]  { background: #FFE599; color: #1a1a1a; }
+.card tr.status-paid td[data-field="status"]       { background: #B6D7A8; color: #1a1a1a; }
+.card tr.status-return td[data-field="status"]     { background: #DD7E6B; color: #1a1a1a; }
+.card tr.status-cancelled td[data-field="status"]  { background: #CCCCCC; color: #1a1a1a; text-decoration: line-through; }
+.card tr.status-superseded td[data-field="status"] { background: #666666; color: #f4f4f4; text-decoration: line-through; }
+.cards { grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); }

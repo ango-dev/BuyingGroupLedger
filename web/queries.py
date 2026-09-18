@@ -32,8 +32,7 @@ SEARCH_FIELDS = ("order_id", "item_name", "tracking_number", "package_id", "card
 DEFAULT_SORT = "order_date"
 #: The columns a card's per-row mini-table shows (the same editable cells as the big table).
 CARD_COLUMNS = ("item_name", "shipment", "status", "quantity", "tracking_number", "delivery_date",
-                "buying_group", "cost_per_item", "insurance", "payout_amount", "payout_date",
-                "return_quantity", "total_profit")
+                "insurance", "payout_amount", "payout_date", "total_profit")
 #: What the cards view can sort by (the table sorts by any column header).
 SORT_CHOICES = tuple((f, FIELD_TO_HEADER[f]) for f in (
     "order_date", "order_id", "status", "retailer", "buying_group", "item_name", "delivery_date",

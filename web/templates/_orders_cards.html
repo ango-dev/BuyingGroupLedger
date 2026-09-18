@@ -17,6 +17,7 @@
         <span class="retailer">{{ c.retailer }}</span>
         <span class="muted small">{{ c.rows }} row(s)</span>
       </header>
+      <div class="card-rows-wrap">
       <table class="grid card-rows">
         <thead><tr>{% for name in CARD_COLUMNS %}<th class="{{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment') }}">{{ header_of(name) }}</th>{% endfor %}</tr></thead>
         <tbody>
@@ -28,6 +29,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       <dl class="facts-grid">
         <dt>Group</dt><dd>{{ c.buying_group }}</dd>
         <dt>Qty</dt><dd>{{ c.quantity }}</dd>

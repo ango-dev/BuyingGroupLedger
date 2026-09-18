@@ -1348,3 +1348,25 @@ class TestMultiSelectFilters:
         assert body.count('<tr class="status-') == 5  # Costco + Best Buy rows
         profile = body[body.index('data-param="profile"'):body.index('data-param="status"')]
         assert 'class="all-box" checked' in profile and ">all<" in profile
+
+
+class TestStaticAssetsCarryTheirBlocks:
+    """two appended blocks (the card row-list styles and the multi-select filter
+    script) never reached the files -- a shell heredoc swallowed them -- and the cards rendered
+    unstyled. These pin every feature block the templates rely on, so a lost block fails here."""
+
+    ROOT = Path(__file__).resolve().parents[1] / "web" / "static"
+
+    def test_the_stylesheet_has_every_feature_block(self):
+        css = (self.ROOT / "style.css").read_text(encoding="utf-8")
+        for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap",
+                       "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
+                       ".bulkbar", ".add-form", "tr.selected td", ".cards {"):
+            assert needle in css, f"style.css lost its {needle!r} rules"
+        assert css.count("{") == css.count("}")
+
+    def test_the_script_has_every_feature_block(self):
+        js = (self.ROOT / "edit.js").read_text(encoding="utf-8")
+        for needle in ("startEdit(", 'closest("td.rownum")', 'closest("th.rownum")',
+                       'addEventListener("htmx:confirm"', "details.multi", 'name !== "view"'):
+            assert needle in js, f"edit.js lost its {needle!r} block"

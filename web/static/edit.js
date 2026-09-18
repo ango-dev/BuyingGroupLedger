@@ -201,3 +201,33 @@
     t.form.submit();
   }, true);
 })();
+
+// Multi-select filter dropdowns: "All" clears every value box; ticking a value unticks "All";
+// unticking the last value re-ticks "All". The summary in the closed dropdown follows. The form's
+// own change trigger (htmx) re-queries the table after each tick.
+(function () {
+  "use strict";
+  function refresh(details) {
+    var all = details.querySelector(".all-box");
+    var boxes = Array.prototype.slice.call(details.querySelectorAll('input[name]'));
+    var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+    if (all) all.checked = picked.length === 0;
+    var text = details.querySelector(".summary-text");
+    if (text) text.textContent = picked.length === 0 ? "all" : (picked.length <= 2 ? picked.join(", ") : picked.length + " selected");
+  }
+  document.addEventListener("change", function (e) {
+    var details = e.target.closest ? e.target.closest("details.multi") : null;
+    if (!details) return;
+    if (e.target.classList.contains("all-box")) {
+      details.querySelectorAll('input[name]').forEach(function (b) { b.checked = false; });
+      e.target.checked = true;
+    }
+    refresh(details);
+  }, true);
+  // Close an open dropdown when clicking elsewhere.
+  document.addEventListener("click", function (e) {
+    document.querySelectorAll("details.multi[open]").forEach(function (d) {
+      if (!d.contains(e.target)) d.removeAttribute("open");
+    });
+  });
+})();
