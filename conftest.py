@@ -96,6 +96,21 @@ def _block_real_sheet_reads(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_ledger_db(tmp_path_factory, monkeypatch):
+    """Safety net: no test may touch the REAL data/ledger.sqlite3.
+
+    `ledger.backend` defaults to `db` (2026-09-18), so an un-fixtured call into anything that opens
+    the ledger -- sheets.ledger_sync._get_worksheet, the dashboard's writer, the read-only opener --
+    lands on the SQLite file, and every settings object names it by the RELATIVE path
+    `data/ledger.sqlite3`, resolved against ledger_db.store.ROOT. Pointing that root at a per-test
+    temp directory sends every such path into it, whichever settings reference the caller holds.
+    """
+    from ledger_db import store
+
+    monkeypatch.setattr(store, "ROOT", tmp_path_factory.mktemp("ledger-db"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_config(tmp_path_factory, monkeypatch):
     """Safety net: no test may read the developer's REAL config.json or .state.json.
 

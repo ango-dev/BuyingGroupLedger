@@ -49,7 +49,7 @@ def config(config_file):
 @pytest.fixture
 def client(config, tmp_path, monkeypatch):
     monkeypatch.delenv("LOOKBACK_DAYS", raising=False)
-    monkeypatch.setenv("GOOGLE_SHEET_ID", "from-the-environment")
+    monkeypatch.setenv("ALERT_EMAIL_TO", "from-the-environment")
     restarts = []
     app = create_app(SnapshotReader(data_dir=tmp_path), logs_dir=tmp_path, failures_dir=tmp_path,
                      backup_dir=tmp_path / "backups", repo_root_dir=tmp_path, clock=lambda: NOW,
@@ -207,8 +207,13 @@ class TestSettingsPage:
         response = client.get("/settings")
         assert response.status_code == 200
         body = response.text
+        hidden = settings_form.hidden_envs()  # the Sheet-only settings, since the backend is db
+        assert hidden and all(env in ENV_TO_CONFIG for env in hidden)
         for env in ENV_TO_CONFIG:
-            assert f'name="{env}"' in body, f"{env} is not on the Settings page"
+            if env in hidden:
+                assert f'name="{env}"' not in body, f"{env} is Sheet-only and the backend is db"
+            else:
+                assert f'name="{env}"' in body, f"{env} is not on the Settings page"
         for secret in ("hunter2", '"K"', '"S"'):
             assert secret not in body
         assert 'type="password"' in body and "blank keeps it" in body
@@ -218,8 +223,8 @@ class TestSettingsPage:
 
     def test_env_override_is_marked(self, client):
         body = client.get("/settings").text
-        # GOOGLE_SHEET_ID is exported in the fixture; LOOKBACK_DAYS is not.
-        sheet_row = body[body.index('for="f-GOOGLE_SHEET_ID"'):body.index('for="f-GOOGLE_SHEET_WORKSHEET_NAME"')]
+        # ALERT_EMAIL_TO is exported in the fixture; LOOKBACK_DAYS is not.
+        sheet_row = body[body.index('for="f-ALERT_EMAIL_TO"'):body.index('for="f-DISCORD_WEBHOOK_URL"')]
         assert "env override" in sheet_row
         lookback_row = body[body.index('for="f-LOOKBACK_DAYS"'):body.index('for="f-DEFAULT_CASHBACK_RATE"')]
         assert "env override" not in lookback_row
@@ -340,6 +345,60 @@ class TestRestartPrompts:
 # --------------------------------------------------------------------------------------------------
 
 
+class TestTheSheetIsDeprecated:
+    """`ledger.backend` defaults to db: the Sheet settings are hidden; under `sheet` they show,
+    tagged and bannered as deprecated."""
+
+    def test_under_db_the_sheet_settings_are_hidden_and_a_save_leaves_them_alone(self, client):
+        body = client.get("/settings").text
+        assert settings_form.effective_backend() == "db" and settings_form.sheet_mode() is False
+        assert 'id="s-google"' not in body and 'id="s-google.service_account"' not in body
+        assert 'href="#s-google"' not in body and "Service Account" not in body
+        assert 'name="WEB_LEDGER_SOURCE"' not in body and 'name="LEDGER_DB_MIRROR_AFTER_RUN"' not in body
+        assert "are hidden while the backend is" in body
+        assert 'value="db"' in body  # the Ledger section shows the (defaulted) backend
+        # a full save with the hidden fields absent must not blank / untick them
+        form = {}
+        for row in settings_form.view(settings_form.schema(), {}):
+            s = row["setting"]
+            if s.env in settings_form.hidden_envs():
+                continue
+            if s.kind == "bool":
+                if row["value"] is True:
+                    form[s.env] = "on"
+            elif not s.secret:
+                form[s.env] = str(row["value"])
+        response = client.post("/settings", data=form, follow_redirects=False)
+        assert response.status_code == 303
+        assert config_value("google.sheet_id") == "SHEET"
+        assert config_value("google.service_account") == {"client_email": "x@y"}
+        assert config_value("database.mirror_after_run") in (None, True)
+
+    def test_under_sheet_they_show_with_a_deprecation_warning(self, client, config):
+        config(scraping={"lookback_days": 3}, ledger={"backend": "sheet"},
+               google={"sheet_id": "SHEET", "service_account": {"client_email": "x@y"}})
+        body = client.get("/settings").text
+        assert settings_form.sheet_mode() is True and settings_form.hidden_envs() == set()
+        assert 'id="s-google"' in body and 'id="s-google.service_account"' in body
+        assert body.count("Deprecated.") >= 2  # the Google Sheet panel and the service-account panel
+        assert '<section class="panel deprecated" id="s-google">' in body
+        google = body[body.index('id="s-google"'):body.index('id="s-alerts"')]
+        assert ">deprecated<" in google
+        for env in ("WEB_LEDGER_SOURCE", "WEB_SHEET_CACHE_TTL_SECONDS", "LEDGER_DB_MIRROR_AFTER_RUN"):
+            field = body[body.index(f'for="f-{env}"'):]
+            assert ">deprecated<" in field[:field.index("</div>\n            </div>")]
+        # switching back to db from the page hides them again
+        form = {s.env: "" for s in settings_form.schema() if not s.secret and s.kind != "bool"}
+        form.update({"LOOKBACK_DAYS": "3", "LEDGER_BACKEND": "db"})
+        client.post("/settings", data=form)
+        assert config_value("ledger.backend") == "db"
+        assert 'id="s-google"' not in client.get("/settings").text
+
+    def test_the_default_is_db(self):
+        assert settings_form.code_defaults()["LEDGER_BACKEND"] == "db"
+        assert Settings().ledger_backend == "db"
+
+
 class TestEntryCards:
     def test_the_page_is_panels_with_an_index_and_a_card_per_entry(self, client):
         body = client.get("/settings").text
@@ -371,7 +430,7 @@ class TestEntryCards:
         # the fixture's config.json has no container section and no gift-card flag
         interval = body[body.index('for="f-RUN_INTERVAL_HOURS"'):body.index('for="f-RUN_ON_START"')]
         assert 'value="6"' in interval and ">default<" in interval
-        netting = body[body.index('for="f-AMAZON_GIFT_CARD_NETTING_ENABLED"'):body.index('for="f-GOOGLE_SERVICE_ACCOUNT_FILE"')]
+        netting = body[body.index('for="f-AMAZON_GIFT_CARD_NETTING_ENABLED"'):body.index('for="f-GMAIL_ADDRESS"')]
         assert 'value="on" checked' in netting and ">default<" in netting
         # a key the file DOES set carries no tag
         lookback = body[body.index('for="f-LOOKBACK_DAYS"'):body.index('for="f-DEFAULT_CASHBACK_RATE"')]

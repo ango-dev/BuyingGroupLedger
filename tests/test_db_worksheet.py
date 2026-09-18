@@ -308,7 +308,7 @@ class TestTheFlag:
         monkeypatch.setattr(settings_module, "settings", patched)
         monkeypatch.setattr(main_module, "settings", patched)
         assert mirror_sheet_to_db.main([]) == 2
-        assert "ledger.backend" in capsys.readouterr().err
+        assert "--force" in capsys.readouterr().err
         calls = []
         monkeypatch.setattr("ledger_db.mirror.mirror_snapshot", lambda *a, **k: calls.append(1))
         main_module.run_db_mirror()

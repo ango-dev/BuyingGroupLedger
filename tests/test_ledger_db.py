@@ -238,7 +238,7 @@ class TestMirrorScript:
         from scripts.mirror_sheet_to_db import main
 
         target = tmp_path / "out.sqlite3"
-        assert main(["--from-snapshot", str(snapshot_path), "--db", str(target)]) == 0
+        assert main(["--from-snapshot", str(snapshot_path), "--db", str(target), "--force"]) == 0
         assert LedgerDb(target).row_count() == 3
         assert "Mirrored 3 row(s) from snapshot" in capsys.readouterr().err
 
@@ -250,7 +250,7 @@ class TestMirrorScript:
 
         monkeypatch.setattr(settings_module, "settings", dataclasses.replace(
             settings_module.settings, ledger_db_path=str(tmp_path / "from_settings.sqlite3")))
-        assert script.main(["--from-snapshot", str(snapshot_path)]) == 0
+        assert script.main(["--from-snapshot", str(snapshot_path), "--force"]) == 0
         assert (tmp_path / "from_settings.sqlite3").is_file()
 
 
@@ -261,7 +261,7 @@ class TestFactory:
         from config.settings import settings
         from web.ledger_reader import SheetReader, reader_from_settings
 
-        base = dataclasses.replace(settings, web_ledger_source="db",
+        base = dataclasses.replace(settings, web_ledger_source="db", ledger_backend="sheet",
                                    ledger_db_path=str(tmp_path / "x.sqlite3"),
                                    web_sheet_cache_ttl_seconds=120)
         reader = reader_from_settings(base)

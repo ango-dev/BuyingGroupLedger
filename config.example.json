@@ -114,10 +114,10 @@
     "port": 8765
   },
 
-  "// ledger": "Where the ledger lives. `sheet` = the Google Sheet (DEPRECATED; today's default). `db` = the SQLite file in `database.path`: the scrapers' upsert, the sort, the buying-group sync, the BFMR auto-reply, the dashboard's editor and every script write and read it, and nothing touches the Sheet. To switch: run `python -m scripts.mirror_sheet_to_db` once while still on `sheet` (the last copy of the Sheet), set this to `db`, restart. The Sheet code stays until you delete it.",
+  "// ledger": "Where the ledger lives. `db` (the default) = the SQLite file in `database.path`: the scrapers' upsert, the sort, the buying-group sync, the BFMR auto-reply, the dashboard's editor and every script write and read it, and nothing touches the Sheet. `sheet` = the Google Sheet, DEPRECATED: every writer targets the Sheet and the file is a mirror of it. A host coming from `sheet` needs its file current first (the end-of-run mirror keeps it so; `python -m scripts.mirror_sheet_to_db` does it by hand) before it starts on `db`. The Sheet code stays until you delete it.",
   "ledger": {
-    "// backend": "LEDGER_BACKEND — sheet | db.",
-    "backend": "sheet"
+    "// backend": "LEDGER_BACKEND — db | sheet.",
+    "backend": "db"
   },
 
   "// database": "The SQLite ledger (ledger_db/). A MIRROR of the Sheet while `ledger.backend` is `sheet` (the scheduled run reads the Sheet back into this file at the end, as do `python -m scripts.mirror_sheet_to_db` and the dashboard's `db` backend); THE LEDGER once it is `db`. Included in `python -m scripts.backup`.",

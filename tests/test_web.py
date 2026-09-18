@@ -780,7 +780,7 @@ class TestOverviewPage:
         assert "Realized profit" in body and "$193.00" in body
         assert "Open Rows" in body
         assert "Blank Card Last 4" in body and "111-0000002-0000002" in body
-        assert "no automatic writes" in body
+        assert "no automatic writes" not in body and "loaded 2026" not in body  # header: pill + stamp gone
 
     def test_every_page_loads_the_in_page_tooltip_layer(self, client):
         body = client.get("/").text
@@ -1026,27 +1026,27 @@ class TestHealth:
 
 class TestReaderFromSettings:
     def test_default_is_the_newest_snapshot(self):
-        reader = reader_from_settings(_settings(web_ledger_source="snapshot", web_snapshot_path=""))
+        reader = reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="snapshot", web_snapshot_path=""))
         assert isinstance(reader, SnapshotReader) and reader._explicit is None
 
     def test_snapshot_path_from_config(self):
-        reader = reader_from_settings(_settings(web_ledger_source="snapshot",
+        reader = reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="snapshot",
                                                 web_snapshot_path="data/sheet_backup_x.csv"))
         assert reader.resolve().name == "sheet_backup_x.csv"
 
     def test_sheet_with_its_ttl(self):
-        reader = reader_from_settings(_settings(web_ledger_source="sheet",
+        reader = reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="sheet",
                                                 web_sheet_cache_ttl_seconds=42))
         assert isinstance(reader, SheetReader) and reader.ttl_seconds == 42.0
 
     def test_explicit_arguments_win(self):
-        reader = reader_from_settings(_settings(web_ledger_source="sheet"), source="snapshot",
+        reader = reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="sheet"), source="snapshot",
                                       snapshot_path="x.csv")
         assert isinstance(reader, SnapshotReader)
 
     def test_a_typo_is_refused_not_defaulted(self):
         with pytest.raises(ValueError, match="WEB_LEDGER_SOURCE"):
-            reader_from_settings(_settings(web_ledger_source="sheets"))
+            reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="sheets"))
 
     def test_the_settings_have_their_config_home(self):
         from config.settings import ENV_TO_CONFIG

@@ -48,9 +48,7 @@
     <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Switch between the light and dark theme">
       <span class="only-light">☾ dark</span><span class="only-dark">☀ light</span>
     </button>
-    <span class="pill read-only" title="Nothing here writes on its own. The only Sheet write is a cell you edit by hand on the Orders page (web/ledger_writer.py); no retailer or buying-group call exists here.">no automatic writes</span>
     <span class="pill backend" title="{{ source }}">{{ backend }}</span>
-    {% if loaded_at %}<span class="muted">loaded {{ loaded_at.strftime('%Y-%m-%d %H:%M:%SZ') }}</span>{% endif %}
     {% if heartbeat %}
       <span class="pill {{ 'stale' if heartbeat.stale else 'ok' }}" title="{{ heartbeat.path }}">
         heartbeat: {{ heartbeat.message }}

@@ -254,6 +254,7 @@ def view(settings: list[Setting], environ: Mapping[str, str]) -> list[dict]:
             "restart": restart_scope(s),
             "defaulted": defaulted,
             "placeholder": placeholder,
+            "sheet_only": is_sheet_only(s),
         })
     return rows
 
@@ -311,11 +312,14 @@ def _parse(setting: Setting, raw: str) -> Any:
     return text
 
 
-def apply_scalars(form: Mapping[str, str], settings: list[Setting] | None = None) -> dict:
+def apply_scalars(form: Mapping[str, str], settings: list[Setting] | None = None,
+                  skip: set[str] | None = None) -> dict:
     """Write every scalar setting from the form into config.json. Checkboxes: absent = false.
-    Secrets: blank keeps the stored value; `<ENV>__clear` = "1" blanks it. Returns {path: value}
-    for what changed. Raises SettingsError (nothing written) when any value fails to parse."""
-    settings = settings or schema()
+    Secrets: blank keeps the stored value; `<ENV>__clear` = "1" blanks it. `skip` names the
+    settings the page did not render (hidden_envs): those keep their file value, since "absent
+    from the form" would otherwise read as blank / unticked. Returns {path: value} for what
+    changed. Raises SettingsError (nothing written) when any value fails to parse."""
+    settings = [s for s in (settings or schema()) if s.env not in (skip or set())]
     defaults = code_defaults()
     data = load_config()
     changes: dict[str, Any] = {}
@@ -391,9 +395,8 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
     "container": ("Schedule", "How often the container runs, and whether it runs at start. "
                   "Read once at container start."),
     "scraping": ("Scraping", "How far back each run looks, and the money rules the ledger applies."),
-    "ledger": ("Ledger", "Where the ledger lives: the Google Sheet (deprecated) or the SQLite "
-               "database. Switching needs one last mirror first -- see docs/operations.md, "
-               "\"Moving off the Sheet\"."),
+    "ledger": ("Ledger", "Where the ledger lives: the SQLite database (db, the default) or the "
+               "Google Sheet (sheet, deprecated). See docs/operations.md, \"Moving off the Sheet\"."),
     "google": ("Google Sheet", "DEPRECATED -- used only while the ledger backend is `sheet`: the "
                "spreadsheet and the service account that reads and writes it."),
     "alerts": ("Alerts", "Where a failed run, a logged-out session or a stale heartbeat is reported."),
@@ -409,9 +412,41 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
                    "it. An order matching no jig is tagged Unclassified."),
     "cards": ("Cards", "Cards by their last 4 digits, with the cashback rate the profit formula "
               "nets from COGS -- overall, and per retailer."),
-    "google.service_account": ("Service account", "The JSON key Google issued for the service "
+    "google.service_account": ("Service Account", "The JSON key Google issued for the service "
                                "account; share the sheet with its client_email."),
 }
+
+
+#: Settings that only mean anything while the ledger is the Google Sheet (besides the whole
+#: `google` section): the dashboard's Sheet source / cache, and the end-of-run mirror FROM the
+#: Sheet. Hidden while `ledger.backend` is `db`; shown with a *deprecated* tag under `sheet`.
+#:
+SHEET_ONLY_ENVS = frozenset({"WEB_LEDGER_SOURCE", "WEB_SNAPSHOT_PATH", "WEB_SHEET_CACHE_TTL_SECONDS",
+                             "LEDGER_DB_MIRROR_AFTER_RUN"})
+
+
+def is_sheet_only(setting: Setting) -> bool:
+    return setting.section == "google" or setting.env in SHEET_ONLY_ENVS
+
+
+def effective_backend() -> str:
+    """`ledger.backend` as the FILE has it, else the code's default -- what the page edits, not
+    what the running process was started with."""
+    value = config_value("ledger.backend")
+    if value in (None, ""):
+        value = code_defaults().get("LEDGER_BACKEND", "db")
+    return str(value).strip().lower()
+
+
+def sheet_mode() -> bool:
+    return effective_backend() == "sheet"
+
+
+def hidden_envs() -> set[str]:
+    """The settings the page does not render (and a save must leave alone)."""
+    if sheet_mode():
+        return set()
+    return {s.env for s in schema() if is_sheet_only(s)}
 
 
 def section_title(section: str) -> tuple[str, str]:

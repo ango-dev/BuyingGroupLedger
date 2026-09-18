@@ -500,6 +500,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             request, "settings.html", message=message, errors=errors or [],
             rows=settings_form.view(rows_schema, os.environ),
             sections=settings_form.sections_in_order(rows_schema), section_forms=forms,
+            hidden_envs=settings_form.hidden_envs(), sheet_mode=settings_form.sheet_mode(),
             open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE),
             restart=restart if restart in ("container", "dashboard") else "",
             section_title=settings_form.section_title, field_label=settings_form.field_label,
@@ -523,7 +524,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     async def settings_save(request: Request):
         form = await request.form()
         try:
-            changes = settings_form.apply_scalars(form)
+            changes = settings_form.apply_scalars(form, skip=settings_form.hidden_envs())
         except settings_form.SettingsError as exc:
             return settings_page(request, errors=exc.errors, status=400)
         message = (f"Saved {len(changes)} changed setting(s): {', '.join(sorted(changes))}"

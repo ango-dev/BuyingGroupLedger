@@ -108,9 +108,9 @@ ENV_TO_CONFIG = {
     "WEB_SHEET_CACHE_TTL_SECONDS": "web.sheet_cache_ttl_seconds",
     "WEB_BIND_HOST": "web.bind_host",
     "WEB_PORT": "web.port",
-    # WHERE THE LEDGER LIVES: "sheet" (the Google Sheet -- DEPRECATED, today's default) or "db"
-    # (the SQLite file; every writer and reader runs off it). See docs/operations.md, "Moving off
-    # the Sheet".
+    # WHERE THE LEDGER LIVES: "db" (the SQLite file; every writer and reader runs off it -- the
+    # default since 2026-09-18) or "sheet" (the Google Sheet -- DEPRECATED). See
+    # docs/operations.md, "Moving off the Sheet".
     "LEDGER_BACKEND": "ledger.backend",
     # The SQLite copy of the ledger (ledger_db/): a mirror while ledger.backend is "sheet", THE
     # ledger once it is "db".
@@ -415,7 +415,7 @@ class Settings:
     # read-only, the dashboard reads the file directly, and the Sheet is not touched by anything.
     # The Sheet code stays (deprecated) until the user decides to delete it. Mirroring INTO the
     # file is refused under "db": it would overwrite the ledger with the stale Sheet.
-    ledger_backend: str = _get_str("LEDGER_BACKEND", "sheet")
+    ledger_backend: str = _get_str("LEDGER_BACKEND", "db")
     # How long a live-Sheet read is served from memory before the next request re-reads it. Every
     # refresh is one Sheets API read; 300 s keeps a page reload from ever becoming an API call.
     web_sheet_cache_ttl_seconds: int = _get_int("WEB_SHEET_CACHE_TTL_SECONDS", 300)

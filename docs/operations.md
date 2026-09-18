@@ -332,8 +332,8 @@ where the ledger lives:
 
 | Value | What runs where |
 |---|---|
-| `sheet` (today's default) | As before: every writer targets the Sheet, `data/ledger.sqlite3` is a mirror refreshed at the end of each run. |
-| `db` | `data/ledger.sqlite3` **is** the ledger. The scrapers' upsert, the sort, the buying-group sync (payouts, insurance, the submitted tick), the BFMR auto-reply, the dashboard's editor and the scripts all read and write it, and **nothing touches the Sheet**. |
+| `db` (the default) | `data/ledger.sqlite3` **is** the ledger. The scrapers' upsert, the sort, the buying-group sync (payouts, insurance, the submitted tick), the BFMR auto-reply, the dashboard's editor and the scripts all read and write it, and **nothing touches the Sheet**. |
+| `sheet` (deprecated) | As before: every writer targets the Sheet, `data/ledger.sqlite3` is a mirror refreshed at the end of each run. The Settings page shows the Google Sheet settings only in this mode, tagged deprecated. |
 
 How it works: every writer addresses the ledger as a positional grid through a handful of
 `gspread.Worksheet` methods, so `ledger_db/worksheet.py` implements that surface over the SQLite
@@ -344,13 +344,18 @@ on every read (the same Python mirrors of the formulas the dashboard already use
 are the sheet's numbers, live, for every row. A row with no Order ID is not a ledger row and is
 never stored.
 
-**To switch** (one host at a time, between runs):
+**A host coming from `sheet`** starts on `db` at its next start (the default) and needs its file
+current first. The end-of-run mirror keeps `data/ledger.sqlite3` at the last run's state, so
+between runs it already is; to be sure, or if the last run's mirror failed, take the last copy by
+hand before restarting:
 
 ```bash
-python -m scripts.mirror_sheet_to_db      # the LAST copy of the Sheet, while still on `sheet`
-# set "ledger": {"backend": "db"} in config.json (or LEDGER_BACKEND=db), then
+python -m scripts.mirror_sheet_to_db      # only runs while ledger.backend is still `sheet`
 docker compose restart                    # or python -m web again on a desktop
 ```
+
+To stay on the Sheet for now, set `"ledger": {"backend": "sheet"}` in `config.json` (or
+`LEDGER_BACKEND=sheet`).
 
 Under `db`: `python -m scripts.mirror_sheet_to_db` and the end-of-run mirror refuse to run (a
 mirror from the stale Sheet would overwrite the ledger), the dashboard serves the file directly

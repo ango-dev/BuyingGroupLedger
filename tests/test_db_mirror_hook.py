@@ -40,6 +40,7 @@ def settings_at(tmp_path, monkeypatch):
     def apply(**overrides):
         values = {"ledger_db_path": str(tmp_path / "ledger.sqlite3"),
                   "ledger_db_mirror_after_run": True, **overrides}
+        values.setdefault("ledger_backend", "sheet")  # the mirror is the SHEET era's last step
         patched = dataclasses.replace(main.settings, **values)
         monkeypatch.setattr(main, "settings", patched)
         return patched

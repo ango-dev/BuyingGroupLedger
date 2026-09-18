@@ -29,14 +29,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", default=None,
                         help="the SQLite file (default: database.path / LEDGER_DB_PATH, "
                              "i.e. data/ledger.sqlite3)")
+    parser.add_argument("--force", action="store_true",
+                        help="under ledger.backend = db, REPLACE the ledger with the source anyway "
+                             "(a deliberate reload from the Sheet or a CSV snapshot)")
     args = parser.parse_args(argv)
 
     from config.settings import settings
 
-    if settings.ledger_is_db():
-        print("Refusing: ledger.backend is `db`, so data/ledger.sqlite3 IS the ledger. Mirroring "
-              "the Sheet into it would overwrite the ledger with the Sheet's stale copy. Set "
-              "ledger.backend back to `sheet` first if you really mean to reload from the Sheet.",
+    if settings.ledger_is_db() and not args.force:
+        print("Refusing: ledger.backend is `db`, so the SQLite file IS the ledger, and mirroring "
+              "into it would REPLACE the ledger with the source's (stale) copy. If that is what you "
+              "mean -- a deliberate reload from the Sheet or from a CSV snapshot -- add --force.",
               file=sys.stderr)
         return 2
 
