@@ -586,6 +586,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         body = templates.get_template("_tool_job.html").render(job=job)
         poll = (f' hx-get="/tools/jobs/{job.id}" hx-trigger="every 2s" hx-swap="outerHTML"'
                 if job.running else "")
+        # The card's Run button was disabled while the job ran; the polling swaps only the output
+        # panel, so the finished job's response swaps the button back in out-of-band.
+        t = tools_module.tool(job.tool_key)
+        button = ("" if job.running else
+                  f'<button type="submit" id="run-{t.key}" class="small {"danger" if t.writes else "primary"}" '
+                  f'hx-swap-oob="true">Run</button>')
         if not job.running:
             act("tool", f"{tools_module.tool(job.tool_key).title} finished"
                         + (f" with exit {job.returncode}" if job.returncode else "")
@@ -593,7 +599,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                 {"tool": job.tool_key, "job": job.id, "returncode": job.returncode}) \
                 if not getattr(job, "_recorded", False) else None
             job._recorded = True
-        return HTMLResponse(f'<div class="tool-output" id="job-{job.id}"{poll}>{body}</div>')
+        return HTMLResponse(f'<div class="tool-output" id="job-{job.id}"{poll}>{body}</div>{button}')
 
     @app.post("/tools/profile/start", response_class=HTMLResponse)
     async def tools_profile_start(request: Request):

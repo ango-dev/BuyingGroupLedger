@@ -251,6 +251,9 @@ class TestTheRoutes:
             time.sleep(0.05)
         partial = client.get(f"/tools/jobs/{job.id}").text
         assert "ran" in partial and "finished" in partial and "hx-trigger" not in partial
+        # the finished response re-enables the card's Run button out-of-band
+        assert '<button type="submit" id="run-preflight" class="small primary" hx-swap-oob="true">Run</button>' in partial
+        assert 'id="run-preflight"' in client.get("/tools", params={"tool": "preflight"}).text
         assert 'id="job-' in client.get("/tools", params={"tool": "preflight"}).text
         assert response.headers["location"] == "/tools?tool=preflight#t-preflight"
         assert client.get("/tools/jobs/nope").status_code == 404

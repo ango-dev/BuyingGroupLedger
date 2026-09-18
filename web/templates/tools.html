@@ -72,7 +72,7 @@
         <label class="field-block">{{ f.label }}{% if f.required %} *{% endif %} <input type="text" name="{{ fname }}" value="{{ f.default }}" placeholder="{{ f.help }}" {{ 'required' if f.required }}></label>
       {% endif %}
     {% endfor %}
-    <button type="submit" class="small {{ 'danger' if t.writes else 'primary' }}" {{ 'disabled' if job and job.running }}>{{ 'Running…' if job and job.running else 'Run' }}</button>
+    <button type="submit" id="run-{{ t.key }}" class="small {{ 'danger' if t.writes else 'primary' }}" {{ 'disabled' if job and job.running }}>{{ 'Running…' if job and job.running else 'Run' }}</button>
   </form>
   {% if job %}
   <div class="tool-output" id="job-{{ job.id }}" {% if job.running %}hx-get="/tools/jobs/{{ job.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
