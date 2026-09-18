@@ -345,8 +345,7 @@ class TestOrdersRoutes:
         assert cogs_td and "edit" not in cogs_td.group(1)  # a formula: never editable
         assert '<tr class="status-shipped' in body and '<tr class="status-paid' in body
         assert "double-click a cell to edit" in body
-        assert "/static/edit.js" in body and "/static/sheet.js" in body
-        assert "/static/sheet.js" not in client.get("/").text
+        assert "/static/edit.js" in body
         # The row tools.
         assert 'name="sel"' in body and 'id="sel-all"' in body
         assert 'class="sel"' not in body  # the row number is the handle; no checkbox column
@@ -577,3 +576,20 @@ class TestReceiptUpload:
         response = client.post("/orders/BBY01-1/receipt", data={"x": "1"}, follow_redirects=False)
         assert response.status_code == 303 and "choose+a+file" in response.headers["location"]
         assert client.post("/orders/nope/receipt", files={"receipt_file": ("r.pdf", b"x", "application/pdf")}).status_code == 404
+
+
+class TestSelectionValueSurvivesTheBrowser:
+    def test_the_row_key_in_the_checkbox_value_parses_after_html_unescaping(self, sheet, tmp_path, logs_dir):
+        """`tojson` output is marked safe and keeps its double quotes, so the
+        attribute ended at the first quote and every delete said "no rows selected"."""
+        import html as html_module
+
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        body = client.get("/orders").text
+        values = re.findall(r'<input type="checkbox" name="sel" value="([^"]*)"', body)
+        assert len(values) == 2
+        keys = [json.loads(html_module.unescape(v)) for v in values]
+        assert keys[0] == KEY and keys[1] == KEY2
+        # And the round trip through the route deletes exactly that row.
+        response = client.post("/orders/delete", data={"sel": [html_module.unescape(values[1])]})
+        assert "Deleted 1 row(s)" in response.text and sheet.deleted == [3]

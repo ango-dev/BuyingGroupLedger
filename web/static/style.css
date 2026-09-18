@@ -124,28 +124,30 @@ table.ledger td { white-space: nowrap; }
    Sheet's OWN conditional-format colours, read from its rules on 2026-09-17: whole-row background
    by Status (=$B2="delivered" and friends), strikethrough on cancelled / superseded. Colours are
    the sheet's exact RGB; the text stays dark on them in both themes, as on the sheet. */
-/* ONE scroll region, like Sheets: on a wide page the body is the viewport, the nav stays put at
-   the top, and <main> is the single thing that scrolls (both ways). Inside it the filter bar
-   sticks to the top and the column header sticks just below it (--toolbar-h is measured by
-   static/sheet.js, since the bar's height depends on wrapping). */
+/* ONE scroll region, like Sheets -- and it is the TABLE. body.wide is the viewport, nothing on
+   the page itself scrolls; <main> is a column, the filter bar / add-row / bulk bar / banners /
+   count are static above, and .sheet (the table's wrapper) is the single element that scrolls, in
+   both directions. The column header sticks to .sheet's top and the row numbers to its left, and
+   nothing above the table can ever be dragged sideways. */
 body.wide { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 body.wide header.top { flex: 0 0 auto; }
-/* margin 0 + width 100% matter: main's base rule centres it with `margin: 0 auto`, and auto
-   margins on a flex item shrink it to its content -- the table's full width -- so it overflowed
-   the hidden body and nothing could scroll sideways. */
-body.wide main { flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%; margin: 0; overflow: auto; max-width: none; padding: 0 0 40px; }
-body.wide .filters { position: sticky; top: 0; left: 0; z-index: 4; margin: 0; border-radius: 0; border-width: 0 0 1px; }
-body.wide h1 { margin: 8px 8px 6px; }
-body.wide .count { margin: 4px 8px; }
-.sheet { overflow: visible; background: var(--card); }
+body.wide main { flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%; margin: 0; overflow: hidden;
+  max-width: none; padding: 0; display: flex; flex-direction: column; }
+body.wide .filters { margin: 0; border-radius: 0; border-width: 0 0 1px; flex: 0 0 auto; }
+body.wide h1 { margin: 8px 8px 6px; flex: 0 0 auto; }
+body.wide .add-row { flex: 0 0 auto; }
+body.wide #bulk { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+body.wide #orders-table { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+body.wide .count { margin: 4px 8px; flex: 0 0 auto; }
+body.wide .bulkbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px;
+  background: var(--card); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+body.wide .sheet { overflow: auto; flex: 1 1 auto; min-height: 0; background: var(--card); border-top: 1px solid var(--line); }
+body.wide footer { display: none; }
 table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: collapse; }
 /* Grid lines are TRANSLUCENT so they take the row's own colour, as the sheet's do over a coloured
    row -- an opaque grey line reads as a gap between rows. */
 table.sheetlike th, table.sheetlike td { border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); border-bottom: 1px solid rgba(0, 0, 0, 0.12); padding: 3px 6px; }
-table.sheetlike th { position: sticky; top: calc(var(--toolbar-h, 0px) + var(--bulkbar-h, 0px)); z-index: 2; background: var(--bg); box-shadow: 0 1px 0 var(--line); }
-/* The bulk bar (inside #bulk, the form that owns the selection) sticks under the filter bar. */
-body.wide .bulkbar { position: sticky; top: var(--toolbar-h, 0px); left: 0; z-index: 4; display: flex; gap: 8px;
-  align-items: center; flex-wrap: wrap; padding: 6px 12px; background: var(--card); border-bottom: 1px solid var(--line); }
+table.sheetlike th { position: sticky; top: 0; z-index: 2; background: var(--bg); box-shadow: 0 1px 0 var(--line); }
 .bulkbar select, .bulkbar input[type=text] { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
 .bulkbar input[type=text] { min-width: 200px; }
 table.sheetlike td.rownum input, table.sheetlike th.rownum input { display: none; }

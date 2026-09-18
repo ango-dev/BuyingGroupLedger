@@ -28,7 +28,7 @@
     {% for row in rows %}
     {% set key = {'order_id': row.order_id, 'order_date': row.order_date, 'item_name': row.item_name, 'shipment': row.shipment} %}
     <tr class="status-{{ row.status }} payout-{{ row.payout_state }}">
-      <td class="rownum muted" title="sheet row {{ row.row_number }}{{ ' — click to select' if editable }}">{% if editable %}<input type="checkbox" name="sel" value="{{ key | tojson }}" hidden aria-label="select row {{ row.row_number }}">{% endif %}{{ row.row_number }}</td>
+      <td class="rownum muted" title="sheet row {{ row.row_number }}{{ ' — click to select' if editable }}">{% if editable %}<input type="checkbox" name="sel" value="{{ key | tojson | forceescape }}" hidden aria-label="select row {{ row.row_number }}">{% endif %}{{ row.row_number }}</td>
       {% for name, heading in columns %}
         {% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}
       {% endfor %}
