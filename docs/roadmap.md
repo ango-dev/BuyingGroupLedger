@@ -8,8 +8,9 @@ _Part of the [Buying Group Ledger](../README.md) docs._
 **Where things stand (2026-09).** Every retailer runs on a deterministic, agent-free path
 (Amazon and Amazon Business parse the order pages; Best Buy reads its order API through a cloud
 browser; Costco reads its GraphQL API with a stored token). The buying-group sync posts tracking,
-files insurance and reads payouts back unattended. Receipts are captured to object storage with a
-capture-time guard that refuses a page which does not name its own order. The sheet audit is a
+files insurance and reads payouts back unattended. Receipts are captured as files beside the ledger
+(served by the dashboard) with a capture-time guard that refuses a page which does not name its
+own order. The ledger itself is a SQLite file; the Google Sheet is deprecated. The sheet audit is a
 read-only script with 40 checks. Failures write a dossier — page, screenshot, selector audit —
 instead of running a paid agent (retired 2026-08-29).
 
