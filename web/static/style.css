@@ -450,6 +450,8 @@ button.ghost { background: transparent; }
 .entry-card .subrow .rm { font-size: 0.8em; color: var(--muted); white-space: nowrap; }
 .entry-card footer { display: flex; gap: 8px; align-items: center; margin-top: auto; padding-top: 6px; }
 .entry-card footer form { margin: 0; margin-left: auto; }
+.entry-card footer .entry-delete-button { margin-left: auto; }
+form.entry-delete { display: none; }
 .entry-card.new { border-style: dashed; background: transparent; }
 .entry-card.new > summary { cursor: pointer; list-style: none; color: var(--accent); font-weight: 600; padding: 4px 0; }
 .entry-card.new > summary::-webkit-details-marker { display: none; }

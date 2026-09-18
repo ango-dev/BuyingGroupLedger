@@ -87,6 +87,30 @@ def env_to_field() -> dict[str, tuple[str, str]]:
     return out
 
 
+def code_defaults() -> dict[str, Any]:
+    """{ENV_NAME: the default the code applies when neither the file nor the environment sets
+    it}, read from the literal second argument of each `_get_x("ENV", default)` in the Settings
+    source. The page shows it for a key config.json omits."""
+    import ast
+
+    out: dict[str, Any] = {}
+    for node in ast.walk(ast.parse(inspect.getsource(Settings))):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id.startswith("_get_") and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            continue
+        default: Any = None
+        literal = node.args[1] if len(node.args) > 1 else next(
+            (kw.value for kw in node.keywords if kw.arg == "default"), None)
+        if literal is not None:
+            try:
+                default = ast.literal_eval(literal)
+            except ValueError:
+                default = None
+        out.setdefault(str(node.args[0].value), default)
+    return out
+
+
 def _example() -> dict:
     try:
         return json.loads(EXAMPLE_PATH.read_text(encoding="utf-8"))
@@ -185,15 +209,23 @@ def is_overridden(setting: Setting, environ: Mapping[str, str]) -> bool:
 
 
 def view(settings: list[Setting], environ: Mapping[str, str]) -> list[dict]:
+    """One row per setting: the FILE's value, or -- when the file omits the key -- the code's
+    default, marked `defaulted` so the page can say so (a flag that defaults to true reads as
+    ticked, not blank)."""
+    defaults = code_defaults()
     rows = []
     for s in settings:
         value = current_value(s)
+        defaulted = value is None and not s.secret and defaults.get(s.env) is not None
+        if defaulted:
+            value = defaults[s.env]
         rows.append({
             "setting": s,
             "value": "" if value is None else value,
             "secret_set": bool(config_value(s.path)) if s.secret else False,
             "overridden": is_overridden(s, environ),
             "restart": restart_scope(s),
+            "defaulted": defaulted,
         })
     return rows
 
@@ -256,11 +288,14 @@ def apply_scalars(form: Mapping[str, str], settings: list[Setting] | None = None
     Secrets: blank keeps the stored value; `<ENV>__clear` = "1" blanks it. Returns {path: value}
     for what changed. Raises SettingsError (nothing written) when any value fails to parse."""
     settings = settings or schema()
+    defaults = code_defaults()
     data = load_config()
     changes: dict[str, Any] = {}
     errors: list[str] = []
     for s in settings:
         before = config_value(s.path)
+        if before is None and not s.secret and defaults.get(s.env) is not None:
+            before = defaults[s.env]  # what the page showed: a key the file omits reads as its default
         if s.kind == "bool":
             value = str(form.get(s.env, "")).strip().lower() in ("on", "true", "1", "yes")
         elif s.secret:

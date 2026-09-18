@@ -358,6 +358,42 @@ class TestEntryCards:
         # the scalar form's save bar
         assert 'id="scalar-form"' in body and 'id="dirty"' in body
 
+    def test_the_remove_button_sits_in_the_card_footer_and_the_delete_form_is_hidden(self, client):
+        body = client.get("/settings").text
+        card = body[body.index('action="/settings/section/cards/entry/0"'):body.index("</article>") if "</article>" in body else len(body)]
+        card = card[:card.index("</form>")]
+        assert 'form="del-cards-0"' in card and "\u2715 Remove" in card  # inside the card's own form
+        assert 'id="del-cards-0"' in body and 'action="/settings/section/cards/entry/0/delete"' in body
+        assert 'class="entry-delete" hidden' in body and "display: contents" not in body
+
+    def test_a_key_the_file_omits_shows_its_code_default(self, client):
+        body = client.get("/settings").text
+        # the fixture's config.json has no container section and no gift-card flag
+        interval = body[body.index('for="f-RUN_INTERVAL_HOURS"'):body.index('for="f-RUN_ON_START"')]
+        assert 'value="6"' in interval and ">default<" in interval
+        netting = body[body.index('for="f-AMAZON_GIFT_CARD_NETTING_ENABLED"'):body.index('for="f-GOOGLE_SERVICE_ACCOUNT_FILE"')]
+        assert 'value="on" checked' in netting and ">default<" in netting
+        # a key the file DOES set carries no tag
+        lookback = body[body.index('for="f-LOOKBACK_DAYS"'):body.index('for="f-DEFAULT_CASHBACK_RATE"')]
+        assert ">default<" not in lookback
+        defaults = settings_form.code_defaults()
+        assert defaults["RUN_INTERVAL_HOURS"] == 6 and defaults["WEB_ENABLED"] is True
+        assert defaults["GOOGLE_SHEET_WORKSHEET_NAME"] == "Orders" and defaults["GOOGLE_SHEET_ID"] is None
+
+    def test_saving_the_shown_defaults_is_not_a_change_but_does_write_them(self, client):
+        form = {}
+        for row in settings_form.view(settings_form.schema(), {}):
+            s = row["setting"]
+            if s.kind == "bool":
+                if row["value"] is True:
+                    form[s.env] = "on"
+            elif not s.secret:
+                form[s.env] = str(row["value"])
+        response = client.post("/settings", data=form, follow_redirects=False)
+        assert response.status_code == 303 and "nothing+had+changed" in response.headers["location"]
+        assert config_value("container.run_interval_hours") == 6  # materialised in the file now
+        assert config_value("scraping.amazon_gift_card_netting_enabled") is True
+
     def test_a_card_can_be_added_edited_and_removed(self, client):
         response = client.post("/settings/section/cards/entry", data={
             "name": "Citi Double Cash", "last4": "8765", "cashback_rate": "2%", "profile": "",

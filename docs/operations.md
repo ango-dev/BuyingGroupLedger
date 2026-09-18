@@ -330,7 +330,8 @@ the command line. After a restore, restart the app so the restored `config.json`
 section of the file with its fields in a label / input grid (the variable name and any restart or
 *env override* tag under the label, the example file's comment as help under the input). Booleans
 are checkboxes; secrets are password fields that show only whether a value is set (blank keeps it,
-*clear* blanks it). The sticky bar at the end of the scalar form says whether there are unsaved
+*clear* blanks it). A key `config.json` omits shows the value the code applies for it, tagged
+*default* (so a flag that defaults to on reads as ticked); saving writes it to the file. The sticky bar at the end of the scalar form says whether there are unsaved
 edits and saves them all at once.
 
 **Profiles, warehouses and cards are entry cards.** Each entry is its own card with a form: a

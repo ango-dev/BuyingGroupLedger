@@ -59,6 +59,7 @@ here, so keep the dashboard on loopback or your own network.</p>
               <div class="meta">
                 <span class="mono small muted">{{ s.env }}</span>
                 {% if row.overridden %}<span class="tag stale" title="exported in the environment; the file value is saved but does not reach the running process">env override</span>{% endif %}
+                {% if row.defaulted %}<span class="tag" title="config.json does not set this key; this is the value the code applies, and saving writes it to the file">default</span>{% endif %}
                 {% if row.restart == 'container' %}<span class="tag" title="the container reads this once at start: docker compose restart to apply">container restart</span>
                 {% elif row.restart == 'dashboard' %}<span class="tag" title="the dashboard reads this once at start: Restart dashboard to apply">dashboard restart</span>{% endif %}
               </div>
@@ -209,11 +210,11 @@ here, so keep the dashboard on loopback or your own network.</p>
           {{ fields(e) }}
           <footer>
             <button type="submit" class="small primary">Save {{ singular }}</button>
+            <button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="remove this {{ singular }} from config.json">✕ Remove</button>
           </footer>
         </form>
-        <form method="post" action="/settings/section/{{ path }}/entry/{{ e.index }}/delete" class="entry-delete" data-confirm="Remove {{ singular }} {% if path == 'profiles' %}{{ e.label }}{% elif path == 'warehouses' %}{{ e.buying_group }}{% else %}{{ e.name }} …{{ e.last4 }}{% endif %} from config.json?" style="display: contents">
-          <button type="submit" class="danger small entry-delete-button" title="remove this {{ singular }}">✕ Remove</button>
-        </form>
+        <form method="post" id="del-{{ path }}-{{ e.index }}" action="/settings/section/{{ path }}/entry/{{ e.index }}/delete" class="entry-delete" hidden
+              data-confirm="Remove {{ singular }} {% if path == 'profiles' %}{{ e.label }}{% elif path == 'warehouses' %}{{ e.buying_group }}{% else %}{{ e.name }} …{{ e.last4 }}{% endif %} from config.json?"></form>
         {% else %}
         <p class="settings-empty">No {{ path }} yet.</p>
         {% endfor %}
