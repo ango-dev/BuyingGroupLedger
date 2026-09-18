@@ -638,7 +638,7 @@ class TestOverview:
         assert by_label["Floating"]["href"] == "/orders?state=unpaid"
         assert by_label["Floating"]["value"] != round(by_label["Spend"]["value"] - by_label["Paid out"]["value"], 2)
 
-    def test_the_month_section_places_by_order_date_and_pays_by_payout_date(self, snapshot_path):
+    def test_the_month_section_is_by_order_date_alone(self, snapshot_path):
         september = overview(SnapshotReader(snapshot_path).load(), month="2026-09",
                              today=NOW.date())["month"]
         tiles = {t["label"]: t["value"] for t in september["tiles"]}
@@ -646,8 +646,9 @@ class TestOverview:
         assert tiles["Rows / orders"][0] == 3 and tiles["Open rows"] == 3
         assert tiles["Projected profit"] == 263.6
         assert tiles["Floating"] == round(1259.99 + 1000 + 2000, 2)  # the Fitbit was placed in August
-        # Only row 5's payout landed in September (row 6's paid status has no date).
-        assert tiles["Paid out"] == 500.0 and tiles["Realized profit"] == 136.0
+        # Nothing placed in September is settled yet (row 5 was paid in September but placed in
+        # August: the month is by Order Date alone).
+        assert tiles["Paid out"] == 0.0 and tiles["Realized profit"] == 0.0
         assert september["label"] == "September 2026" and september["current"] is True
         assert (september["prev"], september["next"]) == ("2026-08", "")
 
@@ -655,7 +656,8 @@ class TestOverview:
                           today=NOW.date())["month"]
         tiles = {t["label"]: t["value"] for t in august["tiles"]}
         assert tiles["Rows / orders"][0] == 6 and tiles["Open rows"] == 1  # the Fitbit
-        assert tiles["Paid out"] == 0.0 and tiles["Projected profit"] == 0.0
+        assert tiles["Paid out"] == 830.0 and tiles["Realized profit"] == 193.0  # rows 5 and 6
+        assert tiles["Projected profit"] == 0.0
         assert (august["prev"], august["next"]) == ("", "2026-09")
         # a month with no rows still renders, with both arrows
         assert overview(SnapshotReader(snapshot_path).load(), month="2026-08",
@@ -788,7 +790,8 @@ class TestOverviewPage:
         assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body
         assert 'href="/orders?month=2026-09"' in body
         assert 'href="/orders?month=2026-09&amp;state=open"' in body
-        assert 'href="/orders?paid=2026-09&amp;state=settled"' in body
+        assert 'href="/orders?month=2026-09&amp;state=settled"' in body
+        assert "paid=2026-09" not in body  # the month is by Order Date alone
 
     def test_an_earlier_month_can_be_opened_and_navigated(self, client):
         body = client.get("/", params={"month": "2026-08"}).text

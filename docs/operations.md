@@ -206,10 +206,10 @@ so the two read side by side. Floating is not spend minus paid out: that gap als
 settled rows' cost minus their payout, and since the profit here comes from cashback a settled row
 is usually paid a little less than it cost. *Lifetime* counts every row of the ledger. *Calendar month* shows one month at a time
 (arrows step through the months the ledger spans; the current month by default, `/?month=YYYY-MM`
-for another): its rows, open rows, spend and projected profit count rows by **Order Date** (what
-was placed that month), its paid out and realized profit count settled rows by **Payout Date** (the
-cash that landed that month, whenever the order was placed — the tax report's basis); each tile's
-hint says which. Every tile is a link that opens the Orders page filtered the same way the
+for another) and counts the rows whose **Order Date** falls in it, nothing else: paid out and
+realized profit are the settled rows among them, whenever the payout landed. The cash-basis view
+(what was paid in a month, whenever placed) is the Orders page's *Paid in* filter and the tax
+report. Every tile is a link that opens the Orders page filtered the same way the
 number was counted, and the Orders filter bar shows those filters as editable controls: *Placed in*
 and *Paid in* (a month) and *Payout* (any / open / projected / settled / unpaid), so a click-through can be
 widened or narrowed without going back. The reconciliation line under Lifetime is what SUM() over

@@ -33,7 +33,7 @@
     {% if m.next %}<a class="button small" href="/?month={{ m.next }}" title="{{ m.next }}">›</a>{% else %}<span class="button small disabled">›</span>{% endif %}
     {% if not m.current %}<a class="muted small" href="/">this month</a>{% endif %}
   </span>
-  <span class="muted small">— placed by Order Date; paid out by Payout Date</span>
+  <span class="muted small">— every row whose Order Date falls in the month</span>
 </h2>
 {{ tiles(m.tiles) }}
 

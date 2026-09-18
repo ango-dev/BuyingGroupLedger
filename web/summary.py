@@ -60,10 +60,10 @@ def _spend(rows: list[LedgerRow]) -> float:
 
 def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
                  link) -> list[dict]:
-    """The SAME six tiles for any period. `placed` are the period's rows (all of them for
-    Lifetime; by Order Date for a month), `paid` its settled rows (all of them for Lifetime; by
-    Payout Date for a month); `scope` is the phrase the hints end with ("of the ledger" / "placed
-    in September 2026"); `link(**filters)` builds the tile's Orders-page href for that period."""
+    """The SAME seven tiles for any period. `placed` are the period's rows (all of them for
+    Lifetime; by Order Date for a month), `paid` the settled ones among them; `scope` is the
+    phrase the hints end with ("of the ledger" / "placed in September 2026"); `link(**filters)`
+    builds the tile's Orders-page href for that period."""
     open_rows = [r for r in placed if r.is_open]
     unpaid = [r for r in placed if r.is_unpaid]
     projected = _money_block([r for r in placed if r.is_committed])
@@ -78,10 +78,8 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
               f"Total Cost over every row {scope} that carries money (cancelled / superseded "
               "excluded)", link(sort="total_cost", dir="desc")),
         _tile("Paid out", realized["payout"], "money",
-              f"{realized['rows']} settled row(s) in {realized['orders']} order(s) "
-              f"{'paid out ' + scope[7:] if scope.startswith('placed ') else scope}: Payout "
-              "Date set, or status paid / return", link(state="settled", paid=True),
-              tone="settled"),
+              f"{realized['rows']} settled row(s) in {realized['orders']} order(s) {scope}: "
+              "Payout Date set, or status paid / return", link(state="settled"), tone="settled"),
         _tile("Floating", _spend(unpaid), "money",
               f"Total Cost of the {len(unpaid)} row(s) in {len({r.order_id for r in unpaid})} "
               f"order(s) {scope} the buying group has not paid yet (no settled payout; gift "
@@ -91,8 +89,7 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
               "committed payout and no Payout Date", link(state="committed"), tone="committed"),
         _tile("Realized profit", realized["profit"], "money",
               f"Total Profit of the {realized['rows']} settled row(s), {realized['orders']} "
-              f"order(s) {'paid out ' + scope[7:] if scope.startswith('placed ') else scope}",
-              link(state="settled", paid=True), tone="settled"),
+              f"order(s) {scope}", link(state="settled"), tone="settled"),
     ]
 
 
@@ -100,10 +97,7 @@ def lifetime_tiles(rows: list[LedgerRow]) -> list[dict]:
     """Every row the ledger holds, as clickable tiles (each opens the Orders page filtered the
     same way the number was counted)."""
 
-    def link(paid: bool = False, **filters) -> str:
-        return _orders_link(**filters)
-
-    return period_tiles(rows, [r for r in rows if r.is_settled], "of the ledger", link)
+    return period_tiles(rows, [r for r in rows if r.is_settled], "of the ledger", _orders_link)
 
 
 def month_label(month: str) -> str:
@@ -119,15 +113,14 @@ def shift_month(month: str, delta: int) -> str:
 
 
 def month_section(rows: list[LedgerRow], month: str, today_month: str) -> dict:
-    """One calendar month. "Placed" tiles count rows by ORDER DATE (what was bought that month,
-    how much of it is still open, what it is projected to make); "paid" tiles count settled rows
-    by PAYOUT DATE (the cash that actually landed that month -- the tax report's basis)."""
+    """One calendar month: the rows whose ORDER DATE falls in it, and nothing else. Paid out /
+    realized are the settled rows among them, whenever the payout landed; the cash-basis view by
+    Payout Date is the Orders page's "Paid in" filter and the tax report."""
     placed = [r for r in rows if r.order_date.startswith(month)]
-    paid = [r for r in rows if r.is_settled and r.payout_date.startswith(month)]
+    paid = [r for r in placed if r.is_settled]
 
-    def link(paid: bool = False, **filters) -> str:
-        # the "paid" tiles filter on Payout Date, the rest on Order Date
-        return _orders_link(**({"paid": month} if paid else {"month": month}), **filters)
+    def link(**filters) -> str:
+        return _orders_link(month=month, **filters)
 
     tiles = period_tiles(placed, paid, f"placed in {month_label(month)}", link)
     dated = sorted({r.order_date[:7] for r in rows if len(r.order_date) >= 7})
