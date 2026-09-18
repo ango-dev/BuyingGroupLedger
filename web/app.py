@@ -183,9 +183,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     templates.env.globals["MONEY_FIELDS"] = MONEY_FIELDS
     templates.env.globals["EDIT_FIELD_HEADINGS"] = [(f, FIELD_TO_HEADER[f]) for f in EDITABLE_FIELDS]
 
-    from web.queries import CARD_COLUMNS, PER_PAGE_CHOICES, SORT_CHOICES, order_cards, paginate
+    from web.queries import (CARD_COLUMNS, ORDER_COLUMNS, PER_PAGE_CHOICES, SORT_CHOICES,
+                             order_cards, paginate)
 
     templates.env.globals["PER_PAGE_CHOICES"] = PER_PAGE_CHOICES
+    templates.env.globals["ORDER_COLUMNS"] = ORDER_COLUMNS
     templates.env.globals["CARD_COLUMNS"] = CARD_COLUMNS
     templates.env.globals["SORT_CHOICES"] = SORT_CHOICES
 

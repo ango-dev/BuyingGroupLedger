@@ -46,7 +46,7 @@
   <div class="tile"><div class="label">{{ 'Projected' if order.payout_state == 'committed' else 'Total' }} Profit</div><div class="value money">{{ order.totals.profit | money }}</div></div>
 </section>
 
-<h2>Shipments</h2>
+<h2>Shipments {% if editable %}<span class="muted small">— double-click a cell to edit; Enter saves, Esc cancels</span>{% endif %}</h2>
 {% for s in order.shipments %}
 <section class="shipment">
   <h3>Shipment {{ s.shipment }} <span class="tag status-{{ s.status }}">{{ s.status }}</span></h3>
@@ -57,31 +57,19 @@
     <dt>Delivery Date</dt><dd>{{ s.delivery_date or '—' }}</dd>
     <dt>Package ID</dt><dd class="mono">{{ s.package_id or '—' }}</dd>
   </dl>
-  <table class="grid compact">
-    <thead><tr><th>Item Name</th><th class="num">Quantity</th><th class="num">Cost Per Item</th><th class="num">Total Cost</th><th class="num">Shipping</th><th class="num">Sales Tax</th><th class="num">Gift Card</th><th class="num">Rewards Used</th><th class="num">Cashback Rate</th><th class="num">COGS</th><th class="num">Insurance</th><th class="num">Payout Amount</th><th>Payout Date</th><th class="num">Return Qty</th><th>Return Date</th><th class="num">Total Profit</th></tr></thead>
+  <div class="card-rows-wrap">
+  <table class="grid compact order-rows">
+    <thead><tr>{% for name in ORDER_COLUMNS %}<th class="{{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }}">{{ header_of(name) }}</th>{% endfor %}</tr></thead>
     <tbody>
       {% for row in s.rows %}
+      {% set key = {'order_id': row.order_id, 'order_date': row.order_date, 'item_name': row.item_name, 'shipment': row.shipment} %}
       <tr class="status-{{ row.status }} payout-{{ row.payout_state }}">
-        <td class="item"><span title="{{ row.item_name }}">{{ row.item_name }}</span></td>
-        <td class="num">{{ row.text('quantity') }}</td>
-        <td class="num">{{ row | cell('cost_per_item') }}</td>
-        <td class="num">{{ row | cell('total_cost') }}</td>
-        <td class="num">{{ row | cell('shipping') }}</td>
-        <td class="num">{{ row | cell('sales_tax') }}</td>
-        <td class="num">{{ row | cell('gift_card') }}</td>
-        <td class="num">{{ row | cell('rewards_used') }}</td>
-        <td class="num">{{ row | cell('cashback_rate') }}</td>
-        <td class="num">{{ row | cell('cogs') }}</td>
-        <td class="num">{{ row | cell('insurance') }}</td>
-        <td class="num">{{ row | cell('payout_amount') }}{% if row.is_committed %} <span class="tag committed">proj.</span>{% endif %}</td>
-        <td>{{ row.payout_date }}</td>
-        <td class="num">{{ row.text('return_quantity') }}</td>
-        <td>{{ row.text('return_date') }}</td>
-        <td class="num">{{ row | cell('total_profit') }}</td>
+        {% for name in ORDER_COLUMNS %}{% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}{% endfor %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </section>
 {% endfor %}
 {% endblock %}

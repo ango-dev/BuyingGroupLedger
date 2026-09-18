@@ -676,3 +676,42 @@ class TestViewMemory:
         client.cookies.set("ledger-per", "7")
         body = client.get("/orders").text
         assert '<article class="card' not in body and '<option value="24" selected>' in body
+
+
+class TestOrderPageEditing:
+    def test_the_order_page_rows_are_editable_like_the_table(self, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        body = client.get("/orders/BBY01-1").text
+        assert 'class="num edit"' in body and 'data-field="insurance"' in body
+        assert 'data-order-id="BBY01-1"' in body and "double-click a cell to edit" in body
+        cogs_td = re.search(r'<td class="([^"]*)"\s+data-field="cogs"', body)
+        assert cogs_td and "edit" not in cogs_td.group(1)
+        # An edit made from the order page lands exactly as one from the table.
+        response = client.post("/orders/cell", data={**KEY, "field": "insurance", "value": "8",
+                                                      "expected": "6.4"})
+        assert response.status_code == 200 and sheet.writes[0][0] == f"{_COL['insurance']}2"
+        assert "$8.00" in client.get("/orders/BBY01-1").text
+
+    def test_the_snapshot_backend_order_page_is_view_only(self, tmp_path, logs_dir):
+        import csv
+
+        path = tmp_path / "sheet_backup_20260917T000000Z.csv"
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            w = csv.writer(handle)
+            w.writerow(HEADER)
+            w.writerow(row(order_id="X", order_date="2026-09-01", item_name="T", shipment="1",
+                           status="shipped", total_cost="1"))
+        from config.settings import settings
+
+        app = create_app(SnapshotReader(path), logs_dir=logs_dir, failures_dir=tmp_path,
+                         backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
+                         settings=dataclasses.replace(settings, container_run_interval_hours=6))
+        body = TestClient(app).get("/orders/X").text
+        assert 'data-field="insurance"' in body and 'class="num edit"' not in body
+
+    def test_the_card_delete_is_in_the_header(self, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        body = client.get("/orders", params={"view": "cards"}).text
+        card = body[body.index('<article class="card'):body.index("</article>")]
+        header = card[card.index("<header>"):card.index("</header>")]
+        assert "✕ Delete order" in header and 'hx-post="/orders/delete"' in header

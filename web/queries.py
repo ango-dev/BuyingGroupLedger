@@ -33,6 +33,11 @@ DEFAULT_SORT = "order_date"
 #: The columns a card's per-row mini-table shows (the same editable cells as the big table).
 CARD_COLUMNS = ("item_name", "shipment", "status", "quantity", "tracking_number", "delivery_date",
                 "insurance", "payout_amount", "payout_date", "total_profit")
+#: The columns an order page's shipment tables show, every one through the same editable cell.
+ORDER_COLUMNS = ("item_name", "status", "quantity", "cost_per_item", "total_cost", "shipping",
+                 "sales_tax", "gift_card", "rewards_used", "cashback_rate", "cogs", "insurance",
+                 "payout_amount", "payout_date", "return_quantity", "return_date", "total_profit",
+                 "tracking_number", "delivery_date", "package_id", "buying_group", "card_last4")
 #: What the cards view can sort by (the table sorts by any column header).
 SORT_CHOICES = tuple((f, FIELD_TO_HEADER[f]) for f in (
     "order_date", "order_id", "status", "retailer", "buying_group", "item_name", "delivery_date",

@@ -1,20 +1,22 @@
 /* Theme. Light is the base; dark applies when the system prefers it and nothing was chosen, or
-   when the toggle chose it (html[data-theme]). The toggle in base.html sets the attribute. */
+   when the toggle chose it (html[data-theme]). The toggle in base.html sets the attribute.
+   Contrast is deliberately SOFT: near-black-on-near-white and near-white-on-near-black both replaced with slate greys,
+   and the accent is a calm indigo rather than a saturated link blue. */
 :root {
-  --bg: #fafafa; --fg: #1a1a1a; --muted: #6b6b6b; --line: #e2e2e2; --card: #ffffff;
-  --ok: #1e7f3f; --warn: #b45309; --bad: #b91c1c; --accent: #1d4ed8; --committed: #7c3aed;
-  --ok-bg: #e8f5ec; --warn-bg: #fff4e5;
+  --bg: #f5f5f7; --fg: #34343a; --muted: #7a7a83; --line: #e3e3e8; --card: #ffffff;
+  --ok: #2f7d4f; --warn: #a8622a; --bad: #b3423f; --accent: #4361b2; --committed: #7c5cbf;
+  --ok-bg: #e9f4ee; --warn-bg: #fbf1e6;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 14px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #111; --fg: #eaeaea; --muted: #9a9a9a; --line: #2c2c2c;
-    --card: #1a1a1a; --accent: #7aa2ff; --committed: #b592ff; --ok-bg: #12301b; --warn-bg: #2f2410;
-    color-scheme: dark; }
+  :root:not([data-theme="light"]) { --bg: #161618; --fg: #cfcfd4; --muted: #8d8d96; --line: #2b2b30;
+    --card: #1e1e22; --accent: #9aaee3; --committed: #b39ae6; --ok: #6fbf8c; --warn: #d9a066; --bad: #d97b78;
+    --ok-bg: #16281d; --warn-bg: #2a2117; color-scheme: dark; }
 }
-:root[data-theme="dark"] { --bg: #111; --fg: #eaeaea; --muted: #9a9a9a; --line: #2c2c2c;
-  --card: #1a1a1a; --accent: #7aa2ff; --committed: #b592ff; --ok-bg: #12301b; --warn-bg: #2f2410;
-  color-scheme: dark; }
+:root[data-theme="dark"] { --bg: #161618; --fg: #cfcfd4; --muted: #8d8d96; --line: #2b2b30;
+  --card: #1e1e22; --accent: #9aaee3; --committed: #b39ae6; --ok: #6fbf8c; --warn: #d9a066; --bad: #d97b78;
+  --ok-bg: #16281d; --warn-bg: #2a2117; color-scheme: dark; }
 /* The toggle shows the theme you would switch TO. */
 .only-dark { display: none; }
 @media (prefers-color-scheme: dark) {
@@ -52,15 +54,20 @@ h4 { margin: 12px 0 4px; }
 .ok { color: var(--ok); }
 
 header.top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
-  gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--card); }
-header nav a { margin-right: 16px; }
-header nav .brand { font-weight: 700; color: var(--fg); }
-header .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.pill { border-radius: 999px; padding: 2px 10px; font-size: 0.85em; border: 1px solid var(--line); }
-.pill.read-only { border-color: var(--ok); color: var(--ok); }
+  gap: 8px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--card); min-height: 48px; }
+header nav { display: flex; align-items: stretch; gap: 4px; }
+header nav a { color: var(--muted); font-weight: 500; padding: 14px 10px; border-bottom: 2px solid transparent;
+  text-decoration: none; }
+header nav a:hover { color: var(--fg); text-decoration: none; }
+header nav a.active { color: var(--fg); border-bottom-color: var(--accent); }
+header nav .brand { font-weight: 700; color: var(--fg); letter-spacing: -0.01em; margin-right: 14px; padding-left: 0; }
+header .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 0.85em; color: var(--muted); }
+.pill { border-radius: 999px; padding: 2px 9px; font-size: 0.92em; border: 1px solid var(--line); color: var(--muted); background: var(--bg); }
+.pill.read-only { color: var(--ok); }
 .pill.backend { text-transform: uppercase; letter-spacing: .04em; }
-.pill.ok { border-color: var(--ok); color: var(--ok); }
-.pill.stale { border-color: var(--warn); color: var(--warn); }
+.pill.ok { color: var(--ok); }
+.pill.stale { color: var(--warn); border-color: var(--warn); }
+.theme-toggle { font-size: 0.92em; padding: 3px 9px; }
 .banner { padding: 8px 20px; }
 .banner.warn { background: var(--warn-bg); color: var(--warn); }
 
@@ -324,3 +331,26 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
 .card details.card-edit summary { cursor: pointer; }
 .card details.card-edit[open] summary { margin-bottom: 6px; }
 .cards { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+/* the order page's shipment tables: the same editable cells, the same affordances */
+.card-rows-wrap { overflow-x: auto; max-width: 100%; }
+table.order-rows { width: max-content; min-width: 100%; }
+table.order-rows td { white-space: nowrap; }
+table.order-rows td.item > span { display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.order-rows td.edit { cursor: cell; }
+table.order-rows td.edit:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
+table.order-rows td[data-editing] { padding: 0; }
+table.order-rows td.error { outline: 2px solid var(--bad); outline-offset: -2px; }
+table.order-rows tr.status-ordered td[data-field="status"]    { background: #EA9999; color: #1a1a1a; }
+table.order-rows tr.status-shipped td[data-field="status"]    { background: #F9CB9C; color: #1a1a1a; }
+table.order-rows tr.status-delivered td[data-field="status"]  { background: #FFE599; color: #1a1a1a; }
+table.order-rows tr.status-paid td[data-field="status"]       { background: #B6D7A8; color: #1a1a1a; }
+table.order-rows tr.status-return td[data-field="status"]     { background: #DD7E6B; color: #1a1a1a; }
+table.order-rows tr.status-cancelled td[data-field="status"]  { background: #CCCCCC; color: #1a1a1a; text-decoration: line-through; }
+table.order-rows tr.status-superseded td[data-field="status"] { background: #666666; color: #f4f4f4; text-decoration: line-through; }
+.card header form.card-delete { margin-left: auto; }
+
+/* calmer links: an order id reads as text and only lights up on hover */
+.card header .order-id { color: var(--fg); }
+.card header .order-id:hover { color: var(--accent); }
+table.sheetlike tr[class*="status-"] td a { color: #2f4a8a; }
+h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
