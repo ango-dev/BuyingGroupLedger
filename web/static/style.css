@@ -208,14 +208,17 @@ table.sheetlike td.error { outline: 2px solid var(--bad); outline-offset: -2px; 
 .count { margin: 6px 0; }
 .ext { color: var(--muted); }
 
-.filters { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 8px; align-items: end; margin: 8px 0 12px;
+/* one row, and NO overflow clipping: a scrolling bar would cut the dropdown menus off; the search box gives
+   way instead when the row is tight */
+.filters { display: flex; flex-wrap: nowrap; gap: 8px; align-items: end; margin: 8px 0 12px;
   background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .filters label { display: flex; flex-direction: column; font-size: 0.85em; color: var(--muted); gap: 3px; white-space: nowrap; flex: 0 0 auto; }
 .filters > details.multi { flex: 0 0 auto; }
 .filters .reset { flex: 0 0 auto; margin-left: auto; align-self: end; }
 .filters input.month { width: 128px; }
 .filters select, .filters input { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
-.filters input[type=search] { min-width: 160px; width: 220px; }
+.filters input[type=search] { min-width: 0; width: 100%; box-sizing: border-box; }
+.filters label.search { flex: 1 1 160px; min-width: 90px; max-width: 320px; }
 .filters details.multi .summary-text { min-width: 96px; max-width: 170px; }
 /* bulk edit / delete controls live in the filter bar; the add-row form sits under it */
 .toolbar-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
