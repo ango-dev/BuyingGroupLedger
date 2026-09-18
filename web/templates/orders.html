@@ -30,6 +30,7 @@
       <option value="open" {{ 'selected' if filters.state == 'open' }}>open (not paid yet)</option>
       <option value="committed" {{ 'selected' if filters.state == 'committed' }}>projected (committed)</option>
       <option value="settled" {{ 'selected' if filters.state == 'settled' }}>settled</option>
+      <option value="unpaid" {{ 'selected' if filters.state == 'unpaid' }}>unpaid (floating)</option>
     </select>
   </label>
   {% if filters.view == 'cards' %}

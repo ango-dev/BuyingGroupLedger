@@ -50,7 +50,7 @@ PER_PAGE_CHOICES = (12, 24, 48, 96)
 DEFAULT_PER_PAGE = 24
 #: The payout-state filter (the overview's tiles link with it): the rows still waiting on the
 #: buying group (LedgerRow.is_open), the projected ones (is_committed) or the settled ones.
-STATES = ("open", "committed", "settled")
+STATES = ("open", "committed", "settled", "unpaid")
 _MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
@@ -208,6 +208,8 @@ def _in_state(row: LedgerRow, state: str) -> bool:
         return row.is_open
     if state == "committed":
         return row.is_committed
+    if state == "unpaid":
+        return row.is_unpaid
     return row.is_settled
 
 

@@ -198,17 +198,20 @@ refusal lasts as long as the run does.
 paid yet), which is deliberately wider than the scrapers' terminal statuses; a gift-card row is
 never open.
 
-**The overview's two stat sections** carry the same six tiles in the same order — rows and
+**The overview's two stat sections** carry the same seven tiles in the same order — rows and
 orders, open rows, spend (Total Cost over rows that carry money), paid out (settled payouts),
-projected profit (committed, undated payouts) and realized profit (settled rows) — so the two read
-side by side. *Lifetime* counts every row of the ledger. *Calendar month* shows one month at a time
+**floating** (Total Cost of the rows the buying group has not paid yet: no settled payout; gift
+cards excluded), projected profit (committed, undated payouts) and realized profit (settled rows) —
+so the two read side by side. Floating is not spend minus paid out: that gap also holds the
+settled rows' cost minus their payout, and since the profit here comes from cashback a settled row
+is usually paid a little less than it cost. *Lifetime* counts every row of the ledger. *Calendar month* shows one month at a time
 (arrows step through the months the ledger spans; the current month by default, `/?month=YYYY-MM`
 for another): its rows, open rows, spend and projected profit count rows by **Order Date** (what
 was placed that month), its paid out and realized profit count settled rows by **Payout Date** (the
 cash that landed that month, whenever the order was placed — the tax report's basis); each tile's
 hint says which. Every tile is a link that opens the Orders page filtered the same way the
 number was counted, and the Orders filter bar shows those filters as editable controls: *Placed in*
-and *Paid in* (a month) and *Payout* (any / open / projected / settled), so a click-through can be
+and *Paid in* (a month) and *Payout* (any / open / projected / settled / unpaid), so a click-through can be
 widened or narrowed without going back. The reconciliation line under Lifetime is what SUM() over
 the sheet's Total Profit column gives, so the page can be checked against the sheet at a glance.
 

@@ -182,6 +182,15 @@ class LedgerRow:
         )
 
     @property
+    def is_unpaid(self) -> bool:
+        """FLOATING money: the row carries cost and no settled payout -- open, committed, or anything
+        else without a Payout Date / paid status. A gift-card row is not floating: it is routed
+        nowhere and no payout is ever expected for it. Note this is NOT spend minus paid out:
+        that gap also holds the settled rows' cost minus their payout (profit here comes from
+        cashback, so a settled row is usually paid a little less than it cost)."""
+        return not self.is_money_free and not self.is_settled and not self.is_gift_card
+
+    @property
     def payout_state(self) -> str:
         """"settled" | "committed" | "none" -- the three states a Payout Amount cell can be in."""
         if self.is_settled:

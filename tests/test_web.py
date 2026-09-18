@@ -615,8 +615,8 @@ class TestOverview:
 
     def test_both_sections_carry_the_same_six_tiles_in_the_same_order(self, summary):
         labels = [t["label"] for t in summary["lifetime"]]
-        assert labels == ["Rows / orders", "Open rows", "Spend", "Paid out", "Projected profit",
-                          "Realized profit"]
+        assert labels == ["Rows / orders", "Open rows", "Spend", "Paid out", "Floating",
+                          "Projected profit", "Realized profit"]
         assert [t["label"] for t in summary["month"]["tiles"]] == labels
         assert [t["kind"] for t in summary["month"]["tiles"]] == [t["kind"] for t in summary["lifetime"]]
 
@@ -632,6 +632,11 @@ class TestOverview:
             float(r[HEADER.index("Total Cost")] or 0) for r in LEDGER_ROWS
             if r[HEADER.index("Status")] not in ("cancelled", "superseded"))
         assert by_label["Open rows"]["href"] == "/orders?state=open"
+        # Floating: cost not yet paid back -- rows 2, 3, 4 and the Fitbit; not the gift card, not
+        # the paid rows, not the money-free ones. NOT spend minus paid out.
+        assert by_label["Floating"]["value"] == round(1259.99 + 1000 + 2000 + 100, 2)
+        assert by_label["Floating"]["href"] == "/orders?state=unpaid"
+        assert by_label["Floating"]["value"] != round(by_label["Spend"]["value"] - by_label["Paid out"]["value"], 2)
 
     def test_the_month_section_places_by_order_date_and_pays_by_payout_date(self, snapshot_path):
         september = overview(SnapshotReader(snapshot_path).load(), month="2026-09",
@@ -640,6 +645,7 @@ class TestOverview:
         # Rows 2-4 were placed in September and are all still open; row 3 carries the commitment.
         assert tiles["Rows / orders"][0] == 3 and tiles["Open rows"] == 3
         assert tiles["Projected profit"] == 263.6
+        assert tiles["Floating"] == round(1259.99 + 1000 + 2000, 2)  # the Fitbit was placed in August
         # Only row 5's payout landed in September (row 6's paid status has no date).
         assert tiles["Paid out"] == 500.0 and tiles["Realized profit"] == 136.0
         assert september["label"] == "September 2026" and september["current"] is True
@@ -772,6 +778,7 @@ class TestOverviewPage:
         assert 'class="tile link " href="/orders"' in body
         assert 'href="/orders?state=open"' in body
         assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
+        assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body
         assert 'href="/orders?month=2026-09"' in body
         assert 'href="/orders?month=2026-09&amp;state=open"' in body
         assert 'href="/orders?paid=2026-09&amp;state=settled"' in body
@@ -1424,6 +1431,7 @@ class TestMultiSelectFilters:
         assert len(filter_rows(rows, Filters.from_query({"state": "open"}))) == 4
         assert [r.row_number for r in filter_rows(rows, Filters.from_query({"state": "committed"}))] == [3]
         assert len(filter_rows(rows, Filters.from_query({"state": "settled"}))) == 2
+        assert [r.row_number for r in filter_rows(rows, Filters.from_query({"state": "unpaid"}))] == [2, 3, 4, 8]
         assert len(filter_rows(rows, Filters.from_query({"month": "2026-08", "state": "open"}))) == 1
         # malformed values mean "no filter", never an error
         bad = Filters.from_query({"month": "Sept", "paid": "2026-13", "state": "paid"})

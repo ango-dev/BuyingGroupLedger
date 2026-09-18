@@ -65,6 +65,7 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
     Payout Date for a month); `scope` is the phrase the hints end with ("of the ledger" / "placed
     in September 2026"); `link(**filters)` builds the tile's Orders-page href for that period."""
     open_rows = [r for r in placed if r.is_open]
+    unpaid = [r for r in placed if r.is_unpaid]
     projected = _money_block([r for r in placed if r.is_committed])
     realized = _money_block(paid)
     return [
@@ -81,6 +82,10 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
               f"{'paid out ' + scope[7:] if scope.startswith('placed ') else scope}: Payout "
               "Date set, or status paid / return", link(state="settled", paid=True),
               tone="settled"),
+        _tile("Floating", _spend(unpaid), "money",
+              f"Total Cost of the {len(unpaid)} row(s) in {len({r.order_id for r in unpaid})} "
+              f"order(s) {scope} the buying group has not paid yet (no settled payout; gift "
+              "cards excluded)", link(state="unpaid"), tone="floating"),
         _tile("Projected profit", projected["profit"], "money",
               f"{projected['rows']} row(s), {projected['orders']} order(s) {scope} with a "
               f"committed payout (${projected['payout']:,.2f}) and no Payout Date",

@@ -80,6 +80,7 @@ header .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; fo
 .tile .hint { color: var(--muted); font-size: 0.85em; }
 .tile.payout-committed .value { color: var(--committed); }
 .tile.payout-settled .value { color: var(--ok); }
+.tile.payout-floating .value { color: var(--warn); }
 /* a stat tile that is a link: reads like the others, lifts on hover, never link-blue */
 a.tile.link { display: block; color: var(--fg); text-decoration: none; transition: border-color .12s, transform .12s; }
 a.tile.link:hover { border-color: var(--accent); transform: translateY(-1px); }
