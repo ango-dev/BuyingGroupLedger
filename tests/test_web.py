@@ -941,9 +941,12 @@ class TestFailuresPage:
         self._dossier(failures_dir, "amazon_profile-charlie_20260914T160056Z", "# Newer\n\ntext\n")
         self._dossier(failures_dir, "bestbuy_profile-bravo_20260901T000000Z", None)
 
-        response = client.get("/failures")
+        moved = client.get("/failures", follow_redirects=False)  # the Failures page lives in Activity now
+        assert moved.status_code == 303 and moved.headers["location"] == "/activity?kind=dossier&days=0"
+        response = client.get("/activity", params={"kind": "dossier", "days": "0"})
         assert response.status_code == 200
         body = response.text
+        assert body.count('<tr class="kind-dossier">') == 3  # dossiers on disk, never logged, still listed
         newest = body.index("amazon_profile-charlie_20260914T160056Z")
         middle = body.index("bestbuy_profile-bravo_20260901T000000Z")
         oldest = body.index("costco_profile-bravo_20260830T070304Z")
@@ -957,17 +960,18 @@ class TestFailuresPage:
 
     def test_raw_html_in_a_report_is_escaped(self, client, failures_dir):
         self._dossier(failures_dir, "costco_profile-bravo_20260830T070304Z", self.REPORT)
-        body = client.get("/failures").text
+        body = client.get("/activity", params={"kind": "dossier", "days": "0"}).text
         assert "<script>alert(1)</script>" not in body
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
 
     def test_empty_directory(self, client):
-        assert "No failure dossiers." in client.get("/failures").text
+        body = client.get("/activity", params={"kind": "dossier", "days": "0"}).text
+        assert 'class="kind-dossier"' not in body and "Nothing recorded" in body
 
     def test_missing_directory(self, snapshot_path, logs_dir, tmp_path):
         app = create_app(SnapshotReader(snapshot_path), logs_dir=logs_dir,
                          failures_dir=tmp_path / "nowhere", clock=lambda: NOW, settings=_settings())
-        assert TestClient(app).get("/failures").status_code == 200
+        assert TestClient(app).get("/activity", params={"kind": "dossier"}).status_code == 200
 
     def test_helpers(self):
         assert parse_name("costco_profile-bravo_20260830T070304Z") == (

@@ -204,11 +204,12 @@ class TestThePage:
         assert "<h1>Activity</h1>" in body and 'id="activity-filters"' in body
         assert body.count("<tr class=\"kind-") == 3  # the January event is outside the default 30 days
         assert "3 event(s) of 4" in body
-        assert 'href="/failures#costco_p_20260917T080000Z"' in body  # the dossier links to its report
+        assert "costco_p_20260917T080000Z" in body and 'href="/failures' not in body  # the Failures page is gone
         assert 'href="/orders/111-1"' in body  # an order id links to its page
         assert ">Alert<" in body and ">Failure dossier<" in body and ">Dashboard edit<" in body
         assert "09-17 08:00" in body  # the run stamp
         assert 'href="/activity"' in body and 'class="gear' in body and 'href="/health"' not in body
+        assert 'href="/failures"' not in body
 
         everything = client.get("/activity", params={"days": "0"}).text
         assert everything.count("<tr class=\"kind-") == 4
@@ -230,6 +231,28 @@ class TestThePage:
         assert events[0]["run_id"] is None
         body = client.get("/activity").text
         assert ">Backup<" in body and "dashboard" in body
+
+    def test_a_logged_dossier_shows_its_report_inline_and_an_unlogged_one_is_listed(self, client, tmp_path):
+        failures = tmp_path / "logs" / "failures"
+        logged = failures / "costco_profile-1_20260917T080000Z"
+        logged.mkdir()
+        (logged / "report.md").write_text("# Failure dossier\n\n## What failed\n\n**Boom**: x\n", encoding="utf-8")
+        (logged / "page_1.html").write_text("<html>", encoding="utf-8")
+        activity.record("dossier", "costco [profile-1]: failure dossier written -- Boom",
+                        {"name": logged.name, "path": str(logged), "error": "Boom: x"},
+                        path=client.activity_path, at=datetime(2026, 9, 17, 8, 0, tzinfo=timezone.utc),
+                        run_id="run-20260917T080000Z")
+        unlogged = failures / "amazon_profile-2_20260901T000000Z"
+        unlogged.mkdir()
+        (unlogged / "response_1.txt").write_text("{}", encoding="utf-8")
+
+        body = client.get("/activity", params={"days": "0"}).text
+        assert body.count('<tr class="kind-dossier">') == 2  # one logged + one only on disk, not doubled
+        assert "<h2>What failed</h2>" in body and "<strong>Boom</strong>" in body  # the report, inline
+        assert "<code>page_1.html</code>" in body and ">report<" in body
+        assert "amazon [profile-2]: failure dossier" in body and "no report.md" in body
+        # the logged one keeps its run; the disk-only one has none; newest first
+        assert body.index("costco_profile-1_20260917T080000Z") < body.index("amazon_profile-2_20260901T000000Z")
 
     def test_an_empty_log_renders(self, client):
         body = client.get("/activity").text

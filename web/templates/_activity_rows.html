@@ -15,20 +15,37 @@
       <td><span class="tag kind kind-{{ e.kind }}">{{ KINDS.get(e.kind, e.kind) }}</span></td>
       <td class="mono small">{% if e.run_id %}<a href="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-get="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-target="#activity-table" hx-push-url="true" title="only this run">{{ run_label(e.run_id) }}</a>{% else %}<span class="muted">dashboard</span>{% endif %}</td>
       <td class="what">{{ e.summary }}
-        {% if e.kind == 'dossier' and e.details.name %} <a href="/failures#{{ e.details.name }}" class="small">open dossier ›</a>{% endif %}
+        {% if e.dossier %}<span class="mono small muted">{{ e.dossier.name }}</span>{% if not e.dossier.has_report %} <span class="tag stale">no report.md</span>{% endif %}{% endif %}
         {% if e.details.order_id %} <a href="/orders/{{ e.details.order_id }}" class="small mono">{{ e.details.order_id }}</a>{% endif %}
       </td>
-      <td class="num">{% if e.details %}<button type="button" class="small ghost" onclick="var d=document.getElementById('ev-{{ n }}');d.hidden=!d.hidden;this.textContent=d.hidden?'details':'hide'">details</button>{% endif %}</td>
+      <td class="num">{% if e.details or e.dossier %}<button type="button" class="small ghost" onclick="var d=document.getElementById('ev-{{ n }}');d.hidden=!d.hidden;this.textContent=d.hidden?'{{ 'report' if e.dossier else 'details' }}':'hide'">{{ 'report' if e.dossier else 'details' }}</button>{% endif %}</td>
     </tr>
-    {% if e.details %}
+    {% if e.details or e.dossier %}
     <tr class="details-row" id="ev-{{ n }}" hidden>
       <td colspan="5">
+        {% if e.dossier %}
+        {# the dossier itself, as the Failures page showed it: path, files, hosted copies, the report #}
+        <div class="dossier-inline">
+          <p class="muted mono small">{{ e.dossier.path }}</p>
+          <p class="files">{% for f in e.dossier.files %}<code>{{ f }}</code> {% endfor %}</p>
+          {% if e.dossier.hosted %}
+          <h4>Hosted copies</h4>
+          <ul class="hosted">
+            {% for name, link in e.dossier.hosted %}
+            <li><code>{{ name }}</code>: <a href="{{ link }}" rel="noopener">{{ link }}</a></li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+          {% if e.dossier.has_report %}<div class="report">{{ e.dossier.report_html | safe }}</div>{% endif %}
+        </div>
+        {% else %}
         <dl class="event-details">
           {% for k, v in e.details.items() %}
           <dt>{{ k | replace('_', ' ') }}</dt>
           <dd>{% if v is mapping or v is sequence and v is not string %}<pre class="small">{{ v | tojson(indent=1) }}</pre>{% else %}{{ v }}{% endif %}</dd>
           {% endfor %}
         </dl>
+        {% endif %}
       </td>
     </tr>
     {% endif %}

@@ -445,24 +445,53 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     templates.env.globals["KINDS"] = activity_module.KINDS
     templates.env.globals["run_label"] = activity_module.run_label
 
+    def with_dossiers(events: list[dict]) -> list[dict]:
+        """The failure dossiers on disk, merged in: a dossier the log already recorded gets its
+        report attached; one written before the log existed (or by an older version) becomes a
+        dossier event of its own, dated from its directory name. Newest first, like the rest."""
+        dossiers = {d.name: d for d in failures_module.list_dossiers(failures_dir)}
+        seen: set[str] = set()
+        merged: list[dict] = []
+        for event in events:
+            if event.get("kind") == "dossier":
+                name = str((event.get("details") or {}).get("name") or "")
+                if name in dossiers:
+                    event = {**event, "dossier": dossiers[name]}
+                    seen.add(name)
+            merged.append(event)
+        for name, dossier in dossiers.items():
+            if name in seen:
+                continue
+            at = dossier.at.replace(tzinfo=timezone.utc) if dossier.at and dossier.at.tzinfo is None \
+                else dossier.at
+            merged.append({
+                "at": (at or clock()).isoformat(timespec="seconds"), "kind": "dossier",
+                "summary": f"{dossier.retailer} [{dossier.profile}]: failure dossier",
+                "run_id": None, "details": {"name": name, "path": str(dossier.path)},
+                "dossier": dossier,
+            })
+        merged.sort(key=lambda e: str(e.get("at", "")), reverse=True)
+        return merged
+
     @app.get("/activity", response_class=HTMLResponse)
     def activity_page(request: Request):
         filters = ActivityFilters.from_query(request.query_params)
-        events = activity_module.read(activity_path)
+        events = with_dossiers(activity_module.read(activity_path))
         shown = activity_module.filter_events(events, kinds=filters.kinds, q=filters.q,
                                               days=filters.days, run_id=filters.run_id, now=clock())
         if not filters.desc:
             shown = list(reversed(shown))
         context = {"events": shown, "total": len(events), "filters": filters,
                    "counts": activity_module.counts_by_kind(events),
-                   "activity_path": str(activity_path)}
+                   "activity_path": str(activity_path), "failures_dir": str(failures_dir)}
         name = "_activity_rows.html" if request.headers.get("HX-Request") else "activity.html"
         return page_no_snapshot(request, name, **context)
 
-    @app.get("/failures", response_class=HTMLResponse)
-    def failures(request: Request):
-        dossiers = failures_module.list_dossiers(failures_dir)
-        return page(request, "failures.html", dossiers=dossiers, failures_dir=str(failures_dir))
+    @app.get("/failures")
+    def failures_page(request: Request):
+        """The Failures page merged into Activity (2026-09-18); the old address lands on the
+        dossier rows, all of them."""
+        return RedirectResponse(url="/activity?kind=dossier&days=0", status_code=303)
 
     # --- backup / restore (local files only; the Sheet is never touched) -------------------------
     backups_dir = Path(backup_dir) if backup_dir else backup_module.BACKUPS_DIR

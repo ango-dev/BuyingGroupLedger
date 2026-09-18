@@ -504,3 +504,5 @@ table.activity tr.details-row td { background: var(--bg); }
 .event-details dt { color: var(--muted); }
 .event-details dd { margin: 0; overflow-wrap: anywhere; }
 .event-details pre { margin: 0; white-space: pre-wrap; }
+.dossier-inline .report { max-width: 960px; }
+.dossier-inline h4 { margin: 8px 0 4px; }

@@ -3,8 +3,9 @@
 {% block content %}
 <h1>Activity</h1>
 <p class="muted">Everything the app did, newest first: what each run scraped and wrote to the ledger,
-what the buying-group sync submitted, insured and read back, the emails it sent, every alert and
-failure dossier, and every change made from this dashboard. From <code>{{ activity_path }}</code>.</p>
+what the buying-group sync submitted, insured and read back, the emails it sent, every alert, every
+failure dossier (its report opens in place), and every change made from this dashboard.
+From <code>{{ activity_path }}</code> and the dossiers under <code>{{ failures_dir }}</code>.</p>
 
 <form id="activity-filters" class="filters" method="get" action="/activity"
       hx-get="/activity" hx-target="#activity-table" hx-push-url="true"

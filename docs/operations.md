@@ -123,8 +123,9 @@ Linux host has its own runbook: **[DEPLOY.md](../DEPLOY.md)**.
 
 A local web page over the ledger, in `web/`: an overview (open rows by status and buying group,
 projected versus realized profit, the COGS input gaps, the scheduler heartbeat), a filterable and
-sortable ledger table, one page per order, the failure dossiers with each `report.md` rendered, a
-Settings page (with backup and restore), and `/health` as JSON. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
+sortable ledger table, one page per order, an Activity page (what every run
+and every dashboard change did, with the failure dossiers' reports rendered in place), a Settings page
+(with backup and restore), and `/health` as JSON for the container's healthcheck. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
 the header (remembered per browser; follows the system until you choose). The dependencies are
 `requirements-web.txt`, an optional install on a desktop and part of the one Docker image.
 
@@ -198,7 +199,9 @@ refusal lasts as long as the run does.
 run, what each retailer's scrape found and what the ledger write updated or added (split boxes,
 ignored tracking numbers, key conflicts named), what the buying-group sync submitted, insured and
 read back and how many rows it updated, the emails the BFMR auto-reply sent, the end-of-run
-mirror; every alert (with its message) and every failure dossier (linked to the Failures page);
+mirror; every alert (with its message) and every failure dossier — the Failures page lives here now:
+a dossier row opens its report, files and hosted copies in place, and dossiers written before the
+log existed are listed from disk (`/failures` redirects to the dossier rows);
 and every change made from the dashboard — cell edits (with the before and after), rows added or
 deleted, receipts uploaded, backups made / restored / deleted, settings saved (paths only, never a
 value). Filter by kind, by the last day / week / month, by text, or by one run (click a run stamp);
