@@ -492,6 +492,22 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     from web.ledger_writer import run_in_progress as _run_in_progress
 
     tool_runner = tools_module.JobRunner(logs_dir, clock=clock)
+
+    def nav_tools() -> list[tuple[str, list[tuple[str, str]]]]:
+        """The header's Tools menu: every tool this backend shows, grouped in GROUPS order."""
+        try:
+            sheet_mode = not settings.ledger_is_db()
+        except RuntimeError:
+            sheet_mode = False
+        out = []
+        for group in tools_module.GROUPS:
+            items = [(t.key, t.title) for t in tools_module.TOOLS
+                     if t.group == group and (sheet_mode or not t.sheet_only)]
+            if items:
+                out.append((group, items))
+        return out
+
+    templates.env.globals["nav_tools"] = nav_tools
     profile_sessions = tools_module.ProfileSessions(
         logs_dir, minutes=int(getattr(settings, "web_tool_session_minutes", 60) or 60), clock=clock)
     app.state.tool_runner = tool_runner

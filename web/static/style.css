@@ -561,8 +561,21 @@ table.activity { width: 100%; table-layout: auto; }
 .tool-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-width: 960px; }
 .tool-card > header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0; }
 .tool-card > header h2 { margin: 0; }
-#tool-picker { margin-bottom: 14px; }
-#tool-picker .picker-hint { align-self: center; max-width: 640px; }
+/* the header's Tools menu: a nav link that opens a grouped list of links */
+header nav details.nav-menu { position: relative; font-size: inherit; color: inherit; display: flex; align-items: stretch; }
+header nav details.nav-menu > summary { list-style: none; cursor: pointer; display: flex; align-items: stretch; }
+header nav details.nav-menu > summary::-webkit-details-marker { display: none; }
+header nav details.nav-menu .nav-link { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-weight: 500; padding: 14px 10px; border-bottom: 2px solid transparent; }
+header nav details.nav-menu:hover .nav-link, header nav details.nav-menu[open] .nav-link { color: var(--fg); }
+header nav details.nav-menu.active .nav-link { color: var(--fg); border-bottom-color: var(--accent); }
+header nav details.nav-menu .caret { color: var(--muted); font-size: 0.8em; }
+header nav details.nav-menu .menu { position: absolute; top: 100%; left: 0; z-index: 20; min-width: 260px; max-height: 70vh; overflow: auto;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  display: flex; flex-direction: column; gap: 1px; }
+header nav details.nav-menu .menu .group { color: var(--muted); font-size: 0.75em; text-transform: uppercase; letter-spacing: .05em; padding: 8px 10px 3px; }
+header nav details.nav-menu .menu a { display: block; padding: 5px 10px; border-radius: 6px; color: var(--fg); font-weight: 400; border: 0; white-space: nowrap; }
+header nav details.nav-menu .menu a:hover { background: var(--bg); }
+header nav details.nav-menu .menu a.current { color: var(--accent); font-weight: 600; }
 .session-panel { border-color: var(--accent); }
 .tool-card > p { margin: 0; font-size: 0.92em; }
 .tool-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }

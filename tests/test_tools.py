@@ -218,20 +218,23 @@ class TestTheRoutes:
 
     def test_the_page_lists_the_tools_and_the_nav_links_it(self, client):
         body = client.get("/tools").text
-        assert "<h1>Tools</h1>" in body and 'href="/tools"' in body
-        # one picker with every tool; the profile login is the default panel
-        assert 'data-param="tool"' in body and 'name="tool" value="profile" checked' in body
+        assert "<h1>Tools</h1>" in body
+        # the header's Tools menu lists every tool, grouped; the profile login is the default panel
+        menu = body[body.index('class="multi nav-menu'):body.index("</details>", body.index('class="multi nav-menu'))]
+        assert 'href="/tools?tool=profile"' in menu and ">Ledger Fixes<" in menu and ">Checks<" in menu
         for key in ("preflight", "tax_report", "backfill_tracking", "costco_token"):
-            assert f'name="tool" value="{key}"' in body
+            assert f'href="/tools?tool={key}"' in menu
             assert f'id="t-{key}"' not in body  # not shown until picked
-        assert 'value="audit_sheet"' not in body  # sheet-only, and the ledger is the database
+        assert 'tool=audit_sheet' not in menu  # sheet-only, and the ledger is the database
+        assert 'class="multi nav-menu' in client.get("/settings").text  # on every page
         assert "Log a Profile In" in body and 'action="/tools/profile/start"' in body
         assert "after 30 minutes" in body
         assert 'name="label" value="p1" checked' in body
         picked = client.get("/tools", params={"tool": "backfill_tracking"}).text
         assert 'id="t-backfill_tracking"' in picked and 'action="/tools/run/backfill_tracking"' in picked
-        assert "Log a Profile In" not in picked and 'name="tool" value="backfill_tracking" checked' in picked
-        assert 'name="tool" value="profile" checked' in client.get("/tools", params={"tool": "nope"}).text
+        assert "Log a Profile In" not in picked and 'href="/tools?tool=backfill_tracking" class="current"' in picked
+        assert "Ledger Fixes · Backfill tracking numbers" in picked
+        assert "Log a Profile In" in client.get("/tools", params={"tool": "nope"}).text
 
     def test_running_a_tool_records_it_and_shows_its_output(self, client):
         response = client.post("/tools/run/preflight", data={"--strict": "on"}, follow_redirects=False)

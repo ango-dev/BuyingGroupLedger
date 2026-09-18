@@ -6,13 +6,9 @@
 {% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
 {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
 
-{# ---- one picker, one tool at a time. The choice travels in ?tool=; htmx swaps just the panel. ---- #}
-<form id="tool-picker" class="filters" method="get" action="/tools"
-      hx-get="/tools" hx-target="#tool-panel" hx-select="#tool-panel" hx-swap="outerHTML" hx-push-url="true"
-      hx-trigger="change">
-  {{ choose('tool', options, selected, 'Tool') }}
-  <span class="muted small picker-hint">{{ hint }}</span>
-</form>
+{# ---- one tool at a time, picked from the Tools menu in the header; the
+   choice travels in ?tool= ---- #}
+<p class="muted small">Pick a tool from the <strong>Tools</strong> menu in the header{% if tool %} — showing <strong>{{ tool.group }} · {{ tool.title }}</strong>{% endif %}.</p>
 
 <div id="tool-panel">
 {% if session %}
