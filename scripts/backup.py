@@ -57,12 +57,43 @@ def _stamp() -> str:
 
 
 def _git_commit(root: Path) -> str:
+    """The short commit the code at `root` is, by asking git; failing that (inside the Docker
+    image there is no git and no working tree) from GIT_COMMIT in the environment, or from the
+    .git/HEAD and ref files .dockerignore lets into the image."""
     try:
         out = subprocess.run(["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
                              capture_output=True, text=True, timeout=10)
-        return out.stdout.strip() if out.returncode == 0 else ""
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
     except (OSError, subprocess.SubprocessError):
+        pass
+    from_env = os.environ.get("GIT_COMMIT", "").strip()
+    if from_env:
+        return from_env[:12]
+    return _commit_from_git_files(root)
+
+
+def _commit_from_git_files(root: Path) -> str:
+    """Resolve HEAD by reading .git/HEAD -> .git/refs/heads/<branch> (or packed-refs)."""
+    try:
+        head = (root / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+    except OSError:
         return ""
+    if not head.startswith("ref:"):
+        return head[:7]
+    ref = head.split(":", 1)[1].strip()
+    try:
+        return (root / ".git" / ref).read_text(encoding="utf-8").strip()[:7]
+    except OSError:
+        pass
+    try:
+        for line in (root / ".git" / "packed-refs").read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1] == ref:
+                return parts[0][:7]
+    except OSError:
+        pass
+    return ""
 
 
 def backup_members(root: Path | None = None) -> list[Path]:

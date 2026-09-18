@@ -13,20 +13,22 @@
 
   <h3>Existing Backups</h3>
   {% if archives %}
-  <table class="grid compact">
-    <thead><tr><th>File</th><th>Created</th><th>Commit</th><th class="num">Files</th><th class="num">Size</th></tr></thead>
+  <table class="grid compact backups">
+    <thead><tr><th>File</th><th>Created</th><th>Commit</th><th class="num">Files</th><th class="num">Size</th><th></th></tr></thead>
     <tbody>
       {% for a in archives %}
       <tr>
         <td class="mono"><a href="/backup/{{ a.name }}" download>{{ a.name }}</a></td>
         <td>{{ a.created_at }}</td>
-        <td class="mono">{{ a.git_commit }}</td>
+        <td class="mono">{{ a.git_commit or '—' }}</td>
         <td class="num">{{ a.files }}</td>
         <td class="num">{{ a.size_kb }} KB</td>
+        <td class="num"><button type="submit" form="del-backup-{{ loop.index0 }}" class="danger small" title="delete this backup zip">✕ Delete</button></td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  {% for a in archives %}<form method="post" id="del-backup-{{ loop.index0 }}" action="/backup/{{ a.name }}/delete" class="entry-delete" hidden data-confirm="Delete backup {{ a.name }}? It cannot be recovered."></form>{% endfor %}
   {% else %}
   <p class="muted">None yet.</p>
   {% endif %}
@@ -35,17 +37,18 @@
   {% if fresh_install %}
   <p>No <code>config.json</code> exists here, so this is a fresh clone. Upload a backup to restore it,
   then restart the app so the restored configuration is read.</p>
-  <form method="post" action="/backup/restore" enctype="multipart/form-data" class="inline-form">
+  {% else %}
+  <p class="muted">Upload a backup zip. Files that already exist here are <strong>kept</strong> unless
+  you tick overwrite; with it ticked the upload replaces <code>config.json</code>, <code>.state.json</code>,
+  <code>.env</code> and everything under <code>data/</code> — the ledger included. A restore that brings a
+  <code>config.json</code> prompts for the container restart that makes it take effect.</p>
+  {% endif %}
+  <form method="post" action="/backup/restore" enctype="multipart/form-data" class="inline-form"
+        data-confirm="Restore this backup onto this host? Existing files are kept unless overwrite is ticked.">
     <input type="file" name="archive" accept=".zip" required>
     <label><input type="checkbox" name="force" value="1"> overwrite files that already exist</label>
-    <button type="submit">Restore</button>
+    <button type="submit" class="danger">Restore</button>
   </form>
-  {% else %}
-  <p class="muted">This host is configured, so restoring from the page is disabled (anyone who can open
-  this page could otherwise replace the live configuration). On the machine itself:</p>
-  <pre>python -m scripts.backup --restore backups/&lt;file&gt;.zip          # keeps existing files
-python -m scripts.backup --restore backups/&lt;file&gt;.zip --force  # overwrites them</pre>
-  {% endif %}
 
   <details class="advanced">
     <summary>What a backup would contain</summary>

@@ -23,16 +23,31 @@
   // Side index: highlight the panel nearest the top of the viewport.
   var links = Array.prototype.slice.call(document.querySelectorAll(".settings-nav a[href^='#']"));
   var panels = links.map(function (a) { return document.getElementById(a.getAttribute("href").slice(1)); });
+  var pinned = null;  // the panel a click chose; held until the user scrolls away from it
   var mark = function () {
     var best = 0, bestTop = -Infinity;
+    var atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
     panels.forEach(function (p, i) {
       if (!p) return;
       var top = p.getBoundingClientRect().top;
       if (top <= 80 && top > bestTop) { bestTop = top; best = i; }
+      // A panel near the end of the page can never reach the top of the viewport (the page
+      // stops scrolling first), so the one in view once the page is scrolled to its end wins.
+      if (atBottom && top < window.innerHeight * 0.6) { best = i; }
     });
+    if (pinned !== null) {
+      var box = panels[pinned] && panels[pinned].getBoundingClientRect();
+      if (box && box.top <= 120 && box.bottom > 60) { best = pinned; } else { pinned = null; }
+    }
     links.forEach(function (a, i) { a.classList.toggle("active", i === best); });
   };
-  if (links.length) { mark(); window.addEventListener("scroll", mark, { passive: true }); }
+  if (links.length) {
+    mark();
+    window.addEventListener("scroll", mark, { passive: true });
+    links.forEach(function (a, i) {
+      a.addEventListener("click", function () { pinned = i; setTimeout(mark, 0); setTimeout(mark, 400); });
+    });
+  }
 
   // In-page confirmation for the delete forms (and the restart), same dialog the Orders page uses.
   var dialog = document.getElementById("settings-confirm");

@@ -465,15 +465,29 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             raise HTTPException(status_code=404)
         return FileResponse(str(path), media_type="application/zip", filename=name)
 
+    def _backup_path(name: str) -> Path:
+        if not name.startswith(backup_module.PREFIX) or not name.endswith(".zip") or "/" in name \
+                or "\\" in name or ".." in name:
+            raise HTTPException(status_code=404)
+        path = backups_dir / name
+        if not path.is_file():
+            raise HTTPException(status_code=404)
+        return path
+
+    @app.post("/backup/{name}/delete")
+    def backup_delete(name: str):
+        """Remove one backup zip. Same name
+        rule as the download; confirmed in-page before the form submits."""
+        _backup_path(name).unlink()
+        return RedirectResponse(url=f"/settings?message=Deleted+{name}#s-backup", status_code=303)
+
     @app.post("/backup/restore")
     async def backup_restore(request: Request, archive: UploadFile = File(...),
                              force: str = Form("")):
-        # Only while the clone is FRESH: an unauthenticated page must not be able to replace a live
-        # host's config.json. On a configured host, restore with `python -m scripts.backup
-        # --restore` on the machine itself.
-        if (repo_root / "config.json").is_file():
-            raise HTTPException(status_code=409, detail="config.json exists; restore from the "
-                                "command line on this host (python -m scripts.backup --restore).")
+        # On ANY host, confirmed
+        # in-page first. Existing files are kept unless the overwrite box is ticked, so an
+        # accidental upload onto a configured host changes nothing without that tick. The page
+        # has no login: keep the dashboard on loopback or your own network (docs/operations.md).
         backups_dir.mkdir(parents=True, exist_ok=True)
         safe_name = Path(archive.filename or "upload.zip").name
         if not safe_name.endswith(".zip"):
@@ -482,9 +496,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         saved.write_bytes(await archive.read())
         result = backup_module.restore_backup(saved, repo_root, force=bool(force))
         message = (f"Restored {len(result['restored'])} file(s), kept {len(result['skipped_existing'])}"
-                   " existing. Restart the app so the restored config.json is read.")
-        return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-backup",
-                                status_code=303)
+                   " existing" + (" (tick overwrite to replace them)" if result["skipped_existing"]
+                                  else "") + ".")
+        url = f"/settings?message={message.replace(' ', '+')}"
+        if "config.json" in result["restored"]:
+            url += "&restart=container"  # the run and the dashboard read config.json at start
+        return RedirectResponse(url=url + "#s-backup", status_code=303)
 
     # --- settings (edits config.json in place; never the Sheet) ---------------------------------
     from web import settings_form

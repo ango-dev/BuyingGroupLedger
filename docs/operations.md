@@ -320,10 +320,14 @@ The script is **standard library only**, so on a new machine the whole move is: 
 `python -m scripts.backup --restore <zip>` with the system Python, then the normal setup
 (`docker compose up -d --build`, or the venv). The dashboard's Settings page has a **Backup & Restore** panel that offers the same
 (`/backup` redirects there):
-a *Create a backup now* button (the zip lands in `backups/` and is downloadable from the page), and a
-*Restore* upload form that is enabled **only while no `config.json` exists** — on a configured host an
-unauthenticated page must not be able to replace the live configuration, so there you restore from
-the command line. After a restore, restart the app so the restored `config.json` is read.
+a *Create a backup now* button (the zip lands in `backups/`, which the compose file bind-mounts so
+a rebuild does not take it with it; each is downloadable and deletable from the page, deletion
+confirmed in-page), and a *Restore* upload form, on any host: files that already exist are kept
+unless *overwrite* is ticked, the upload is confirmed in-page, and a restore that brings a
+`config.json` prompts for the container restart that makes it take effect. The page has no login,
+so restoring from it is only as safe as the network the dashboard is on — keep it on loopback or
+your own network. Each backup's manifest names the commit it was made from; inside the image that
+comes from `.git/HEAD` and its ref, which `.dockerignore` lets in for exactly this.
 
 ### Moving off the Sheet (`ledger.backend`)
 

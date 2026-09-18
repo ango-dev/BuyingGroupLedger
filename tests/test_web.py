@@ -1143,6 +1143,28 @@ class TestThemeToggle:
 
 
 class TestBackupScript:
+    def test_the_commit_comes_from_the_git_files_when_there_is_no_git(self, tmp_path, monkeypatch):
+        """Inside the image there is no git; .dockerignore lets .git/HEAD and the ref in."""
+        from scripts import backup as backup_module
+
+        monkeypatch.delenv("GIT_COMMIT", raising=False)
+        root = tmp_path / "image"
+        (root / ".git" / "refs" / "heads").mkdir(parents=True)
+        (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (root / ".git" / "refs" / "heads" / "main").write_text("0123456789abcdef\n", encoding="utf-8")
+        assert backup_module._commit_from_git_files(root) == "0123456"
+        (root / ".git" / "refs" / "heads" / "main").unlink()
+        (root / ".git" / "packed-refs").write_text("# pack-refs\nfedcba9876543210 refs/heads/main\n",
+                                                   encoding="utf-8")
+        assert backup_module._commit_from_git_files(root) == "fedcba9"
+        assert backup_module._commit_from_git_files(tmp_path / "nowhere") == ""
+        monkeypatch.setenv("GIT_COMMIT", "abc1234")
+        assert backup_module._git_commit(tmp_path / "nowhere") == "abc1234"
+        ignore = (Path(__file__).resolve().parents[1] / ".dockerignore").read_text(encoding="utf-8")
+        assert "!.git/HEAD" in ignore and "!.git/refs/heads/" in ignore
+        compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text(encoding="utf-8")
+        assert "- ./backups:/app/backups" in compose  # a rebuild must not take the backups with it
+
     @pytest.fixture
     def repo(self, tmp_path):
         root = tmp_path / "repo"
@@ -1266,7 +1288,7 @@ class TestBackupPage:
         assert page.status_code == 200 and "Create a backup now" in page.text
         assert 'id="s-backup"' in page.text and 'href="#s-backup"' in page.text
         assert "None yet." in page.text
-        assert "restoring from the page is disabled" in page.text  # configured host
+        assert 'action="/backup/restore"' in page.text and "overwrite" in page.text  # any host
 
         created = client.post("/backup", follow_redirects=False)
         assert created.status_code == 303 and created.headers["location"].endswith("#s-backup")
@@ -1287,8 +1309,8 @@ class TestBackupPage:
         assert client.get("/backup/ledger_backup_missing.zip").status_code == 404
         assert client.get("/backup/..%2Fconfig.json").status_code == 404
 
-    def test_restore_upload_only_on_a_fresh_clone(self, repo, snapshot_path, logs_dir,
-                                                  failures_dir, tmp_path):
+    def test_restore_upload_works_on_any_host_and_keeps_existing_unless_forced(
+            self, repo, snapshot_path, logs_dir, failures_dir, tmp_path):
         import zipfile
 
         archive = tmp_path / "ledger_backup_x.zip"
@@ -1299,20 +1321,49 @@ class TestBackupPage:
 
         page = client.get("/settings").text
         assert "fresh clone" in page and 'action="/backup/restore"' in page
+        assert 'data-confirm="Restore this backup' in page  # the in-page confirmation
 
         with archive.open("rb") as handle:
             response = client.post("/backup/restore", files={"archive": ("b.zip", handle,
                                                                           "application/zip")},
                                    follow_redirects=False)
         assert response.status_code == 303 and response.headers["location"].startswith("/settings?message=Restored")
+        assert "restart=container" in response.headers["location"]  # config.json came back
         assert (repo / "config.json").read_text(encoding="utf-8") == '{"restored": true}'
         assert (repo / "data" / "sheet_backup_1.csv").is_file()
 
-        # Now configured: the upload is refused.
+        # Now configured: the form is still there, existing files are KEPT
+        # unless overwrite is ticked.
+        page = client.get("/settings").text
+        assert "fresh clone" not in page and 'action="/backup/restore"' in page and "overwrite" in page
+        (repo / "config.json").write_text('{"live": true}', encoding="utf-8")
         with archive.open("rb") as handle:
-            refused = client.post("/backup/restore", files={"archive": ("b.zip", handle,
-                                                                         "application/zip")})
-        assert refused.status_code == 409
+            kept = client.post("/backup/restore", files={"archive": ("b.zip", handle,
+                                                                      "application/zip")},
+                               follow_redirects=False)
+        assert kept.status_code == 303 and "kept+2+existing" in kept.headers["location"]
+        assert "restart=" not in kept.headers["location"]
+        assert (repo / "config.json").read_text(encoding="utf-8") == '{"live": true}'
+        with archive.open("rb") as handle:
+            forced = client.post("/backup/restore", data={"force": "1"},
+                                 files={"archive": ("b.zip", handle, "application/zip")},
+                                 follow_redirects=False)
+        assert forced.status_code == 303 and "Restored+2" in forced.headers["location"]
+        assert (repo / "config.json").read_text(encoding="utf-8") == '{"restored": true}'
+
+    def test_a_backup_can_be_deleted_from_the_panel(self, repo, snapshot_path, logs_dir, failures_dir):
+        (repo / "config.json").write_text("{}", encoding="utf-8")
+        client = self._client(repo, snapshot_path, logs_dir, failures_dir)
+        client.post("/backup", follow_redirects=False)
+        name = list((repo / "backups").glob("ledger_backup_*.zip"))[0].name
+        page = client.get("/settings").text
+        assert f'action="/backup/{name}/delete"' in page and 'form="del-backup-0"' in page
+        assert 'data-confirm="Delete backup' in page
+        gone = client.post(f"/backup/{name}/delete", follow_redirects=False)
+        assert gone.status_code == 303 and gone.headers["location"].endswith("#s-backup")
+        assert not list((repo / "backups").glob("ledger_backup_*.zip"))
+        assert client.post(f"/backup/{name}/delete").status_code == 404
+        assert client.post("/backup/..%2Fconfig.json/delete").status_code == 404
 
     def test_the_backup_panel_works_without_any_ledger_source(self, repo, logs_dir, failures_dir,
                                                               tmp_path):

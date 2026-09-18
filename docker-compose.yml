@@ -61,8 +61,12 @@ services:
       # rotated token is lost — which can strand the stored one and force a manual re-grab. Keeping
       # it a SEPARATE file from config.json is what lets that stay read-only.
       - ./.state.json:/app/.state.json
-      - ./data:/app/data          # generated CSVs (optional; Sheet is source of truth)
+      - ./data:/app/data          # THE LEDGER (data/ledger.sqlite3) and the CSV snapshots
       - ./logs:/app/logs          # run.log, the overlap lock, and the .last_run heartbeat
+      # Backup zips made from the dashboard's Settings page (or `python -m scripts.backup`). A
+      # bind mount so a rebuild does not take them with it (it did, 2026-09-18). They hold every
+      # live credential: this directory is gitignored and dockerignored, keep it that way.
+      - ./backups:/app/backups
     # Docker's default json-file driver grows without bound. On a Pi that means an SD card filling
     # up months later and taking the whole host down with it.
     logging:

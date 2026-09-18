@@ -31,4 +31,10 @@ logs/
 # Backup zips hold config.json and every live credential -- never baked into an image.
 backups/
 .git/
+# ...except the two tiny files that say which commit this is: scripts/backup.py stamps a backup's
+# manifest with it, and inside the image there is no `git` to ask (the commit column on the
+# Settings page's Backup panel was blank, 2026-09-18).
+!.git/HEAD
+!.git/refs/heads/
+!.git/packed-refs
 .gitignore
