@@ -58,14 +58,31 @@ def _spend(rows: list[LedgerRow]) -> float:
     return round(sum(r.total_cost or 0.0 for r in rows if not r.is_money_free), 2)
 
 
+def average_cashback(rows: list[LedgerRow]) -> tuple[float | None, int, int]:
+    """The EFFECTIVE cashback rate: weighted by
+    Total Cost over the rows that carry money and a Cashback Rate, so a 9% rate on a $300 row
+    does not count as much as a 4% rate on a $2,000 one. Returns (rate as a fraction or None,
+    rows counted, rows that carry money but no rate)."""
+    rated = [r for r in rows if not r.is_money_free and r.number("cashback_rate") is not None
+             and r.total_cost]
+    unrated = [r for r in rows if not r.is_money_free and r.total_cost
+               and r.number("cashback_rate") is None]
+    cost = sum(r.total_cost for r in rated)
+    if not cost:
+        return None, 0, len(unrated)
+    earned = sum(r.total_cost * (r.number("cashback_rate") or 0.0) for r in rated)
+    return round(earned / cost, 4), len(rated), len(unrated)
+
+
 def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
                  link) -> list[dict]:
-    """The SAME seven tiles for any period. `placed` are the period's rows (all of them for
+    """The SAME eight tiles for any period. `placed` are the period's rows (all of them for
     Lifetime; by Order Date for a month), `paid` the settled ones among them; `scope` is the
     phrase the hints end with ("of the ledger" / "placed in September 2026"); `link(**filters)`
     builds the tile's Orders-page href for that period."""
     open_rows = [r for r in placed if r.is_open]
     unpaid = [r for r in placed if r.is_unpaid]
+    rate, rated, unrated = average_cashback(placed)
     projected = _money_block([r for r in placed if r.is_committed])
     realized = _money_block(paid)
     return [
@@ -77,6 +94,10 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
         _tile("Spend", _spend(placed), "money",
               f"Total Cost over every row {scope} that carries money (cancelled / superseded "
               "excluded)", link(sort="total_cost", dir="desc")),
+        _tile("Average cashback", rate, "percent",
+              f"cost-weighted over the {rated} row(s) {scope} with a Cashback Rate"
+              + (f"; {unrated} row(s) with cost but no rate not counted" if unrated else ""),
+              link(sort="cashback_rate", dir="desc")),
         _tile("Paid out", realized["payout"], "money",
               f"{realized['rows']} settled row(s) in {realized['orders']} order(s) {scope}: "
               "Payout Date set, or status paid / return", link(state="settled"), tone="settled"),

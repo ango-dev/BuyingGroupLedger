@@ -11,6 +11,7 @@
   <a class="tile link {{ 'payout-' ~ t.tone if t.tone }}" href="{{ t.href }}">
     <div class="label">{{ t.label }}</div>
     {% if t.kind == 'money' %}<div class="value money">{{ t.value | money }}</div>
+    {% elif t.kind == 'percent' %}<div class="value money">{{ (t.value | percent) if t.value is not none else '—' }}</div>
     {% elif t.kind == 'pair' %}<div class="value">{{ t.value[0] }} <span class="muted">/ {{ t.value[1] }}</span></div>
     {% else %}<div class="value">{{ t.value }}</div>{% endif %}
     <div class="hint">{{ t.hint }}</div>

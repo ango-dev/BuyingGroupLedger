@@ -198,8 +198,10 @@ refusal lasts as long as the run does.
 paid yet), which is deliberately wider than the scrapers' terminal statuses; a gift-card row is
 never open.
 
-**The overview's two stat sections** carry the same seven tiles in the same order — rows and
-orders, open rows, spend (Total Cost over rows that carry money), paid out (settled payouts),
+**The overview's two stat sections** carry the same eight tiles in the same order — rows and
+orders, open rows, spend (Total Cost over rows that carry money), average cashback (the effective
+rate: cost-weighted over the rows that carry money and a Cashback Rate, so a big order counts for
+more than a small one; rows with cost but no rate are named and left out), paid out (settled payouts),
 **floating** (Total Cost of the rows the buying group has not paid yet: no settled payout; gift
 cards excluded), projected profit (committed, undated payouts) and realized profit (settled rows) —
 so the two read side by side. Floating is not spend minus paid out: that gap also holds the
