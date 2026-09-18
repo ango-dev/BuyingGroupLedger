@@ -479,11 +479,12 @@ holds what the ledger cannot know:
   Counted under line 27a.
 - **Program cashback** — Prime, Prime Business and Costco Executive pay cashback of their own,
   separate from any card or portal: one row per retailer login in your profiles. Line 6.
-- **Card sign-up bonuses** — one row per card used on an order placed in the year (every Card
-  Last 4 on the year's rows, whether or not the Cards settings list it), minus any the settings
-  mark `virtual`. Line 6.
+- **Cards** — one row per card used on an order placed in the year (every Card Last 4 on the
+  year's rows, whether or not the Cards settings list it), minus any the settings mark `virtual`:
+  the sign-up bonus received (line 6) and the annual fee paid (line 27a).
 - **Cashback sites** — the usual portals plus any you add. Line 6.
-- **Anything else** — an open list of other income or expense lines, and notes for the preparer.
+- **Other income** — an open list of income lines, and notes for the preparer. Income only: every
+  expense goes through the expense list, with its receipt.
 
 Everything is stored per year in `data/tax_inputs.json`. It is a summary for a preparer, not tax
 advice — every line says what it holds. Nothing on the page writes the ledger.

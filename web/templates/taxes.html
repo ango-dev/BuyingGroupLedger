@@ -95,13 +95,14 @@
     {% else %}<p class="muted small">No profiles with a Costco, Amazon or Amazon Business login in config.json, so nothing to ask.</p>{% endif %}
   </section>
 
-  <section class="panel" id="s-bonuses">
-    <header><h2>Card Sign-up Bonuses</h2><p class="muted">One row per card used on an order placed in {{ year }} — every Card Last 4 on the year's rows, whether or not the Cards settings list it, minus any marked <em>virtual</em> there. The bonus received in {{ year }}, if any. Counted under Other income (line 6).</p></header>
-    {% if bonus_prompts %}
-    <table class="entry-table"><thead><tr><th>Card</th><th>Bonus</th></tr></thead><tbody>
-      {% for p in bonus_prompts %}
-      <tr><td>{{ p.label }} <span class="muted small">— {{ p.hint }}</span></td>
-          <td class="narrow"><input type="text" name="{{ p.key }}" value="{{ inputs.bonuses.get(p.key, '') }}" placeholder="0.00" inputmode="decimal"></td></tr>
+  <section class="panel" id="s-cards">
+    <header><h2>Cards</h2><p class="muted">One row per card used on an order placed in {{ year }} — every Card Last 4 on the year's rows, whether or not the Cards settings list it, minus any marked <em>virtual</em> there. The sign-up bonus received in {{ year }} counts under Other income (line 6); the annual fee paid under Other expenses (line 27a). Blank = none.</p></header>
+    {% if card_prompts %}
+    <table class="entry-table"><thead><tr><th>Card</th><th>Sign-up Bonus</th><th>Annual Fee</th></tr></thead><tbody>
+      {% for p in card_prompts %}
+      <tr><td>{{ p.label }}</td>
+          <td class="narrow"><input type="text" name="bonus:{{ p.last4 }}" value="{{ inputs.bonuses.get('bonus:' ~ p.last4, '') }}" placeholder="0.00" inputmode="decimal"></td>
+          <td class="narrow"><input type="text" name="fee:{{ p.last4 }}" value="{{ inputs.fees.get('fee:' ~ p.last4, '') }}" placeholder="0.00" inputmode="decimal"></td></tr>
       {% endfor %}
     </tbody></table>
     {% else %}<p class="muted small">No card appears on an order placed in {{ year }}.</p>{% endif %}
@@ -120,17 +121,15 @@
   </section>
 
   <section class="panel" id="s-other">
-    <header><h2>Anything Else</h2><p class="muted">Any other income or expense of the business for {{ year }} that fits nowhere above: a label, the amount, and which side it is. Blank a label to drop the row.</p></header>
-    <table class="entry-table"><thead><tr><th>What</th><th>Amount</th><th>Side</th></tr></thead><tbody>
+    <header><h2>Other Income</h2><p class="muted">Any other income of the business for {{ year }} that fits nowhere above: a label and the amount. Blank a label to drop the row. Expenses do not go here — every expense goes in the Expenses list above, with its receipt.</p></header>
+    <table class="entry-table"><thead><tr><th>What</th><th>Amount</th></tr></thead><tbody>
       {% for o in inputs.other %}
       <tr><td><input type="text" name="other.{{ loop.index0 }}.label" value="{{ o.label }}"></td>
-          <td class="narrow"><input type="text" name="other.{{ loop.index0 }}.amount" value="{{ o.amount }}" inputmode="decimal"></td>
-          <td class="narrow">{{ choose('other.' ~ loop.index0 ~ '.kind', [('expense', 'expense'), ('income', 'income')], o.kind, '', 'cell') }}</td></tr>
+          <td class="narrow"><input type="text" name="other.{{ loop.index0 }}.amount" value="{{ o.amount }}" inputmode="decimal"></td></tr>
       {% endfor %}
       {% set n = inputs.other | length %}
       <tr class="new-row"><td><input type="text" name="other.{{ n }}.label" placeholder="e.g. a refund received"></td>
-          <td class="narrow"><input type="text" name="other.{{ n }}.amount" placeholder="0.00" inputmode="decimal"></td>
-          <td class="narrow">{{ choose('other.' ~ n ~ '.kind', [('expense', 'expense'), ('income', 'income')], 'expense', '', 'cell') }}</td></tr>
+          <td class="narrow"><input type="text" name="other.{{ n }}.amount" placeholder="0.00" inputmode="decimal"></td></tr>
     </tbody></table>
     <label class="field-block">Notes for the preparer <textarea name="notes" rows="3" class="json">{{ inputs.notes }}</textarea></label>
   </section>

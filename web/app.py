@@ -413,7 +413,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except Exception:  # noqa: BLE001
             cards = []
         return (tax_inputs.program_prompts(profiles),
-                tax_inputs.bonus_prompts(snapshot.rows, year, cards))
+                tax_inputs.card_prompts(snapshot.rows, year, cards))
 
     def taxes_page(request: Request, year: int, **extra):
         from web.settings_form import profile_labels
@@ -421,14 +421,14 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         snapshot = load(request)
         years = tax_years(snapshot)
         inputs = load_tax_inputs(year)
-        programs, bonuses = tax_prompts(snapshot, year)
+        programs, cards = tax_prompts(snapshot, year)
         summary = tax_inputs.schedule_c(tax_report_for(snapshot, year), inputs)
         try:
             labels = profile_labels()
         except Exception:  # noqa: BLE001
             labels = []
         return page(request, "taxes.html", snapshot=snapshot, year=year, years=years,
-                    inputs=inputs, summary=summary, program_prompts=programs, bonus_prompts=bonuses,
+                    inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
                     draft=extra.pop("draft", {}), **extra)
 
@@ -449,16 +449,16 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     async def taxes_save(request: Request):
         form = await request.form()
         year = requested_year(request, clock().year, form)
-        programs, bonuses = tax_prompts(load(request), year)
+        programs, cards = tax_prompts(load(request), year)
         inputs = load_tax_inputs(year)
         try:
-            inputs = tax_inputs.apply_form(inputs, form, programs + bonuses)
+            inputs = tax_inputs.apply_form(inputs, form, programs + cards)
         except ValueError as exc:
             return taxes_page(request, year, error=str(exc))
         tax_inputs.save_year(tax_inputs_path, year, inputs)
         act("settings", f"Tax inputs for {year} saved",
             {"year": year, "programs": inputs.program_total, "bonuses": inputs.bonus_total,
-             "sites": inputs.site_total, "other": len(inputs.other)})
+             "fees": inputs.fee_total, "sites": inputs.site_total, "other": len(inputs.other)})
         return RedirectResponse(url=f"/taxes?year={year}&notice=Saved+{year}", status_code=303)
 
     @app.post("/taxes/expense")
