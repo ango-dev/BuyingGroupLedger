@@ -733,9 +733,9 @@ class TestOrderPageEditing:
         assert links.count('class="button small"') == links.count("<a ") >= 1
         assert ">Details<" in links and "details" not in links
 
-    def test_the_wide_page_hides_only_the_page_footer_not_the_card_footer(self):
-        # `body.wide footer` (0,1,2) outranks `.card footer` (0,1,1) and hid every card's footer,
-        # Delete button and links included; the rule must target the page footer alone.
+    def test_no_page_rule_can_hide_the_card_footer(self):
+        # `body.wide footer` (0,1,2) once outranked `.card footer` (0,1,1) and hid every card's
+        # footer, Delete button and links included. The page footer is gone (2026-09-18); no rule
+        # may match a card's <footer> from above.
         css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
-        assert "body.wide > footer {" in css
-        assert "body.wide footer {" not in css
+        assert "body.wide footer {" not in css and "\nfooter {" not in css

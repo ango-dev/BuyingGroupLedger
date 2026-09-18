@@ -499,20 +499,30 @@ class TestUnsubmittableAlertsImmediately:
         assert not hasattr(sync_tracking, "_is_held")
         assert "deferrable" not in SubmissionResult().__dataclass_fields__
 
-    def test_an_unroutable_shipped_row_alerts(self, monkeypatch):
-        """Unsubmittable to ANY group is the same loss as a rejected submission, and carries the same
-        deadline. Previously this was only printed in the run summary."""
+    def test_an_unroutable_shipped_row_warns_once_per_group(self, monkeypatch):
+        """A group the config does not know is a gap to fill, not an emergency:
+        a calm alert ONCE per group name, remembered in .state.json; the log and the activity feed
+        carry it on every run."""
+        from config.loader import load_state
+        from diagnostics import activity
+
         sent = []
         monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
 
-        sync_tracking._alert_on_unroutable(
-            self._plan(unroutable_tracked=[(7, "ORDER-1", "1Z999", "Unclassified")]), apply=True)
-
+        plan = self._plan(unroutable_tracked=[(7, "ORDER-1", "1Z999", "AI")])
+        sync_tracking._alert_on_unroutable(plan, apply=True)
         subject, body = sent[0]
-        assert subject.startswith("ACTION NEEDED")
-        assert "route to no buying group" in subject
-        assert "BEFORE DELIVERY" in body, "the deadline is why this interrupts someone"
-        assert "row 7" in body and "1Z999" in body and "Unclassified" in body
+        assert subject == "Buying group not configured: AI -- 1 shipped package(s) waiting"
+        assert "ACTION NEEDED" not in subject and "BEFORE DELIVERY" not in body
+        assert "row 7" in body and "1Z999" in body and "'AI'" in body and "once per group name" in body
+        assert load_state()["unroutable_groups_alerted"]["AI"]
+        assert activity.read()[0]["summary"].startswith("1 shipped row(s) have a Buying Group that is not configured (AI)")
+
+        sync_tracking._alert_on_unroutable(plan, apply=True)  # the next run: no second alert
+        assert len(sent) == 1 and len(activity.read()) == 2  # but the feed has it again
+        sync_tracking._alert_on_unroutable(
+            self._plan(unroutable_tracked=[(9, "ORDER-2", "1Z777", "NewGroup")]), apply=True)
+        assert len(sent) == 2 and "NewGroup" in sent[1][0]  # a NEW name is alerted
 
     def test_an_untracked_unroutable_row_does_not_alert(self, monkeypatch):
         """An unclassified row with nothing to submit yet is a config gap to fix at leisure — no

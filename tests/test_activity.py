@@ -210,6 +210,7 @@ class TestThePage:
         assert "09-17 08:00" in body  # the run stamp
         assert 'href="/activity"' in body and 'class="gear' in body and 'href="/health"' not in body
         assert 'href="/failures"' not in body
+        assert 'class="pill backend"' not in body and "<footer" not in body  # gone (2026-09-18)
 
         everything = client.get("/activity", params={"days": "0"}).text
         assert everything.count("<tr class=\"kind-") == 4

@@ -46,7 +46,6 @@
     <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Switch between the light and dark theme">
       <span class="only-light">☾ dark</span><span class="only-dark">☀ light</span>
     </button>
-    <span class="pill backend" title="{{ source }}">{{ backend }}</span>
     {% if heartbeat %}
       <span class="pill {{ 'stale' if heartbeat.stale else 'ok' }}" title="{{ heartbeat.path }}">
         heartbeat: {{ heartbeat.message }}
@@ -66,8 +65,5 @@
 <main>
 {% block content %}{% endblock %}
 </main>
-<footer class="muted">
-  Buying Group Ledger · {{ backend }}{% if source %} · <code>{{ source }}</code>{% endif %}
-</footer>
 </body>
 </html>

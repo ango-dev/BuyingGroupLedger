@@ -65,6 +65,7 @@ Apply for real:
 
 import argparse
 import logging
+from datetime import datetime, timezone
 import re
 
 from gspread.utils import ValueInputOption, ValueRenderOption
@@ -1099,38 +1100,63 @@ def _write_payout_cells(worksheet, writes: dict[int, dict], apply: bool) -> None
 
 
 def _alert_on_unroutable(plan: dict, apply: bool) -> None:
-    """A SHIPPED package whose Buying Group routes to no provider — unsubmittable to ANY of them.
+    """A SHIPPED package whose Buying Group routes to no configured provider -- the run cannot
+    submit or insure it until the group is set up.
 
-    Until now this was only printed in the run summary, on the reasoning that an unrecognised
-    warehouse is a config gap rather than an error. That reasoning holds for a row with nothing to
-    submit yet; it does not hold once the package is in the carrier's hands, because then it is the
-    same loss as a rejected submission — the group never learns about the package, so it is neither
-    reimbursed nor insured — and it carries the same deadline (see `_run_one_group`: most groups only
-    insure a package whose tracking number arrived BEFORE delivery).
-
-    The fix is quick, which is exactly why it is worth interrupting someone for: add the warehouse's
-    address to config.json `warehouses`, or set the row's Buying Group by hand, and the next run submits it.
+    A WARNING, not an emergency: the usual cause is a group the
+    config does not know yet, which is a config gap to fill, not a loss in progress. So: a log
+    line and an activity-log entry on every run that sees it, and ONE calm alert per group name
+    (remembered in .state.json) rather than the same shout four times a day. Add the group's
+    warehouse / provider to config.json, or set the row's Buying Group by hand, and the next run
+    submits the rows.
     """
     rows = plan.get("unroutable_tracked") or []
     if not rows:
         return
+    labels = sorted({str(label) for _n, _oid, _t, label in rows})
     detail = "\n".join(
         f"  row {n}: order {oid}, tracking {t}, Buying Group {label!r}"
         for n, oid, t, label in rows
     )
-    log.warning("%d shipped row(s) route to no buying group", len(rows))
+    log.warning("%d shipped row(s) route to no configured buying group (%s):\n%s",
+                len(rows), ", ".join(labels), detail)
+    try:
+        from diagnostics import activity
+
+        activity.record("sync", f"{len(rows)} shipped row(s) have a Buying Group that is not "
+                        f"configured ({', '.join(labels)}); not submitted or insured until it is",
+                        {"groups": labels, "rows": [{"row": n, "order_id": oid, "tracking": t,
+                                                    "buying_group": label}
+                                                   for n, oid, t, label in rows][:40]})
+    except Exception:  # noqa: BLE001
+        log.debug("activity log unavailable", exc_info=True)
+    if not apply:
+        return
+    from config.loader import load_state, save_state
+
+    state = load_state()
+    already = state.get("unroutable_groups_alerted") or {}
+    fresh = [label for label in labels if label not in already]
+    if not fresh:
+        log.info("Unconfigured buying group(s) %s already alerted once; not repeating.",
+                 ", ".join(labels))
+        return
     _alert(
         apply,
-        f"ACTION NEEDED — {len(rows)} shipped package(s) route to no buying group",
-        "These rows have a tracking number but their Buying Group matches no configured provider, "
-        "so they cannot be submitted anywhere. Nobody is expecting these packages, and no insurance "
-        "can be filed on them.\n\n"
-        "MOST GROUPS ONLY INSURE A PACKAGE IF ITS TRACKING NUMBER WAS SUBMITTED BEFORE DELIVERY, so "
-        "this is worth fixing now rather than at the end of the week.\n\n"
-        "Add the delivery address to config.json `warehouses` (or set Buying Group on the row by hand) "
-        "and "
-        f"the next run will submit them:\n{detail}",
+        f"Buying group not configured: {', '.join(fresh)} -- {len(rows)} shipped package(s) waiting",
+        f"Buying Group {', '.join(repr(l) for l in fresh)} is not set up as a provider, so the run "
+        "cannot submit or insure these packages until it is. Add it to config.json (a `warehouses` "
+        "entry for its address, and a `buying_groups` provider if it has an API), or set the row's "
+        "Buying Group by hand, and the next run submits them.\n\n"
+        "This is sent once per group name; the Activity page lists the rows on every run.\n\n"
+        f"{detail}",
     )
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    state["unroutable_groups_alerted"] = {**already, **{label: stamp for label in fresh}}
+    try:
+        save_state(state)
+    except OSError:
+        log.warning("Could not remember the unroutable-group alert in .state.json", exc_info=True)
 
 
 def _alert_on_unresolved_splits(plan: dict, apply: bool) -> None:

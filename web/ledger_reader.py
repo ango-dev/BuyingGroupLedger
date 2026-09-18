@@ -558,7 +558,8 @@ class DbReader:
             last = self.db.last_mirror() if self.db.path.is_file() else None
             snapshot = Snapshot(
                 rows=rows, header=list(HEADER), backend=self.backend,
-                source=f"{self.db.path}" + (f" (mirrored from {last['source']})" if last else ""),
+                source=f"{self.db.path}" + (f" (mirrored from {last['source']})"
+                                            if last and self.upstream is not None else ""),
                 loaded_at=datetime.now(timezone.utc),
             )
             snapshot.meta = {"db_path": str(self.db.path), "last_mirror": last}

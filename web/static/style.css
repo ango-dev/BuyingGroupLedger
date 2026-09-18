@@ -45,7 +45,6 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
 main { padding: 0 20px 40px; max-width: 1600px; margin: 0 auto; }
-footer { padding: 12px 20px; border-top: 1px solid var(--line); }
 h1 { font-size: 1.5em; margin: 18px 0 10px; }
 h2 { font-size: 1.15em; margin: 26px 0 8px; }
 h3 { font-size: 1.02em; margin: 14px 0 6px; }
@@ -175,7 +174,6 @@ body.wide .count { margin: 4px 8px; flex: 0 0 auto; }
 body.wide .bulkbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px;
   background: var(--card); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 body.wide .sheet { overflow: auto; flex: 1 1 auto; min-height: 0; background: var(--card); border-top: 1px solid var(--line); }
-body.wide > footer { display: none; }  /* the PAGE footer only: a card's <footer> must stay visible */
 table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: collapse; }
 /* Grid lines are TRANSLUCENT so they take the row's own colour, as the sheet's do over a coloured
    row -- an opaque grey line reads as a gap between rows. */
