@@ -10,6 +10,10 @@
     <button type="submit" class="primary">Create a backup now</button>
     <span class="muted small">{{ members | length }} file(s) → <code>{{ backups_dir }}</code></span>
   </form>
+  <details class="advanced">
+    <summary>What a backup would contain</summary>
+    <ul class="files">{% for m in members %}<li class="mono small">{{ m }}</li>{% endfor %}</ul>
+  </details>
 
   <h3>Existing Backups</h3>
   {% if archives %}
@@ -50,8 +54,4 @@
     <button type="submit" class="danger">Restore</button>
   </form>
 
-  <details class="advanced">
-    <summary>What a backup would contain</summary>
-    <ul class="files">{% for m in members %}<li class="mono small">{{ m }}</li>{% endfor %}</ul>
-  </details>
 </section>
