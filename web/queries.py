@@ -91,9 +91,6 @@ class Filters:
     paid: str = ""
     #: One of STATES, or "" for every row.
     state: str = ""
-    #: A tax year (YYYY, "" = none): only the Expenses page scopes rows by it, but it rides on the
-    #: sort and pager links like every other filter so the page keeps its year.
-    year: str = ""
 
     @classmethod
     def from_query(cls, params) -> "Filters":
@@ -121,11 +118,7 @@ class Filters:
         state = str(params.get("state") or "").strip().lower()
         if state not in STATES:
             state = ""
-        year = str(params.get("year") or "").strip()
-        if not (len(year) == 4 and year.isdigit()):
-            year = ""
         return cls(
-            year=year,
             month=month_of(params.get("month")),
             paid=month_of(params.get("paid")),
             state=state,
@@ -162,7 +155,7 @@ class Filters:
         """The query mapping for a link; multi-valued facets are lists (encode with doseq)."""
         values = {"retailer": list(self.retailers), "profile": list(self.profiles),
                   "status": list(self.statuses), "group": list(self.groups), "q": self.q,
-                  "month": self.month, "paid": self.paid, "state": self.state, "year": self.year,
+                  "month": self.month, "paid": self.paid, "state": self.state,
                   "sort": self.sort, "dir": "desc" if self.desc else "asc",
                   "view": self.view if self.view != "table" else "",
                   "per": str(self.per) if self.per != DEFAULT_PER_PAGE else "",

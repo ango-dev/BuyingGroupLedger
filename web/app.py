@@ -40,7 +40,7 @@ TEMPLATES_DIR = HERE / "templates"
 STATIC_DIR = HERE / "static"
 
 #: The routes, for the read-only test that asserts every one of them refuses any non-GET method.
-ROUTES = ("/", "/orders", "/orders/{order_id}", "/audit", "/recon", "/expenses", "/taxes", "/failures", "/health")
+ROUTES = ("/", "/orders", "/orders/{order_id}", "/audit", "/recon", "/taxes", "/failures", "/health")
 
 
 # --------------------------------------------------------------------------------------------------
@@ -279,7 +279,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     # The Audit and Reconciliation pages ARE the Orders view (table or cards, the same filters,
     # sort, search, editing) over a subset of rows with a finding beside each. `scope` names the
     # subset; the filter form carries it so an htmx swap or a bulk edit re-renders the same page.
-    SCOPES = {"": "/orders", "audit": "/audit", "recon": "/recon", "expenses": "/expenses"}
+    SCOPES = {"": "/orders", "audit": "/audit", "recon": "/recon"}
     tax_inputs_path = (Path(repo_root_dir) if repo_root_dir else tax_inputs.Path(__file__).resolve().parents[1]) \
         / "data" / tax_inputs.FILE_NAME
 
@@ -340,13 +340,6 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             rows = [r for r in rows if r.order_id in report.keys]
             findings = recon_findings(rows, report)
             extra.update(recon=report)
-        elif scope == "expenses":
-            # The cost side of a tax year, as scripts/tax_report counts it: placed in the year,
-            # carrying money.
-            year = filters.year or str(clock().year)
-            rows = [r for r in rows if r.order_date.startswith(year) and not r.is_money_free]
-            extra.update(year=year, years=[str(y) for y in tax_years(snapshot)],
-                         tax=tax_report_for(snapshot, int(year))["totals"])
         by_order: dict[str, list] = {}
         for key, lines in (findings or {}).items():
             bucket = by_order.setdefault(key[0], [])
@@ -403,12 +396,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     def recon(request: Request):
         return scoped(request, "recon")
 
-    @app.get("/expenses", response_class=HTMLResponse)
-    def expenses(request: Request):
-        return scoped(request, "expenses")
-
     # ---- Taxes: the year on Schedule C, with the hand-entered items (web/tax_inputs.py) ---------
-    def tax_prompts() -> tuple[list, list]:
+    data_dir = tax_inputs_path.parent
+
+    def tax_prompts(snapshot, year: int) -> tuple[list, list]:
         try:
             from config.profiles import load_profiles
 
@@ -421,23 +412,31 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             cards = load_cards()
         except Exception:  # noqa: BLE001
             cards = []
-        return tax_inputs.membership_prompts(profiles), tax_inputs.bonus_prompts(cards)
+        return (tax_inputs.program_prompts(profiles),
+                tax_inputs.bonus_prompts(snapshot.rows, year, cards))
 
     def taxes_page(request: Request, year: int, **extra):
+        from web.settings_form import profile_labels
+
         snapshot = load(request)
         years = tax_years(snapshot)
         inputs = load_tax_inputs(year)
-        memberships, bonuses = tax_prompts()
+        programs, bonuses = tax_prompts(snapshot, year)
         summary = tax_inputs.schedule_c(tax_report_for(snapshot, year), inputs)
+        try:
+            labels = profile_labels()
+        except Exception:  # noqa: BLE001
+            labels = []
         return page(request, "taxes.html", snapshot=snapshot, year=year, years=years,
-                    inputs=inputs, summary=summary, membership_prompts=memberships,
-                    bonus_prompts=bonuses, site_names=tax_inputs.site_names(inputs), **extra)
+                    inputs=inputs, summary=summary, program_prompts=programs, bonus_prompts=bonuses,
+                    site_names=tax_inputs.site_names(inputs), profile_labels=labels,
+                    draft=extra.pop("draft", {}), **extra)
 
     def load_tax_inputs(year: int):
         return tax_inputs.load_year(tax_inputs_path, year)
 
-    def requested_year(request: Request, default: int) -> int:
-        text = str(request.query_params.get("year") or "").strip()
+    def requested_year(request: Request, default: int, form=None) -> int:
+        text = str((form.get("year") if form is not None else None) or request.query_params.get("year") or "").strip()
         return int(text) if len(text) == 4 and text.isdigit() else default
 
     @app.get("/taxes", response_class=HTMLResponse)
@@ -449,18 +448,62 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.post("/taxes/save")
     async def taxes_save(request: Request):
         form = await request.form()
-        text = str(form.get("year") or "").strip()
-        year = int(text) if len(text) == 4 and text.isdigit() else clock().year
-        memberships, bonuses = tax_prompts()
+        year = requested_year(request, clock().year, form)
+        programs, bonuses = tax_prompts(load(request), year)
+        inputs = load_tax_inputs(year)
         try:
-            inputs = tax_inputs.parse_form(form, memberships + bonuses)
+            inputs = tax_inputs.apply_form(inputs, form, programs + bonuses)
         except ValueError as exc:
             return taxes_page(request, year, error=str(exc))
         tax_inputs.save_year(tax_inputs_path, year, inputs)
         act("settings", f"Tax inputs for {year} saved",
-            {"year": year, "memberships": inputs.membership_total, "bonuses": inputs.bonus_total,
+            {"year": year, "programs": inputs.program_total, "bonuses": inputs.bonus_total,
              "sites": inputs.site_total, "other": len(inputs.other)})
         return RedirectResponse(url=f"/taxes?year={year}&notice=Saved+{year}", status_code=303)
+
+    @app.post("/taxes/expense")
+    async def taxes_expense_add(request: Request):
+        """One expense with its receipt: every field required (web/tax_inputs.add_expense)."""
+        form = await request.form()
+        year = requested_year(request, clock().year, form)
+        upload = form.get("receipt_file")
+        receipt_file = None
+        if upload is not None and getattr(upload, "filename", ""):
+            payload = await upload.read()
+            if payload:
+                receipt_file = (upload.filename, payload)
+        fields = {k: str(v) for k, v in form.items() if isinstance(v, str)}
+        inputs = load_tax_inputs(year)
+        try:
+            entry = tax_inputs.add_expense(inputs, fields, year=year, data_dir=data_dir,
+                                           receipt_file=receipt_file)
+        except ValueError as exc:
+            return taxes_page(request, year, error=str(exc), draft=fields)
+        tax_inputs.save_year(tax_inputs_path, year, inputs)
+        act("settings", f"Expense added to {year}: {entry['description']} ({entry['amount']:.2f})",
+            {"year": year, "id": entry["id"], "amount": entry["amount"], "profile": entry["profile"]})
+        return RedirectResponse(url=f"/taxes?year={year}&notice={quote('Added ' + entry['description'])}#s-expenses",
+                                status_code=303)
+
+    @app.post("/taxes/expense/{entry_id}/delete")
+    def taxes_expense_delete(request: Request, entry_id: str):
+        year = requested_year(request, clock().year)
+        inputs = load_tax_inputs(year)
+        entry = tax_inputs.remove_expense(inputs, entry_id, data_dir=data_dir)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="no such expense")
+        tax_inputs.save_year(tax_inputs_path, year, inputs)
+        act("settings", f"Expense removed from {year}: {entry['description']}", {"year": year, "id": entry_id})
+        return RedirectResponse(url=f"/taxes?year={year}&notice={quote('Removed ' + entry['description'])}#s-expenses",
+                                status_code=303)
+
+    @app.get("/taxes/receipt/{entry_id}")
+    def taxes_receipt(request: Request, entry_id: str):
+        year = requested_year(request, clock().year)
+        path = tax_inputs.receipt_path(load_tax_inputs(year), entry_id, data_dir=data_dir)
+        if path is None:
+            raise HTTPException(status_code=404)
+        return FileResponse(str(path), filename=path.name)
 
     def selected_keys(form) -> list[dict]:
         keys = []

@@ -1,40 +1,60 @@
 """The Taxes page's hand-entered side, and the Schedule C summary it produces.
 
-WHAT IS ASKED, AND WHY IT IS DERIVED. The memberships are one per (profile, retailer) the config
-says that profile is logged into, the sign-up bonuses one per configured card that is not
-`virtual`, so the page asks for exactly what the setup implies and nothing has to be typed twice.
-The cashback-site rows start from the usual names and keep whatever else was added. The answers
-are stored PER TAX YEAR in data/tax_inputs.json (inside every backup, beside the ledger) -- never
-in config.json, which is setup, not a year's figures.
+WHAT THE PAGE ASKS FOR, AND WHY EACH IS DERIVED OR TYPED.
 
-WHAT THE SUMMARY IS. scripts/tax_report.build_report's cash-basis figures for the year (payouts by
-Payout Date; COGS and insurance by Order Date) laid out on Schedule C's lines, with the hand-entered
-items on the lines they most plausibly belong to. It is a summary for a preparer, not tax advice:
-every line says what it holds, and the placement of the hand-entered items is a suggestion.
+- **Program cashback**: Prime, Prime Business and Costco Executive pay cashback of their own,
+  separate from any card or portal. One row per (profile, retailer) the config says is logged in,
+  so the page asks for exactly what the setup implies.
+- **Card sign-up bonuses**: one row per card USED in the tax year -- every distinct Card Last 4
+  on the year's ledger rows, whether or not the Cards settings know it -- minus any last-4 the settings mark
+  `virtual` (a virtual number of another card earns no bonus of its own).
+- **Cashback sites**: the usual portals plus any the user adds.
+- **Expenses**: the user's own list of everything spent for the business in the year beyond the
+  ledger's purchases -- each with a date, a description, an amount, the profile and the email of
+  the account that paid, and a receipt (an uploaded file, kept under data/expenses/, or a link).
+  All of those are REQUIRED.
+- **Anything else**: an open list of other income or expense lines, for what fits nowhere above.
+
+The answers live PER TAX YEAR in data/tax_inputs.json (inside every backup, beside the ledger),
+never in config.json, which is setup rather than a year's figures.
+
+THE SUMMARY. scripts/tax_report.build_report's cash-basis figures (payouts by Payout Date; COGS
+and insurance by Order Date) laid out on Schedule C's lines, with the hand-entered items placed
+where they most plausibly belong: program cashback, portal cashback, bonuses and other income on
+line 6; the expense list and other expenses on line 27a; insurance on 15; Part III shows the card
+cashback netted from cost. A summary for a preparer, not tax advice -- every line says what it
+holds.
 """
 from __future__ import annotations
 
 import json
+import re
+import uuid
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Iterable, Mapping
 
 #: The cashback sites the page always offers a row for (the user names the rest).
 DEFAULT_SITES = ("TopCashback", "Rakuten", "ShopBack", "RetailMeNot", "Capital One Shopping")
 
-#: Which membership a retailer login implies, in the words the user used.
-MEMBERSHIPS = {
-    "costco": "Costco Executive membership",
-    "amazon": "Prime (Young Adult) membership",
-    "amazon-business": "Prime Business Rewards membership",
+#: The cashback program a retailer login implies.
+PROGRAMS = {
+    "costco": "Costco Executive",
+    "amazon": "Prime",
+    "amazon-business": "Prime Business",
 }
 
 FILE_NAME = "tax_inputs.json"
+EXPENSES_DIR = "expenses"  # under data/: data/expenses/<year>/<id>_<file>
+
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @dataclass(frozen=True)
 class Prompt:
-    kind: str    # "membership" | "bonus"
+    kind: str    # "program" | "bonus"
     key: str     # stable id the stored amount is keyed by
     label: str
     hint: str = ""
@@ -42,15 +62,16 @@ class Prompt:
 
 @dataclass
 class YearInputs:
-    memberships: dict[str, float] = field(default_factory=dict)  # prompt key -> amount
-    bonuses: dict[str, float] = field(default_factory=dict)      # prompt key -> amount
-    sites: dict[str, float] = field(default_factory=dict)        # site name -> amount
-    other: list[dict] = field(default_factory=list)              # {label, amount, kind}
+    programs: dict[str, float] = field(default_factory=dict)   # prompt key -> cashback received
+    bonuses: dict[str, float] = field(default_factory=dict)    # prompt key -> bonus received
+    sites: dict[str, float] = field(default_factory=dict)      # site name -> cashback received
+    expenses: list[dict] = field(default_factory=list)         # see add_expense
+    other: list[dict] = field(default_factory=list)            # {label, amount, kind}
     notes: str = ""
 
     @property
-    def membership_total(self) -> float:
-        return round(sum(self.memberships.values()), 2)
+    def program_total(self) -> float:
+        return round(sum(self.programs.values()), 2)
 
     @property
     def bonus_total(self) -> float:
@@ -61,6 +82,10 @@ class YearInputs:
         return round(sum(self.sites.values()), 2)
 
     @property
+    def expense_total(self) -> float:
+        return round(sum(float(e.get("amount") or 0) for e in self.expenses), 2)
+
+    @property
     def other_income(self) -> float:
         return round(sum(float(o.get("amount") or 0) for o in self.other if o.get("kind") == "income"), 2)
 
@@ -69,8 +94,8 @@ class YearInputs:
         return round(sum(float(o.get("amount") or 0) for o in self.other if o.get("kind") != "income"), 2)
 
     def to_json(self) -> dict:
-        return {"memberships": self.memberships, "bonuses": self.bonuses, "sites": self.sites,
-                "other": self.other, "notes": self.notes}
+        return {"programs": self.programs, "bonuses": self.bonuses, "sites": self.sites,
+                "expenses": self.expenses, "other": self.other, "notes": self.notes}
 
     @classmethod
     def from_json(cls, payload: Mapping) -> "YearInputs":
@@ -93,8 +118,23 @@ class YearInputs:
                 continue
             other.append({"label": str(o["label"]).strip(), "amount": amount,
                           "kind": "income" if o.get("kind") == "income" else "expense"})
-        return cls(memberships=amounts("memberships"), bonuses=amounts("bonuses"),
-                   sites=amounts("sites"), other=other, notes=str(payload.get("notes") or ""))
+        expenses = []
+        for e in payload.get("expenses") or []:
+            if not isinstance(e, dict) or not e.get("id") or not e.get("date"):
+                continue
+            try:
+                amount = round(float(e.get("amount") or 0), 2)
+            except (TypeError, ValueError):
+                continue
+            expenses.append({
+                "id": str(e["id"]), "date": str(e["date"]), "description": str(e.get("description") or ""),
+                "amount": amount, "category": str(e.get("category") or ""),
+                "profile": str(e.get("profile") or ""), "email": str(e.get("email") or ""),
+                "receipt": dict(e.get("receipt") or {}), "added_at": str(e.get("added_at") or ""),
+            })
+        expenses.sort(key=lambda e: (e["date"], e["added_at"]))
+        return cls(programs=amounts("programs"), bonuses=amounts("bonuses"), sites=amounts("sites"),
+                   expenses=expenses, other=other, notes=str(payload.get("notes") or ""))
 
 
 # --------------------------------------------------------------------------------------------------
@@ -102,30 +142,38 @@ class YearInputs:
 # --------------------------------------------------------------------------------------------------
 
 
-def membership_prompts(profiles: Iterable) -> list[Prompt]:
-    """One per (profile, retailer) the config says is logged in: Costco Executive for a Costco
-    login, Prime for an Amazon one, Prime Business Rewards for an Amazon Business one."""
+def program_prompts(profiles: Iterable) -> list[Prompt]:
+    """One per (profile, retailer login) that has a cashback program of its own."""
     out = []
     for profile in profiles:
         for retailer in getattr(profile, "retailers", None) or []:
-            name = MEMBERSHIPS.get(str(retailer).strip().lower())
+            name = PROGRAMS.get(str(retailer).strip().lower())
             if name is None:
                 continue
-            out.append(Prompt("membership", f"membership:{profile.label}:{retailer}",
-                              f"{name} — {profile.label}", "annual fee paid this year, if any"))
+            out.append(Prompt("program", f"program:{profile.label}:{retailer}",
+                              f"{name} — {profile.label}", "cashback the program paid this year"))
     return out
 
 
-def bonus_prompts(cards: Iterable) -> list[Prompt]:
-    """One per configured card that is not virtual (a virtual number is another card's; it earns
-    no sign-up bonus of its own)."""
-    out = []
-    for card in cards:
-        if getattr(card, "virtual", False):
+def bonus_prompts(rows: Iterable, year: int, cards: Iterable = ()) -> list[Prompt]:
+    """One per card USED in `year`: every distinct Card Last 4 on rows placed in the year (with
+    the card name the ledger recorded, or the settings' name), minus the last-4s the Cards
+    settings mark virtual."""
+    virtual = {str(getattr(c, "last4", "")).strip() for c in cards if getattr(c, "virtual", False)}
+    names = {str(getattr(c, "last4", "")).strip(): str(getattr(c, "name", "")) for c in cards}
+    seen: dict[str, str] = {}
+    for row in rows:
+        if not row.order_date.startswith(str(year)) or getattr(row, "is_money_free", False):
             continue
-        out.append(Prompt("bonus", f"bonus:{card.last4}:{card.name}",
-                          f"{card.name} …{card.last4} sign-up bonus", "received this year, if any"))
-    return out
+        last4 = row.text("card_last4").strip()
+        if not last4 or last4 in virtual:
+            continue
+        name = row.text("card_name").strip() or names.get(last4, "")
+        if last4 not in seen or (name and not seen[last4]):
+            seen[last4] = name
+    return [Prompt("bonus", f"bonus:{last4}", f"{name or 'Card'} …{last4} sign-up bonus",
+                   "received this year, if any")
+            for last4, name in sorted(seen.items(), key=lambda kv: (kv[1].lower(), kv[0]))]
 
 
 def site_names(inputs: YearInputs) -> list[str]:
@@ -174,12 +222,15 @@ def _amount(text) -> float | None:
     return round(float(text), 2)
 
 
-def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt]) -> YearInputs:
-    """The page's form -> YearInputs. A blank amount is "none"; a bad one raises ValueError with the
-    field named. Prompt amounts are read by key; sites by `site.<i>.name` / `.amount`; the open
-    rows by `other.<i>.label` / `.amount` / `.kind`."""
+def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt]) -> tuple[dict, dict, dict, list, str]:
+    """The save form's amounts -> (programs, bonuses, sites, other, notes). A blank amount is
+    "none"; a bad one raises ValueError naming the field. The expense list is not on this form
+    (it has its own add / delete routes) and is left as stored."""
     errors: list[str] = []
-    inputs = YearInputs(notes=str(form.get("notes") or "").strip())
+    programs: dict[str, float] = {}
+    bonuses: dict[str, float] = {}
+    sites: dict[str, float] = {}
+    other: list[dict] = []
     for p in prompts:
         try:
             value = _amount(form.get(p.key))
@@ -187,7 +238,7 @@ def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt]) -> YearInputs
             errors.append(f"{p.label}: not a number")
             continue
         if value is not None:
-            (inputs.memberships if p.kind == "membership" else inputs.bonuses)[p.key] = value
+            (programs if p.kind == "program" else bonuses)[p.key] = value
     for i in _indexed(form, "site"):
         name = str(form.get(f"site.{i}.name") or "").strip()
         if not name:
@@ -198,7 +249,7 @@ def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt]) -> YearInputs
             errors.append(f"{name}: not a number")
             continue
         if value is not None:
-            inputs.sites[name] = value
+            sites[name] = value
     for i in _indexed(form, "other"):
         label = str(form.get(f"other.{i}.label") or "").strip()
         if not label:
@@ -209,10 +260,16 @@ def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt]) -> YearInputs
             errors.append(f"{label}: not a number")
             continue
         kind = "income" if str(form.get(f"other.{i}.kind") or "") == "income" else "expense"
-        inputs.other.append({"label": label, "amount": value, "kind": kind})
+        other.append({"label": label, "amount": value, "kind": kind})
     if errors:
         raise ValueError("; ".join(errors))
-    return inputs
+    return programs, bonuses, sites, other, str(form.get("notes") or "").strip()
+
+
+def apply_form(inputs: YearInputs, form: Mapping[str, str], prompts: Iterable[Prompt]) -> YearInputs:
+    programs, bonuses, sites, other, notes = parse_form(form, prompts)
+    return YearInputs(programs=programs, bonuses=bonuses, sites=sites, expenses=list(inputs.expenses),
+                      other=other, notes=notes)
 
 
 def _indexed(form: Mapping[str, str], prefix: str) -> list[int]:
@@ -226,6 +283,106 @@ def _indexed(form: Mapping[str, str], prefix: str) -> list[int]:
 
 
 # --------------------------------------------------------------------------------------------------
+# The expense list: every field required, the receipt kept beside the ledger
+# --------------------------------------------------------------------------------------------------
+
+
+def safe_filename(name: str) -> str:
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(str(name or "")).name)
+    name = re.sub(r"_+", "_", name)
+    name = re.sub(r"_(?=\.)", "", name).strip("._") or "receipt"
+    return name[:80]
+
+
+def add_expense(inputs: YearInputs, fields: Mapping[str, str], *, year: int, data_dir: Path,
+                receipt_file: tuple[str, bytes] | None = None) -> dict:
+    """Validate and append one expense. `receipt_file` = (filename, bytes) from the upload, or
+    None when a link was given. Raises ValueError naming what is missing."""
+    errors = []
+    when = str(fields.get("date") or "").strip()
+    if not _ISO_DATE.match(when):
+        errors.append("Date must be written as YYYY-MM-DD")
+    else:
+        try:
+            parsed = date.fromisoformat(when)
+        except ValueError:
+            errors.append("Date is not a real day")
+            parsed = None
+        if parsed is not None and parsed.year != int(year):
+            errors.append(f"Date must fall in {year}")
+    description = str(fields.get("description") or "").strip()
+    if not description:
+        errors.append("Description is required")
+    try:
+        amount = _amount(fields.get("amount"))
+    except ValueError:
+        amount = None
+        errors.append("Amount is not a number")
+    if amount is None:
+        errors.append("Amount is required")
+    profile = str(fields.get("profile") or "").strip()
+    if not profile:
+        errors.append("Profile is required")
+    email = str(fields.get("email") or "").strip()
+    if not _EMAIL.match(email):
+        errors.append("Email is required (the account that paid)")
+    link = str(fields.get("receipt_url") or "").strip()
+    if not receipt_file and not link:
+        errors.append("A receipt is required: upload the file or give its link")
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    entry_id = uuid.uuid4().hex[:10]
+    if receipt_file:
+        filename, payload = receipt_file
+        rel = Path(EXPENSES_DIR) / str(year) / f"{entry_id}_{safe_filename(filename)}"
+        target = Path(data_dir) / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+        receipt = {"file": rel.as_posix(), "name": safe_filename(filename)}
+    else:
+        receipt = {"url": link}
+    entry = {
+        "id": entry_id, "date": when, "description": description, "amount": amount,
+        "category": str(fields.get("category") or "").strip(), "profile": profile, "email": email,
+        "receipt": receipt, "added_at": date.today().isoformat(),
+    }
+    inputs.expenses.append(entry)
+    inputs.expenses.sort(key=lambda e: (e["date"], e["added_at"]))
+    return entry
+
+
+def remove_expense(inputs: YearInputs, entry_id: str, *, data_dir: Path) -> dict | None:
+    """Drop one expense (and its uploaded receipt file). Returns it, or None if unknown."""
+    for entry in inputs.expenses:
+        if entry["id"] == entry_id:
+            inputs.expenses.remove(entry)
+            rel = (entry.get("receipt") or {}).get("file")
+            if rel:
+                try:
+                    (Path(data_dir) / rel).unlink()
+                except OSError:
+                    pass
+            return entry
+    return None
+
+
+def receipt_path(inputs: YearInputs, entry_id: str, *, data_dir: Path) -> Path | None:
+    """The stored receipt file of an expense, if it has one and it is inside data/expenses/."""
+    for entry in inputs.expenses:
+        if entry["id"] == entry_id:
+            rel = (entry.get("receipt") or {}).get("file")
+            if not rel:
+                return None
+            base = (Path(data_dir) / EXPENSES_DIR).resolve()
+            path = (Path(data_dir) / rel).resolve()
+            if base not in path.parents:
+                return None
+            return path if path.is_file() else None
+    return None
+
+
+# --------------------------------------------------------------------------------------------------
 # The summary on Schedule C's lines
 # --------------------------------------------------------------------------------------------------
 
@@ -236,11 +393,11 @@ def schedule_c(report: dict, inputs: YearInputs) -> dict:
     payouts = float(t.get("payouts") or 0)
     cogs = float(t.get("cogs") or 0)
     insurance = float(t.get("insurance") or 0)
-    other_income = round(inputs.site_total + inputs.bonus_total + inputs.other_income, 2)
-    gross_income = round(payouts + other_income, 2)
-    other_expenses = round(inputs.membership_total + inputs.other_expense, 2)
+    other_income = round(inputs.program_total + inputs.site_total + inputs.bonus_total + inputs.other_income, 2)
+    gross_income = round(payouts - cogs + other_income, 2)
+    other_expenses = round(inputs.expense_total + inputs.other_expense, 2)
     total_expenses = round(insurance + other_expenses, 2)
-    net = round(gross_income - cogs - total_expenses, 2)
+    net = round(gross_income - total_expenses, 2)
     lines = [
         {"part": "I", "line": "1", "name": "Gross receipts or sales", "amount": round(payouts, 2),
          "what": f"buying-group payouts dated in {report['year']} ({t.get('payout_rows', 0)} rows)"},
@@ -248,13 +405,16 @@ def schedule_c(report: dict, inputs: YearInputs) -> dict:
          "what": f"COGS of orders placed in {report['year']}: cost + shipping + tax, net of gift cards and "
                  "card cashback (Part III below)"},
         {"part": "I", "line": "6", "name": "Other income", "amount": other_income,
-         "what": "cashback sites + card sign-up bonuses + the open income rows (suggested placement)"},
-        {"part": "I", "line": "7", "name": "Gross income", "amount": round(gross_income - cogs, 2),
+         "what": f"program cashback {inputs.program_total:,.2f} + cashback sites {inputs.site_total:,.2f} + "
+                 f"sign-up bonuses {inputs.bonus_total:,.2f} + other income {inputs.other_income:,.2f} "
+                 "(suggested placement)"},
+        {"part": "I", "line": "7", "name": "Gross income", "amount": gross_income,
          "what": "line 1 − line 4 + line 6"},
         {"part": "II", "line": "15", "name": "Insurance (other than health)", "amount": round(insurance, 2),
          "what": "buying-group shipment insurance premiums"},
         {"part": "II", "line": "27a", "name": "Other expenses", "amount": other_expenses,
-         "what": "memberships (Costco Executive, Prime, Prime Business Rewards) + the open expense rows"},
+         "what": f"the expense list {inputs.expense_total:,.2f} ({len(inputs.expenses)} receipt(s)) + "
+                 f"other expense rows {inputs.other_expense:,.2f}"},
         {"part": "II", "line": "28", "name": "Total expenses", "amount": total_expenses,
          "what": "lines 8 through 27a"},
         {"part": "II", "line": "31", "name": "Net profit or (loss)", "amount": net,

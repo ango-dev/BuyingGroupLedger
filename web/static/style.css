@@ -633,6 +633,16 @@ table.schedule td.neg { color: var(--bad); }
 .tax-form .entry-table input[type=text] { width: 100%; box-sizing: border-box; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
 .tax-form .entry-table td.narrow { width: 160px; }
 .tax-form textarea.json { margin-top: 4px; }
+table.expenses { width: 100%; }
+table.expenses td.num, table.expenses th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.expenses tr.total td { font-weight: 600; border-top: 1px solid var(--line); }
+.expense-form { display: flex; flex-direction: column; gap: 10px; }
+.expense-form .fgrid { display: grid; gap: 8px 12px; }
+.expense-form .fgrid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.expense-form .fgrid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.expense-form label, .expense-form .lbl { display: flex; flex-direction: column; gap: 3px; font-size: 0.85em; color: var(--muted); min-width: 0; }
+.expense-form input[type=text], .expense-form input[type=email] { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; width: 100%; box-sizing: border-box; }
+@media (max-width: 900px) { .expense-form .fgrid.four, .expense-form .fgrid.two { grid-template-columns: 1fr; } }
 
 /* ---- Motion. The rules that keep
    it cheap: only opacity, transform and colours ever animate (never a layout property, never a
