@@ -16,13 +16,6 @@
         <span class="muted">{{ c.order_date }}</span>
         <span class="retailer">{{ c.retailer }}</span>
         <span class="muted small">{{ c.rows }} row(s)</span>
-        {% if editable %}
-        <form class="card-delete" hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"
-              hx-confirm="Delete order {{ c.order_id }} — all {{ c.rows }} of its row(s) — from the sheet? This cannot be undone here.">
-          {% for k in c['keys'] %}<input type="hidden" name="sel" value="{{ k | tojson | forceescape }}">{% endfor %}
-          <button type="submit" class="danger small" title="delete every row of this order">✕ Delete order</button>
-        </form>
-        {% endif %}
       </header>
       <ul class="items">
         {% for name in c['items'] %}<li title="{{ name }}">{{ name }}</li>{% endfor %}
@@ -61,6 +54,13 @@
           {% if c.order_url %}<a href="{{ c.order_url }}" rel="noopener">order ↗</a>{% endif %}
           {% for u in c.receipt_urls %}<a href="{{ u }}" rel="noopener">receipt ↗</a>{% endfor %}
         </span>
+        {% if editable %}
+        <form class="card-delete" hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"
+              hx-confirm="Delete order {{ c.order_id }} — all {{ c.rows }} of its row(s) — from the sheet? This cannot be undone here.">
+          {% for k in c['keys'] %}<input type="hidden" name="sel" value="{{ k | tojson | forceescape }}">{% endfor %}
+          <button type="submit" class="danger small" title="delete every row of this order">✕ Delete order</button>
+        </form>
+        {% endif %}
       </footer>
     </article>
     {% else %}

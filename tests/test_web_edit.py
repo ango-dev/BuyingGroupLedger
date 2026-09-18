@@ -709,9 +709,10 @@ class TestOrderPageEditing:
         body = TestClient(app).get("/orders/X").text
         assert 'data-field="insurance"' in body and 'class="num edit"' not in body
 
-    def test_the_card_delete_is_in_the_header(self, sheet, tmp_path, logs_dir):
+    def test_the_card_delete_is_at_the_bottom_right(self, sheet, tmp_path, logs_dir):
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
         body = client.get("/orders", params={"view": "cards"}).text
         card = body[body.index('<article class="card'):body.index("</article>")]
-        header = card[card.index("<header>"):card.index("</header>")]
-        assert "✕ Delete order" in header and 'hx-post="/orders/delete"' in header
+        footer = card[card.index("<footer>"):card.index("</footer>")]
+        assert "✕ Delete order" in footer and 'hx-post="/orders/delete"' in footer
+        assert 'hx-post="/orders/delete"' not in card[:card.index("<footer>")]

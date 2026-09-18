@@ -347,7 +347,7 @@ table.order-rows tr.status-paid td[data-field="status"]       { background: #B6D
 table.order-rows tr.status-return td[data-field="status"]     { background: #DD7E6B; color: #1a1a1a; }
 table.order-rows tr.status-cancelled td[data-field="status"]  { background: #CCCCCC; color: #1a1a1a; text-decoration: line-through; }
 table.order-rows tr.status-superseded td[data-field="status"] { background: #666666; color: #f4f4f4; text-decoration: line-through; }
-.card header form.card-delete { margin-left: auto; }
+.card footer form.card-delete { margin-left: auto; }
 
 /* calmer links: an order id reads as text and only lights up on hover */
 .card header .order-id { color: var(--fg); }
