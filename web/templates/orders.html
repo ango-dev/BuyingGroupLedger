@@ -86,6 +86,14 @@
 {# The selection (hidden checkboxes in the row-number cells) and the buttons that act on it are
    ONE form, so the buttons' own form carries the selected keys -- an include of a second form did
    not reliably. #}
+{# The bulk form wraps the TABLE only. A card carries its own delete <form>; nested inside this one
+   the browser dropped the first card's form tag, so its button submitted #bulk as a plain GET and
+   its </form> closed #bulk for the cards after it. #}
+{% if filters.view == 'cards' %}
+<div id="orders-table">
+  {% include "_orders_cards.html" %}
+</div>
+{% else %}
 <form id="bulk" hx-include="#filters">
   {% if editable and filters.view == 'table' %}
   <div id="bulkbar" class="bulkbar">
@@ -99,7 +107,8 @@
   </div>
   {% endif %}
   <div id="orders-table">
-    {% if filters.view == 'cards' %}{% include "_orders_cards.html" %}{% else %}{% include "_orders_table.html" %}{% endif %}
+    {% include "_orders_table.html" %}
   </div>
 </form>
+{% endif %}
 {% endblock %}

@@ -741,6 +741,29 @@ class TestOrderPageEditing:
         assert "body.wide footer {" not in css and "\nfooter {" not in css
 
 
+class TestNoNestedForms:
+    def test_a_cards_delete_form_is_never_inside_the_bulk_form(self, sheet, tmp_path, logs_dir):
+        """The first card's delete did nothing but GET /orders?sel=...: its
+        <form> was nested in #bulk, so the browser dropped the tag and the button submitted the
+        outer form natively. The bulk form wraps the table view only."""
+        import re
+
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        cards = client.get("/orders", params={"view": "cards"}).text
+        assert 'id="bulk"' not in cards
+        table = client.get("/orders", params={"view": "table"}).text  # the cookie remembers cards
+        assert 'id="bulk"' in table
+        for body in (cards, table):
+            depth = 0
+            for tag in re.findall(r"<form\b|</form>", body):
+                depth += 1 if tag.startswith("<form") else -1
+                assert 0 <= depth <= 1, "a <form> is nested inside another <form>"
+            assert depth == 0
+        # every card's delete is its own htmx form, the first one included
+        first = cards[cards.index('<article class="card'):cards.index("</article>")]
+        assert '<form class="card-delete" hx-post="/orders/delete"' in first
+
+
 class TestTheDropdowns:
     def test_no_native_select_is_left_on_the_orders_or_settings_page(self, sheet, tmp_path, logs_dir):
         """every select-one dropdown uses the page's own dropdown design."""
