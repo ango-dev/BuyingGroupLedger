@@ -621,6 +621,9 @@ table.audit a.current { font-weight: 600; color: var(--accent); }
 .tag.pass { background: var(--ok-bg); color: var(--ok); }
 .tag.skip { background: var(--bg); color: var(--muted); }
 
+/* ---- a cell typed by hand on the dashboard: the runs keep it (ledger_db/hand_edits) ---- */
+table.sheetlike td.hand, table.card-rows td.hand { box-shadow: inset 3px 0 0 var(--committed); }
+
 /* ---- Motion. The rules that keep
    it cheap: only opacity, transform and colours ever animate (never a layout property, never a
    blanket transition of every property); every entrance is a one-shot of ~.2s; nothing loops except the dim of a cell

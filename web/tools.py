@@ -181,6 +181,12 @@ TOOLS: tuple[Tool, ...] = (
          "backend the Google Sheet checks (formulas, formats) are skipped. The Audit page shows the same findings by row.",
          "Checks", (Field("--stale-days", "Stale after (days)", "int", default="3"),
                     Field("--strict", "Strict", "flag"))),
+    Tool("hand_edits", "scripts.hand_edits", "Hand-edited cells",
+         "The cells typed on the dashboard that no run may overwrite. Lists them; Forget releases an order's "
+         "cells (or one field of them) so the next run may write them again.",
+         "Ledger Fixes", (Field("--forget", "Forget order", "text", "an order number; blank = just list"),
+                          Field("--field", "Field", "text", "with Forget: release only this field, e.g. cashback_rate")),
+         writes=True),
     Tool("migrate_expected_payout", "scripts.migrate_expected_payout", "Move commitments to Expected Payout",
          "One-time, after the 2026-09-18 column: move each open row's committed payout out of Actual Payout into "
          "Expected Payout, so the Reconciliation page can compare the promise with the payment.",

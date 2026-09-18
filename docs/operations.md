@@ -145,7 +145,13 @@ local files only.
 coloured by the Sheet's own status rules (read from its conditional formats: ordered red, shipped
 orange, delivered yellow, paid green, return terracotta, cancelled grey and superseded dark grey
 with strikethrough), a frozen header, full page width. Double-click a cell (or press Enter on it)
-to edit; Enter saves, Esc cancels. A cell that shows a link (Order Link, Tracking Link, Receipt
+to edit; Enter saves, Esc cancels. **A cell you edit is protected from then on**: the scheduled
+run's upsert, its order-level reproration and the buying-group sync all keep a hand-typed value
+(`ledger_db/hand_edits`, a table in the ledger file that the dashboard's writer fills; the cell
+shows a coloured left edge and says so in its tooltip). Deleting the row clears its marks; Tools
+→ Ledger Fixes → *Hand-edited cells* lists them and can release an order's cells (or one field)
+when you want the run to take over again. The repair scripts (backfills, retag, the profit-column
+refresh) are your own explicit rewrites and are not gated. A cell that shows a link (Order Link, Tracking Link, Receipt
 Link, a tracking number with its carrier link) cannot be double-clicked into — the click follows
 the link — so it carries a ✎ pencil that opens the editor, and a blank link cell shows *add ↗* on
 hover and edits on a single click. An edit lands on the Sheet exactly as if typed there: the row is

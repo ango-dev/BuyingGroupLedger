@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import re
 import time
+import logging
 from pathlib import Path
 from typing import Callable
 
@@ -44,6 +45,8 @@ from sheets.ledger_sync import (
     HEADER, SCOPES, _BOOL_FIELDS, _COL, _NUMERIC_FIELDS, _blank_to_none, _coerce,
     _ensure_grid_rows, _last_occupied_row, _parse_checkbox, _write_profit_formulas,
 )
+
+log = logging.getLogger(__name__)
 
 KEY_FIELDS = ("order_id", "order_date", "item_name", "shipment")
 FORMULA_FIELDS = ("cogs", "total_profit")
@@ -200,8 +203,40 @@ class _Grid:
         return matches[0]
 
 
+def _protect(worksheet, key: dict, field: str, value) -> None:
+    """Record a hand edit (ledger_db/hand_edits) when the ledger is the database; a Sheet has no
+    such record and a test fake needs none. Never fails the edit that succeeded."""
+    from ledger_db.hand_edits import ledger_db_of
+
+    db = ledger_db_of(worksheet)
+    if db is None:
+        return
+    try:
+        from ledger_db.hand_edits import record
+
+        record(db, normalize_key(key), field, value)
+    except Exception:  # noqa: BLE001
+        log.exception("the edit was written but could not be marked as hand-edited")
+
+
+def _forget(worksheet, key: dict) -> None:
+    from ledger_db.hand_edits import ledger_db_of
+
+    db = ledger_db_of(worksheet)
+    if db is None:
+        return
+    try:
+        from ledger_db.hand_edits import forget
+
+        forget(db, normalize_key(key))
+    except Exception:  # noqa: BLE001
+        log.exception("the row was deleted but its hand-edit marks could not be cleared")
+
+
 class SheetCellWriter:
-    """Write cells, append a row, delete rows. `opener` and `logs_dir` are injection points."""
+    """Write cells, append a row, delete rows. `opener` and `logs_dir` are injection points.
+    Every cell it writes under the `db` backend is recorded as hand-edited, so no scheduled run
+    overwrites it (ledger_db/hand_edits); a deleted row's marks are cleared."""
 
     backend = "sheet"
 
@@ -233,6 +268,7 @@ class SheetCellWriter:
             worksheet.update(a1, [[""]], value_input_option="USER_ENTERED")
         else:
             worksheet.update(a1, [[coerced]], value_input_option="RAW")
+        _protect(worksheet, key, field, coerced)
         return {"row_number": row_number, "field": field, "value": coerced}
 
     # --- the same cell across rows (bulk edit) --------------------------------------------------
@@ -246,16 +282,19 @@ class SheetCellWriter:
         self._guard()
         worksheet = self._opener()
         grid = _Grid(worksheet)
-        targets, errors = [], []
+        targets, errors, located = [], [], []
         for key in keys:
             try:
                 targets.append(grid.locate(key))
+                located.append(key)
             except EditError as exc:
                 errors.append(str(exc))
         targets = sorted(set(targets))
         if targets:
             data = [{"range": f"{_COL[field]}{n}", "values": [[coerced]]} for n in targets]
             worksheet.batch_update(data, value_input_option="USER_ENTERED" if coerced == "" else "RAW")
+            for key in located:
+                _protect(worksheet, key, field, coerced)
         return {"written": len(targets), "errors": errors, "field": field, "value": coerced}
 
     # --- a new row ------------------------------------------------------------------------------
@@ -301,6 +340,13 @@ class SheetCellWriter:
             row[FIELDNAMES.index(f)] = ""
         worksheet.update(f"A{row_number}", [_blank_to_none(row)], value_input_option="RAW")
         _write_profit_formulas(worksheet, [row_number])
+        # Every field the user typed on the new row is theirs: a scrape that later finds the
+        # order may fill the blanks, never rewrite these.
+        for field in EDITABLE_FIELDS:
+            if field in FORMULA_FIELDS or field == "total_cost":
+                continue
+            if str(fields.get(field, "") or "").strip():
+                _protect(worksheet, key, field, values.get(field, ""))
         return {"row_number": row_number, "key": key}
 
     # --- delete rows ----------------------------------------------------------------------------
@@ -316,4 +362,6 @@ class SheetCellWriter:
         targets = sorted({grid.locate(key) for key in keys}, reverse=True)
         for n in targets:
             worksheet.delete_rows(n)
+        for key in keys:
+            _forget(worksheet, key)  # a row re-created by a scrape starts clean
         return {"deleted": len(targets), "row_numbers": targets}

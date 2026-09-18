@@ -508,9 +508,25 @@ def _ensure_grid_cols(worksheet) -> None:
         worksheet.add_cols(len(HEADER) - current)
 
 
+def _protected_cells(worksheet) -> dict:
+    """{row key: fields} the user typed by hand (ledger_db/hand_edits); {} for a Sheet or a fake."""
+    from ledger_db.hand_edits import protected_fields
+
+    return protected_fields(worksheet)
+
+
+def _row_key(values: list) -> tuple:
+    from ledger_db.hand_edits import key_of_row
+
+    return key_of_row(values)
+
+
 def sync_csv_to_sheet(csv_path: Path) -> None:
     worksheet = _get_worksheet()
     _ensure_grid_cols(worksheet)
+    # Cells the user typed on the dashboard: the merge below keeps them whatever a scrape says.
+    #
+    protected = _protected_cells(worksheet)
     existing = worksheet.get_all_values()
     # An empty-but-existing worksheet returns [] or a single blank row like [[]] — both mean
     # "no header yet", so (re)write our header into row 1.
@@ -981,7 +997,8 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
                         })
                         continue  # leave the existing box's row untouched
 
-        merged = _merge_row(_preserve_from_stored(existing_row, raw_grid, row_number), sheet_row)
+        merged = _merge_row(_preserve_from_stored(existing_row, raw_grid, row_number), sheet_row,
+                            protected=protected.get(_row_key(existing_row), ()))
         # Preserved cells come back as strings from get_all_values(); re-coerce so a kept numeric
         # (e.g. a quantity carried over from a prior run) is written as a number, not text —
         # otherwise Sheets stores it as text and shows a leading-apostrophe '1.
@@ -1361,6 +1378,7 @@ def _reprorate_order_level(worksheet, order_ids: set, raw_totals: dict) -> None:
         if oid in order_ids:
             rows_by_order.setdefault(oid, []).append(row_number)
 
+    protected = _protected_cells(worksheet)
     data = []
     for oid, row_numbers in rows_by_order.items():
         totals = {field: raw_totals.get(field, {}).get(oid) for field in _ORDER_LEVEL_FIELDS}
@@ -1377,9 +1395,10 @@ def _reprorate_order_level(worksheet, order_ids: set, raw_totals: dict) -> None:
             if str(row_status).strip().lower() in MONEY_FREE_STATUSES:
                 continue
             weight = (costs[n] or 0) / cost_sum if cost_sum else 0.0
+            hand = protected.get(_row_key(grid[n - 1]), ()) if protected else ()
             for field, total in totals.items():
-                if total is None:
-                    continue
+                if total is None or field in hand:
+                    continue  # a share typed by hand stays (ledger_db/hand_edits)
                 data.append({"range": f"{_COL[field]}{n}", "values": [[round(total * weight, 2)]]})
 
     if not data:
@@ -1544,9 +1563,10 @@ def _preserve_from_stored(existing_row: list, raw_grid: list[list], row_number: 
     return out
 
 
-def _merge_row(existing_row: list, new_row: list) -> list:
+def _merge_row(existing_row: list, new_row: list, protected=()) -> list:
     """Overlay new_row onto existing_row, but never overwrite an existing non-empty cell with a
-    blank. This makes partial refreshes safe: a tracking-only re-check leaves the static columns
+    blank -- and never overwrite a PROTECTED field at all (`protected`: the field names the user
+    typed by hand on the dashboard; ledger_db/hand_edits). This makes partial refreshes safe: a tracking-only re-check leaves the static columns
     (item name, cost, address, ...) blank, and those blanks must not wipe already-captured data —
     while real new values (status, tracking, delivery date, last scraped at) still update.
 
@@ -1566,9 +1586,12 @@ def _merge_row(existing_row: list, new_row: list) -> list:
     until now the far more frequent scraper path did not have.
     """
     merged = []
+    protected = set(protected or ())
     for i, new_val in enumerate(new_row):
         old_val = existing_row[i] if i < len(existing_row) else ""
-        if str(new_val).strip() == "" and str(old_val).strip() != "":
+        if protected and i < len(FIELDNAMES) and FIELDNAMES[i] in protected:
+            merged.append(old_val)  # typed by hand: the run does not get a say
+        elif str(new_val).strip() == "" and str(old_val).strip() != "":
             merged.append(old_val)
         elif i == _STATUS_FIELD_IDX and _rank_of(new_val) < _rank_of(old_val):
             merged.append(old_val)

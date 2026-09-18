@@ -71,6 +71,8 @@ class LedgerRow:
     #: summing displayed cents drifts from the sheet's own SUM by a few cents, which is exactly
     #: the kind of number a user compares. A CSV backup has no such grid: the text is parsed.
     numbers: dict[str, float | None] = field(default_factory=dict)
+    #: Fields the user typed by hand on the dashboard (ledger_db/hand_edits): a run keeps them.
+    hand_edited: frozenset = frozenset()
 
     # --- raw access -------------------------------------------------------------------------------
     def text(self, name: str) -> str:
@@ -575,6 +577,12 @@ class DbReader:
                         pass
             self.refresh(force=force)
             records = self.db.fetch_rows()
+            try:
+                from ledger_db.hand_edits import protected
+
+                hand = protected(self.db)
+            except Exception:  # noqa: BLE001
+                hand = {}
             rows = []
             for rec in records:
                 cells = {}
@@ -584,7 +592,9 @@ class DbReader:
                         cells[field] = "TRUE" if int(value) else "FALSE"
                     else:
                         cells[field] = _as_text(value)
-                rows.append(LedgerRow(cells=cells, row_number=int(rec.get("sheet_row") or 0)))
+                key = tuple(cells.get(f, "").strip() for f in ("order_id", "order_date", "item_name", "shipment"))
+                rows.append(LedgerRow(cells=cells, row_number=int(rec.get("sheet_row") or 0),
+                                      hand_edited=frozenset(hand.get(key, ()))))
             last = self.db.last_mirror() if self.db.path.is_file() else None
             snapshot = Snapshot(
                 rows=rows, header=list(HEADER), backend=self.backend,

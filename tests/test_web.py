@@ -1747,3 +1747,25 @@ class TestReconPage:
         findings = findings_for(rows, report)
         assert findings[("O1", "2026-08-01", "Widget", "2")] == [("short", "expected $220.00, paid $200.00 on this row; the order is short-paid by $20.00")]
         assert not any(k[0] == "O4" for k in findings)
+
+
+class TestTableSorting:
+    """A header click must change the sort: htmx inherits hx-include, so the bulk form's include of the filter bar -- with its
+    hidden sort / dir inputs -- rode along on every header link and the current sort won."""
+
+    def test_the_bulk_forms_include_never_reaches_the_header_links(self, client):
+        template = (Path(__file__).resolve().parents[1] / "web" / "templates" / "orders.html").read_text(encoding="utf-8")
+        form = template[template.index('<form id="bulk"'):template.index("</form>", template.index('<form id="bulk"'))]
+        assert form.startswith('<form id="bulk" hx-disinherit="hx-include">')
+        assert form.count('hx-include="#filters"') == 2  # the two bulk buttons, nothing else
+        body = client.get("/orders").text
+        bulk = body[body.index('<form id="bulk"'):body.index("</form>", body.index('<form id="bulk"'))]
+        table = bulk.split('<div id="orders-table">')[1]
+        assert 'hx-include' not in table and 'sort=total_cost' in table
+
+    def test_a_sort_link_sorts(self, client):
+        body = client.get("/orders", params={"sort": "total_cost", "dir": "desc"},
+                          headers={"HX-Request": "true"}).text
+        first = body.index('data-field="total_cost">')
+        assert "$2,000.00" in body[first:first + 40]
+        assert "▼" in body[body.index("Total Cost"):body.index("Total Cost") + 30]

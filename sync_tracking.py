@@ -74,7 +74,7 @@ from alerts.notifier import alert
 from buying_groups.base import BuyingGroupError, PayoutRecord, TrackingSubmission
 from config.warehouses import is_deliberately_unrouted
 from buying_groups.registry import PROVIDERS, get_client, resolve_group
-from models.order import RETIRED_STATUSES
+from models.order import FIELDNAMES, RETIRED_STATUSES
 from sheets.ledger_sync import (
     HEADER,
     _col_letter,
@@ -192,6 +192,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     payout_by_row: dict[int, float | None] = {}
     date_by_row: dict[int, str] = {}
     expected_by_row: dict[int, float | None] = {}
+    key_by_row: dict[int, tuple] = {}  # the upsert key, for the hand-edit protection
 
     for offset, row in enumerate(data_rows):
         row_number = offset + 2  # row 1 is the header
@@ -261,6 +262,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
                 payout_by_row[row_number] = _as_float(cell(PAYOUT_AMOUNT_COL))
                 date_by_row[row_number] = cell(PAYOUT_DATE_COL)
                 expected_by_row[row_number] = _as_float(optional_cell(EXPECTED_PAYOUT_COL))
+                key_by_row[row_number] = (order_id, cell("Order Date"), cell("Item Name"), cell("Shipment"))
                 rows_by_order.setdefault(group_key, {}).setdefault(order_id, []).append(row_number)
             continue
 
@@ -304,6 +306,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         payout_by_row[row_number] = _as_float(cell(PAYOUT_AMOUNT_COL))
         date_by_row[row_number] = cell(PAYOUT_DATE_COL)
         expected_by_row[row_number] = _as_float(optional_cell(EXPECTED_PAYOUT_COL))
+        key_by_row[row_number] = (order_id, cell("Order Date"), cell("Item Name"), cell("Shipment"))
         rows_by_order.setdefault(group_key, {}).setdefault(order_id, []).append(row_number)
 
         # SETTLED = paid, with money actually recorded. Such a package needs no further SUBMITTING:
@@ -355,6 +358,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "payout_by_row": payout_by_row,
         "date_by_row": date_by_row,
         "expected_by_row": expected_by_row,
+        "key_by_row": key_by_row,
         "submitted_by_row": submitted_by_row,
         "unresolved_split": unresolved_split,
         "corrupted_tracking": corrupted_tracking,
@@ -779,7 +783,7 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
                    "Unexpected error — check logs/run.log.")
 
     if all_writes:
-        _write_payout_cells(worksheet, all_writes, apply)
+        _write_payout_cells(worksheet, _drop_protected(all_writes, plan, worksheet), apply)
     return {"plan": plan, "outcomes": outcomes, "writes": all_writes}
 
 
@@ -1083,6 +1087,29 @@ def _merge_writes(target: dict[int, dict], incoming: dict[int, dict]) -> None:
     """Fold per-row cell updates together so two providers (or two passes) can touch one row."""
     for row_number, cells in incoming.items():
         target.setdefault(row_number, {}).update(cells)
+
+
+def _drop_protected(writes: dict[int, dict], plan: dict, worksheet) -> dict[int, dict]:
+    """The planned cell writes minus every cell the user typed by hand on the dashboard
+    (ledger_db/hand_edits): a hand-set payout, insurance or expected payout is theirs to keep.
+    Logged, so a figure the group reports that never lands can be traced to its lock."""
+    from ledger_db.hand_edits import drop_protected, protected_fields
+
+    protected = protected_fields(worksheet)
+    if not protected:
+        return writes
+    by_header = {heading: fld for fld, heading in zip(FIELDNAMES, HEADER)}
+    keys = plan.get("key_by_row") or {}
+    out: dict[int, dict] = {}
+    for row_number, cells in writes.items():
+        fields = protected.get(keys.get(row_number), ())
+        kept, dropped = drop_protected(cells, fields, by_header=by_header) if fields else (cells, [])
+        if dropped:
+            log.info("row %d: %s typed by hand on the dashboard; the sync leaves it alone",
+                     row_number, ", ".join(dropped))
+        if kept:
+            out[row_number] = kept
+    return out
 
 
 def _write_payout_cells(worksheet, writes: dict[int, dict], apply: bool) -> None:
