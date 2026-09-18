@@ -216,7 +216,12 @@ body.wide .cards-wrap { overflow: auto; flex: 1 1 auto; min-height: 0; padding: 
 .card .facts-grid dd.neg { color: var(--bad); font-weight: 600; }
 .card .facts-grid dd.pos { color: var(--ok); font-weight: 600; }
 .card footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
-.card footer .links { display: flex; gap: 10px; flex-wrap: wrap; }
+.card footer .links { display: flex; gap: 6px; flex-wrap: wrap; }
+/* the card's footer links are buttons of the same cut as its Delete order button (neutral, not red) */
+a.button { display: inline-block; font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 10px; text-decoration: none; line-height: normal; }
+a.button:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+a.button.small { padding: 2px 8px; font-size: 0.85em; }
 .card form.card-delete { margin: 0; }
 button.small { padding: 2px 8px; font-size: 0.85em; }
 .pager { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 14px 0 0; }

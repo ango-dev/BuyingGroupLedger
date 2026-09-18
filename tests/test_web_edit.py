@@ -716,6 +716,9 @@ class TestOrderPageEditing:
         footer = card[card.index("<footer>"):card.index("</footer>")]
         assert "✕ Delete order" in footer and 'hx-post="/orders/delete"' in footer
         assert 'hx-post="/orders/delete"' not in card[:card.index("<footer>")]
+        # the footer's links are buttons of the same cut as Delete order
+        links = footer[footer.index('<span class="links">'):footer.index("</span>")]
+        assert links.count('class="button small"') == links.count("<a ") >= 1
 
     def test_the_wide_page_hides_only_the_page_footer_not_the_card_footer(self):
         # `body.wide footer` (0,1,2) outranks `.card footer` (0,1,1) and hid every card's footer,
