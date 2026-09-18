@@ -50,9 +50,9 @@
       {% endif %}
       <footer>
         <span class="links">
-          <a class="button small" href="/orders/{{ c.order_id }}">details</a>
-          {% if c.order_url %}<a class="button small" href="{{ c.order_url }}" rel="noopener">order ↗</a>{% endif %}
-          {% for u in c.receipt_urls %}<a class="button small" href="{{ u }}" rel="noopener">receipt ↗</a>{% endfor %}
+          <a class="button small" href="/orders/{{ c.order_id }}">Details</a>
+          {% if c.order_url %}<a class="button small" href="{{ c.order_url }}" rel="noopener">Order</a>{% endif %}
+          {% for u in c.receipt_urls %}<a class="button small" href="{{ u }}" rel="noopener">Receipt</a>{% endfor %}
         </span>
         {% if editable %}
         <form class="card-delete" hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"
