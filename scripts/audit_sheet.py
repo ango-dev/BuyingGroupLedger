@@ -145,6 +145,18 @@ class Grids:
         )
 
 
+def open_ledger_readonly():
+    """The SQLite ledger as a READ-ONLY worksheet (ledger_db/worksheet.py) -- what
+    open_worksheet_readonly hands out under `ledger.backend` = `db`: the same view, no
+    credentials, nothing to create, every write refused."""
+    from config.settings import settings
+    from ledger_db.store import LedgerDb
+    from ledger_db.worksheet import DbWorksheet
+
+    worksheet = DbWorksheet(LedgerDb(settings.ledger_db_path), read_only=True)
+    return worksheet, worksheet.title
+
+
 def open_worksheet_readonly():
     """Open the ledger worksheet with read-only credentials.
 
@@ -152,10 +164,13 @@ def open_worksheet_readonly():
     missing (ledger_sync.py:172-178), which would let this script audit a tab it had just fabricated.
     Here a missing tab is a hard stop, and nothing is created.
     """
+    from config.settings import settings
+
+    if settings.ledger_is_db():
+        return open_ledger_readonly()
+
     import gspread
     from google.oauth2.service_account import Credentials
-
-    from config.settings import settings
 
     creds = settings.google_credentials(READONLY_SCOPES)
     client = gspread.authorize(creds)
@@ -2203,6 +2218,16 @@ def main() -> None:
     parser.add_argument("--compare", metavar="PATH", help="also report what changed vs an earlier --save-snapshot (added/removed/changed rows; bare names resolve under data/)")
     parser.add_argument("--stale-days", type=int, default=3, help="warn when an OPEN row hasn't been re-scraped in this many days (default 3)")
     args = parser.parse_args()
+
+    if not args.from_snapshot:
+        from config.settings import settings
+
+        if settings.ledger_is_db():
+            print("ledger.backend is `db`: the ledger is data/ledger.sqlite3, and this audit's "
+                  "checks are the Google Sheet's (formulas, formats, notes, grid). It has nothing to "
+                  "audit there. The dashboard's /health and the offline tests cover the database; "
+                  "`--from-snapshot` still audits a saved Sheet snapshot.", file=sys.stderr)
+            raise SystemExit(2)
 
     if args.from_snapshot:
         from_path = _snapshot_path(args.from_snapshot)

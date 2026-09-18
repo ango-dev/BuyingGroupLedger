@@ -590,6 +590,12 @@ def reader_from_settings(settings, *, source: str | None = None,
     filled from a CSV, no credentials)."""
     chosen = (source or settings.web_ledger_source or "snapshot").strip().lower()
     snapshot_path = snapshot_path or settings.web_snapshot_path or None
+    if settings.ledger_is_db() and source is None:
+        # The database IS the ledger: serve it as it is, and never mirror anything INTO it (a
+        # mirror from the deprecated Sheet would overwrite the ledger). web.ledger_source is
+        # moot under this flag; an explicit CLI --source still wins for development.
+        return DbReader(settings.ledger_db_path, upstream=None,
+                        ttl_seconds=settings.web_sheet_cache_ttl_seconds)
     if chosen == "snapshot":
         return SnapshotReader(snapshot_path)
     if chosen == "sheet":

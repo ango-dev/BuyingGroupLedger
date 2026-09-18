@@ -603,6 +603,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         body = {
             "ok": error is None,
             "read_only": True,
+            "ledger_backend": getattr(settings, "ledger_backend", "sheet"),
             "rows": rows,
             "schema_matches": schema,
             "heartbeat": heartbeat(),

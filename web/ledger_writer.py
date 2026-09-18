@@ -91,9 +91,15 @@ def run_in_progress(logs_dir: Path | None = None, *, now: float | None = None) -
 def _open_for_writing():
     """The worksheet with the WRITE scope. Deliberately not ledger_sync._get_worksheet, which
     creates a missing tab -- an edit must never create anything."""
-    import gspread
-
     from config.settings import settings
+
+    if settings.ledger_is_db():
+        from ledger_db.store import LedgerDb
+        from ledger_db.worksheet import DbWorksheet
+
+        return DbWorksheet(LedgerDb(settings.ledger_db_path))
+
+    import gspread
 
     client = gspread.authorize(settings.google_credentials(SCOPES))
     spreadsheet = client.open_by_key(settings.google_sheet_id)

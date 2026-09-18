@@ -32,6 +32,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     from config.settings import settings
+
+    if settings.ledger_is_db():
+        print("Refusing: ledger.backend is `db`, so data/ledger.sqlite3 IS the ledger. Mirroring "
+              "the Sheet into it would overwrite the ledger with the Sheet's stale copy. Set "
+              "ledger.backend back to `sheet` first if you really mean to reload from the Sheet.",
+              file=sys.stderr)
+        return 2
+
     from web.ledger_reader import SheetReader, SnapshotReader
 
     reader = SnapshotReader(args.from_snapshot) if args.from_snapshot else SheetReader(ttl_seconds=0)

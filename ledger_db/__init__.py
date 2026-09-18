@@ -18,7 +18,10 @@ from sheets.ledger_sync's own field sets (_NUMERIC_FIELDS / _INT_FIELDS / _BOOL_
 primary key is the upsert key (Order ID + Order Date + Item Name + Shipment). Adding a column to the
 ledger therefore adds it here on the next mirror -- the table is rebuilt whenever the schema differs.
 
-WHAT COMES NEXT (the cutover, NOT built -- see the design notes): make this the primary store the writers
-target and the Sheet a view exported from it. That touches every money path and is a deliberate,
-separately-decided step.
+STAGE TWO (2026-09-18): `ledger.backend` = `db` makes this file THE ledger. ledger_db/worksheet.py
+puts a gspread.Worksheet face on it, sheets.ledger_sync._get_worksheet hands that out instead of
+the Sheet, and every writer -- the upsert, the sort, the buying-group sync, the BFMR auto-reply,
+the dashboard's editor, the scripts -- runs on it unchanged; the read-only opener serves the same
+view to the audit-style readers and the dashboard reads the file directly. Mirroring INTO the
+file is refused under the flag. The Sheet code stays, deprecated, until the user deletes it.
 """

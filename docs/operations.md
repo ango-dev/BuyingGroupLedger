@@ -325,6 +325,44 @@ a *Create a backup now* button (the zip lands in `backups/` and is downloadable 
 unauthenticated page must not be able to replace the live configuration, so there you restore from
 the command line. After a restore, restart the app so the restored `config.json` is read.
 
+### Moving off the Sheet (`ledger.backend`)
+
+The Google Sheet is **deprecated** as the ledger's home. `ledger.backend` (`LEDGER_BACKEND`) says
+where the ledger lives:
+
+| Value | What runs where |
+|---|---|
+| `sheet` (today's default) | As before: every writer targets the Sheet, `data/ledger.sqlite3` is a mirror refreshed at the end of each run. |
+| `db` | `data/ledger.sqlite3` **is** the ledger. The scrapers' upsert, the sort, the buying-group sync (payouts, insurance, the submitted tick), the BFMR auto-reply, the dashboard's editor and the scripts all read and write it, and **nothing touches the Sheet**. |
+
+How it works: every writer addresses the ledger as a positional grid through a handful of
+`gspread.Worksheet` methods, so `ledger_db/worksheet.py` implements that surface over the SQLite
+file and `sheets.ledger_sync._get_worksheet()` hands it out instead of a Google worksheet — the
+money-path code runs unchanged, and the tests that pin its behaviour run against the adapter too.
+COGS and Total Profit are never stored as formula text: the two columns are computed from the row
+on every read (the same Python mirrors of the formulas the dashboard already used), so the numbers
+are the sheet's numbers, live, for every row. A row with no Order ID is not a ledger row and is
+never stored.
+
+**To switch** (one host at a time, between runs):
+
+```bash
+python -m scripts.mirror_sheet_to_db      # the LAST copy of the Sheet, while still on `sheet`
+# set "ledger": {"backend": "db"} in config.json (or LEDGER_BACKEND=db), then
+docker compose restart                    # or python -m web again on a desktop
+```
+
+Under `db`: `python -m scripts.mirror_sheet_to_db` and the end-of-run mirror refuse to run (a
+mirror from the stale Sheet would overwrite the ledger), the dashboard serves the file directly
+whatever `web.ledger_source` says (an explicit `--source` still wins for development), `/health`
+reports `ledger_backend`, and `python -m scripts.audit_sheet` exits with a note (its checks are the
+Sheet's: formulas, formats, notes, grid; `--from-snapshot` still audits a saved Sheet snapshot).
+The Sheet-only maintenance scripts (`reorder_sheet`, `apply_sheet_formats`, the format-related
+backfills) are not meant for the database and say so if they hit a method the adapter does not
+have. **Nothing of the Sheet code is deleted**: switching back is setting the flag to `sheet`
+(the Sheet then lags by whatever was written meanwhile). Deleting the Sheet paths is the user's
+call, tracked in the design notes.
+
 ### The Settings page
 
 `/settings` edits `config.json` in place. A side index lists the panels; each panel is one

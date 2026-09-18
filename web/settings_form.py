@@ -167,7 +167,7 @@ def restart_scope(setting: Setting) -> str:
     "next run"   nothing -- every scheduled run is a fresh process that reads the file"""
     if setting.env in container_restart_envs():
         return "container"
-    if setting.section in ("web", "database"):
+    if setting.section in ("web", "database", "ledger"):
         return "dashboard"
     return "next run"
 
@@ -391,8 +391,11 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
     "container": ("Schedule", "How often the container runs, and whether it runs at start. "
                   "Read once at container start."),
     "scraping": ("Scraping", "How far back each run looks, and the money rules the ledger applies."),
-    "google": ("Google Sheet", "The ledger spreadsheet and the service account that reads and "
-               "writes it."),
+    "ledger": ("Ledger", "Where the ledger lives: the Google Sheet (deprecated) or the SQLite "
+               "database. Switching needs one last mirror first -- see docs/operations.md, "
+               "\"Moving off the Sheet\"."),
+    "google": ("Google Sheet", "DEPRECATED -- used only while the ledger backend is `sheet`: the "
+               "spreadsheet and the service account that reads and writes it."),
     "alerts": ("Alerts", "Where a failed run, a logged-out session or a stale heartbeat is reported."),
     "buying_groups": ("Buying groups", "BFMR and MaxOutDeals: API access, insurance, and the "
                       "combined-package auto-reply."),

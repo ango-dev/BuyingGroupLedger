@@ -106,9 +106,11 @@ class LedgerDb:
 
     # --- writes (the mirror is the only writer) --------------------------------------------------
     def replace_rows(self, records: list[dict], *, backend: str, source: str, skipped: int = 0,
-                     header_ok: bool = True, duration_ms: int = 0) -> int:
+                     header_ok: bool = True, duration_ms: int = 0, log_run: bool = True) -> int:
         """Replace every ledger row with `records` (dicts keyed by FIELDNAMES + `sheet_row`), in one
-        transaction, and log the mirror run. Returns the number of rows written."""
+        transaction, and log the mirror run (unless `log_run` is False: the worksheet adapter
+        writes the table on every cell write and a log line per write would be noise). Returns
+        the number of rows written."""
         names = [name for name, _ in columns()]
         placeholders = ", ".join("?" for _ in names)
         stamp = _now()
@@ -121,12 +123,13 @@ class LedgerDb:
                     f"VALUES ({placeholders})",
                     [tuple(_storable(rec.get(n)) for n in names[:-1]) + (stamp,) for rec in records],
                 )
-                conn.execute(
-                    'INSERT INTO "mirror_runs" ("at", "backend", "source", "rows", "skipped", '
-                    '"header_ok", "duration_ms") VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    (stamp, backend, source, len(records), skipped, int(bool(header_ok)),
-                     int(duration_ms)),
-                )
+                if log_run:
+                    conn.execute(
+                        'INSERT INTO "mirror_runs" ("at", "backend", "source", "rows", "skipped", '
+                        '"header_ok", "duration_ms") VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        (stamp, backend, source, len(records), skipped, int(bool(header_ok)),
+                         int(duration_ms)),
+                    )
                 conn.execute("COMMIT")
             except Exception:
                 conn.execute("ROLLBACK")

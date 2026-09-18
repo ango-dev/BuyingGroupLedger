@@ -108,7 +108,12 @@ ENV_TO_CONFIG = {
     "WEB_SHEET_CACHE_TTL_SECONDS": "web.sheet_cache_ttl_seconds",
     "WEB_BIND_HOST": "web.bind_host",
     "WEB_PORT": "web.port",
-    # The SQLite copy of the ledger (ledger_db/). A mirror of the Sheet today; see its docstring.
+    # WHERE THE LEDGER LIVES: "sheet" (the Google Sheet -- DEPRECATED, today's default) or "db"
+    # (the SQLite file; every writer and reader runs off it). See docs/operations.md, "Moving off
+    # the Sheet".
+    "LEDGER_BACKEND": "ledger.backend",
+    # The SQLite copy of the ledger (ledger_db/): a mirror while ledger.backend is "sheet", THE
+    # ledger once it is "db".
     "LEDGER_DB_PATH": "database.path",
     "LEDGER_DB_MIRROR_AFTER_RUN": "database.mirror_after_run",
 }
@@ -405,6 +410,12 @@ class Settings:
     # main.run_db_mirror: after every scheduled run, read the Sheet back (read-only scope) into
     # the SQLite copy. Spends nothing, submits nothing -- one Sheets read per run.
     ledger_db_mirror_after_run: bool = _get_bool("LEDGER_DB_MIRROR_AFTER_RUN", True)
+    # "sheet" | "db". Under "db", sheets.ledger_sync._get_worksheet hands every writer the SQLite
+    # ledger behind a worksheet face (ledger_db/worksheet.py), the read-only opener the same
+    # read-only, the dashboard reads the file directly, and the Sheet is not touched by anything.
+    # The Sheet code stays (deprecated) until the user decides to delete it. Mirroring INTO the
+    # file is refused under "db": it would overwrite the ledger with the stale Sheet.
+    ledger_backend: str = _get_str("LEDGER_BACKEND", "sheet")
     # How long a live-Sheet read is served from memory before the next request re-reads it. Every
     # refresh is one Sheets API read; 300 s keeps a page reload from ever becoming an API call.
     web_sheet_cache_ttl_seconds: int = _get_int("WEB_SHEET_CACHE_TTL_SECONDS", 300)
@@ -412,6 +423,17 @@ class Settings:
     # a deliberate choice (0.0.0.0 behind Tailscale, or the compose service's published port).
     web_bind_host: str = _get_str("WEB_BIND_HOST", "127.0.0.1")
     web_port: int = _get_int("WEB_PORT", 8765)
+
+    def ledger_is_db(self) -> bool:
+        """True when the SQLite file is the ledger (`ledger.backend` = `db`), False for the
+        deprecated Sheet. Anything else is a LOUD error: a typo must not quietly mean "sheet"
+        and send a run's writes to the wrong ledger."""
+        backend = (self.ledger_backend or "sheet").strip().lower()
+        if backend not in ("sheet", "db"):
+            raise RuntimeError(
+                f"ledger.backend / LEDGER_BACKEND must be `sheet` or `db`, not {self.ledger_backend!r}"
+            )
+        return backend == "db"
 
     def google_credentials(self, scopes):
         """Google service-account credentials, from the config file or a standalone JSON file.

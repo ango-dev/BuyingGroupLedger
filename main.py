@@ -315,6 +315,10 @@ def run_db_mirror() -> None:
     ON by default (database.mirror_after_run / LEDGER_DB_MIRROR_AFTER_RUN) -- it spends nothing and
     submits nothing; one Sheets API read per run.
     """
+    if settings.ledger_is_db():
+        log.info("Ledger DB mirror skipped: ledger.backend is `db`, the database is the ledger "
+                 "and every step of this run wrote it directly.")
+        return
     if not settings.ledger_db_mirror_after_run:
         log.info("Ledger DB mirror is disabled (database.mirror_after_run is false).")
         return

@@ -1,3 +1,9 @@
+"""DEPRECATION (2026-09-18): the Google Sheet is on its way out. With `ledger.backend` = `db`
+everything in this module runs against the SQLite ledger through ledger_db/worksheet.py (see
+_get_worksheet); the gspread paths below are live only while the flag says `sheet`, and go when
+the user decides to delete the Sheet. Until then nothing here is removed.
+"""
+
 import csv
 import logging
 import re
@@ -366,7 +372,17 @@ def _collapse_records(records: list[dict]) -> list[dict]:
     return [collapsed[k] for k in order]
 
 
-def _get_worksheet() -> gspread.Worksheet:
+def _get_worksheet():
+    """The ledger as a worksheet: the SQLite file behind a worksheet face when `ledger.backend`
+    is `db` (ledger_db/worksheet.py -- the cutover's second stage, 2026-09-18), else the Google
+    Sheet (DEPRECATED; kept until the user deletes it). Every writer in this module, the
+    buying-group sync, the BFMR auto-reply and the scripts open the ledger HERE, so the flag
+    routes all of them at once."""
+    if settings.ledger_is_db():
+        from ledger_db.store import LedgerDb
+        from ledger_db.worksheet import DbWorksheet
+
+        return DbWorksheet(LedgerDb(settings.ledger_db_path))
     creds = settings.google_credentials(SCOPES)
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(settings.google_sheet_id)
