@@ -8,10 +8,18 @@
 <div class="banner warn restart-prompt">
   <strong>Restart the container to apply this change.</strong> You changed a setting the container
   reads once at start (the schedule, the timezone, whether the dashboard runs). It is saved, but it
-  takes effect only after, on the host:
+  takes effect only after a container restart.
+  {% if in_container %}
+  <form method="post" action="/settings/restart-container" class="inline-form"
+        data-confirm="Restart the container now? The scheduler and the dashboard come back in about half a minute. It is refused while a run is in progress.">
+    <button type="submit" class="primary">Restart the container now</button>
+    <span class="muted small">or, on the host: <code>docker compose restart</code></span>
+  </form>
+  {% else %}
   <pre>docker compose restart</pre>
+  {% endif %}
   Do it between runs: a restart mid-run aborts that run (the heartbeat shows the last run's age
-  above; <code>logs/.run.lock</code> exists while one is in progress).
+  above; the button refuses while <code>logs/.run.lock</code> is live).
 </div>
 {% elif restart == 'dashboard' %}
 <div class="banner warn restart-prompt">
@@ -297,6 +305,13 @@ here, so keep the dashboard on loopback or your own network.</p>
         <button type="submit">Restart dashboard</button>
         <span class="muted">re-reads config.json for the web and database settings; the scheduler is untouched</span>
       </form>
+      {% if in_container %}
+      <form method="post" action="/settings/restart-container" class="inline-form"
+            data-confirm="Restart the whole container now? The scheduler and the dashboard come back in about half a minute. It is refused while a run is in progress.">
+        <button type="submit" class="danger">Restart container</button>
+        <span class="muted">the schedule, the timezone and every other setting are re-read on the way up; refused while a run is in progress, so nothing is aborted</span>
+      </form>
+      {% endif %}
     </section>
   </div>
 </div>

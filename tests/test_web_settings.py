@@ -51,12 +51,16 @@ def client(config, tmp_path, monkeypatch):
     monkeypatch.delenv("LOOKBACK_DAYS", raising=False)
     monkeypatch.setenv("ALERT_EMAIL_TO", "from-the-environment")
     restarts = []
+    container_restarts = []
     app = create_app(SnapshotReader(data_dir=tmp_path), logs_dir=tmp_path, failures_dir=tmp_path,
                      backup_dir=tmp_path / "backups", repo_root_dir=tmp_path, clock=lambda: NOW,
                      settings=dataclasses.replace(Settings(), container_run_interval_hours=6),
-                     restarter=lambda: restarts.append(1))
+                     restarter=lambda: restarts.append(1),
+                     container_restarter=lambda: container_restarts.append(1), in_container=True)
     test_client = TestClient(app)
     test_client.restarts = restarts
+    test_client.container_restarts = container_restarts
+    test_client.logs_dir = tmp_path
     return test_client
 
 
@@ -267,6 +271,37 @@ class TestSettingsPage:
     def test_restart_calls_the_restarter(self, client):
         response = client.post("/settings/restart")
         assert response.status_code == 200 and client.restarts == [1]
+
+    def test_the_container_can_be_restarted_from_the_page_but_never_mid_run(self, client):
+        """a container restart without ssh. It signals PID 1 (the compose
+        policy brings the container back) and is refused while the run lock is live."""
+        from diagnostics import activity
+
+        body = client.get("/settings").text
+        assert 'action="/settings/restart-container"' in body and "Restart container" in body
+        (client.logs_dir / ".run.lock").write_text("pid 1", encoding="utf-8")
+        refused = client.post("/settings/restart-container")
+        assert refused.status_code == 423 and "run is in progress" in refused.text
+        assert client.container_restarts == []
+        (client.logs_dir / ".run.lock").unlink()
+        response = client.post("/settings/restart-container")
+        assert response.status_code == 200 and "Restarting the container" in response.text
+        assert client.container_restarts == [1]
+        assert activity.read(client.logs_dir / "activity.jsonl")[0]["summary"].startswith("Container restart requested")
+
+    def test_outside_a_container_the_button_is_absent_and_the_route_refuses(self, config, tmp_path):
+        app = create_app(SnapshotReader(data_dir=tmp_path), logs_dir=tmp_path, failures_dir=tmp_path,
+                         backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
+                         settings=dataclasses.replace(Settings(), container_run_interval_hours=6),
+                         restarter=lambda: None, container_restarter=lambda: None, in_container=False)
+        desktop = TestClient(app)
+        assert 'action="/settings/restart-container"' not in desktop.get("/settings").text
+        assert desktop.post("/settings/restart-container").status_code == 400
+
+    def test_the_container_prompt_offers_the_button(self, client):
+        body = client.get("/settings", params={"restart": "container"}).text
+        banner = body[body.index("restart-prompt"):body.index("</div>", body.index("restart-prompt"))]
+        assert "Restart the container now" in banner and 'action="/settings/restart-container"' in banner
 
     def test_the_compose_mount_is_writable_for_this_page(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")

@@ -98,15 +98,37 @@ def _exit_soon(delay: float = 0.5) -> None:
     threading.Timer(delay, lambda: os._exit(0)).start()
 
 
+def _signal_container(delay: float = 1.0) -> None:
+    """Restart the whole container from inside it. PID 1 is supercronic (docker/entrypoint.sh execs it); a SIGTERM
+    ends it, and the compose service's `restart: unless-stopped` starts the container again --
+    the entrypoint re-reads config.json, so a container-scope setting takes effect. Delayed so the
+    response that says so is sent first. The route refuses while a run lock is live: a restart
+    mid-run would abort that run."""
+    import signal
+    import threading
+
+    threading.Timer(delay, lambda: os.kill(1, signal.SIGTERM)).start()
+
+
+def _in_container() -> bool:
+    return Path("/.dockerenv").exists()
+
+
 def create_app(reader: LedgerReader | None = None, *, settings=None,
                logs_dir: Path | None = None, failures_dir: Path | None = None,
                backup_dir: Path | None = None, repo_root_dir: Path | None = None,
                clock: Callable[[], datetime] | None = None,
                restarter: Callable[[], None] | None = None,
+               container_restarter: Callable[[], None] | None = None,
+               in_container: bool | None = None,
                writer=None) -> FastAPI:
     """`writer` is the ONE sheet-write path (web/ledger_writer.SheetCellWriter): cell edits on
-    the Orders page. None = the page is view-only (the snapshot backend, or a test)."""
+    the Orders page. None = the page is view-only (the snapshot backend, or a test).
+    `container_restarter` / `in_container` are injection points for the container-restart
+    button (the defaults signal PID 1, and detect Docker by /.dockerenv)."""
     restart = restarter or _exit_soon
+    restart_container = container_restarter or _signal_container
+    in_container = _in_container() if in_container is None else bool(in_container)
     if settings is None:
         from config.settings import settings as live_settings
 
@@ -597,6 +619,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             rows=settings_form.view(rows_schema, os.environ),
             sections=settings_form.sections_in_order(rows_schema), section_forms=forms,
             hidden_envs=settings_form.hidden_envs(), sheet_mode=settings_form.sheet_mode(),
+            in_container=in_container,
             open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE),
             restart=restart if restart in ("container", "dashboard") else "",
             section_title=settings_form.section_title, field_label=settings_form.field_label,
@@ -678,6 +701,26 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         act("settings", f"Settings: removed {path[:-1]} {label}", {"path": path, "entry": label})
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
                                 status_code=303)
+
+    @app.post("/settings/restart-container", response_class=HTMLResponse)
+    def settings_restart_container(request: Request):
+        """Restart the whole container (see _signal_container). Refused while a run is in
+        progress, with the same lock the writers honour."""
+        from web.ledger_writer import run_in_progress
+
+        if not in_container:
+            return settings_page(request, errors=["Not running in a container: restart the process "
+                                                  "yourself on this machine."], status=400)
+        if run_in_progress(logs_dir):
+            return settings_page(request, errors=["A scheduled run is in progress (logs/.run.lock); "
+                                                  "restarting now would abort it. Try again when the "
+                                                  "heartbeat shows it finished."], status=423)
+        act("settings", "Container restart requested from the Settings page")
+        restart_container()
+        return HTMLResponse("<!doctype html><meta http-equiv='refresh' content='30;url=/settings'>"
+                            "<p style='font-family:system-ui;padding:20px'>Restarting the container; "
+                            "the scheduler and the dashboard come back in about half a minute and this "
+                            "page reloads then. config.json is re-read on the way up.</p>")
 
     @app.post("/settings/restart", response_class=HTMLResponse)
     def settings_restart(request: Request):
