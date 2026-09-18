@@ -349,8 +349,9 @@ class TestOrdersRoutes:
         # The row tools.
         assert 'name="sel"' in body and 'id="sel-all"' in body
         assert 'class="sel"' not in body  # the row number is the handle; no checkbox column
-        assert 'hx-post="/orders/bulk"' not in body and 'id="delete-selected"' in body  # no field/value bar: the grid fills ranges
-        assert "Delete removes them (asked once)" in body
+        assert 'hx-post="/orders/bulk"' not in body and 'id="delete-selected" class="danger" hidden' in body
+        assert 'id="bulkbar"' not in body  # no bar: the count line carries the counter and the hint
+        assert 'id="sel-count">0</span> selected' in body and "Delete removes them (asked once)" in body
         # The buttons live INSIDE the form that owns the selection (live: "no rows selected").
         bulk_form = body[body.index('<form id="bulk"'):body.index("</form>", body.index('<form id="bulk"'))]
         assert 'hx-post="/orders/delete"' in bulk_form and 'name="sel"' in bulk_form

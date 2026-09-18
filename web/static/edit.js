@@ -4,7 +4,7 @@
 //   double-click     opens the editor (or press Enter, or just start typing: the keystroke replaces
 //                    the value, as in Sheets)
 //   Enter            saves; with a RANGE selected, fills every editable cell in it with the value
-//   Esc              cancels the editor, or clears the selection
+//   Esc              cancels the editor, or clears the selection (cells and rows both)
 //   Delete/Backspace clears every editable selected cell
 //   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
 //                    pastes a single value into every selected cell, or a block cell by cell from
@@ -315,9 +315,21 @@
                                                 : "Delete the " + n + " selected rows from the ledger? This cannot be undone here.");
     }
   }
+  function clearRows() {
+    var boxes = document.querySelectorAll('input[name="sel"]:checked');
+    if (!boxes.length) return false;
+    boxes.forEach(function (box) { box.checked = false; });
+    var all = document.getElementById("sel-all");
+    if (all) all.checked = false;
+    document.dispatchEvent(new Event("rows:cleared"));
+    count();
+    return true;
+  }
   document.addEventListener("keydown", function (e) {
-    if (e.key !== "Delete" || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    if (e.key === "Escape") { if (clearRows()) e.preventDefault(); return; }
+    if (e.key !== "Delete") return;
     var button = document.getElementById("delete-selected");
     if (!button || !document.querySelector('input[name="sel"]:checked')) return;
     e.preventDefault();
@@ -374,6 +386,7 @@
     if (e.target && (e.target.name === "sel" || e.target.id === "sel-all")) syncClasses();
   });
   document.addEventListener("htmx:afterSwap", function () { last = null; syncClasses(); });
+  document.addEventListener("rows:cleared", syncClasses);
 })();
 
 // The # header is the select-all handle (the header checkbox is hidden, like the row ones).

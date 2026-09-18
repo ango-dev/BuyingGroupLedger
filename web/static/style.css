@@ -171,8 +171,6 @@ body.wide .add-row { flex: 0 0 auto; }
 body.wide #bulk { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 body.wide #orders-table { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 body.wide .count { margin: 4px 8px; flex: 0 0 auto; }
-body.wide .bulkbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px;
-  background: var(--card); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 body.wide .sheet { overflow: auto; flex: 1 1 auto; min-height: 0; background: var(--card); border-top: 1px solid var(--line); }
 table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: collapse; }
 /* Grid lines are TRANSLUCENT so they take the row's own colour, as the sheet's do over a coloured
@@ -540,7 +538,7 @@ details.multi.single .menu label:has(input:checked) { color: var(--accent); font
 details.multi.single .menu label:has(input:checked)::before { content: "✓"; position: absolute; left: 6px; }
 details.multi.inline { display: inline-block; vertical-align: middle; }
 details.multi.inline summary { flex-direction: row; align-items: center; gap: 6px; }
-.bulkbar details.multi .summary-text, .add-form details.multi .summary-text { padding: 4px 8px; }
+.add-form details.multi .summary-text { padding: 4px 8px; }
 .entry-card details.multi.field { font-size: 1em; color: var(--muted); min-width: 0; }
 .entry-card details.multi.field .summary-text { font-size: 1em; width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: 6px; }
 table.activity { width: 100%; table-layout: auto; }

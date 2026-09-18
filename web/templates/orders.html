@@ -106,11 +106,11 @@
 {% else %}
 <form id="bulk" hx-disinherit="hx-include">
   {% if editable and filters.view == 'table' %}
-  <div id="bulkbar" class="bulkbar">
-    <span class="muted small"><span id="sel-count">0</span> selected · click row numbers to select, shift-click for a range, click <b>#</b> for all / to clear · Delete removes them (asked once)</span>
-    <button type="submit" id="delete-selected" class="danger" hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"
-            hx-confirm="Delete every selected row from the ledger? This cannot be undone here.">Delete selected</button>
-  </div>
+  {# The one row action is Delete, on the keyboard; this hidden button is what the key presses, so
+     htmx asks hx-confirm (the page's own dialog, worded with the count by edit.js) and posts the
+     ticked rows. The counter and the hint sit on the table's count line. #}
+  <button type="submit" id="delete-selected" class="danger" hidden hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"
+          hx-confirm="Delete every selected row from the ledger? This cannot be undone here.">Delete selected</button>
   {% endif %}
   <div id="orders-table">
     {% include "_orders_table.html" %}

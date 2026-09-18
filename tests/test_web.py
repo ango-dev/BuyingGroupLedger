@@ -1584,7 +1584,7 @@ class TestStaticAssetsCarryTheirBlocks:
         css = (self.ROOT / "style.css").read_text(encoding="utf-8")
         for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap", "td.sel-cell",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
-                       ".bulkbar", ".add-form", "tr.selected td", ".cards {", ".card ol.items",
+                       ".add-form", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
                        "table.activity { width: 100%", ".dropzone.dragover",
                        ".filters { display: flex; flex-wrap: nowrap", ".filters label.search {",
@@ -1610,7 +1610,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        'addEventListener("paste"', 'e.key === "Delete"', "fillSelection(", "all.checked = !any",
                        "if (thenDown) move(1, 0, false)", "paint(false)",
                        'e.key === "Delete" && rowsChecked()', 'getElementById("delete-selected")',
-                       "selected rows from the ledger?",
+                       "selected rows from the ledger?", 'if (e.key === "Escape") { if (clearRows())',
+                       '"rows:cleared"',
                        'GRID_TD = "table.sheetlike td, table.order-rows td"'):
             assert needle in js, f"edit.js lost its {needle!r} block"
 

@@ -175,9 +175,9 @@ writes the Sheet and re-mirrors, so the copy follows.
 
 **Rows: select, add, delete.** Selection is Sheets-style: click a row number to select that row
 (it tints blue), shift-click for a range, click the `#` header for every row shown (or, with
-anything selected, to clear). With rows selected, the Delete key or the *Delete selected* button
-removes them after ONE confirmation that names the count (rows are removed bottom-up so the
-located numbers stay valid; all-or-nothing). Setting one value on many rows is the grid's range
+anything selected, to clear); Esc clears. The counter sits on the table's count line. With rows
+selected, the Delete key removes them after ONE confirmation that names the count (rows are
+removed bottom-up so the located numbers stay valid; all-or-nothing); there is no bar or button. Setting one value on many rows is the grid's range
 fill: select the cells, type the value, Enter — the field/value bar that did this is gone
 (2026-09-18).
 *Add a row* takes the key columns (Order Date, Order ID, Item Name, Shipment) plus the common ones;
