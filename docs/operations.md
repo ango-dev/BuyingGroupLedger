@@ -193,6 +193,19 @@ refusal lasts as long as the run does.
 paid yet), which is deliberately wider than the scrapers' terminal statuses; a gift-card row is
 never open.
 
+**The overview's two stat sections.** *Lifetime* counts every row of the ledger: rows and orders,
+open rows, spend (Total Cost over rows that carry money), paid out (settled payouts), projected
+profit (committed, undated payouts) and realized profit (settled rows). *Calendar month* shows one
+month at a time (arrows step through the months the ledger spans; the current month by default,
+`/?month=YYYY-MM` for another): *placed* tiles count rows by **Order Date** (what was bought that
+month, how much is still open, what it is projected to make), *paid out* and *realized profit* count
+settled rows by **Payout Date** (the cash that landed that month, whenever the order was placed —
+the tax report's basis). Every tile is a link that opens the Orders page filtered the same way the
+number was counted, and the Orders filter bar shows those filters as editable controls: *Placed in*
+and *Paid in* (a month) and *Payout* (any / open / projected / settled), so a click-through can be
+widened or narrowed without going back. The reconciliation line under Lifetime is what SUM() over
+the sheet's Total Profit column gives, so the page can be checked against the sheet at a glance.
+
 **Three backends, one adapter** (`web/ledger_reader.py`), chosen in `config.json`'s `web` section or
 by `WEB_LEDGER_SOURCE=snapshot|sheet|db` (the variable table in [configuration.md](configuration.md)
 lists every `WEB_*` setting):

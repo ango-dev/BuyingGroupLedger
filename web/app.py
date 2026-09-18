@@ -164,7 +164,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         snapshot = load(request)
-        return page(request, "overview.html", snapshot=snapshot, summary=overview(snapshot))
+        month = str(request.query_params.get("month") or "")
+        return page(request, "overview.html", snapshot=snapshot,
+                    summary=overview(snapshot, month=month, today=clock().date()))
 
     # The sheet writer: cell edits on the Orders page. The snapshot backend is a CSV, so there is
     # nothing to write to and the page stays view-only there.

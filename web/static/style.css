@@ -80,6 +80,17 @@ header .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; fo
 .tile .hint { color: var(--muted); font-size: 0.85em; }
 .tile.payout-committed .value { color: var(--committed); }
 .tile.payout-settled .value { color: var(--ok); }
+/* a stat tile that is a link: reads like the others, lifts on hover, never link-blue */
+a.tile.link { display: block; color: var(--fg); text-decoration: none; transition: border-color .12s, transform .12s; }
+a.tile.link:hover { border-color: var(--accent); transform: translateY(-1px); }
+a.tile.link:hover .label { color: var(--accent); }
+.reconcile { margin: -4px 0 14px; }
+.reconcile .money { font-variant-numeric: tabular-nums; }
+h2.month-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.month-nav { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8em; font-weight: 500; }
+.month-nav .month-label { min-width: 9.5em; text-align: center; font-weight: 600; }
+.month-nav .button.disabled { opacity: 0.35; }
+input.month { font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
 .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 
 /* --- Charts (web/charts.py, _donut.html, _bars.html): one row, same card, same height ------- */
@@ -336,6 +347,7 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
 .card .tag.status-superseded { background: #666666; color: #f4f4f4; border-color: transparent; text-decoration: line-through; }
 .card details.card-edit summary { cursor: pointer; }
 .card details.card-edit[open] summary { margin-bottom: 6px; }
+.card .row-count { margin: -4px 0 0; }
 .cards { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
 /* the order page's shipment tables: the same editable cells, the same affordances */
 .card-rows-wrap { overflow-x: auto; max-width: 100%; }

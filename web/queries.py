@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from models.order import FIELDNAMES
@@ -46,6 +47,16 @@ SORT_CHOICES = tuple((f, FIELD_TO_HEADER[f]) for f in (
 VIEWS = ("table", "cards")
 PER_PAGE_CHOICES = (12, 24, 48, 96)
 DEFAULT_PER_PAGE = 24
+#: The payout-state filter (the overview's tiles link with it): the rows still waiting on the
+#: buying group (LedgerRow.is_open), the projected ones (is_committed) or the settled ones.
+STATES = ("open", "committed", "settled")
+_MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+def month_of(value) -> str:
+    """A YYYY-MM string or "" -- anything else (a stale link, a typo) means no month filter."""
+    text = str(value or "").strip()
+    return text if _MONTH.match(text) else ""
 
 
 def _values(params, name: str) -> tuple[str, ...]:
@@ -74,6 +85,11 @@ class Filters:
     view: str = "table"
     per: int = DEFAULT_PER_PAGE
     page: int = 1
+    #: Calendar-month windows (YYYY-MM, "" = any): `month` on Order Date, `paid` on Payout Date.
+    month: str = ""
+    paid: str = ""
+    #: One of STATES, or "" for every row.
+    state: str = ""
 
     @classmethod
     def from_query(cls, params) -> "Filters":
@@ -98,7 +114,13 @@ class Filters:
             page = max(1, int(str(params.get("page") or 1)))
         except ValueError:
             page = 1
+        state = str(params.get("state") or "").strip().lower()
+        if state not in STATES:
+            state = ""
         return cls(
+            month=month_of(params.get("month")),
+            paid=month_of(params.get("paid")),
+            state=state,
             retailers=_values(params, "retailer"),
             profiles=_values(params, "profile"),
             statuses=tuple(s.lower() for s in _values(params, "status")),
@@ -132,6 +154,7 @@ class Filters:
         """The query mapping for a link; multi-valued facets are lists (encode with doseq)."""
         values = {"retailer": list(self.retailers), "profile": list(self.profiles),
                   "status": list(self.statuses), "group": list(self.groups), "q": self.q,
+                  "month": self.month, "paid": self.paid, "state": self.state,
                   "sort": self.sort, "dir": "desc" if self.desc else "asc",
                   "view": self.view if self.view != "table" else "",
                   "per": str(self.per) if self.per != DEFAULT_PER_PAGE else "",
@@ -167,10 +190,24 @@ def filter_rows(rows: list[LedgerRow], filters: Filters) -> list[LedgerRow]:
             continue
         if filters.groups and (row.buying_group or "(blank)") not in filters.groups:
             continue
+        if filters.month and not row.order_date.startswith(filters.month):
+            continue
+        if filters.paid and not row.payout_date.startswith(filters.paid):
+            continue
+        if filters.state and not _in_state(row, filters.state):
+            continue
         if needle and not any(needle in row.text(f).lower() for f in SEARCH_FIELDS):
             continue
         out.append(row)
     return out
+
+
+def _in_state(row: LedgerRow, state: str) -> bool:
+    if state == "open":
+        return row.is_open
+    if state == "committed":
+        return row.is_committed
+    return row.is_settled
 
 
 def sort_rows(rows: list[LedgerRow], filters: Filters) -> list[LedgerRow]:

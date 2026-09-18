@@ -3,37 +3,39 @@
 {% block content %}
 <h1>Overview</h1>
 
+{#- A stat tile is a LINK: it opens the Orders page filtered the same way the number was counted.
+   -#}
+{% macro tiles(items) %}
 <section class="tiles">
-  <div class="tile">
-    <div class="label">Rows / orders</div>
-    <div class="value">{{ summary.rows }} <span class="muted">/ {{ summary.orders }}</span></div>
-  </div>
-  <div class="tile">
-    <div class="label">Open rows</div>
-    <div class="value">{{ summary.open_rows }}</div>
-    <div class="hint">ordered, shipped or delivered: the buying group has not paid yet</div>
-  </div>
-  <div class="tile">
-    <div class="label">Projected profit</div>
-    <div class="value money">{{ summary.projected.profit | money }}</div>
-    <div class="hint">{{ summary.projected.rows }} row(s), {{ summary.projected.orders }} order(s) with a committed payout ({{ summary.projected.payout | money }}) and no Payout Date</div>
-  </div>
-  <div class="tile">
-    <div class="label">Realized profit</div>
-    <div class="value money">{{ summary.realized.profit | money }}</div>
-    <div class="hint">{{ summary.realized.rows }} row(s), {{ summary.realized.orders }} order(s) settled ({{ summary.realized.payout | money }} paid): Payout Date set, or status paid / return</div>
-  </div>
-  <div class="tile">
-    <div class="label">Total Profit column sum</div>
-    <div class="value money">{{ summary.column_sum.profit | money }}</div>
-    <div class="hint">what SUM() over the sheet's Total Profit gives ({{ summary.column_sum.rows }} cells): realized + projected{% if summary.column_sum.other %} + {{ summary.column_sum.other | money }} on rows with a payout cell but neither state{% endif %}</div>
-  </div>
-  <div class="tile {{ 'warn' if heartbeat.stale else '' }}">
-    <div class="label">Scheduler heartbeat</div>
-    <div class="value">{{ heartbeat.age_text or '—' }}</div>
-    <div class="hint">{{ heartbeat.message }}{% if heartbeat.present %}; stale after {{ (heartbeat.threshold_seconds // 3600) }}h{% endif %}</div>
-  </div>
+  {% for t in items %}
+  <a class="tile link {{ 'payout-' ~ t.tone if t.tone }}" href="{{ t.href }}">
+    <div class="label">{{ t.label }}</div>
+    {% if t.kind == 'money' %}<div class="value money">{{ t.value | money }}</div>
+    {% elif t.kind == 'pair' %}<div class="value">{{ t.value[0] }} <span class="muted">/ {{ t.value[1] }}</span></div>
+    {% else %}<div class="value">{{ t.value }}</div>{% endif %}
+    <div class="hint">{{ t.hint }}</div>
+  </a>
+  {% endfor %}
 </section>
+{% endmacro %}
+
+<h2>Lifetime <span class="muted small">— every row of the ledger; click a tile to open those rows</span></h2>
+{{ tiles(summary.lifetime) }}
+<p class="muted small reconcile">Total Profit column sum: <strong class="money">{{ summary.column_sum.profit | money }}</strong>
+  — what SUM() over the sheet's Total Profit gives ({{ summary.column_sum.rows }} cells): realized + projected{% if summary.column_sum.other %} + {{ summary.column_sum.other | money }} on rows with a payout cell but neither state{% endif %}.
+  <a href="/orders?sort=total_profit&amp;dir=desc">Open the column ›</a></p>
+
+{% set m = summary.month %}
+<h2 class="month-head">Calendar month
+  <span class="month-nav">
+    {% if m.prev %}<a class="button small" href="/?month={{ m.prev }}" title="{{ m.prev }}">‹</a>{% else %}<span class="button small disabled">‹</span>{% endif %}
+    <span class="month-label">{{ m.label }}</span>
+    {% if m.next %}<a class="button small" href="/?month={{ m.next }}" title="{{ m.next }}">›</a>{% else %}<span class="button small disabled">›</span>{% endif %}
+    {% if not m.current %}<a class="muted small" href="/">this month</a>{% endif %}
+  </span>
+  <span class="muted small">— placed by Order Date; paid out by Payout Date</span>
+</h2>
+{{ tiles(m.tiles) }}
 
 <h2>Rows <span class="muted small">— click a slice or a bar to open it on the Orders page</span></h2>
 <div class="charts">
@@ -61,4 +63,13 @@ cannot net a card rebate. Cancelled and superseded rows carry no money and are n
   </section>
   {% endfor %}
 </div>
+
+<h2>Scheduler</h2>
+<section class="tiles">
+  <div class="tile {{ 'warn' if heartbeat.stale else '' }}">
+    <div class="label">Scheduler heartbeat</div>
+    <div class="value">{{ heartbeat.age_text or '—' }}</div>
+    <div class="hint">{{ heartbeat.message }}{% if heartbeat.present %}; stale after {{ (heartbeat.threshold_seconds // 3600) }}h{% endif %}</div>
+  </div>
+</section>
 {% endblock %}

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import calendar
+import re
 from collections import Counter, defaultdict
+from datetime import date
 
 from models.order import STATUSES
 
@@ -10,6 +13,7 @@ from web.ledger_reader import LedgerRow, Snapshot
 
 #: How many order ids a gap list names before it says "and N more".
 GAP_SAMPLE = 12
+_MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 def _status_order(statuses) -> list[str]:
@@ -38,9 +42,107 @@ def _gap(rows: list[LedgerRow]) -> dict:
             "more": max(0, len(ids) - GAP_SAMPLE)}
 
 
-def overview(snapshot: Snapshot) -> dict:
+def _tile(label: str, value, kind: str, hint: str, href: str, tone: str = "") -> dict:
+    return {"label": label, "value": value, "kind": kind, "hint": hint, "href": href, "tone": tone}
+
+
+def _orders_link(**params) -> str:
+    """A link to the Orders page with these filters, "" values dropped (see queries.Filters)."""
+    from web.queries import query_string
+
+    query = query_string({k: v for k, v in params.items() if v})
+    return "/orders?" + query if query else "/orders"
+
+
+def _spend(rows: list[LedgerRow]) -> float:
+    return round(sum(r.total_cost or 0.0 for r in rows if not r.is_money_free), 2)
+
+
+def lifetime_tiles(rows: list[LedgerRow]) -> list[dict]:
+    """Every row the ledger holds, as clickable tiles (each opens the Orders page filtered the
+    same way the number was counted)."""
+    open_rows = [r for r in rows if r.is_open]
+    projected = _money_block([r for r in rows if r.is_committed])
+    realized = _money_block([r for r in rows if r.is_settled])
+    return [
+        _tile("Rows / orders", (len(rows), len({r.order_id for r in rows})), "pair",
+              "every row of the ledger", _orders_link()),
+        _tile("Open rows", len(open_rows), "count",
+              "ordered, shipped or delivered: the buying group has not paid yet",
+              _orders_link(state="open")),
+        _tile("Spend", _spend(rows), "money",
+              "Total Cost over every row that carries money (cancelled / superseded excluded)",
+              _orders_link(sort="total_cost", dir="desc")),
+        _tile("Paid out", realized["payout"], "money",
+              f"{realized['rows']} settled row(s) in {realized['orders']} order(s): Payout Date set, "
+              "or status paid / return", _orders_link(state="settled"), tone="settled"),
+        _tile("Projected profit", projected["profit"], "money",
+              f"{projected['rows']} row(s), {projected['orders']} order(s) with a committed payout "
+              f"(${projected['payout']:,.2f}) and no Payout Date", _orders_link(state="committed"),
+              tone="committed"),
+        _tile("Realized profit", realized["profit"], "money",
+              f"{realized['rows']} settled row(s), {realized['orders']} order(s) "
+              f"(${realized['payout']:,.2f} paid)", _orders_link(state="settled"), tone="settled"),
+    ]
+
+
+def month_label(month: str) -> str:
+    """"2026-09" -> "September 2026"."""
+    year, number = month.split("-")
+    return f"{calendar.month_name[int(number)]} {year}"
+
+
+def shift_month(month: str, delta: int) -> str:
+    year, number = (int(part) for part in month.split("-"))
+    index = year * 12 + (number - 1) + delta
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
+def month_section(rows: list[LedgerRow], month: str, today_month: str) -> dict:
+    """One calendar month. "Placed" tiles count rows by ORDER DATE (what was bought that month,
+    how much of it is still open, what it is projected to make); "paid" tiles count settled rows
+    by PAYOUT DATE (the cash that actually landed that month -- the tax report's basis)."""
+    placed = [r for r in rows if r.order_date.startswith(month)]
+    paid = [r for r in rows if r.is_settled and r.payout_date.startswith(month)]
+    open_rows = [r for r in placed if r.is_open]
+    projected = _money_block([r for r in placed if r.is_committed])
+    landed = _money_block(paid)
+    tiles = [
+        _tile("Rows / orders placed", (len(placed), len({r.order_id for r in placed})), "pair",
+              "rows whose Order Date falls in the month", _orders_link(month=month)),
+        _tile("Still open", len(open_rows), "count",
+              "of those, ordered / shipped / delivered and not yet paid",
+              _orders_link(month=month, state="open")),
+        _tile("Spend", _spend(placed), "money", "Total Cost of the month's rows that carry money",
+              _orders_link(month=month, sort="total_cost", dir="desc")),
+        _tile("Projected profit", projected["profit"], "money",
+              f"{projected['rows']} row(s) placed this month with a committed, unpaid payout",
+              _orders_link(month=month, state="committed"), tone="committed"),
+        _tile("Paid out", landed["payout"], "money",
+              f"{landed['rows']} row(s) in {landed['orders']} order(s) whose Payout Date falls in "
+              "the month, whenever they were placed", _orders_link(paid=month, state="settled"),
+              tone="settled"),
+        _tile("Realized profit", landed["profit"], "money",
+              "Total Profit of the rows paid out in the month",
+              _orders_link(paid=month, state="settled"), tone="settled"),
+    ]
+    dated = sorted({r.order_date[:7] for r in rows if len(r.order_date) >= 7})
+    first = min(dated[0], today_month) if dated else today_month
+    return {
+        "month": month, "label": month_label(month), "tiles": tiles,
+        "prev": shift_month(month, -1) if month > first else "",
+        "next": shift_month(month, 1) if month < today_month else "",
+        "current": month == today_month, "today": today_month,
+    }
+
+
+def overview(snapshot: Snapshot, month: str = "", today: date | None = None) -> dict:
+    """`month` is the calendar month the month section shows (YYYY-MM; blank = the current one,
+    from `today`, which the app takes from its clock)."""
     rows = snapshot.rows
     open_rows = [r for r in rows if r.is_open]
+    today_month = (today or date.today()).strftime("%Y-%m")
+    month = month if _MONTH.match(month or "") else today_month
 
     # Open rows by status x buying group. Blank group is shown as such, never folded into another.
     groups = sorted({r.buying_group or "(blank)" for r in open_rows})
@@ -94,6 +196,9 @@ def overview(snapshot: Snapshot) -> dict:
     ]
 
     return {
+        # The two stat sections.
+        "lifetime": lifetime_tiles(rows),
+        "month": month_section(rows, month, today_month),
         "donuts": donuts,
         # The open-rows matrix as stacked bars, drawn in the same row as the donuts.
         "open_bars": open_rows_bars(open_table),

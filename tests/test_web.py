@@ -15,7 +15,7 @@ from __future__ import annotations
 import csv
 import dataclasses
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -613,6 +613,41 @@ class TestOverview:
         assert summary["status_counts"] == [("ordered", 2), ("shipped", 1), ("delivered", 2),
                                             ("cancelled", 1), ("paid", 2), ("superseded", 1)]
 
+    def test_lifetime_tiles_count_every_row(self, summary):
+        by_label = {t["label"]: t for t in summary["lifetime"]}
+        assert by_label["Rows / orders"]["value"] == (len(LEDGER_ROWS), 8)
+        assert by_label["Open rows"]["value"] == 4
+        assert by_label["Projected profit"]["value"] == 263.6
+        assert by_label["Realized profit"]["value"] == 193.0
+        assert by_label["Paid out"]["value"] == 830.0
+        # Spend: every row that carries money (the cancelled / superseded rows are excluded)
+        assert by_label["Spend"]["value"] == sum(
+            float(r[HEADER.index("Total Cost")] or 0) for r in LEDGER_ROWS
+            if r[HEADER.index("Status")] not in ("cancelled", "superseded"))
+        assert by_label["Open rows"]["href"] == "/orders?state=open"
+
+    def test_the_month_section_places_by_order_date_and_pays_by_payout_date(self, snapshot_path):
+        september = overview(SnapshotReader(snapshot_path).load(), month="2026-09",
+                             today=NOW.date())["month"]
+        tiles = {t["label"]: t["value"] for t in september["tiles"]}
+        # Rows 2-4 were placed in September and are all still open; row 3 carries the commitment.
+        assert tiles["Rows / orders placed"][0] == 3 and tiles["Still open"] == 3
+        assert tiles["Projected profit"] == 263.6
+        # Only row 5's payout landed in September (row 6's paid status has no date).
+        assert tiles["Paid out"] == 500.0 and tiles["Realized profit"] == 136.0
+        assert september["label"] == "September 2026" and september["current"] is True
+        assert (september["prev"], september["next"]) == ("2026-08", "")
+
+        august = overview(SnapshotReader(snapshot_path).load(), month="2026-08",
+                          today=NOW.date())["month"]
+        tiles = {t["label"]: t["value"] for t in august["tiles"]}
+        assert tiles["Rows / orders placed"][0] == 6 and tiles["Still open"] == 1  # the Fitbit
+        assert tiles["Paid out"] == 0.0 and tiles["Projected profit"] == 0.0
+        assert (august["prev"], august["next"]) == ("", "2026-09")
+        # a month with no rows still renders, with both arrows
+        assert overview(SnapshotReader(snapshot_path).load(), month="2026-08",
+                        today=date(2026, 12, 1))["month"]["next"] == "2026-09"
+
 
 # --------------------------------------------------------------------------------------------------
 # The heartbeat
@@ -719,6 +754,32 @@ class TestOverviewPage:
         assert "Open Rows" in body
         assert "Blank Card Last 4" in body and "111-0000002-0000002" in body
         assert "no automatic writes" in body
+
+    def test_lifetime_and_month_sections_are_linked_tiles(self, client):
+        body = client.get("/").text
+        assert "<h2>Lifetime" in body and "Calendar month" in body
+        # NOW is 2026-09-17: the month section opens on September, with a way back only.
+        assert "September 2026" in body and 'href="/?month=2026-08"' in body
+        assert 'href="/?month=2026-10"' not in body
+        # every tile is a link to the Orders page, filtered the way it was counted
+        assert 'class="tile link " href="/orders"' in body
+        assert 'href="/orders?state=open"' in body
+        assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
+        assert 'href="/orders?month=2026-09"' in body
+        assert 'href="/orders?month=2026-09&amp;state=open"' in body
+        assert 'href="/orders?paid=2026-09&amp;state=settled"' in body
+
+    def test_an_earlier_month_can_be_opened_and_navigated(self, client):
+        body = client.get("/", params={"month": "2026-08"}).text
+        assert "August 2026" in body and 'href="/?month=2026-09"' in body
+        assert 'href="/?month=2026-07"' not in body  # nothing was placed before August
+        assert '<a class="muted small" href="/">this month</a>' in body
+        # a bad month falls back to the current one rather than failing
+        assert "September 2026" in client.get("/", params={"month": "never"}).text
+
+    def test_the_cards_footer_keeps_the_arrows_on_the_outbound_links(self, client):
+        body = client.get("/orders", params={"view": "cards"}).text
+        assert ">Order ↗<" in body and ">Receipt ↗<" in body and ">Details<" in body
 
     def test_heartbeat_shows_fresh(self, client):
         body = client.get("/").text
@@ -1328,6 +1389,21 @@ class TestMultiSelectFilters:
         assert {(r.retailer, r.status) for r in picked} == {("Costco", "paid"), ("Best Buy", "shipped")}
         assert len(filter_rows(rows, Filters.from_query({}))) == len(rows)
         assert Filters.from_query({"retailer": "Costco"}).retailers == ("Costco",)
+
+    def test_month_paid_and_state_filters(self, snapshot_path):
+        rows = SnapshotReader(snapshot_path).load().rows
+        assert len(filter_rows(rows, Filters.from_query({"month": "2026-09"}))) == 3
+        assert [r.row_number for r in filter_rows(rows, Filters.from_query({"paid": "2026-09"}))] == [5]
+        assert len(filter_rows(rows, Filters.from_query({"state": "open"}))) == 4
+        assert [r.row_number for r in filter_rows(rows, Filters.from_query({"state": "committed"}))] == [3]
+        assert len(filter_rows(rows, Filters.from_query({"state": "settled"}))) == 2
+        assert len(filter_rows(rows, Filters.from_query({"month": "2026-08", "state": "open"}))) == 1
+        # malformed values mean "no filter", never an error
+        bad = Filters.from_query({"month": "Sept", "paid": "2026-13", "state": "paid"})
+        assert (bad.month, bad.paid, bad.state) == ("", "", "")
+        assert "month" not in bad.as_query()
+        good = Filters.from_query({"month": "2026-09", "state": "open"})
+        assert good.as_query()["month"] == "2026-09" and good.as_query()["state"] == "open"
 
     def test_links_carry_repeated_params(self):
         from web.queries import query_string
