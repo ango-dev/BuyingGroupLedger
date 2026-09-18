@@ -60,8 +60,11 @@ def send_discord(message: str) -> None:
     response.raise_for_status()
 
 
-def alert(subject: str, message: str) -> None:
-    """Fire both alert channels independently so one failing doesn't suppress the other."""
+def alert(subject: str, message: str, *, kind: str = "alert") -> None:
+    """Fire both alert channels independently so one failing doesn't suppress the other.
+    `kind` is the activity-log type the alert is recorded under: "alert" for the app's own,
+    "health" for the container healthcheck's (docker/healthcheck.sh sets ALERT_KIND=health), so
+    the Activity page can show or hide them apart."""
     # The BODY goes to the log too, not just the subject: it carries the failure dossier links and
     # the classified sign-in verdicts, and an alert that never arrived (email down, webhook
     # rotated) would otherwise leave no local record of either. run.log is where a reader looks.
@@ -69,7 +72,7 @@ def alert(subject: str, message: str) -> None:
     try:
         from diagnostics import activity  # lazy: alerts is imported everywhere
 
-        activity.record("alert", subject, {"message": message})
+        activity.record(kind if kind in activity.KINDS else "alert", subject, {"message": message})
     except Exception:  # noqa: BLE001 -- the activity log must never stop an alert
         log.warning("Could not record the alert in the activity log", exc_info=True)
     try:
@@ -90,6 +93,9 @@ if __name__ == "__main__":
     if len(sys.argv) >= 3:
         # `python -m alerts.notifier "<subject>" "<body>"` -- for shell callers such as
         # docker/healthcheck.sh, so a dead scheduler reaches the same channels as everything else.
-        alert(sys.argv[1], " ".join(sys.argv[2:]))
+        # ALERT_KIND=health in the environment files it under the Activity page's health type.
+        import os
+
+        alert(sys.argv[1], " ".join(sys.argv[2:]), kind=os.environ.get("ALERT_KIND") or "alert")
     else:
         alert("BuyingGroupLedger test alert", "If you see this by email and/or Discord, notifier.py is working.")

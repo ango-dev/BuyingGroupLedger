@@ -11,12 +11,23 @@ From <code>{{ activity_path }}</code> and the dossiers under <code>{{ failures_d
 <form id="activity-filters" class="filters" method="get" action="/activity"
       hx-get="/activity" hx-target="#activity-table" hx-push-url="true"
       hx-trigger="change, keyup changed delay:300ms from:#aq, submit">
-  <details class="multi" data-param="kind">
-    <summary><span class="lbl">Kind</span> <span class="summary-text"><span class="summary-value">{{ 'all' if not filters.kinds else (filters.kinds | map('replace', '_', ' ') | join(', ') if filters.kinds | length <= 2 else (filters.kinds | length) ~ ' selected') }}</span><span class="caret">▾</span></span></summary>
+  <details class="multi" data-param="type">
+    <summary><span class="lbl">Type</span> <span class="summary-text"><span class="summary-value">{{ 'all' if not filters.kinds else (filters.kinds | map('replace', '_', ' ') | join(', ') if filters.kinds | length <= 2 else (filters.kinds | length) ~ ' selected') }}</span><span class="caret">▾</span></span></summary>
     <div class="menu">
       <label class="all"><input type="checkbox" class="all-box" {{ 'checked' if not filters.kinds }}> All</label>
       {% for key, label in KINDS.items() %}
-      <label><input type="checkbox" name="kind" value="{{ key }}" {{ 'checked' if key in filters.kinds }}> {{ label }} <span class="muted small">{{ counts.get(key, 0) }}</span></label>
+      <label><input type="checkbox" name="type" value="{{ key }}" {{ 'checked' if key in filters.kinds }}> {{ label }} <span class="muted small">{{ counts.get(key, 0) }}{% if key in filters.hidden %} · hidden{% endif %}</span></label>
+      {% endfor %}
+    </div>
+  </details>
+  {# Suppressed types: remembered in this browser (the activity-hide cookie); a type picked in the
+     Type filter shows even while hidden. hide_set tells the server the boxes were on the form. #}
+  <input type="hidden" name="hide_set" value="1">
+  <details class="multi" data-param="hide" data-empty="none">
+    <summary><span class="lbl">Hide</span> <span class="summary-text"><span class="summary-value">{{ 'none' if not filters.hidden else (filters.hidden | join(', ') if filters.hidden | length <= 2 else (filters.hidden | length) ~ ' types') }}</span><span class="caret">▾</span></span></summary>
+    <div class="menu">
+      {% for key, label in KINDS.items() %}
+      <label><input type="checkbox" name="hide" value="{{ key }}" {{ 'checked' if key in filters.hidden }}> {{ label }}</label>
       {% endfor %}
     </div>
   </details>

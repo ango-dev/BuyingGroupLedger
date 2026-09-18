@@ -220,7 +220,8 @@
     var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
     if (all) all.checked = picked.length === 0;
     var text = details.querySelector(".summary-value") || details.querySelector(".summary-text");
-    if (text) text.textContent = picked.length === 0 ? "all" : (picked.length <= 2 ? picked.join(", ") : picked.length + " selected");
+    var empty = details.dataset.empty || "all";  // a "Hide" dropdown reads "none" when nothing is ticked
+    if (text) text.textContent = picked.length === 0 ? empty : (picked.length <= 2 ? picked.join(", ") : picked.length + " selected");
   }
   document.addEventListener("change", function (e) {
     var details = e.target.closest ? e.target.closest("details.multi") : null;

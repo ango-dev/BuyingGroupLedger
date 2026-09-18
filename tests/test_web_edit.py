@@ -670,6 +670,23 @@ class TestViewMemory:
         assert back.cookies.get("ledger-view") == "table"
         assert '<article class="card' not in client.get("/orders").text
 
+    def test_the_bare_orders_page_replays_the_remembered_filters_and_sort(self, sheet, tmp_path, logs_dir):
+        """set up the filters or sorts, and the default page remembers them."""
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        chosen = client.get("/orders", params={"status": "shipped", "sort": "total_cost", "dir": "asc",
+                                               "q": "", "page": "2"})
+        cookie = chosen.cookies.get("ledger-filters")
+        assert "status=shipped" in cookie and "sort=total_cost" in cookie and "page=" not in cookie
+        body = client.get("/orders").text  # the nav link: no query at all
+        assert 'name="status" value="shipped" checked' in body
+        assert 'name="sort" value="total_cost"' in body and 'name="dir" value="asc"' in body
+        # a link that names a filter is taken as it is, not merged with the memory
+        body = client.get("/orders", params={"status": "paid"}).text
+        assert 'name="status" value="paid" checked' in body and 'value="shipped" checked' not in body
+        # clearing the filters is remembered too
+        client.get("/orders", params={"q": "", "sort": "order_date", "dir": "desc"})
+        assert 'value="shipped" checked' not in client.get("/orders").text
+
     def test_a_bad_cookie_is_ignored(self, sheet, tmp_path, logs_dir):
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
         client.cookies.set("ledger-view", "grid")

@@ -38,6 +38,7 @@ KINDS: dict[str, str] = {
     "sync": "Buying-group sync",
     "reply": "Email reply",
     "alert": "Alert",
+    "health": "Container health",
     "dossier": "Failure dossier",
     "mirror": "DB mirror",
     "edit": "Dashboard edit",
@@ -132,14 +133,18 @@ def read(path: Path | None = None) -> list[dict]:
 
 
 def filter_events(events: list[dict], *, kinds: tuple[str, ...] = (), q: str = "", days: int = 0,
-                  run_id: str = "", now: datetime | None = None) -> list[dict]:
+                  run_id: str = "", now: datetime | None = None,
+                  hidden: tuple[str, ...] = ()) -> list[dict]:
     """Narrow a read: by kind (any of), a case-insensitive text over summary + details, a window
-    of the last N days (0 = all), or one run."""
+    of the last N days (0 = all), or one run. `hidden` kinds are left out unless `kinds` names
+    them explicitly (the page's suppressed types)."""
     needle = (q or "").strip().lower()
     cutoff = (now or _now()) - timedelta(days=days) if days else None
     out = []
     for event in events:
         if kinds and event.get("kind") not in kinds:
+            continue
+        if not kinds and hidden and event.get("kind") in hidden:
             continue
         if run_id and event.get("run_id") != run_id:
             continue

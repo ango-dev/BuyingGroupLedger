@@ -227,13 +227,22 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     from web.queries import PER_PAGE_CHOICES as _PER, VIEWS as _VIEWS
 
-    VIEW_COOKIE, PER_COOKIE = "ledger-view", "ledger-per"
+    VIEW_COOKIE, PER_COOKIE, FILTERS_COOKIE = "ledger-view", "ledger-per", "ledger-filters"
     COOKIE_MAX_AGE = 365 * 24 * 3600
+    #: Never remembered: a page number is where you were, not how you look at the ledger.
+    TRANSIENT = {"page", "notice", "error"}
 
     def remembered(request: Request, params) -> QueryParams:
         """The request's params with the remembered view / page size filled in when the request
-        does not say."""
+        does not say. A BARE
+        /orders -- no query at all, the nav link -- comes back with the whole remembered filter
+        and sort state."""
         items = list(params.multi_items()) if hasattr(params, "multi_items") else list(params.items())
+        if not [k for k, _v in items if k not in TRANSIENT]:
+            from urllib.parse import parse_qsl
+
+            items = [(k, v) for k, v in items if k in TRANSIENT] + \
+                parse_qsl(request.cookies.get(FILTERS_COOKIE, ""), keep_blank_values=False)
         names = {k for k, _v in items}
         view = request.cookies.get(VIEW_COOKIE, "")
         if "view" not in names and view in _VIEWS:
@@ -244,11 +253,18 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return QueryParams(items)
 
     def remember(request: Request, response, filters: Filters):
-        """Persist a view / page size the request chose explicitly."""
+        """Persist a view / page size the request chose explicitly, and the whole filter / sort
+        state of any request that names one (the bare /orders replays it)."""
         if "view" in request.query_params:
             response.set_cookie(VIEW_COOKIE, filters.view, max_age=COOKIE_MAX_AGE, samesite="lax")
         if "per" in request.query_params:
             response.set_cookie(PER_COOKIE, str(filters.per), max_age=COOKIE_MAX_AGE, samesite="lax")
+        explicit = [(k, v) for k, v in request.query_params.multi_items() if k not in TRANSIENT]
+        if explicit:
+            from urllib.parse import urlencode
+
+            response.set_cookie(FILTERS_COOKIE, urlencode(explicit, doseq=True), max_age=COOKIE_MAX_AGE,
+                                samesite="lax")
         return response
 
     def orders_context(request: Request, params=None, **extra) -> dict:
@@ -496,25 +512,39 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         merged.sort(key=lambda e: str(e.get("at", "")), reverse=True)
         return merged
 
+    HIDE_COOKIE = "activity-hide"
+
     @app.get("/activity", response_class=HTMLResponse)
     def activity_page(request: Request):
         filters = ActivityFilters.from_query(request.query_params)
+        # The hidden types: what the form just said, else what this browser remembered.
+        if not filters.hide_set:
+            remembered_hidden = [k for k in request.cookies.get(HIDE_COOKIE, "").split(",") if k]
+            filters = filters.with_hidden(remembered_hidden)
         events = with_dossiers(activity_module.read(activity_path))
         shown = activity_module.filter_events(events, kinds=filters.kinds, q=filters.q,
-                                              days=filters.days, run_id=filters.run_id, now=clock())
+                                              days=filters.days, run_id=filters.run_id, now=clock(),
+                                              hidden=filters.hidden)
         if not filters.desc:
             shown = list(reversed(shown))
         context = {"events": shown, "total": len(events), "filters": filters,
                    "counts": activity_module.counts_by_kind(events),
                    "activity_path": str(activity_path), "failures_dir": str(failures_dir)}
         name = "_activity_rows.html" if request.headers.get("HX-Request") else "activity.html"
-        return page_no_snapshot(request, name, **context)
+        response = page_no_snapshot(request, name, **context)
+        if filters.hide_set:
+            if filters.hidden:
+                response.set_cookie(HIDE_COOKIE, ",".join(filters.hidden), max_age=365 * 24 * 3600,
+                                    samesite="lax")
+            else:
+                response.delete_cookie(HIDE_COOKIE)  # "hide nothing": forget, rather than store ""
+        return response
 
     @app.get("/failures")
     def failures_page(request: Request):
         """The Failures page merged into Activity (2026-09-18); the old address lands on the
         dossier rows, all of them."""
-        return RedirectResponse(url="/activity?kind=dossier&days=0", status_code=303)
+        return RedirectResponse(url="/activity?type=dossier&days=0", status_code=303)
 
     # --- backup / restore (local files only; the Sheet is never touched) -------------------------
     backups_dir = Path(backup_dir) if backup_dir else backup_module.BACKUPS_DIR

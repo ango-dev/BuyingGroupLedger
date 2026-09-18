@@ -218,7 +218,8 @@ class TestThePage:
 
         everything = client.get("/activity", params={"days": "0"}).text
         assert everything.count("<tr class=\"kind-") == 4
-        only_edits = client.get("/activity", params={"kind": "edit", "days": "0"}).text
+        only_edits = client.get("/activity", params={"type": "edit", "days": "0"}).text
+        assert client.get("/activity", params={"kind": "edit", "days": "0"}).text.count("<tr class=\"kind-") == 2  # an old link
         assert only_edits.count("<tr class=\"kind-") == 2 and ">Alert<" not in only_edits[only_edits.index("<table"):]
         searched = client.get("/activity", params={"q": "boom"}).text
         assert searched.count("<tr class=\"kind-") == 1
@@ -258,6 +259,38 @@ class TestThePage:
         assert "amazon [profile-2]: failure dossier" in body and "no report.md" in body
         # the logged one keeps its run; the disk-only one has none; newest first
         assert body.index("costco_profile-1_20260917T080000Z") < body.index("amazon_profile-2_20260901T000000Z")
+
+    def test_hidden_types_are_remembered_in_a_cookie_and_still_pickable(self, client):
+        path = client.activity_path
+        activity.record("health", "Ledger container healthy again", path=path,
+                        at=datetime(2026, 9, 18, 7, 0, tzinfo=timezone.utc))
+        activity.record("alert", "Costco: scrape failed", path=path,
+                        at=datetime(2026, 9, 18, 8, 0, tzinfo=timezone.utc))
+        body = client.get("/activity").text
+        assert ">Container health<" in body and body.count("<tr class=\"kind-") == 2
+        assert 'data-param="hide"' in body and '<th>Type</th>' in body and "<th>Kind</th>" not in body
+
+        # the form says: hide health
+        hidden = client.get("/activity", params={"hide_set": "1", "hide": "health"})
+        assert hidden.cookies.get("activity-hide") == "health"
+        assert hidden.text.count("<tr class=\"kind-") == 1 and "healthy again" not in hidden.text
+        assert "· hidden" in hidden.text
+        # the bare page remembers it; picking the type explicitly shows it anyway
+        assert client.get("/activity").text.count("<tr class=\"kind-") == 1
+        assert "healthy again" in client.get("/activity", params={"type": "health"}).text
+        # the form saying "hide nothing" clears the memory
+        cleared = client.get("/activity", params={"hide_set": "1"})
+        assert not cleared.cookies.get("activity-hide") and cleared.text.count("<tr class=\"kind-") == 2
+        assert client.get("/activity").text.count("<tr class=\"kind-") == 2
+
+    def test_the_healthcheck_alert_files_under_health(self, monkeypatch):
+        from alerts.notifier import alert
+
+        alert("Ledger container UNHEALTHY -- scheduler is not producing runs", "body", kind="health")
+        alert("Costco: scrape failed", "body")
+        assert [e["kind"] for e in activity.read()] == ["alert", "health"]
+        script = (Path(__file__).resolve().parents[1] / "docker" / "healthcheck.sh").read_text(encoding="utf-8")
+        assert script.count("ALERT_KIND=health $NOTIFY") == 2
 
     def test_an_empty_log_renders(self, client):
         body = client.get("/activity").text
