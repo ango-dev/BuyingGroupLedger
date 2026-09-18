@@ -367,6 +367,7 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
 .card details.card-edit summary { cursor: pointer; }
 .card details.card-edit[open] summary { margin-bottom: 6px; }
 .card .row-count { margin: -4px 0 0; }
+.card details.card-edit summary .row-count { margin: 0; }
 .cards { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
 /* the order page's shipment tables: the same editable cells, the same affordances */
 .card-rows-wrap { overflow-x: auto; max-width: 100%; }
@@ -485,3 +486,21 @@ td:hover .cell-empty { opacity: 0.8; }
   color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 6px;
   box-shadow: 0 4px 14px rgba(0,0,0,0.12); pointer-events: none; opacity: 0; transition: opacity .12s; white-space: normal; }
 .tip.on { opacity: 1; }
+
+/* ---- the Settings gear (top right) and the Activity page ---- */
+header .meta .gear { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px;
+  color: var(--muted); border: 1px solid transparent; margin-left: 4px; }
+header .meta .gear:hover { color: var(--fg); background: var(--bg); border-color: var(--line); text-decoration: none; }
+header .meta .gear.active { color: var(--accent); border-color: var(--accent); }
+table.activity td.when { white-space: nowrap; font-size: 0.85em; color: var(--muted); }
+table.activity td.what { overflow-wrap: anywhere; }
+table.activity tr.details-row td { background: var(--bg); }
+.tag.kind { border-color: transparent; color: #1a1a1a; font-weight: 500; white-space: nowrap; }
+.tag.kind-run { background: #d9dde8; } .tag.kind-scrape { background: #cfe3f7; } .tag.kind-ledger { background: #cde9d3; }
+.tag.kind-sync { background: #e3d5f5; } .tag.kind-reply { background: #d9ecf2; } .tag.kind-alert { background: #f7d2cf; }
+.tag.kind-dossier { background: #f4c7c3; } .tag.kind-mirror { background: #e2e2e2; } .tag.kind-edit { background: #fbe6b8; }
+.tag.kind-backup { background: #dfe8d0; } .tag.kind-settings { background: #e8dccf; }
+.event-details { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 4px 0; font-size: 0.88em; }
+.event-details dt { color: var(--muted); }
+.event-details dd { margin: 0; overflow-wrap: anywhere; }
+.event-details pre { margin: 0; white-space: pre-wrap; }

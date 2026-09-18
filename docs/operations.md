@@ -194,6 +194,20 @@ underneath it would put its updates on the wrong rows. The signal is the run loc
 already keeps (`logs/.run.lock`, stale after three hours, the same rule as `main.py`), so the
 refusal lasts as long as the run does.
 
+**The Activity page** is the app's own account of what it did, newest first: for every scheduled
+run, what each retailer's scrape found and what the ledger write updated or added (split boxes,
+ignored tracking numbers, key conflicts named), what the buying-group sync submitted, insured and
+read back and how many rows it updated, the emails the BFMR auto-reply sent, the end-of-run
+mirror; every alert (with its message) and every failure dossier (linked to the Failures page);
+and every change made from the dashboard — cell edits (with the before and after), rows added or
+deleted, receipts uploaded, backups made / restored / deleted, settings saved (paths only, never a
+value). Filter by kind, by the last day / week / month, by text, or by one run (click a run stamp);
+expand a row for its details. The source is `logs/activity.jsonl` (`diagnostics/activity.py`),
+append-only, recorded at the source — `alerts.notifier.alert` records the alert, the dossier
+records itself, each step of `main.py` records what it did — so nothing is reconstructed from
+`run.log`. The header's gear opens Settings; `/health` stays a JSON endpoint for the container's
+healthcheck and is not linked.
+
 **Open rows** on the overview are `ordered`, `shipped` **or `delivered`** (the buying group has not
 paid yet), which is deliberately wider than the scrapers' terminal statuses; a gift-card row is
 never open.

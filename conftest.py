@@ -111,6 +111,19 @@ def _isolate_ledger_db(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_activity_log(tmp_path_factory, monkeypatch):
+    """Safety net: no test may append to the REAL logs/activity.jsonl. alerts.notifier.alert,
+    FailureDossier.write and main's steps all record there (diagnostics/activity.py); a per-test
+    file (in its own directory, so a test that counts tmp_path's entries is not disturbed) keeps
+    the developer's own activity feed clean and lets a test read back what it caused."""
+    from diagnostics import activity
+
+    monkeypatch.setattr(activity, "ACTIVITY_FILE",
+                        tmp_path_factory.mktemp("activity") / "activity.jsonl")
+    monkeypatch.setattr(activity, "_run_id", None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_config(tmp_path_factory, monkeypatch):
     """Safety net: no test may read the developer's REAL config.json or .state.json.
 

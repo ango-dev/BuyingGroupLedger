@@ -233,6 +233,16 @@ class FailureDossier:
         except Exception:  # noqa: BLE001 — the dossier is an aid; it must never become the failure
             log.exception("Could not write the failure dossier report to %s", directory)
         self.path = directory
+        try:
+            from diagnostics import activity
+
+            activity.record("dossier", f"{self.retailer_key} [{self.profile_label}]: failure dossier "
+                            f"written{' -- ' + type(exc).__name__ if exc else ''}",
+                            {"name": directory.name, "path": str(directory),
+                             "error": f"{type(exc).__name__}: {exc}" if exc else "",
+                             "snapshots": len(self.snapshots)})
+        except Exception:  # noqa: BLE001
+            log.warning("Could not record the dossier in the activity log", exc_info=True)
         self._prune()
         return directory
 

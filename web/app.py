@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from diagnostics import activity as activity_module
 from scripts import backup as backup_module
 
 from web import failures as failures_module
@@ -141,6 +142,13 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     def heartbeat() -> dict:
         return heartbeat_module.read_heartbeat(logs_dir, now=clock(),
                                               interval_hours=interval_hours)
+
+    # The activity log this dashboard reads and appends to (diagnostics/activity.py): the same
+    # file the scheduled run writes, since both share logs/.
+    activity_path = Path(logs_dir) / activity_module.ACTIVITY_FILE.name
+
+    def act(kind: str, summary: str, details: dict | None = None) -> None:
+        activity_module.record(kind, summary, details, path=activity_path)
 
     def load(request: Request) -> Snapshot:
         force = str(request.query_params.get("refresh", "")).lower() in ("1", "true", "yes")
@@ -280,6 +288,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except Exception as exc:  # noqa: BLE001
             return table_after(request, form, error=f"{type(exc).__name__}: {exc}")
         reader.load(force=True)
+        act("edit", f"Set {FIELD_TO_HEADER.get(field, field)} to {value!r} on {result['written']} row(s)",
+            {"field": field, "value": value, "rows": result["written"],
+             "order_ids": sorted({k.get("order_id", "") for k in keys})})
         notice = (f"Set {FIELD_TO_HEADER.get(field, field)} on {result['written']} row(s)"
                   + (f"; {len(result['errors'])} skipped: " + "; ".join(result["errors"])
                      if result["errors"] else ""))
@@ -299,6 +310,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except Exception as exc:  # noqa: BLE001
             return table_after(request, form, error=f"{type(exc).__name__}: {exc}")
         reader.load(force=True)
+        act("edit", f"Deleted {result['deleted']} row(s) from the ledger",
+            {"rows": result["deleted"], "order_ids": sorted({k.get("order_id", "") for k in keys}),
+             "keys": keys[:40]})
         return table_after(request, form, notice=f"Deleted {result['deleted']} row(s)")
 
     from web import receipts_upload
@@ -343,6 +357,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return refused(str(exc), exc.status)
         reader.load(force=True)
         notice = f"Added {result['key']['order_id']} at sheet row {result['row_number']}"
+        act("edit", f"Added a row for {result['key']['order_id']} ({fields.get('item_name', '')})",
+            {"order_id": result["key"]["order_id"], "row_number": result["row_number"],
+             "fields": {k: v for k, v in fields.items() if v}})
         return RedirectResponse(
             url="/orders?" + urlencode({"q": result["key"]["order_id"], "notice": notice}),
             status_code=303)
@@ -366,6 +383,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             try:
                 writer.write_cell(key, field, value,
                                   None if expected is None else str(expected))
+                act("edit", f"{FIELD_TO_HEADER.get(field, field)} on {key['order_id']} "
+                            f"(shipment {key['shipment']}): {expected!r} → {value!r}",
+                    {"order_id": key["order_id"], "item_name": key["item_name"],
+                     "shipment": key["shipment"], "field": field, "was": expected, "now": value})
             except EditError as exc:
                 error = str(exc)
             except Exception as exc:  # noqa: BLE001 -- the page must show why, not a 500
@@ -408,6 +429,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             keys = [{"order_id": r.order_id, "order_date": r.order_date, "item_name": r.item_name,
                      "shipment": r.shipment} for r in rows]
             result = writer.write_cells(keys, "receipt_url", link)
+            act("edit", f"Receipt uploaded for {order_id}: linked on {result['written']} row(s)",
+                {"order_id": order_id, "link": link, "rows": result["written"]})
         except (receipts_upload.UploadError, EditError) as exc:
             return RedirectResponse(url=f"/orders/{order_id}?" + urlencode({"error": str(exc)}),
                                     status_code=303)
@@ -415,6 +438,26 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         notice = f"Receipt stored and linked on {result['written']} row(s)"
         return RedirectResponse(url=f"/orders/{order_id}?" + urlencode({"notice": notice}),
                                 status_code=303)
+
+    # --- the activity feed ------------------------------------------------------
+    from web.activity_view import ActivityFilters
+
+    templates.env.globals["KINDS"] = activity_module.KINDS
+    templates.env.globals["run_label"] = activity_module.run_label
+
+    @app.get("/activity", response_class=HTMLResponse)
+    def activity_page(request: Request):
+        filters = ActivityFilters.from_query(request.query_params)
+        events = activity_module.read(activity_path)
+        shown = activity_module.filter_events(events, kinds=filters.kinds, q=filters.q,
+                                              days=filters.days, run_id=filters.run_id, now=clock())
+        if not filters.desc:
+            shown = list(reversed(shown))
+        context = {"events": shown, "total": len(events), "filters": filters,
+                   "counts": activity_module.counts_by_kind(events),
+                   "activity_path": str(activity_path)}
+        name = "_activity_rows.html" if request.headers.get("HX-Request") else "activity.html"
+        return page_no_snapshot(request, name, **context)
 
     @app.get("/failures", response_class=HTMLResponse)
     def failures(request: Request):
@@ -453,6 +496,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.post("/backup")
     def backup_create(request: Request):
         target = backup_module.create_backup(repo_root, backups_dir)
+        act("backup", f"Backup {target.name} created", {"name": target.name,
+                                                       "size_kb": target.stat().st_size // 1024})
         return RedirectResponse(url=f"/settings?message=Wrote+{target.name}#s-backup", status_code=303)
 
     @app.get("/backup/{name}")
@@ -479,6 +524,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         """Remove one backup zip. Same name
         rule as the download; confirmed in-page before the form submits."""
         _backup_path(name).unlink()
+        act("backup", f"Backup {name} deleted", {"name": name})
         return RedirectResponse(url=f"/settings?message=Deleted+{name}#s-backup", status_code=303)
 
     @app.post("/backup/restore")
@@ -498,6 +544,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         message = (f"Restored {len(result['restored'])} file(s), kept {len(result['skipped_existing'])}"
                    " existing" + (" (tick overwrite to replace them)" if result["skipped_existing"]
                                   else "") + ".")
+        act("backup", f"Restore from {safe_name}: {message}",
+            {"archive": safe_name, "force": bool(force), "restored": result["restored"],
+             "kept": result["skipped_existing"]})
         url = f"/settings?message={message.replace(' ', '+')}"
         if "config.json" in result["restored"]:
             url += "&restart=container"  # the run and the dashboard read config.json at start
@@ -546,6 +595,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return settings_page(request, errors=exc.errors, status=400)
         message = (f"Saved {len(changes)} changed setting(s): {', '.join(sorted(changes))}"
                    if changes else "Saved; nothing had changed.")
+        if changes:
+            act("settings", f"Settings saved: {', '.join(sorted(changes))}",
+                {"changed": sorted(changes)})  # paths only: a value here may be a secret
         restart_kind = settings_form.restart_needed(changes)
         url = f"/settings?message={message.replace(' ', '+')}"
         if restart_kind:
@@ -562,6 +614,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return settings_page(request, errors=exc.errors, open_section=path,
                                  section_texts={path: text}, status=400)
         message = f"Saved {path} ({count} entr{'y' if count == 1 else 'ies'})."
+        act("settings", f"Settings: {path} replaced as JSON ({count} entries)", {"path": path})
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}", status_code=303)
 
     # One entry of a card section: add, replace, delete. Errors re-render the page with the section open and nothing written.
@@ -573,6 +626,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return settings_page(request, errors=exc.errors, open_section=path, status=400)
         verb = "Added" if index is None else "Saved"
         message = f"{verb} {path[:-1]} {label}."
+        act("settings", f"Settings: {verb.lower()} {path[:-1]} {label}", {"path": path, "entry": label})
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
                                 status_code=303)
 
@@ -591,11 +645,13 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except settings_form.SettingsError as exc:
             return settings_page(request, errors=exc.errors, open_section=path, status=400)
         message = f"Removed {path[:-1]} {label}."
+        act("settings", f"Settings: removed {path[:-1]} {label}", {"path": path, "entry": label})
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
                                 status_code=303)
 
     @app.post("/settings/restart", response_class=HTMLResponse)
     def settings_restart(request: Request):
+        act("settings", "Dashboard restart requested from the Settings page")
         restart()
         return HTMLResponse("<!doctype html><meta http-equiv='refresh' content='6;url=/settings'>"
                             "<p style='font-family:system-ui;padding:20px'>Restarting the dashboard; "

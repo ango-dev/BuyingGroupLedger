@@ -40,6 +40,7 @@ logging.basicConfig(
 from functools import lru_cache  # noqa: E402
 
 from alerts.notifier import alert  # noqa: E402
+from diagnostics import activity  # noqa: E402
 from config.cards import load_cards, tag_cards  # noqa: E402
 from config.profiles import load_profiles_for_retailer  # noqa: E402
 from config.settings import settings  # noqa: E402
@@ -164,6 +165,8 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
 
     if not items:
         log.info("No orders found for %s (nothing new in the lookback window).", label)
+        activity.record("scrape", f"{label}: nothing new in the lookback window",
+                        {"retailer": scraper.retailer_name, "profile": scraper.profile.label})
         return
 
     # Guarded for the same reason scrape() is: this ran UNPROTECTED until 2026-08-14, so a bad address
@@ -174,6 +177,8 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
         items = _classify_and_drop_personal(items, label)
         if not items:
             log.info("Nothing to record for %s (all scraped rows were personal addresses).", label)
+            activity.record("scrape", f"{label}: only personal addresses, nothing recorded",
+                            {"retailer": scraper.retailer_name, "profile": scraper.profile.label})
             return
 
         # After the personal-address drop, so no work is spent resolving cards for rows we discard.
@@ -212,12 +217,15 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
     # where it already sits — so the common re-check run (0 appended) skips this entirely rather than
     # paying a full re-stamp of every formula each time. Sorting happens AFTER the sync so the row
     # numbers sync cached from its pre-sync snapshot are never invalidated mid-write.
+    sorted_after = None
     if (result or {}).get("appended"):
         try:
             sort_ledger_by_date_desc()
+            sorted_after = True
         except Exception:
             # The scraped rows are already safely written; a sort failure only leaves them out of
             # order, which the next append-triggered sort (or scripts/sort_ledger.py) fixes.
+            sorted_after = False
             log.exception("Ledger sort failed after syncing %s", csv_path)
             alert(
                 "Ledger sort failed",
@@ -225,9 +233,27 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
                 "afterwards failed, so the ledger may be out of order. The data itself is intact. "
                 "Run `python -m scripts.sort_ledger --apply` to fix. Check logs/run.log.",
             )
+    summary = result or {}
+    activity.record(
+        "ledger",
+        f"{label}: {len(items)} row(s) scraped -- {summary.get('updated', 0)} updated, "
+        f"{summary.get('appended', 0)} added"
+        + (f", {summary['split_rows']} split-box row(s)" if summary.get("split_rows") else "")
+        + (f", {len(summary['suspect_tracking'])} repeated tracking number(s) ignored"
+           if summary.get("suspect_tracking") else "")
+        + (f", {summary['skipped_conflicts']} key conflict(s) skipped" if summary.get("skipped_conflicts") else ""),
+        {"retailer": scraper.retailer_name, "profile": scraper.profile.label, "scraped": len(items),
+         "updated": summary.get("updated", 0), "appended": summary.get("appended", 0),
+         "split_rows": summary.get("split_rows", 0), "skipped_blank": summary.get("skipped_blank", 0),
+         "skipped_conflicts": summary.get("skipped_conflicts", 0),
+         "suspect_tracking": summary.get("suspect_tracking", []),
+         "order_ids": sorted({getattr(i, "order_id", "") for i in items if getattr(i, "order_id", "")}),
+         "csv": csv_path.name, "sorted": sorted_after},
+    )
 
 
 def main(retailers: list[str]) -> None:
+    activity.begin_run(", ".join(retailers))
     for name in retailers:
         scraper_cls = SCRAPERS[name]
         profiles = load_profiles_for_retailer(scraper_cls.retailer_key)
@@ -263,6 +289,7 @@ def main(retailers: list[str]) -> None:
     run_bfmr_email_autoreply()
     # Last, so the SQLite copy holds everything this run wrote: the scrapes AND the sync's payouts.
     run_db_mirror()
+    activity.end_run()
 
 
 def run_buying_group_sync() -> None:
@@ -293,11 +320,66 @@ def run_buying_group_sync() -> None:
     try:
         from sync_tracking import run as run_tracking_sync  # local: keeps `import main` cheap
 
-        run_tracking_sync(apply=True)
+        result = run_tracking_sync(apply=True)
+        _record_sync(result)
     except Exception:
         log.exception("Buying-group sync failed")
         alert("Buying-group sync failed",
               "Tracking numbers may not have been submitted. Check logs/run.log.")
+
+
+def _pairs(items) -> list[str]:
+    """respond_bfmr's (label, reason) tuples as "label: reason" lines for the activity log."""
+    out = []
+    for item in items:
+        if isinstance(item, (tuple, list)) and len(item) == 2:
+            out.append(f"{item[0]}: {item[1]}")
+        else:
+            out.append(str(item))
+    return out
+
+
+def _record_sync(result) -> None:
+    """One activity line for what the buying-group sync did: per group, what was submitted,
+    insured and read back, and how many ledger rows it updated. Never raises."""
+    try:
+        result = result if isinstance(result, dict) else {}
+        groups: dict = {}
+        submitted = insured = payouts = failed = manual = 0
+        for group_key, outcome in (result.get("outcomes") or {}).items():
+            outcome = outcome or {}
+            push, insurance, records = outcome.get("push"), outcome.get("insurance"), outcome.get("payouts")
+            entry = {
+                "submitted": len(getattr(push, "submitted", []) or []),
+                "submit_failed": len(getattr(push, "failed", []) or []),
+                "needs_manual": len(getattr(push, "needs_manual", []) or []),
+                "insured": len(getattr(insurance, "submitted", []) or []) if insurance is not None else 0,
+                "payout_records": len(records or []),
+            }
+            if getattr(push, "submitted", None):
+                entry["tracking_submitted"] = list(push.submitted)[:40]
+            if getattr(push, "failed", None):
+                entry["failed"] = [f"{o} {t}" for o, t in list(push.failed)[:20]]
+            groups[group_key] = entry
+            submitted += entry["submitted"]
+            insured += entry["insured"]
+            payouts += entry["payout_records"]
+            failed += entry["submit_failed"]
+            manual += entry["needs_manual"]
+        writes = result.get("writes") or {}
+        if not result:
+            activity.record("sync", "Buying-group sync: nothing eligible", {})
+            return
+        activity.record(
+            "sync",
+            f"Buying-group sync: {submitted} package(s) submitted, {insured} insured, {payouts} payout "
+            f"record(s) read, {len(writes)} ledger row(s) updated"
+            + (f", {failed} submission(s) failed" if failed else "")
+            + (f", {manual} need(s) a human" if manual else ""),
+            {"groups": groups, "rows_written": sorted(int(n) for n in writes)[:100]},
+        )
+    except Exception:  # noqa: BLE001 -- the activity log must never fail the run
+        log.warning("Could not record the buying-group sync in the activity log", exc_info=True)
 
 
 def run_db_mirror() -> None:
@@ -332,6 +414,9 @@ def run_db_mirror() -> None:
         log.info("Ledger DB mirror: %d row(s) from %s into %s%s", summary["rows"],
                  summary["source"], summary["db_path"],
                  "" if summary["header_ok"] else " (NOTE: the sheet's header is not HEADER)")
+        activity.record("mirror", f"DB mirror: {summary['rows']} row(s) copied from the Sheet",
+                        {"source": summary["source"], "db_path": summary["db_path"],
+                         "skipped": summary["skipped"], "header_ok": summary["header_ok"]})
     except Exception:
         log.exception("Ledger DB mirror failed")
         alert("Ledger DB mirror failed",
@@ -360,7 +445,16 @@ def run_bfmr_email_autoreply() -> None:
     try:
         from respond_bfmr import run as run_email_autoreply  # local: keeps `import main` cheap
 
-        run_email_autoreply(apply=True)
+        outcome = run_email_autoreply(apply=True)
+        outcome = outcome if isinstance(outcome, dict) else {}
+        replied = list(outcome.get("replied") or [])
+        skipped = list(outcome.get("skipped") or [])
+        failed = list(outcome.get("failed") or [])
+        activity.record(
+            "reply",
+            f"BFMR auto-reply: {len(replied)} email(s) sent, {len(skipped)} skipped, {len(failed)} failed",
+            {"replied": [str(r) for r in replied], "skipped": _pairs(skipped), "failed": _pairs(failed)},
+        )
     except Exception:
         log.exception("BFMR email auto-reply failed")
         alert("BFMR email auto-reply failed",

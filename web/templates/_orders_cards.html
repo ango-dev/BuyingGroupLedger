@@ -37,7 +37,7 @@
       </dl>
       {% if editable %}
       <details class="card-edit">
-        <summary class="muted small">edit rows</summary>
+        <summary class="muted small">edit rows <span class="row-count">· {{ c.rows }} row(s)</span></summary>
         <div class="card-rows-wrap">
         <table class="grid card-rows">
           <thead><tr>{% for name in CARD_COLUMNS %}<th class="{{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment') }}">{{ header_of(name) }}</th>{% endfor %}</tr></thead>
@@ -53,7 +53,7 @@
         </div>
       </details>
       {% endif %}
-      <p class="muted small row-count">{{ c.rows }} row(s)</p>
+      {% if not editable %}<p class="muted small row-count">{{ c.rows }} row(s)</p>{% endif %}
       <footer>
         <span class="links">
           <a class="button small" href="/orders/{{ c.order_id }}">Details</a>

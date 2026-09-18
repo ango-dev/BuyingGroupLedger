@@ -1,0 +1,40 @@
+{#- The Activity table (diagnostics/activity.py events), swapped into #activity-table by the filter
+    form. A row's details expand in place; a run id filters to that run; a dossier row links to
+    its report on the Failures page. -#}
+<p class="muted count">{{ events | length }} event(s){% if total != events | length %} of {{ total }}{% endif %}</p>
+{% if events %}
+<table class="grid compact activity">
+  <thead>
+    <tr><th>When</th><th>Kind</th><th>Run</th><th>What happened</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for e in events %}
+    {% set n = loop.index %}
+    <tr class="kind-{{ e.kind }}">
+      <td class="mono when" title="{{ e.at }}">{{ e.at | replace('T', ' ') | replace('+00:00', 'Z') }}</td>
+      <td><span class="tag kind kind-{{ e.kind }}">{{ KINDS.get(e.kind, e.kind) }}</span></td>
+      <td class="mono small">{% if e.run_id %}<a href="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-get="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-target="#activity-table" hx-push-url="true" title="only this run">{{ run_label(e.run_id) }}</a>{% else %}<span class="muted">dashboard</span>{% endif %}</td>
+      <td class="what">{{ e.summary }}
+        {% if e.kind == 'dossier' and e.details.name %} <a href="/failures#{{ e.details.name }}" class="small">open dossier ›</a>{% endif %}
+        {% if e.details.order_id %} <a href="/orders/{{ e.details.order_id }}" class="small mono">{{ e.details.order_id }}</a>{% endif %}
+      </td>
+      <td class="num">{% if e.details %}<button type="button" class="small ghost" onclick="var d=document.getElementById('ev-{{ n }}');d.hidden=!d.hidden;this.textContent=d.hidden?'details':'hide'">details</button>{% endif %}</td>
+    </tr>
+    {% if e.details %}
+    <tr class="details-row" id="ev-{{ n }}" hidden>
+      <td colspan="5">
+        <dl class="event-details">
+          {% for k, v in e.details.items() %}
+          <dt>{{ k | replace('_', ' ') }}</dt>
+          <dd>{% if v is mapping or v is sequence and v is not string %}<pre class="small">{{ v | tojson(indent=1) }}</pre>{% else %}{{ v }}{% endif %}</dd>
+          {% endfor %}
+        </dl>
+      </td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Nothing recorded{% if total %} that matches{% else %} yet — the next scheduled run, alert or dashboard change will appear here{% endif %}.</p>
+{% endif %}

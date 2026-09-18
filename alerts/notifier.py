@@ -67,6 +67,12 @@ def alert(subject: str, message: str) -> None:
     # rotated) would otherwise leave no local record of either. run.log is where a reader looks.
     log.info("ALERT: %s\n%s", subject, message)
     try:
+        from diagnostics import activity  # lazy: alerts is imported everywhere
+
+        activity.record("alert", subject, {"message": message})
+    except Exception:  # noqa: BLE001 -- the activity log must never stop an alert
+        log.warning("Could not record the alert in the activity log", exc_info=True)
+    try:
         send_email(subject, message)
     except Exception:
         log.exception("Failed to send email alert: %s", subject)
