@@ -146,11 +146,18 @@ local files only.
 **Editing on the Orders page.** The table is the Sheet: every column in the Sheet's order, rows
 coloured by the Sheet's own status rules (read from its conditional formats: ordered red, shipped
 orange, delivered yellow, paid green, return terracotta, cancelled grey and superseded dark grey
-with strikethrough), a frozen header, full page width. Double-click a cell (or press Enter on it)
-to edit; Enter saves, Esc cancels. **A cell you edit is protected from then on**: the scheduled
+with strikethrough), a frozen header, full page width. It edits like a spreadsheet: click a
+cell to select it, shift-click or drag for a range; double-click, Enter or just start typing to
+edit (the keystroke replaces the value); Enter saves, and fills every cell of a selected range;
+Esc cancels; Delete clears the selection; Ctrl+C copies the selection as tab-separated values
+(it pastes into Sheets or Excel) and Ctrl+V pastes a value into every selected cell or a block
+cell by cell from the top-left; the arrow keys move, with Shift they extend. Every write is one
+conflict-checked cell write, run one after another. **A cell you edit is protected from then
+on**: the scheduled
 run's upsert, its order-level reproration and the buying-group sync all keep a hand-typed value
 (`ledger_db/hand_edits`, a table in the ledger file that the dashboard's writer fills; the cell
-shows a coloured left edge and says so in its tooltip). Deleting the row clears its marks; Tools
+shows a coloured left edge and says so in its tooltip). Clearing the cell releases it, so the next
+run fills it again; deleting the row clears its marks; Tools
 → Ledger Fixes → *Hand-edited cells* lists them and can release an order's cells (or one field)
 when you want the run to take over again. The repair scripts (backfills, retag, the profit-column
 refresh) are your own explicit rewrites and are not gated. A cell that shows a link (Order Link, Tracking Link, Receipt

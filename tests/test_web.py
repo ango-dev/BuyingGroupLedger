@@ -1582,7 +1582,7 @@ class TestStaticAssetsCarryTheirBlocks:
 
     def test_the_stylesheet_has_every_feature_block(self):
         css = (self.ROOT / "style.css").read_text(encoding="utf-8")
-        for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap",
+        for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap", "td.sel-cell",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".bulkbar", ".add-form", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
@@ -1606,7 +1606,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        'addEventListener("htmx:confirm"', "details.multi", 'name !== "view"',
                        '".cell-edit, .cell-empty"', 'contains("single")', '"time.local"',
                        'closest(".dropzone")', "data-autosubmit", 'classList.add("just-in")',
-                       'matches(\'[hx-trigger*="every"]\')'):
+                       'matches(\'[hx-trigger*="every"]\')', "sel-cell", 'addEventListener("copy"',
+                       'addEventListener("paste"', 'e.key === "Delete"', "fillSelection(", "all.checked = !any"):
             assert needle in js, f"edit.js lost its {needle!r} block"
 
 

@@ -205,15 +205,19 @@ class _Grid:
 
 def _protect(worksheet, key: dict, field: str, value) -> None:
     """Record a hand edit (ledger_db/hand_edits) when the ledger is the database; a Sheet has no
-    such record and a test fake needs none. Never fails the edit that succeeded."""
+    such record and a test fake needs none. CLEARING a cell releases it instead. Never fails the
+    edit that succeeded."""
     from ledger_db.hand_edits import ledger_db_of
 
     db = ledger_db_of(worksheet)
     if db is None:
         return
     try:
-        from ledger_db.hand_edits import record
+        from ledger_db.hand_edits import forget, record
 
+        if str(value if value is not None else "").strip() == "":
+            forget(db, normalize_key(key), field)
+            return
         record(db, normalize_key(key), field, value)
     except Exception:  # noqa: BLE001
         log.exception("the edit was written but could not be marked as hand-edited")

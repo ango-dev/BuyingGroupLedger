@@ -107,7 +107,7 @@
 <form id="bulk" hx-disinherit="hx-include">
   {% if editable and filters.view == 'table' %}
   <div id="bulkbar" class="bulkbar">
-    <span class="muted small"><span id="sel-count">0</span> selected · click row numbers to select, shift-click for a range, click <b>#</b> for all</span>
+    <span class="muted small"><span id="sel-count">0</span> selected · click row numbers to select, shift-click for a range, click <b>#</b> for all / to clear</span>
     {{ choose('field', EDIT_FIELD_HEADINGS, EDIT_FIELD_HEADINGS[0][0], '', 'inline') }}
     <input type="text" name="value" placeholder="value (blank clears)">
     <button type="submit" hx-post="/orders/bulk" hx-target="#orders-table" hx-include="#filters"

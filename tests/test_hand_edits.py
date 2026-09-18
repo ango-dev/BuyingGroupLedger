@@ -95,6 +95,12 @@ class TestTheWriterRecords:
         assert hand_edits.protected(db) == {KEYT: {"cashback_rate"}}
         writer.write_cells([KEY, {**KEY, "order_id": "missing"}], "insurance", "2.5")
         assert hand_edits.protected(db) == {KEYT: {"cashback_rate", "insurance"}}
+        # clearing a cell hands it back to the run
+        writer.write_cell(KEY, "insurance", "", expected="2.5")
+        assert hand_edits.protected(db) == {KEYT: {"cashback_rate"}}
+        writer.write_cells([KEY], "cashback_rate", "")
+        assert hand_edits.protected(db) == {}
+        writer.write_cell(KEY, "cashback_rate", "0.05")
         writer.remove_rows([KEY])
         assert hand_edits.protected(db) == {}
 

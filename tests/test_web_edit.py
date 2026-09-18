@@ -344,7 +344,7 @@ class TestOrdersRoutes:
         cogs_td = re.search(r'<td class="([^"]*)"\s+data-field="cogs"', body)
         assert cogs_td and "edit" not in cogs_td.group(1)  # a formula: never editable
         assert '<tr class="status-shipped' in body and '<tr class="status-paid' in body
-        assert "double-click a cell to edit" in body
+        assert "works like a spreadsheet" in body
         assert "/static/edit.js" in body
         # The row tools.
         assert 'name="sel"' in body and 'id="sel-all"' in body
@@ -714,7 +714,7 @@ class TestOrderPageEditing:
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
         body = client.get("/orders/BBY01-1").text
         assert 'class="num edit"' in body and 'data-field="insurance"' in body
-        assert 'data-order-id="BBY01-1"' in body and "double-click a cell to edit" in body
+        assert 'data-order-id="BBY01-1"' in body and "works like a spreadsheet" in body
         cogs_td = re.search(r'<td class="([^"]*)"\s+data-field="cogs"', body)
         assert cogs_td and "edit" not in cogs_td.group(1)
         # An edit made from the order page lands exactly as one from the table.

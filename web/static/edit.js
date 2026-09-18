@@ -1,18 +1,116 @@
-// Inline cell editing for the Orders page. No build step, no framework: a <td class="edit"> turns
-// into an <input> on double-click (or Enter while focused), and Enter / blur posts the value to
-// /orders/cell with the row's key and what the cell showed before ("expected"), so a cell someone
-// else changed meanwhile is refused as a conflict instead of overwritten. The server answers with
-// the whole <td> re-rendered from a fresh read (or with data-error), and htmx swaps it in place.
+// The Orders table edits like a spreadsheet. No build step, no framework.
+//
+//   click            selects a cell (the active cell, outlined); shift-click or drag selects a range
+//   double-click     opens the editor (or press Enter, or just start typing: the keystroke replaces
+//                    the value, as in Sheets)
+//   Enter            saves; with a RANGE selected, fills every editable cell in it with the value
+//   Esc              cancels the editor, or clears the selection
+//   Delete/Backspace clears every editable selected cell
+//   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
+//                    pastes a single value into every selected cell, or a block cell by cell from
+//                    the top-left of the selection
+//   arrows           move the active cell; with Shift, extend the selection
+//
+// Every write is one POST to /orders/cell with the row's key, the field, the value and what the
+// cell showed before ("expected"), so a cell someone else changed meanwhile is refused as a
+// conflict instead of overwritten. The server answers with the whole <td> re-rendered from a
+// fresh read (or with data-error), and htmx swaps it in place. Writes run one after another.
 (function () {
   "use strict";
 
-  function startEdit(td) {
+  // ---- the grid: coordinates survive the swaps that replace cells ------------------------------
+  // The Orders table and an order page's shipment tables are all grids; the selection lives in
+  // ONE of them at a time (the one last clicked), and a cell swap keeps the table element.
+  var GRID = "table.sheetlike, table.order-rows";
+  var grid = null;     // the table the selection is in
+  function table() { return grid && grid.isConnected ? grid : null; }
+  function body() { var t = table(); return t ? t.tBodies[0] : null; }
+  function inGrid(el) { return !!(el && el.closest && el.closest(GRID)); }
+  function cellAt(r, c) {
+    var b = body();
+    var row = b && b.rows[r];
+    return row ? row.cells[c] : null;
+  }
+  function coordsOf(td) {
+    var tr = td.parentElement;
+    return { r: tr.sectionRowIndex, c: td.cellIndex };
+  }
+  function selectable(td) { return !!td && td.tagName === "TD" && !td.classList.contains("rownum"); }
+  function editable(td) { return !!td && td.classList.contains("edit") && !td.hasAttribute("data-editing"); }
+
+  var sel = null;      // {r1, c1, r2, c2} or null
+  var active = null;   // {r, c} or null
+  var anchor = null;   // {r, c}: where a shift-click / drag range starts
+
+  function forEachSelected(fn) {
+    if (!sel) return;
+    for (var r = sel.r1; r <= sel.r2; r++) {
+      for (var c = sel.c1; c <= sel.c2; c++) {
+        var td = cellAt(r, c);
+        if (selectable(td)) fn(td, r, c);
+      }
+    }
+  }
+  function paint() {
+    document.querySelectorAll("td.sel-cell").forEach(function (td) { td.classList.remove("sel-cell"); });
+    forEachSelected(function (td) { td.classList.add("sel-cell"); });
+    var td = active ? cellAt(active.r, active.c) : null;
+    if (td && document.activeElement !== td && !document.querySelector("input.cell-input")) {
+      td.focus({ preventScroll: true });
+    }
+  }
+  function rangeCount() { return sel ? (sel.r2 - sel.r1 + 1) * (sel.c2 - sel.c1 + 1) : 0; }
+  function setSelection(a, b) {
+    sel = { r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
+    paint();
+  }
+  function selectOne(td) {
+    grid = td.closest(GRID);
+    var p = coordsOf(td);
+    anchor = p; active = p;
+    setSelection(p, p);
+  }
+  function clearSelection() { sel = null; anchor = null; paint(); }
+
+  // ---- writes, one after another ----------------------------------------------------------------
+  var queue = Promise.resolve();
+  function writeCell(td, value) {
+    if (!editable(td)) return;
+    var raw = td.getAttribute("data-raw") || "";
+    if (value === raw) return;
+    var values = {
+      order_id: td.getAttribute("data-order-id"),
+      order_date: td.getAttribute("data-order-date"),
+      item_name: td.getAttribute("data-item-name"),
+      shipment: td.getAttribute("data-shipment"),
+      field: td.getAttribute("data-field"),
+      value: value,
+      expected: raw
+    };
+    td.classList.add("saving");
+    queue = queue.then(function () {
+      return htmx.ajax("POST", "/orders/cell", { target: td, swap: "outerHTML", values: values });
+    }).catch(function () {});
+  }
+  function fillSelection(value) {
+    var targets = [];
+    forEachSelected(function (td) { if (editable(td)) targets.push(td); });
+    targets.forEach(function (td) { writeCell(td, value); });
+  }
+
+  // ---- the editor --------------------------------------------------------------------------------
+  function armed(td) {
+    if (!td.getAttribute("data-original-html")) td.setAttribute("data-original-html", td.innerHTML);
+    return td;
+  }
+  function startEdit(td, initial) {
     if (td.querySelector("input")) return;
+    armed(td);
     var raw = td.getAttribute("data-raw") || "";
     var field = td.getAttribute("data-field");
     var input = document.createElement("input");
     input.type = "text";
-    input.value = raw;
+    input.value = initial !== undefined ? initial : raw;
     input.className = "cell-input";
     input.setAttribute("aria-label", "edit " + field);
     if (field === "tracking_submitted") input.placeholder = "TRUE / FALSE";
@@ -21,68 +119,160 @@
     td.innerHTML = "";
     td.appendChild(input);
     input.focus();
-    input.select();
+    if (initial === undefined) input.select();
 
     var done = false;
+    function restore() {
+      td.removeAttribute("data-editing");
+      td.innerHTML = td.getAttribute("data-original-html") || "";
+    }
     function cancel() {
       if (done) return;
       done = true;
-      td.removeAttribute("data-editing");
-      td.innerHTML = td.getAttribute("data-original-html") || "";
+      restore();
+      td.focus({ preventScroll: true });
     }
     function save() {
       if (done) return;
       done = true;
-      td.removeAttribute("data-editing");
-      td.classList.add("saving");
-      htmx.ajax("POST", "/orders/cell", {
-        target: td,
-        swap: "outerHTML",
-        values: {
-          order_id: td.getAttribute("data-order-id"),
-          order_date: td.getAttribute("data-order-date"),
-          item_name: td.getAttribute("data-item-name"),
-          shipment: td.getAttribute("data-shipment"),
-          field: field,
-          value: input.value,
-          expected: raw
-        }
-      });
+      var value = input.value;
+      restore();
+      // A range selected around this cell: the value goes into every editable cell of it.
+      if (rangeCount() > 1) { fillSelection(value); return; }
+      writeCell(td, value);
     }
     input.addEventListener("keydown", function (e) {
       if (e.key === "Enter") { e.preventDefault(); save(); }
       else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+      else if (e.key === "Tab") { e.preventDefault(); save(); move(0, e.shiftKey ? -1 : 1, false); }
     });
     input.addEventListener("blur", function () {
       if (input.value === raw) cancel(); else save();
     });
   }
 
-  function armed(td) {
-    if (!td.getAttribute("data-original-html")) td.setAttribute("data-original-html", td.innerHTML);
-    return td;
-  }
-
+  // ---- mouse: click selects, shift-click / drag extend ---------------------------------------------
+  var dragging = false;
+  document.addEventListener("mousedown", function (e) {
+    if (e.button !== 0) return;
+    if (e.target.closest && e.target.closest("a, button, input, .cell-edit, .cell-empty")) return;
+    var td = e.target.closest ? e.target.closest(GRID + " td") : null;
+    if (!selectable(td)) return;
+    if (td.hasAttribute("data-editing")) return;
+    var open = document.querySelector("input.cell-input");
+    if (open) open.blur();  // commits or cancels the open editor first
+    if (e.shiftKey && anchor && td.closest(GRID) === table()) { active = coordsOf(td); setSelection(anchor, active); }
+    else selectOne(td);
+    dragging = true;
+    e.preventDefault();  // no text selection while dragging a range
+  });
+  document.addEventListener("mousemove", function (e) {
+    if (!dragging) return;
+    var td = e.target.closest ? e.target.closest(GRID + " td") : null;
+    if (!selectable(td) || td.closest(GRID) !== table()) return;
+    var p = coordsOf(td);
+    if (!active || p.r !== active.r || p.c !== active.c) { active = p; setSelection(anchor, p); }
+  });
+  document.addEventListener("mouseup", function () { dragging = false; });
   document.addEventListener("dblclick", function (e) {
-    var td = e.target.closest("td.edit");
-    if (td && !td.hasAttribute("data-editing")) startEdit(armed(td));
+    var td = e.target.closest ? e.target.closest("td.edit") : null;
+    if (td && !td.hasAttribute("data-editing")) startEdit(td);
   });
   // A cell that shows a link cannot be double-clicked into (the first click follows the link),
   // so it carries a pencil; a blank link cell shows "add" and edits on a single click.
   document.addEventListener("click", function (e) {
     var handle = e.target.closest ? e.target.closest(".cell-edit, .cell-empty") : null;
     var td = handle ? handle.closest("td.edit") : null;
-    if (td && !td.hasAttribute("data-editing")) { e.preventDefault(); startEdit(armed(td)); }
+    if (td && !td.hasAttribute("data-editing")) { e.preventDefault(); selectOne(td); startEdit(td); }
   });
+
+  // ---- keyboard ----------------------------------------------------------------------------------
+  function move(dr, dc, extend) {
+    if (!active) return;
+    var r = active.r + dr, c = active.c + dc;
+    var td = cellAt(r, c);
+    if (!selectable(td)) return;
+    active = { r: r, c: c };
+    if (extend && anchor) setSelection(anchor, active);
+    else { anchor = active; setSelection(active, active); }
+    td.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+  function selectionTsv() {
+    var lines = [];
+    if (!sel) return "";
+    for (var r = sel.r1; r <= sel.r2; r++) {
+      var cells = [];
+      for (var c = sel.c1; c <= sel.c2; c++) {
+        var td = cellAt(r, c);
+        cells.push(td ? (td.hasAttribute("data-raw") ? td.getAttribute("data-raw") : td.textContent.trim()) : "");
+      }
+      lines.push(cells.join("\t"));
+    }
+    return lines.join("\n");
+  }
+  function pasteText(text) {
+    if (!sel || !text) return;
+    var rows = text.replace(/\r/g, "").replace(/\n$/, "").split("\n").map(function (l) { return l.split("\t"); });
+    if (rows.length === 1 && rows[0].length === 1) { fillSelection(rows[0][0]); return; }
+    // A block: cell by cell from the top-left of the selection, as far as the table goes.
+    rows.forEach(function (line, dr) {
+      line.forEach(function (value, dc) {
+        var td = cellAt(sel.r1 + dr, sel.c1 + dc);
+        if (editable(td)) writeCell(td, value);
+      });
+    });
+  }
+  var pasteHandled = false;
   document.addEventListener("keydown", function (e) {
-    if (e.key !== "Enter") return;
-    var td = e.target.closest ? e.target.closest("td.edit") : null;
-    if (td && e.target === td && !td.hasAttribute("data-editing")) { e.preventDefault(); startEdit(armed(td)); }
+    if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    var td = active ? cellAt(active.r, active.c) : null;
+    if (!td || !inGrid(document.activeElement)) return;
+    var ctrl = e.ctrlKey || e.metaKey;
+    if (e.key === "ArrowUp") { e.preventDefault(); move(-1, 0, e.shiftKey); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); move(1, 0, e.shiftKey); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); move(0, -1, e.shiftKey); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); move(0, 1, e.shiftKey); }
+    else if (e.key === "Tab") { e.preventDefault(); move(0, e.shiftKey ? -1 : 1, false); }
+    else if (e.key === "Enter") { e.preventDefault(); if (editable(td)) startEdit(td); }
+    else if (e.key === "Escape") { e.preventDefault(); clearSelection(); }
+    else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); fillSelection(""); }
+    else if (ctrl && (e.key === "c" || e.key === "C")) {
+      var tsv = selectionTsv();
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(tsv).catch(function () {});
+    }
+    else if (ctrl && (e.key === "v" || e.key === "V")) {
+      pasteHandled = false;
+      setTimeout(function () {  // the paste event is the reliable path; readText is the fallback
+        if (pasteHandled || !navigator.clipboard || !navigator.clipboard.readText) return;
+        navigator.clipboard.readText().then(pasteText).catch(function () {});
+      }, 60);
+    }
+    else if (!ctrl && !e.altKey && e.key.length === 1 && editable(td)) {
+      e.preventDefault();
+      startEdit(td, e.key);  // typing replaces the value, as in Sheets
+    }
   });
-  // After a swap, surface a refused edit where it happened.
+  document.addEventListener("copy", function (e) {
+    if (!sel || document.querySelector("input.cell-input")) return;
+    if (!inGrid(document.activeElement)) return;
+    e.clipboardData.setData("text/plain", selectionTsv());
+    e.preventDefault();
+  });
+  document.addEventListener("paste", function (e) {
+    if (!sel || document.querySelector("input.cell-input")) return;
+    if (!inGrid(document.activeElement)) return;
+    pasteHandled = true;
+    e.preventDefault();
+    pasteText(e.clipboardData.getData("text/plain"));
+  });
+
+  // After a swap: a refused edit is surfaced where it happened; the selection is repainted onto
+  // the new cells (a whole-table swap on a filter change starts with nothing selected).
   document.addEventListener("htmx:afterSwap", function (e) {
     var td = e.target && e.target.matches && e.target.matches("td[data-error]") ? e.target : null;
     if (td) { td.focus(); }
+    if (e.target && e.target.id === "orders-table") { sel = null; anchor = null; active = null; }
+    paint();
   });
 })();
 
@@ -157,7 +347,9 @@
     var all = document.getElementById("sel-all");
     if (!all) return;
     e.preventDefault();
-    all.checked = !all.checked;
+    // Like Sheets' corner: anything selected -> clear the selection; nothing -> select every row.
+    var any = document.querySelector('input[name="sel"]:checked');
+    all.checked = !any;
     all.dispatchEvent(new Event("change", { bubbles: true }));
   });
 })();
