@@ -271,3 +271,19 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
 .report code { background: var(--bg); padding: 0 3px; border-radius: 3px; }
 .report table { border-collapse: collapse; }
 .report td, .report th { border: 1px solid var(--line); padding: 3px 8px; }
+
+/* --- Multi-select filter dropdowns (the four facets) ------------------------------------------ */
+.filters details.multi { position: relative; font-size: 0.85em; color: var(--muted); }
+.filters details.multi summary { list-style: none; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
+.filters details.multi summary::-webkit-details-marker { display: none; }
+.filters details.multi .summary-text { display: inline-block; font-size: 1.18em; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 120px; max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filters details.multi[open] .summary-text { border-color: var(--accent); }
+.filters details.multi .menu { position: absolute; top: 100%; left: 0; z-index: 6; margin-top: 4px; min-width: 200px; max-height: 320px;
+  overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); display: flex; flex-direction: column; gap: 2px; }
+.filters details.multi .menu label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 1.15em;
+  color: var(--fg); white-space: nowrap; padding: 2px 4px; border-radius: 4px; }
+.filters details.multi .menu label:hover { background: var(--bg); }
+.filters details.multi .menu label.all { border-bottom: 1px solid var(--line); padding-bottom: 5px; margin-bottom: 3px; }

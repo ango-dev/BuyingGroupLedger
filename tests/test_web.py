@@ -656,12 +656,12 @@ class TestQueries:
         return SnapshotReader(snapshot_path).load().rows
 
     def test_filters(self, rows):
-        assert {r.order_id for r in filter_rows(rows, Filters(retailer="Costco"))} == {
+        assert {r.order_id for r in filter_rows(rows, Filters(retailers=("Costco",)))} == {
             "1399000017", "1399000018", "1399000019"}
-        assert [r.row_number for r in filter_rows(rows, Filters(status="shipped"))] == [3]
-        assert {r.order_id for r in filter_rows(rows, Filters(group="MOD"))} == {
+        assert [r.row_number for r in filter_rows(rows, Filters(statuses=("shipped",)))] == [3]
+        assert {r.order_id for r in filter_rows(rows, Filters(groups=("MOD",)))} == {
             "1399000017", "1399000018"}
-        assert {r.order_id for r in filter_rows(rows, Filters(profile="profile-charlie"))} == {
+        assert {r.order_id for r in filter_rows(rows, Filters(profiles=("profile-charlie",)))} == {
             "111-0000002-0000002", "111-0000003-0000003", "111-0000004-0000004"}
         assert [r.row_number for r in filter_rows(rows, Filters(q="529900000012"))] == [3]
         assert [r.row_number for r in filter_rows(rows, Filters(q="dyson"))] == [6]
@@ -778,7 +778,8 @@ class TestOrdersPage:
 
     def test_facets_come_from_the_whole_ledger(self, client):
         body = client.get("/orders", params={"retailer": "Costco"}).text
-        assert '<option value="Best Buy"' in body and '<option value="Costco" selected' in body
+        assert 'name="retailer" value="Best Buy" >' in body  # still offered while Costco is chosen
+        assert 'name="retailer" value="Costco" checked' in body
 
 
 class TestOrderPage:
@@ -1315,3 +1316,35 @@ class TestCardsHelpers:
         assert (p["start"], p["end"], p["has_prev"], p["has_next"]) == (13, 24, True, True)
         assert paginate(list(range(50)), 12, 99)["page"] == 5  # clamps to the last page
         assert paginate([], 12, 1) == {**paginate([], 12, 1), "total": 0, "pages": 1, "start": 0, "end": 0}
+
+
+class TestMultiSelectFilters:
+    def test_repeated_params_select_all_that_apply_and_none_means_all(self, snapshot_path):
+        rows = SnapshotReader(snapshot_path).load().rows
+        f = Filters.from_query({"retailer": ["Costco", "Best Buy"], "status": ["paid", "shipped"]})
+        assert f.retailers == ("Costco", "Best Buy") and f.statuses == ("paid", "shipped")
+        assert f.retailer == ""  # more than one: no single value
+        picked = filter_rows(rows, f)
+        assert {(r.retailer, r.status) for r in picked} == {("Costco", "paid"), ("Best Buy", "shipped")}
+        assert len(filter_rows(rows, Filters.from_query({}))) == len(rows)
+        assert Filters.from_query({"retailer": "Costco"}).retailers == ("Costco",)
+
+    def test_links_carry_repeated_params(self):
+        from web.queries import query_string
+
+        f = Filters.from_query({"retailer": ["Costco", "Best Buy"], "group": ["MOD"]})
+        assert query_string(f.as_query(sort="total_cost")) == (
+            "retailer=Costco&retailer=Best+Buy&group=MOD&sort=total_cost&dir=desc")
+
+    def test_the_page_renders_checkbox_dropdowns_with_an_all_box(self, client):
+        body = client.get("/orders", params={"retailer": ["Costco", "Best Buy"]}).text
+        assert body.count('<details class="multi"') == 4
+        retailer = body[body.index('data-param="retailer"'):body.index('data-param="profile"')]
+        assert 'name="retailer" value="Costco" checked' in retailer
+        assert 'name="retailer" value="Best Buy" checked' in retailer
+        assert 'name="retailer" value="Amazon" >' in retailer
+        assert '<input type="checkbox" class="all-box" > All' in retailer
+        assert "Costco, Best Buy" in retailer  # the summary
+        assert body.count('<tr class="status-') == 5  # Costco + Best Buy rows
+        profile = body[body.index('data-param="profile"'):body.index('data-param="status"')]
+        assert 'class="all-box" checked' in profile and ">all<" in profile

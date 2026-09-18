@@ -133,6 +133,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     templates.env.filters["money"] = money
     templates.env.filters["percent"] = percent
     templates.env.filters["cell"] = cell
+    from web.queries import query_string
+
+    templates.env.filters["query"] = query_string
     templates.env.globals["header_of"] = FIELD_TO_HEADER.get
 
     def heartbeat() -> dict:
@@ -180,9 +183,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     templates.env.globals["MONEY_FIELDS"] = MONEY_FIELDS
     templates.env.globals["EDIT_FIELD_HEADINGS"] = [(f, FIELD_TO_HEADER[f]) for f in EDITABLE_FIELDS]
 
-    from web.queries import PER_PAGE_CHOICES, order_cards, paginate
+    from web.queries import CARD_COLUMNS, PER_PAGE_CHOICES, SORT_CHOICES, order_cards, paginate
 
     templates.env.globals["PER_PAGE_CHOICES"] = PER_PAGE_CHOICES
+    templates.env.globals["CARD_COLUMNS"] = CARD_COLUMNS
+    templates.env.globals["SORT_CHOICES"] = SORT_CHOICES
 
     def orders_context(request: Request, params=None, **extra) -> dict:
         snapshot = load(request)

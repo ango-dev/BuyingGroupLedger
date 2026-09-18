@@ -163,10 +163,16 @@ the column formats survive, the two formula cells stamped), Total Cost is comput
 Cost Per Item, and the row sorts into date order on the next sync. A key that already exists is
 refused.
 
+**Filters select all that apply.** Retailer, Profile, Status and Buying group are checkbox
+dropdowns: tick any combination; *All* clears the others (and re-ticks itself when the last value
+is unticked). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
+
 **Two views.** The *View* control in the filter bar switches between the sheet-like table and
-**cards**: one card per order (its rows grouped: items, statuses, tracking, group, quantity, cost,
-payout, profit, links), under the same filters, sort and search, paginated with a *Per page* choice
-of 12 / 24 / 48 / 96. A card's *Delete* removes every row of that order, through the same
+**cards**: one card per order under the same filters and search, sorted by the *Sort by* / *Order*
+controls that appear in the cards view, paginated with a *Per page* choice of 12 / 24 / 48 / 96.
+A card shows the order's totals (quantity, cost, payout with its state, profit) and a list of its
+rows with the same editable cells as the table (double-click, Enter, Esc), the Status cell coloured
+as the table's rows are. A card's *Delete* removes every row of that order, through the same
 all-or-nothing delete the table uses. Every confirmation on the page (bulk apply, delete, card
 delete) is an in-page dialog rather than the browser's own prompt.
 

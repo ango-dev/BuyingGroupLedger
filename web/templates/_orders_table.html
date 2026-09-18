@@ -17,8 +17,8 @@
       {% set active = filters.sort == name %}
       {% set next_dir = 'asc' if (active and filters.desc) else 'desc' %}
       <th class="col-{{ name }} {{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }} {{ 'sorted' if active }}">
-        <a href="/orders?{{ filters.as_query(sort=name, dir=next_dir) | urlencode }}"
-           hx-get="/orders?{{ filters.as_query(sort=name, dir=next_dir) | urlencode }}"
+        <a href="/orders?{{ filters.as_query(sort=name, dir=next_dir) | query }}"
+           hx-get="/orders?{{ filters.as_query(sort=name, dir=next_dir) | query }}"
            hx-target="#orders-table" hx-push-url="true">{{ heading }}{% if active %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a>
       </th>
       {% endfor %}

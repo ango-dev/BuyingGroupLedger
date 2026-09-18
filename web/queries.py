@@ -30,18 +30,40 @@ SEARCH_FIELDS = ("order_id", "item_name", "tracking_number", "package_id", "card
                  "delivery_address")
 
 DEFAULT_SORT = "order_date"
+#: The columns a card's per-row mini-table shows (the same editable cells as the big table).
+CARD_COLUMNS = ("item_name", "shipment", "status", "quantity", "tracking_number", "delivery_date",
+                "buying_group", "cost_per_item", "insurance", "payout_amount", "payout_date",
+                "return_quantity", "total_profit")
+#: What the cards view can sort by (the table sorts by any column header).
+SORT_CHOICES = tuple((f, FIELD_TO_HEADER[f]) for f in (
+    "order_date", "order_id", "status", "retailer", "buying_group", "item_name", "delivery_date",
+    "total_cost", "payout_amount", "payout_date", "total_profit", "last_scraped_at"))
 #: The two ways the Orders page shows the ledger: the sheet-like table, or one card per ORDER.
 VIEWS = ("table", "cards")
 PER_PAGE_CHOICES = (12, 24, 48, 96)
 DEFAULT_PER_PAGE = 24
 
 
+def _values(params, name: str) -> tuple[str, ...]:
+    """Every value a query/form mapping carries for `name` (repeated params = multi-select),
+    trimmed, blanks dropped. Works on starlette's QueryParams / FormData (getlist) and on a plain
+    dict whose value is a string or a list."""
+    if hasattr(params, "getlist"):
+        raw = params.getlist(name)
+    else:
+        value = params.get(name)
+        raw = value if isinstance(value, (list, tuple)) else ([value] if value is not None else [])
+    return tuple(dict.fromkeys(str(v).strip() for v in raw if str(v).strip()))
+
+
 @dataclass(frozen=True)
 class Filters:
-    retailer: str = ""
-    profile: str = ""
-    status: str = ""
-    group: str = ""
+    """The Orders page's state. The four facets are MULTI-select: an empty tuple means every value."""
+
+    retailers: tuple[str, ...] = ()
+    profiles: tuple[str, ...] = ()
+    statuses: tuple[str, ...] = ()
+    groups: tuple[str, ...] = ()
     q: str = ""
     sort: str = DEFAULT_SORT
     desc: bool = True
@@ -73,10 +95,10 @@ class Filters:
         except ValueError:
             page = 1
         return cls(
-            retailer=str(params.get("retailer") or "").strip(),
-            profile=str(params.get("profile") or "").strip(),
-            status=str(params.get("status") or "").strip().lower(),
-            group=str(params.get("group") or "").strip(),
+            retailers=_values(params, "retailer"),
+            profiles=_values(params, "profile"),
+            statuses=tuple(s.lower() for s in _values(params, "status")),
+            groups=_values(params, "group"),
             q=str(params.get("q") or "").strip(),
             sort=sort,
             desc=desc,
@@ -85,15 +107,40 @@ class Filters:
             page=page,
         )
 
+    # Single-value conveniences for templates and older callers.
+    @property
+    def retailer(self) -> str:
+        return self.retailers[0] if len(self.retailers) == 1 else ""
+
+    @property
+    def profile(self) -> str:
+        return self.profiles[0] if len(self.profiles) == 1 else ""
+
+    @property
+    def status(self) -> str:
+        return self.statuses[0] if len(self.statuses) == 1 else ""
+
+    @property
+    def group(self) -> str:
+        return self.groups[0] if len(self.groups) == 1 else ""
+
     def as_query(self, **overrides) -> dict:
-        values = {"retailer": self.retailer, "profile": self.profile, "status": self.status,
-                  "group": self.group, "q": self.q, "sort": self.sort,
-                  "dir": "desc" if self.desc else "asc",
+        """The query mapping for a link; multi-valued facets are lists (encode with doseq)."""
+        values = {"retailer": list(self.retailers), "profile": list(self.profiles),
+                  "status": list(self.statuses), "group": list(self.groups), "q": self.q,
+                  "sort": self.sort, "dir": "desc" if self.desc else "asc",
                   "view": self.view if self.view != "table" else "",
                   "per": str(self.per) if self.per != DEFAULT_PER_PAGE else "",
                   "page": str(self.page) if self.page > 1 else ""}
         values = {**values, **overrides}
-        return {k: v for k, v in values.items() if v not in ("", None)}
+        return {k: v for k, v in values.items() if v not in ("", None, [], ())}
+
+
+def query_string(mapping: dict) -> str:
+    """urlencode with doseq, so a list value becomes repeated parameters."""
+    from urllib.parse import urlencode
+
+    return urlencode(mapping, doseq=True)
 
 
 def _value_of(row: LedgerRow, name: str):
@@ -108,13 +155,13 @@ def filter_rows(rows: list[LedgerRow], filters: Filters) -> list[LedgerRow]:
     needle = filters.q.lower()
     out = []
     for row in rows:
-        if filters.retailer and row.retailer != filters.retailer:
+        if filters.retailers and row.retailer not in filters.retailers:
             continue
-        if filters.profile and row.profile != filters.profile:
+        if filters.profiles and row.profile not in filters.profiles:
             continue
-        if filters.status and row.status != filters.status:
+        if filters.statuses and row.status not in filters.statuses:
             continue
-        if filters.group and (row.buying_group or "(blank)") != filters.group:
+        if filters.groups and (row.buying_group or "(blank)") not in filters.groups:
             continue
         if needle and not any(needle in row.text(f).lower() for f in SEARCH_FIELDS):
             continue
@@ -258,8 +305,10 @@ def order_cards(rows: list[LedgerRow]) -> list[dict]:
                 "quantity": 0, "total_cost": 0.0, "payout": 0.0, "profit": 0.0,
                 "has_profit": False, "payout_states": set(), "receipt_urls": [],
                 "order_url": row.text("order_url"), "card": row.text("card_name"),
+                "row_objs": [],
             }
         card["rows"] += 1
+        card["row_objs"].append(row)
         if row.status and row.status not in card["statuses"]:
             card["statuses"].append(row.status)
         name = row.item_name

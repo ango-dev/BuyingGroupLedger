@@ -612,6 +612,11 @@ class TestCardsView:
         assert 'class="pager"' in body and "page 1 of 2" in body
         assert 'id="bulkbar"' not in body  # the cards have their own delete
         assert '<option value="cards" selected>' in body
+        # Cards carry the same editable cells as the table, and the Status cell wears the row colour.
+        assert 'class="num edit"' in body and 'data-field="insurance"' in body
+        assert 'data-field="status"' in body and '<table class="grid card-rows">' in body
+        assert '<select name="sort">' in body and '<option value="total_profit"' in body
+        assert 'class="tag status-' not in body[body.index('<article'):]  # tags moved into the row list
 
         page2 = client.get("/orders", params={"view": "cards", "page": "2"},
                            headers={"HX-Request": "true"}).text
