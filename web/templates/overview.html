@@ -35,60 +35,12 @@
   </div>
 </section>
 
-<h2>Open rows by status and buying group</h2>
-{% if summary.open_table.total %}
-<table class="grid compact">
-  <thead>
-    <tr><th>Status</th>{% for g in summary.open_table.groups %}<th class="num">{{ g }}</th>{% endfor %}<th class="num">Total</th></tr>
-  </thead>
-  <tbody>
-    {% for r in summary.open_table.rows %}
-    <tr>
-      <td><a href="/orders?status={{ r.status }}">{{ r.status }}</a></td>
-      {% for c in r.cells %}<td class="num">{{ c or '' }}</td>{% endfor %}
-      <td class="num"><strong>{{ r.total }}</strong></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-  <tfoot>
-    <tr><th>Total</th>{% for c in summary.open_table.column_totals %}<th class="num">{{ c }}</th>{% endfor %}<th class="num">{{ summary.open_table.total }}</th></tr>
-  </tfoot>
-</table>
-{% else %}
-<p class="muted">No open rows.</p>
-{% endif %}
-
-<div class="columns">
-  <section>
-    <h2>All rows by status</h2>
-    <table class="grid compact">
-      <tbody>
-        {% for status, n in summary.status_counts %}
-        <tr><td><a href="/orders?status={{ status }}">{{ status }}</a></td><td class="num">{{ n }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </section>
-  <section>
-    <h2>By retailer</h2>
-    <table class="grid compact">
-      <tbody>
-        {% for name, n in summary.by_retailer %}
-        <tr><td><a href="/orders?retailer={{ name }}">{{ name }}</a></td><td class="num">{{ n }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </section>
-  <section>
-    <h2>By buying group</h2>
-    <table class="grid compact">
-      <tbody>
-        {% for name, n in summary.by_group %}
-        <tr><td><a href="/orders?group={{ name }}">{{ name }}</a></td><td class="num">{{ n }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </section>
+<h2>Rows <span class="muted small">— click a slice or a bar to open it on the Orders page</span></h2>
+<div class="charts">
+  {% with b=summary.open_bars, table=summary.open_table %}{% include "_bars.html" %}{% endwith %}
+  {% for d in summary.donuts %}
+    {% with d=d %}{% include "_donut.html" %}{% endwith %}
+  {% endfor %}
 </div>
 
 <h2>COGS input gaps</h2>

@@ -1,0 +1,40 @@
+{#- One donut (web/charts.Donut): an inline SVG ring whose every slice is a link to the Orders page
+    with that filter applied, a legend with direct labels (identity is never colour-alone), the
+    total in the middle, and the same numbers as a table under <details> (the table view). -#}
+<figure class="donut" aria-label="{{ d.title }}">
+  <figcaption>{{ d.title }}</figcaption>
+  <div class="donut-body">
+    <svg viewBox="0 0 {{ d.size }} {{ d.size }}" width="{{ d.size }}" height="{{ d.size }}" role="img" aria-label="{{ d.title }}: {{ d.total }} rows">
+      <circle class="track" cx="{{ d.center }}" cy="{{ d.center }}" r="{{ d.radius }}" fill="none" stroke-width="{{ d.stroke }}"></circle>
+      {% for s in d.segments %}
+      {% if s.href %}<a href="{{ s.href }}" class="slice" aria-label="{{ s.label }}: {{ s.count }} rows">{% endif %}
+      <circle class="slice-arc" cx="{{ d.center }}" cy="{{ d.center }}" r="{{ d.radius }}" fill="none"
+              stroke="{{ s.color }}" stroke-width="{{ d.stroke }}"
+              stroke-dasharray="{{ s.dash }} {{ d.circumference }}" stroke-dashoffset="{{ s.offset }}"
+              transform="rotate(-90 {{ d.center }} {{ d.center }})"
+              data-label="{{ s.label }}" data-count="{{ s.count }}">
+        <title>{{ s.label }}: {{ s.count }} ({{ (s.share * 100) | round(1) }}%)</title>
+      </circle>
+      {% if s.href %}</a>{% endif %}
+      {% endfor %}
+      <text class="donut-total" x="{{ d.center }}" y="{{ d.center - 2 }}" text-anchor="middle">{{ d.total }}</text>
+      <text class="donut-sub" x="{{ d.center }}" y="{{ d.center + 14 }}" text-anchor="middle">rows</text>
+    </svg>
+    <ul class="legend">
+      {% for s in d.segments %}
+      <li>
+        <span class="swatch" style="background: {{ s.color }}"></span>
+        {% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}<span>{{ s.label }}</span>{% endif %}
+        <span class="num">{{ s.count }}</span>
+        <span class="muted small">{{ (s.share * 100) | round(0) | int }}%</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <details class="table-view">
+    <summary class="muted small">table</summary>
+    <table class="grid compact"><tbody>
+      {% for s in d.segments %}<tr><td>{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</td><td class="num">{{ s.count }}</td></tr>{% endfor %}
+    </tbody></table>
+  </details>
+</figure>

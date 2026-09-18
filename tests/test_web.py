@@ -704,7 +704,7 @@ class TestOverviewPage:
         body = response.text
         assert "Projected profit" in body and "$263.60" in body
         assert "Realized profit" in body and "$193.00" in body
-        assert "Open rows by status and buying group" in body
+        assert "Open rows by buying group and status" in body
         assert "Blank Card Last 4" in body and "111-0000002-0000002" in body
         assert "no automatic writes" in body
 
@@ -1190,3 +1190,74 @@ class TestBackupPage:
                          failures_dir=failures_dir, backup_dir=repo / "backups",
                          repo_root_dir=repo, clock=lambda: NOW, settings=_settings())
         assert TestClient(app).get("/backup").status_code == 200
+
+
+# --------------------------------------------------------------------------------------------------
+# Charts: donuts and stacked bars whose every slice is a filter link
+# --------------------------------------------------------------------------------------------------
+
+
+class TestCharts:
+    def test_status_donut_uses_lifecycle_order_and_the_sheets_colours(self):
+        from web.charts import STATUS_COLORS, status_donut
+
+        d = status_donut([("paid", 2), ("ordered", 5), ("shipped", 1), ("weird", 1)])
+        assert [s.label for s in d.segments] == ["ordered", "shipped", "paid", "weird"]
+        assert d.total == 9
+        assert d.segments[0].color == STATUS_COLORS["ordered"]
+        assert d.segments[0].href == "/orders?status=ordered"
+        assert d.segments[-1].color == "#8a8a8a"  # out-of-vocabulary: the fold-up grey
+        assert abs(sum(s.share for s in d.segments) - 1.0) < 1e-9
+
+    def test_arcs_cover_the_ring_with_a_gap_between_slices(self):
+        from web.charts import donut
+
+        d = donut("t", [("A", 3), ("B", 1)], param="retailer")
+        assert d.segments[0].dash == round(d.circumference * 0.75 - 2, 3)
+        assert d.segments[1].dash == round(d.circumference * 0.25 - 2, 3)
+        assert d.segments[0].offset == 0.0
+        assert d.segments[1].offset == round(-d.circumference * 0.75, 3)
+        lone = donut("t", [("A", 3)], param="retailer")
+        assert lone.segments[0].dash == round(lone.circumference, 3)  # no gap on a full ring
+
+    def test_categorical_slots_are_fixed_in_order_and_fold_past_eight(self):
+        from web.charts import CATEGORICAL, donut
+
+        counts = [(f"g{i}", 10 - i) for i in range(10)]
+        d = donut("t", counts, param="group")
+        assert [s.label for s in d.segments][-1] == "Other"
+        assert len(d.segments) == 8
+        assert [s.color for s in d.segments[:7]] == list(CATEGORICAL[:7])
+        assert d.segments[-1].href == ""  # a fold-up maps to no single filter
+        assert d.segments[-1].count == 3 + 2 + 1
+
+    def test_blank_group_links_to_the_blank_filter(self):
+        from web.charts import donut
+
+        d = donut("t", [("(blank)", 2), ("BFMR", 1)], param="group")
+        assert d.segments[0].href == "/orders?group="
+
+    def test_open_rows_bars(self):
+        from web.charts import STATUS_COLORS, open_rows_bars
+
+        table = {"groups": ["BFMR", "MOD"], "rows": [
+            {"status": "ordered", "cells": [4, 1], "total": 5},
+            {"status": "shipped", "cells": [2, 0], "total": 2}], "column_totals": [6, 1], "total": 7}
+        b = open_rows_bars(table)
+        assert [bar.label for bar in b.bars] == ["BFMR", "MOD"]  # largest first
+        assert b.bars[0].total == 6 and b.bars[0].href == "/orders?group=BFMR"
+        assert [s.label for s in b.bars[0].segments] == ["ordered", "shipped"]
+        assert b.bars[0].segments[0].href == "/orders?status=ordered&group=BFMR"
+        assert b.bars[0].segments[0].color == STATUS_COLORS["ordered"]
+        assert b.bars[1].segments == b.bars[1].segments and len(b.bars[1].segments) == 1
+        assert b.legend == [("ordered", STATUS_COLORS["ordered"]), ("shipped", STATUS_COLORS["shipped"])]
+
+    def test_the_overview_renders_the_charts_with_clickable_slices(self, client):
+        body = client.get("/").text
+        assert body.count("<figure") == 4  # bars + three donuts
+        assert 'href="/orders?status=ordered"' in body and 'href="/orders?retailer=Costco"' in body
+        assert 'href="/orders?group=MOD"' in body
+        assert 'href="/orders?status=shipped&amp;group=BFMR"' in body
+        assert "<title>shipped: 1" in body  # the hover tooltip
+        assert body.count("<details class=\"table-view\">") == 4  # a table view per chart
+        assert "Rows by status" in body and "Open rows by buying group and status" in body

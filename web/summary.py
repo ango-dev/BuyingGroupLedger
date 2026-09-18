@@ -82,7 +82,21 @@ def overview(snapshot: Snapshot) -> dict:
     by_retailer = Counter(r.retailer or "(blank)" for r in rows)
     by_group = Counter(r.buying_group or "(blank)" for r in rows)
 
+    # The three "rows by ..." breakdowns as donuts, every slice a filter link.
+    # Retailer / group slices are drawn largest first; a name keeps its colour slot by that order
+    # within this snapshot (the categorical rule: fixed order, never re-cycled mid-page).
+    from web.charts import donut, open_rows_bars, status_donut
+
+    donuts = [
+        status_donut(status_counts),
+        donut("Rows by retailer", by_retailer.most_common(), param="retailer"),
+        donut("Rows by buying group", by_group.most_common(), param="group"),
+    ]
+
     return {
+        "donuts": donuts,
+        # The open-rows matrix as stacked bars, drawn in the same row as the donuts.
+        "open_bars": open_rows_bars(open_table),
         "rows": len(rows),
         "orders": len({r.order_id for r in rows}),
         "open_rows": len(open_rows),
