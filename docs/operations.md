@@ -198,14 +198,15 @@ refusal lasts as long as the run does.
 paid yet), which is deliberately wider than the scrapers' terminal statuses; a gift-card row is
 never open.
 
-**The overview's two stat sections.** *Lifetime* counts every row of the ledger: rows and orders,
-open rows, spend (Total Cost over rows that carry money), paid out (settled payouts), projected
-profit (committed, undated payouts) and realized profit (settled rows). *Calendar month* shows one
-month at a time (arrows step through the months the ledger spans; the current month by default,
-`/?month=YYYY-MM` for another): *placed* tiles count rows by **Order Date** (what was bought that
-month, how much is still open, what it is projected to make), *paid out* and *realized profit* count
-settled rows by **Payout Date** (the cash that landed that month, whenever the order was placed —
-the tax report's basis). Every tile is a link that opens the Orders page filtered the same way the
+**The overview's two stat sections** carry the same six tiles in the same order — rows and
+orders, open rows, spend (Total Cost over rows that carry money), paid out (settled payouts),
+projected profit (committed, undated payouts) and realized profit (settled rows) — so the two read
+side by side. *Lifetime* counts every row of the ledger. *Calendar month* shows one month at a time
+(arrows step through the months the ledger spans; the current month by default, `/?month=YYYY-MM`
+for another): its rows, open rows, spend and projected profit count rows by **Order Date** (what
+was placed that month), its paid out and realized profit count settled rows by **Payout Date** (the
+cash that landed that month, whenever the order was placed — the tax report's basis); each tile's
+hint says which. Every tile is a link that opens the Orders page filtered the same way the
 number was counted, and the Orders filter bar shows those filters as editable controls: *Placed in*
 and *Paid in* (a month) and *Payout* (any / open / projected / settled), so a click-through can be
 widened or narrowed without going back. The reconciliation line under Lifetime is what SUM() over

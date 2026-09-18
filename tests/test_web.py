@@ -613,6 +613,13 @@ class TestOverview:
         assert summary["status_counts"] == [("ordered", 2), ("shipped", 1), ("delivered", 2),
                                             ("cancelled", 1), ("paid", 2), ("superseded", 1)]
 
+    def test_both_sections_carry_the_same_six_tiles_in_the_same_order(self, summary):
+        labels = [t["label"] for t in summary["lifetime"]]
+        assert labels == ["Rows / orders", "Open rows", "Spend", "Paid out", "Projected profit",
+                          "Realized profit"]
+        assert [t["label"] for t in summary["month"]["tiles"]] == labels
+        assert [t["kind"] for t in summary["month"]["tiles"]] == [t["kind"] for t in summary["lifetime"]]
+
     def test_lifetime_tiles_count_every_row(self, summary):
         by_label = {t["label"]: t for t in summary["lifetime"]}
         assert by_label["Rows / orders"]["value"] == (len(LEDGER_ROWS), 8)
@@ -631,7 +638,7 @@ class TestOverview:
                              today=NOW.date())["month"]
         tiles = {t["label"]: t["value"] for t in september["tiles"]}
         # Rows 2-4 were placed in September and are all still open; row 3 carries the commitment.
-        assert tiles["Rows / orders placed"][0] == 3 and tiles["Still open"] == 3
+        assert tiles["Rows / orders"][0] == 3 and tiles["Open rows"] == 3
         assert tiles["Projected profit"] == 263.6
         # Only row 5's payout landed in September (row 6's paid status has no date).
         assert tiles["Paid out"] == 500.0 and tiles["Realized profit"] == 136.0
@@ -641,7 +648,7 @@ class TestOverview:
         august = overview(SnapshotReader(snapshot_path).load(), month="2026-08",
                           today=NOW.date())["month"]
         tiles = {t["label"]: t["value"] for t in august["tiles"]}
-        assert tiles["Rows / orders placed"][0] == 6 and tiles["Still open"] == 1  # the Fitbit
+        assert tiles["Rows / orders"][0] == 6 and tiles["Open rows"] == 1  # the Fitbit
         assert tiles["Paid out"] == 0.0 and tiles["Projected profit"] == 0.0
         assert (august["prev"], august["next"]) == ("", "2026-09")
         # a month with no rows still renders, with both arrows
