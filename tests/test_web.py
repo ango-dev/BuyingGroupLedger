@@ -1594,6 +1594,17 @@ class TestAuditPage:
         assert client.post("/audit").status_code == 405
 
 
+class TestReconTilesFilter:
+    def test_the_tiles_are_links_that_narrow_the_rows_by_kind(self, client):
+        page = client.get("/recon").text
+        assert page.count('<a class="tile link') == 4
+        assert 'href="/recon?kind=short"' in page and 'href="/recon?kind=over"' in page
+        short = client.get("/recon?kind=short").text
+        assert 'name="kind" value="short"' in short and "short-paid" in short.lower()
+        assert 'class="tile link payout-floating' in short and " current" in short[short.index('href="/recon?kind=short"') - 80:short.index('href="/recon?kind=short"')]
+        assert client.get("/recon?kind=nonsense").status_code == 200
+
+
 class TestReconPage:
     """Orders the buying group paid more or less than it committed to."""
 

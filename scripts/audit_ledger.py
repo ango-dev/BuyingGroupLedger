@@ -427,26 +427,27 @@ def check_duplicate_tracking_keys(sheet: Sheet, opts: Options) -> Result:
         seen.setdefault(key, []).append(row_number)
         by_number.setdefault(key[1], set()).add(key[0])
     shared = [f"rows {v}: order {k[0]} tracking {k[1]}" for k, v in seen.items() if len(v) > 1]
-    # One number under TWO Order IDs is a genuine defect, unlike several rows sharing one box.
+    # One number under several Order IDs is a COMBINED BOX: the buying group ships several orders'
+    # units in one carton under one label, and the sync pairs each order's rows to it (history
+    # 2026-09-14/15). Normal and permanent, so INFO.
     crossed = [
-        f"tracking {number} appears under {len(orders)} different Order IDs: {sorted(orders)}"
+        f"tracking {number} is a combined box for {len(orders)} orders: {sorted(orders)}"
         for number, orders in by_number.items() if len(orders) > 1
     ]
     if not shared and not crossed:
         return Result("duplicate_tracking_keys", "PASS", f"{len(seen)} tracked row(s), all 1:1")
-    if crossed:
-        return Result(
-            "duplicate_tracking_keys", "WARN",
-            "one tracking number spans several orders",
-            _truncate(crossed + shared, opts.max_detail),
-        )
     # INFO for the same reason as duplicate_shipment_lines: a multi-SKU box legitimately puts several
     # rows behind one tracking number. It only means the tracking-based reconciliation declines to
     # fire there (it is guarded to the unambiguous 1:1 case), which is correct behaviour, not a fault.
+    parts = []
+    if crossed:
+        parts.append(f"{len(crossed)} combined box(es) carry several orders")
+    if shared:
+        parts.append(f"{len(shared)} tracking number(s) cover several rows of one order")
     return Result(
         "duplicate_tracking_keys", "INFO",
-        f"{len(shared)} tracking number(s) cover several rows -- reconciliation won't fire on them",
-        _truncate(shared, opts.max_detail),
+        "; ".join(parts) + " -- normal; the tracking-based reconciliation won't fire on them",
+        _truncate(crossed + shared, opts.max_detail),
     )
 
 
@@ -1029,10 +1030,16 @@ def check_shipping_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
     for order_id, rows in by_order.items():
         if len(rows) < 2:
             continue
-        ratios = {round(shipping / cost, 4) for _, shipping, cost in rows}
-        if len(ratios) > 1:
-            detail = ", ".join(f"row {n}: {shipping}/{cost}={shipping / cost:.4f}" for n, shipping, cost in rows)
-            offenders.append(f"order {order_id}: rows disagree -- {detail}")
+        # The share each row SHOULD carry: the order's shipping total by the row's share of its cost.
+        # Compared to the cent (the reproration rounds each share to cents, so two rows' ratios can
+        # differ in the fourth decimal without anything being wrong -- a false alarm until 2026-09-18).
+        total_shipping = sum(shipping for _, shipping, _ in rows)
+        total_cost = sum(cost for _, _, cost in rows)
+        off = [(n, shipping, cost, round(total_shipping * cost / total_cost, 2)) for n, shipping, cost in rows
+               if abs(shipping - total_shipping * cost / total_cost) > 0.011]
+        if off:
+            detail = ", ".join(f"row {n}: {shipping} (share would be {want})" for n, shipping, _, want in off)
+            offenders.append(f"order {order_id}: {detail}")
     if not offenders:
         return Result("shipping_is_cost_weighted", "PASS", f"{len(by_order)} order(s) checked")
     return Result(
@@ -1084,16 +1091,24 @@ def check_card_and_rate_coverage(sheet: Sheet, opts: Options) -> Result:
         sheet.header, sheet.grids.unformatted[1:], cards, settings.default_cashback_rate, refresh=True
     )
     details, status = [], "PASS"
-    for label, key in (("never filled", "fills"), ("disagree with config.json `cards`", "changes")):
-        entries = plan.get(key) or []
-        if entries:
-            status = "WARN"
-            details.append(f"{len(entries)} cell(s) {label} -- run `python -m scripts.backfill_profit_columns`")
+    fills = plan.get("fills") or []
+    if fills:
+        status = "WARN"
+        details.append(f"{len(fills)} cell(s) never filled though the card is known -- run `python -m scripts.backfill_profit_columns`")
+    # A rate that disagrees with the cards list is not a fault: rate cells record the rate AT
+    # PURCHASE TIME and the list holds only the current one (standing ruling, the design notes). A last 4 the
+    # list does not know is a retired card. Both are information, never a warning (2026-09-18).
+    changes = plan.get("changes") or []
+    if changes:
+        status = status if status == "WARN" else "INFO"
+        details.append(f"{len(changes)} rate cell(s) differ from the cards list -- rates are era-specific, leave them")
     unresolved = plan.get("unresolved") or []
     if unresolved:
-        status = "WARN"
-        details.append(f"{len(unresolved)} card last-4(s) not in config.json `cards`")
-    return Result("card_and_rate_coverage", status, "Card + Cashback Rate resolve cleanly" if status == "PASS" else "gaps found", _truncate(details, opts.max_detail))
+        status = status if status == "WARN" else "INFO"
+        details.append(f"{len(unresolved)} card last-4(s) not in the cards list (retired cards)")
+    summary = ("Card + Cashback Rate resolve cleanly" if status == "PASS"
+               else "cells the backfill could fill" if status == "WARN" else "known differences from the cards list")
+    return Result("card_and_rate_coverage", status, summary, _truncate(details, opts.max_detail))
 
 
 @check("legacy_blank_shipment")
@@ -1186,26 +1201,40 @@ def check_payout_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
             continue
         packages.setdefault(key, []).append((row_number, payout, cost))
 
-    offenders, checked = [], 0
+    doubled, uneven, checked = [], [], 0
     for key, rows in packages.items():
         if len(rows) < 2:
             continue
         checked += 1
-        ratios = {round(payout / cost, 4) for _, payout, cost in rows}
-        if len(ratios) > 1:
-            detail = ", ".join(f"row {n}: {p}/{c}={p / c:.4f}" for n, p, c in rows)
-            offenders.append(f"order {key[0]} package {key[1]}: {detail}")
-    if not offenders:
+        total_payout = sum(p for _, p, _ in rows)
+        total_cost = sum(c for _, _, c in rows)
+        # Compared to the cent: the sync rounds each share to cents.
+        off = [n for n, p, c in rows if abs(p - total_payout * c / total_cost) > 0.011]
+        if not off:
+            continue
+        detail = ", ".join(f"row {n}: {p} on {c}" for n, p, c in rows)
+        amounts = {round(p, 2) for _, p, _ in rows}
+        costs = {round(c, 2) for _, _, c in rows}
+        # The tell-tale of a double-booking: every row carries the SAME amount over DIFFERENT costs
+        # -- the package's whole payout written to each row. Anything else is a real per-item
+        # payout (hand-entered or imported: MOD paid $74 on a $59.98 Echo Dot beside 1.005x on the
+        # watches in the same box, 2026-08-30), which is information, not a fault.
+        if len(amounts) == 1 and len(costs) > 1 and next(iter(amounts)) > 0:
+            doubled.append(f"order {key[0]} package {key[1]}: {detail} -- the same amount on every row")
+        else:
+            uneven.append(f"order {key[0]} package {key[1]}: {detail}")
+    if not doubled and not uneven:
         return Result("payout_is_cost_weighted", "PASS", f"{checked} multi-row package(s) split pro-rata")
-    # WARN, not FAIL: the sync always splits by cost, but a hand-entered or imported package can carry
-    # the group's REAL per-item payouts (MOD paid $74 on a $59.98 Echo Dot beside 1.005x on the
-    # watches in the same box, 2026-08-30), which this cannot tell from a double-booking. The
-    # tell-tale of a double-booking is every row carrying the SAME full amount -- read the ratios.
+    if doubled:
+        return Result(
+            "payout_is_cost_weighted", "WARN",
+            f"{len(doubled)} package(s) carry the same payout on every row -- the money may be booked twice",
+            _truncate(doubled + uneven, opts.max_detail),
+        )
     return Result(
-        "payout_is_cost_weighted", "WARN",
-        f"{len(offenders)} package(s) don't split their payout by cost -- either real per-item payouts "
-        "(hand-entered / imported) or the money booked twice; compare the rows",
-        _truncate(offenders, opts.max_detail),
+        "payout_is_cost_weighted", "INFO",
+        f"{len(uneven)} package(s) hold per-item payouts rather than a cost-weighted split (hand-entered or imported)",
+        _truncate(uneven, opts.max_detail),
     )
 
 

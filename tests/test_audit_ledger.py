@@ -437,6 +437,14 @@ def test_inconsistent_shipping_split_breaks_the_pro_rata_profit():
     assert result_for(build(a, b), "shipping_is_cost_weighted").status == "WARN"
 
 
+def test_a_shipping_split_rounded_to_cents_is_not_an_inconsistency():
+    """2026-09-18: the reproration rounds each share to cents, so two small rows' ratios differ in
+    the fourth decimal; the check compares each row to its share, to the cent."""
+    a = row_cells(2, **{"Order ID": Cell("BBY01-1"), "Shipping": Cell(3.33), "Total Cost": Cell(20.0), "Item Name": Cell("A")})
+    b = row_cells(3, **{"Order ID": Cell("BBY01-1"), "Shipping": Cell(1.67), "Total Cost": Cell(10.0), "Item Name": Cell("B")})
+    assert result_for(build(a, b), "shipping_is_cost_weighted").status == "PASS"
+
+
 def test_total_cost_that_does_not_reconcile_is_flagged():
     sheet = build(row_cells(2, Quantity=Cell(2), **{"Cost Per Item": Cell(399.0), "Total Cost": Cell(1.0)}))
     assert result_for(sheet, "total_cost_matches_quantity").status == "WARN"
@@ -686,10 +694,14 @@ class TestReviewFindings:
         # cards.json, so a whole-ledger exit code would depend on the user's config, not on the code.)
         assert audit_ledger.exit_code(pair, strict=True) == 0
 
-    def test_one_tracking_number_under_two_orders_is_still_a_warning(self):
+    def test_one_tracking_number_under_two_orders_is_a_combined_box_not_a_warning(self):
+        """2026-09-18: the group combines several orders' units in one carton under one label --
+        normal and permanent, so INFO (it was a WARN that nagged on every healthy ledger)."""
         a = row_cells(2, **{"Order ID": Cell("C-1"), "Tracking Number": Cell("1Z1")})
         b = row_cells(3, **{"Order ID": Cell("C-2"), "Tracking Number": Cell("1Z1")})
-        assert result_for(build(a, b), "duplicate_tracking_keys").status == "WARN"
+        result = result_for(build(a, b), "duplicate_tracking_keys")
+        assert result.status == "INFO" and "combined box" in result.summary
+        assert any("1Z1 is a combined box for 2 orders" in d for d in result.details)
 
     def test_expect_rows_is_not_swallowed_when_render_modes_disagree(self):
         """It used to return the height WARN before ever comparing, so --expect-rows reported success
@@ -748,7 +760,8 @@ class TestBuyingGroupPayouts:
                             "Total Cost": Cell(600.0), "Actual Payout": Cell(1000.0)})
         b = row_cells(3, **{"Order ID": Cell("O-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1"),
                             "Total Cost": Cell(400.0), "Actual Payout": Cell(1000.0)})
-        assert result_for(build(a, b), "payout_is_cost_weighted").status == "WARN"  # WARN since 2026-08-30: a real per-item payout looks the same by ratio
+        result = result_for(build(a, b), "payout_is_cost_weighted")
+        assert result.status == "WARN" and "booked twice" in result.summary
 
     def test_a_correctly_split_payout_passes(self):
         a = row_cells(2, **{"Order ID": Cell("O-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1"),
@@ -1194,14 +1207,15 @@ class TestImportedShapesAreNotFailures:
         )
         assert result_for(sheet, "order_level_cells_agree").status == "FAIL"
 
-    def test_an_uneven_package_split_is_a_warning_to_read_not_a_failure(self):
+    def test_an_uneven_package_split_is_a_real_per_item_payout_info_only(self):
         sheet = build(
             row_cells(2, **{"Order ID": Cell("A"), "Tracking Number": Cell("T"), "Total Cost": Cell(59.98),
                             "Actual Payout": Cell(74.0, fmt="currency")}),
             row_cells(3, **{"Order ID": Cell("A"), "Tracking Number": Cell("T"), "Total Cost": Cell(597.0),
                             "Actual Payout": Cell(600.0, fmt="currency"), "Item Name": Cell("Watch")}),
         )
-        assert result_for(sheet, "payout_is_cost_weighted").status == "WARN"
+        result = result_for(sheet, "payout_is_cost_weighted")
+        assert result.status == "INFO" and "per-item" in result.summary  # 2026-09-18: was a WARN
 
 
 def test_a_gift_card_row_paid_with_a_zero_payout_is_by_rule():

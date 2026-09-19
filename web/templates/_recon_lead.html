@@ -3,9 +3,10 @@
 <div class="lead">
   <p class="muted small">Settled rows whose <strong>Actual Payout</strong> disagrees with the <strong>Expected Payout</strong> the buying group committed to, compared as order totals over the same rows (two cents of tolerance, plus a cent per row for proration). A row with no commitment — MaxOutDeals publishes none — is not compared. Nothing below is written by this page; fix a figure by editing the cell, or take it up with the group.</p>
   <section class="tiles stats">
-    <div class="tile payout-floating {{ 'warn' if recon.short }}"><div class="label">Short-paid</div><div class="value money">{{ recon.short_total | money }}</div><div class="hint">{{ recon.short | length }} order(s) paid less</div></div>
-    <div class="tile payout-settled"><div class="label">Over-paid</div><div class="value money">{{ recon.over_total | money }}</div><div class="hint">{{ recon.over | length }} order(s) paid more</div></div>
-    <div class="tile"><div class="label">Net</div><div class="value money">{{ (recon.over_total - recon.short_total) | money }}</div><div class="hint">over minus short</div></div>
-    <div class="tile"><div class="label">Orders compared</div><div class="value">{{ recon.compared }}</div><div class="hint">settled, with a commitment</div></div>
+    {# Each tile is a link: Short-paid / Over-paid narrow the rows to those orders, the other two show all. #}
+    <a class="tile link payout-floating {{ 'warn' if recon.short }} {{ 'current' if kind == 'short' }}" href="/recon?kind=short" title="the short-paid orders"><div class="label">Short-paid</div><div class="value money">{{ recon.short_total | money }}</div><div class="hint">{{ recon.short | length }} order(s) paid less</div></a>
+    <a class="tile link payout-settled {{ 'current' if kind == 'over' }}" href="/recon?kind=over" title="the over-paid orders"><div class="label">Over-paid</div><div class="value money">{{ recon.over_total | money }}</div><div class="hint">{{ recon.over | length }} order(s) paid more</div></a>
+    <a class="tile link {{ 'current' if not kind }}" href="/recon" title="every order that disagrees"><div class="label">Net</div><div class="value money">{{ (recon.over_total - recon.short_total) | money }}</div><div class="hint">over minus short</div></a>
+    <a class="tile link" href="/recon" title="every order that disagrees"><div class="label">Orders compared</div><div class="value">{{ recon.compared }}</div><div class="hint">settled, with a commitment</div></a>
   </section>
 </div>

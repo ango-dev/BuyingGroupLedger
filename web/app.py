@@ -359,9 +359,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             extra.update(audit=report, checks=checks)
         elif scope == "recon":
             report = reconcile(snapshot.rows)
-            rows = [r for r in rows if r.order_id in report.keys]
+            kind = str(params.get("kind") or "")  # the tiles: short-paid / over-paid orders only
+            kind = kind if kind in ("short", "over") else ""
+            rows = [r for r in rows if r.order_id in report.keys and (not kind or report.kind_of(r.order_id) == kind)]
             findings = recon_findings(rows, report)
-            extra.update(recon=report)
+            extra.update(recon=report, kind=kind)
         by_order: dict[str, list] = {}
         for key, lines in (findings or {}).items():
             bucket = by_order.setdefault(key[0], [])

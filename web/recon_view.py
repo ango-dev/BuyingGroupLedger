@@ -60,6 +60,13 @@ class ReconReport:
     #: How many orders were compared at all (settled rows with a commitment), matched or not.
     compared: int = 0
 
+    def kind_of(self, order_id: str) -> str:
+        """"short" | "over" | "" for an order the report knows (the tiles filter on it)."""
+        for o in self.orders:
+            if o.order_id == order_id:
+                return o.kind
+        return ""
+
     @property
     def keys(self) -> set[str]:
         return {o.order_id for o in self.orders}
