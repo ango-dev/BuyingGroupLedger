@@ -53,12 +53,13 @@
   <noscript><button type="submit">Apply</button></noscript>
   <a class="button small reset" href="{{ base }}?reset=1" title="clear the filters, search and sort (the view and page size stay)">Reset</a>
 </form>
+{# The previous answers per choice column and the Card Name / Card Last 4 pairings, for the table's
+   cell editor on every page that has one (Orders, Audit, Recon: "the Audit
+   dropdowns say no previous answers") and the add-row form (static/picker.js reads it; a
+   choice-cell write re-renders it out of band). #}
+{% if editable %}<script type="application/json" id="cell-choices">{{ choices | tojson }}</script>{% endif %}
 {% if editable and not scope %}
   {# Outside the filter form (a form cannot nest inside another), inside the pinned bar. #}
-  {# The previous answers per choice column and the Card Name / Card Last 4 pairings, for the
-     table's cell editor and the form below (static/picker.js reads it; a choice-cell write
-     re-renders it out of band). #}
-  {% if editable %}<script type="application/json" id="cell-choices">{{ choices | tojson }}</script>{% endif %}
   <details class="add-row" {{ 'open' if add_open }}>
     <summary>Add a row</summary>
     {# Every field is the page's own design: the calendar on the date, the column's previous

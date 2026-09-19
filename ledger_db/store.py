@@ -102,9 +102,13 @@ class LedgerDb:
         the positional-drift bug in a new coat, so the columns are compared in full, in order.
         """
         conn.execute(MIRROR_RUNS_DDL)
-        from ledger_db.hand_edits import HAND_EDITS_DDL
+        from ledger_db.hand_edits import HAND_EDITS_DDL, HAND_EDITS_MIGRATIONS
 
         conn.execute(HAND_EDITS_DDL)
+        have = {r["name"] for r in conn.execute('PRAGMA table_info("hand_edits")')}
+        for column, ddl in HAND_EDITS_MIGRATIONS:
+            if column not in have:
+                conn.execute(ddl)
         existing = [r["name"] for r in conn.execute('PRAGMA table_info("ledger_rows")')]
         wanted = [name for name, _ in columns()]
         if existing == wanted:

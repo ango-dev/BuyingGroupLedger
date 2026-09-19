@@ -181,7 +181,7 @@ class TestValidate:
 class TestLedgerCellWriter:
     def test_writes_a_number_raw_on_the_row_found_by_key(self, writer, sheet):
         result = writer.write_cell(KEY, "insurance", "7.25", expected="6.4")
-        assert result == {"row_number": 2, "field": "insurance", "value": 7.25}
+        assert result == {"row_number": 2, "field": "insurance", "value": 7.25, "restored": False}
         assert sheet.writes == [(f"{_COL['insurance']}2", [[7.25]], "RAW")]
 
     def test_a_blank_clears_with_user_entered(self, writer, sheet):

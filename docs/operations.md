@@ -171,8 +171,8 @@ Every write is one conflict-checked cell write, run one after another. **A cell 
 on**: the scheduled
 run's upsert, its order-level reproration and the buying-group sync all keep a hand-typed value
 (`ledger_db/hand_edits`, a table in the ledger file that the dashboard's writer fills; the cell
-shows a coloured left edge and says so in its tooltip). Clearing the cell releases it, so the next
-run fills it again; deleting the row clears its marks; Tools
+shows a coloured left edge and says so in its tooltip). Clearing the cell puts back what the run had
+written before you typed (a cell that was blank before is left blank) and releases it; deleting the row clears its marks; Tools
 → Ledger Fixes → *Hand-edited cells* lists them and can release an order's cells (or one field)
 when you want the run to take over again. The repair scripts (backfills, retag, the profit-column
 refresh) are your own explicit rewrites and are not gated. A cell that shows a link (Order Link, Tracking Link, Receipt

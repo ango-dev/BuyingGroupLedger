@@ -88,18 +88,52 @@ class TestTheRecord:
         assert hand_edits.forget_order(db, "X1") == 1
 
 
+class TestThePreviousValue:
+    def test_an_old_table_gains_the_column_on_open(self, tmp_path):
+        import sqlite3
+
+        from ledger_db.store import LedgerDb
+
+        path = tmp_path / "old.sqlite3"
+        conn = sqlite3.connect(path)
+        conn.execute('CREATE TABLE "hand_edits" ("order_id" TEXT NOT NULL, "order_date" TEXT NOT NULL, '
+                     '"item_name" TEXT NOT NULL, "shipment" TEXT NOT NULL, "field" TEXT NOT NULL, "value" TEXT, '
+                     '"edited_at" TEXT NOT NULL, PRIMARY KEY ("order_id", "order_date", "item_name", "shipment", "field"))')
+        conn.execute('INSERT INTO "hand_edits" VALUES ("X1", "2026-09-01", "T", "1", "insurance", "2", "2026-09-18T00:00:00+00:00")')
+        conn.commit()
+        conn.close()
+        db = LedgerDb(path)
+        with db.connect() as c:
+            assert "previous" in {r["name"] for r in c.execute('PRAGMA table_info("hand_edits")')}
+        assert hand_edits.previous_value(db, ("X1", "2026-09-01", "T", "1"), "insurance") == ""  # unknown before: treated as blank
+        assert hand_edits.previous_value(db, ("X1", "2026-09-01", "T", "1"), "cogs") is None
+
+
 class TestTheWriterRecords:
     def test_a_cell_edit_a_bulk_edit_and_a_deletion(self, ws, db, logs_dir):
         writer = LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir)
         writer.write_cell(KEY, "cashback_rate", "6%", expected="0.04")
         assert hand_edits.protected(db) == {KEYT: {"cashback_rate"}}
+        assert hand_edits.previous_value(db, KEY, "cashback_rate") == "0.04"  # what the run had written
+        writer.write_cell(KEY, "cashback_rate", "7%", expected="0.06")
+        assert hand_edits.previous_value(db, KEY, "cashback_rate") == "0.04"  # the FIRST edit's before, kept
         writer.write_cells([KEY, {**KEY, "order_id": "missing"}], "insurance", "2.5")
         assert hand_edits.protected(db) == {KEYT: {"cashback_rate", "insurance"}}
-        # clearing a cell hands it back to the run
-        writer.write_cell(KEY, "insurance", "", expected="2.5")
+        assert hand_edits.previous_value(db, KEY, "insurance") == ""  # the cell was blank before
+        # clearing a cell that was BLANK before the hand edit clears it, and releases it
+        cleared = writer.write_cell(KEY, "insurance", "", expected="2.5")
+        assert cleared["value"] == "" and cleared["restored"] is False
         assert hand_edits.protected(db) == {KEYT: {"cashback_rate"}}
+        # clearing a cell the run had filled puts the run's value BACK, and releases it
+        back = writer.write_cell(KEY, "cashback_rate", "", expected="0.07")
+        assert back["value"] == "0.04" and back["restored"] is True
+        assert hand_edits.protected(db) == {}
+        assert LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "cashback_rate", "0.05", expected="0.04")
+        # the bulk path restores the same way
+        assert hand_edits.previous_value(db, KEY, "cashback_rate") == "0.04"
         writer.write_cells([KEY], "cashback_rate", "")
         assert hand_edits.protected(db) == {}
+        assert ws.get_all_values()[1][FIELDNAMES.index("cashback_rate")] == "0.04"
         writer.write_cell(KEY, "cashback_rate", "0.05")
         writer.remove_rows([KEY])
         assert hand_edits.protected(db) == {}

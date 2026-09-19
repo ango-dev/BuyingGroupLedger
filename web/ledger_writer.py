@@ -190,24 +190,45 @@ class _Grid:
         return matches[0]
 
 
-def _protect(worksheet, key: dict, field: str, value) -> None:
-    """Record a hand edit (ledger_db/hand_edits); a test fake has no database and needs no
-    record. CLEARING a cell releases it instead. Never fails the
-    edit that succeeded."""
+def _protect(worksheet, key: dict, field: str, value, previous=None) -> None:
+    """Record a hand edit (ledger_db/hand_edits) with what the cell held before it (`previous`,
+    kept from the FIRST hand edit); a test fake has no database and needs no record. Never fails
+    the edit that succeeded."""
     from ledger_db.hand_edits import ledger_db_of
 
     db = ledger_db_of(worksheet)
     if db is None:
         return
     try:
-        from ledger_db.hand_edits import forget, record
+        from ledger_db.hand_edits import record
 
-        if str(value if value is not None else "").strip() == "":
-            forget(db, normalize_key(key), field)
-            return
-        record(db, normalize_key(key), field, value)
+        record(db, normalize_key(key), field, value, previous=previous)
     except Exception:  # noqa: BLE001
         log.exception("the edit was written but could not be marked as hand-edited")
+
+
+def _release(worksheet, key: dict, field: str) -> str:
+    """The user CLEARED the cell: release it and hand back what a run had written before the hand
+    edit. "" when the cell was blank before, or never
+    hand-edited."""
+    from ledger_db.hand_edits import ledger_db_of
+
+    db = ledger_db_of(worksheet)
+    if db is None:
+        return ""
+    try:
+        from ledger_db.hand_edits import forget, previous_value
+
+        before = previous_value(db, normalize_key(key), field)
+        forget(db, normalize_key(key), field)
+        return before or ""
+    except Exception:  # noqa: BLE001
+        log.exception("the cell was cleared but its hand-edit mark could not be released")
+        return ""
+
+
+def _text(value) -> str:
+    return "" if value is None else str(value)
 
 
 def _forget(worksheet, key: dict) -> None:
@@ -250,17 +271,22 @@ class LedgerCellWriter:
         worksheet = self._opener()
         grid = _Grid(worksheet)
         row_number = grid.locate(key)
-        if expected is not None:
-            current = grid.cell(row_number, field)
-            if _display(current) != _display(expected):
-                raise ConflictError(f"the cell now reads {current!r}, not {expected!r}; reload")
+        current = grid.cell(row_number, field)
+        if expected is not None and _display(current) != _display(expected):
+            raise ConflictError(f"the cell now reads {current!r}, not {expected!r}; reload")
         a1 = f"{_COL[field]}{row_number}"
+        restored = False
+        if coerced == "":
+            back = _release(worksheet, key, field)  # the run's value from before the hand edit, or ""
+            if back != "":
+                coerced, restored = back, True
         if coerced == "":
             worksheet.update(a1, [[""]], value_input_option="USER_ENTERED")
         else:
             worksheet.update(a1, [[coerced]], value_input_option="RAW")
-        _protect(worksheet, key, field, coerced)
-        return {"row_number": row_number, "field": field, "value": coerced}
+            if not restored:
+                _protect(worksheet, key, field, coerced, previous=_text(current))
+        return {"row_number": row_number, "field": field, "value": coerced, "restored": restored}
 
     # --- the same cell across rows (bulk edit) --------------------------------------------------
     def write_cells(self, keys: list[dict], field: str, value: str) -> dict:
@@ -280,13 +306,24 @@ class LedgerCellWriter:
                 located.append(key)
             except EditError as exc:
                 errors.append(str(exc))
-        targets = sorted(set(targets))
-        if targets:
-            data = [{"range": f"{_COL[field]}{n}", "values": [[coerced]]} for n in targets]
-            worksheet.batch_update(data, value_input_option="USER_ENTERED" if coerced == "" else "RAW")
-            for key in located:
-                _protect(worksheet, key, field, coerced)
-        return {"written": len(targets), "errors": errors, "field": field, "value": coerced}
+        seen: set[int] = set()
+        blanks, values = [], []
+        for key, n in zip(located, targets):
+            if n in seen:
+                continue
+            seen.add(n)
+            current = _text(grid.cell(n, field))
+            if coerced == "":
+                back = _release(worksheet, key, field)  # the run's value, or "" -- never re-protected
+                (values if back != "" else blanks).append({"range": f"{_COL[field]}{n}", "values": [[back]]})
+            else:
+                values.append({"range": f"{_COL[field]}{n}", "values": [[coerced]]})
+                _protect(worksheet, key, field, coerced, previous=current)
+        if blanks:
+            worksheet.batch_update(blanks, value_input_option="USER_ENTERED")
+        if values:
+            worksheet.batch_update(values, value_input_option="RAW")
+        return {"written": len(seen), "errors": errors, "field": field, "value": coerced}
 
     # --- a new row ------------------------------------------------------------------------------
     def add_row(self, fields: dict) -> dict:

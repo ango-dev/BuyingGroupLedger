@@ -13,7 +13,9 @@ payout / insurance / expected-payout writes (sync_tracking._drop_protected). The
 scripts (the backfills, retag, the profit-column refresh) are NOT gated: they are the user
 choosing to rewrite a column, and each is a dry run by default.
 
-WHEN IT ENDS. Editing the cell again re-records it (still protected, new value). Deleting the row
+WHEN IT ENDS. Editing the cell again re-records it (still protected, new value). CLEARING the
+cell puts back what it held before the first hand edit -- the run's value -- and releases it; a
+cell that was blank before is left blank and released. Deleting the row
 from the dashboard forgets the row's protections, so a row re-created by a scrape starts clean.
 `python -m scripts.hand_edits --forget <order id> [--field <field>]` releases a cell on purpose.
 The Orders page marks a protected cell so the reason a run "did not update it" is visible.
@@ -36,8 +38,11 @@ HAND_EDITS_DDL = """CREATE TABLE IF NOT EXISTS "hand_edits" (
     "field" TEXT NOT NULL,
     "value" TEXT,
     "edited_at" TEXT NOT NULL,
+    "previous" TEXT,
     PRIMARY KEY ("order_id", "order_date", "item_name", "shipment", "field")
 )"""
+#: A hand_edits table from before `previous` existed (2026-09-18) gains the column on open.
+HAND_EDITS_MIGRATIONS = (("previous", 'ALTER TABLE "hand_edits" ADD COLUMN "previous" TEXT'),)
 
 RowKey = tuple[str, str, str, str]
 
@@ -57,21 +62,37 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def record(db, key: dict | RowKey, field: str, value) -> None:
+def record(db, key: dict | RowKey, field: str, value, previous=None) -> None:
     """Remember that `field` of the row `key` was typed by hand (its current value, for the
-    listing). Idempotent: editing again updates the value and the time."""
+    listing) and, on the FIRST hand edit of the cell, what it held before (`previous`, what a run
+    had written -- clearing the cell later puts that back). Idempotent: editing
+    again updates the value and the time and keeps the original `previous`."""
     if field not in FIELDNAMES or field in KEY_FIELDS:
         return
     k = key if isinstance(key, tuple) else key_tuple(key)
     with db.connect() as conn:
         conn.execute(
             'INSERT INTO "hand_edits" ("order_id", "order_date", "item_name", "shipment", "field", '
-            '"value", "edited_at") VALUES (?, ?, ?, ?, ?, ?, ?) '
+            '"value", "edited_at", "previous") VALUES (?, ?, ?, ?, ?, ?, ?, ?) '
             'ON CONFLICT("order_id", "order_date", "item_name", "shipment", "field") '
             'DO UPDATE SET "value" = excluded."value", "edited_at" = excluded."edited_at"',
-            (*k, field, "" if value is None else str(value), _now()),
+            (*k, field, "" if value is None else str(value), _now(),
+             None if previous is None else str(previous)),
         )
         conn.commit()
+
+
+def previous_value(db, key: dict | RowKey, field: str) -> str | None:
+    """What the cell held before it was first typed by hand -- "" if it was blank, None when the
+    cell is not hand-edited at all."""
+    k = key if isinstance(key, tuple) else key_tuple(key)
+    with db.connect() as conn:
+        row = conn.execute(
+            'SELECT "previous" FROM "hand_edits" WHERE "order_id" = ? AND "order_date" = ? AND '
+            '"item_name" = ? AND "shipment" = ? AND "field" = ?', (*k, field)).fetchone()
+    if row is None:
+        return None
+    return "" if row["previous"] is None else str(row["previous"])
 
 
 def forget(db, key: dict | RowKey, field: str | None = None) -> int:
