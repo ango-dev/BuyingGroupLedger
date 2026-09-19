@@ -2,6 +2,8 @@
 
 import logging
 
+import pytest
+
 from alerts import notifier
 
 
@@ -63,3 +65,28 @@ def test_send_message_sends_the_prebuilt_mime_through_smtp_ssl(monkeypatch):
     assert sent["login"] == "me@example.com"
     assert sent["recipients"] == ["support@example.com", "audit@example.com"]
     assert "In-Reply-To: <original@example.com>" in sent["body"]
+
+
+def test_each_channel_has_its_own_switch(monkeypatch):
+    """a channel
+    that is OFF sends nothing even when it is fully configured."""
+    import dataclasses
+
+    monkeypatch.undo()  # conftest stubs send_email / send_discord for every test; this one needs the real ones
+
+    def boom(*a, **k):
+        raise AssertionError("the channel is off; nothing may be sent")
+
+    monkeypatch.setattr(notifier, "settings", dataclasses.replace(
+        notifier.settings, gmail_alerts_enabled=False, gmail_address="a@example.com",
+        gmail_app_password="pw", alert_email_to="a@example.com",
+        discord_alerts_enabled=False, discord_webhook_url="https://discord.example/hook"))
+    monkeypatch.setattr(notifier.smtplib, "SMTP_SSL", boom)
+    monkeypatch.setattr(notifier.requests, "post", boom)
+    notifier.send_email("subject", "body")
+    notifier.send_discord("message")
+    # switched back on, the same configuration reaches the channel
+    monkeypatch.setattr(notifier, "settings", dataclasses.replace(
+        notifier.settings, discord_alerts_enabled=True))
+    with pytest.raises(AssertionError, match="nothing may be sent"):
+        notifier.send_discord("message")

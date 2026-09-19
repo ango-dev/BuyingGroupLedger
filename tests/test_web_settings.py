@@ -223,7 +223,7 @@ class TestSettingsPage:
     def test_env_override_is_marked(self, client):
         body = client.get("/settings").text
         # ALERT_EMAIL_TO is exported in the fixture; LOOKBACK_DAYS is not.
-        sheet_row = body[body.index('for="f-ALERT_EMAIL_TO"'):body.index('for="f-DISCORD_WEBHOOK_URL"')]
+        sheet_row = body[body.index('for="f-ALERT_EMAIL_TO"'):body.index("</section>", body.index('for="f-ALERT_EMAIL_TO"'))]
         assert "env override" in sheet_row
         lookback_row = body[body.index('for="f-LOOKBACK_DAYS"'):body.index('for="f-DEFAULT_CASHBACK_RATE"')]
         assert "env override" not in lookback_row
@@ -435,31 +435,24 @@ class TestEntryCards:
         assert defaults["RUN_INTERVAL_HOURS"] == 6 and defaults["WEB_ENABLED"] is True
         assert defaults["WEB_LEDGER_SOURCE"] == "db" and defaults["WEB_PUBLIC_URL"] == ""
 
-    def test_the_combined_package_account_shows_the_alerts_account_as_its_fallback(self, client, config):
-        # the fixture sets alerts.gmail_address / gmail_app_password and no combined-package pair
+    def test_the_combined_package_account_never_borrows_the_alerts_account(self, client, config):
+        # the fixture sets alerts.gmail_address / gmail_app_password and no combined-package pair:
+        # the field is simply blank -- no placeholder, no "falls back" tag
         body = client.get("/settings").text
         address = body[body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS"'):body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD"')]
-        assert 'value=""' in address and 'placeholder="me@example.com (the alerts account, used while this is blank)"' in address
-        assert ">falls back<" in address and ">default<" not in address
-        password = body[body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD"'):body.index('for="f-MAXOUTDEALS_API_BASE_URL"')]
-        assert 'placeholder="uses the alerts app password (set; blank keeps it that way)"' in password
-        assert "hunter2" not in password and ">falls back<" in password
-        # saving with the field left blank writes NOTHING into it (the placeholder is not a value)
-        form = {s.env: "" for s in settings_form.schema() if not s.secret and s.kind != "bool"}
-        form["LOOKBACK_DAYS"] = "3"
-        client.post("/settings", data=form)
-        assert config_value("buying_groups.bfmr.combined_package_gmail_address") in (None, "")
-        # its own value, once set, is shown as the value and the fallback tag goes
-        config(alerts={"gmail_address": "me@example.com", "gmail_app_password": "hunter2"},
-               buying_groups={"bfmr": {"combined_package_gmail_address": "bfmr@example.com"}})
+        assert 'value=""' in address and "me@example.com" not in address and ">falls back<" not in address
+        assert "falls back" not in body
+
+    def test_the_alert_channels_are_two_panels_each_with_a_switch(self, client):
         body = client.get("/settings").text
-        address = body[body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS"'):body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD"')]
-        assert 'value="bfmr@example.com"' in address and ">falls back<" not in address
-        # both blank: no placeholder at all
-        config(alerts={}, buying_groups={"bfmr": {}})
-        body = client.get("/settings").text
-        address = body[body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS"'):body.index('for="f-BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD"')]
-        assert "placeholder=" not in address and ">falls back<" not in address
+        assert 'id="s-alerts_discord"' in body and 'id="s-alerts_gmail"' in body and 'id="s-alerts"' not in body
+        assert body.index('id="s-alerts_discord"') < body.index('id="s-alerts_gmail"')
+        discord = body[body.index('id="s-alerts_discord"'):body.index('id="s-alerts_gmail"')]
+        assert 'name="DISCORD_ALERTS_ENABLED"' in discord and 'name="DISCORD_WEBHOOK_URL"' in discord
+        assert 'name="GMAIL_ADDRESS"' not in discord
+        gmail = body[body.index('id="s-alerts_gmail"'):body.index('id="s-alerts_gmail"') + 6000]
+        assert 'name="GMAIL_ALERTS_ENABLED"' in gmail and 'name="GMAIL_ADDRESS"' in gmail and 'name="ALERT_EMAIL_TO"' in gmail
+        assert ">Alerts: Discord<" in body and ">Alerts: Gmail<" in body
 
     def test_saving_the_shown_defaults_is_not_a_change_but_does_write_them(self, client):
         form = {}

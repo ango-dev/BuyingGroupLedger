@@ -9,12 +9,16 @@
 
   "alerts": {
     "// ": "Configure at least one channel. With neither, an unattended host reports a logged-out session or a failed run to nobody. Test with `python -m alerts.notifier`.",
-    "// gmail_app_password": "GMAIL_APP_PASSWORD — a Google APP PASSWORD, not your account password.",
+    "// discord_enabled": "DISCORD_ALERTS_ENABLED — post alerts to the Discord webhook below. Off keeps the URL and sends nothing there.",
+    "discord_enabled": true,
+    "discord_webhook_url": "",
+    "// gmail_enabled": "GMAIL_ALERTS_ENABLED — email alerts from the Gmail account below. Off keeps the account and sends nothing.",
+    "gmail_enabled": true,
+    "// gmail_app_password": "GMAIL_APP_PASSWORD — a Google APP PASSWORD, not your account password. This account is only for alerts: the BFMR auto-reply's mailbox is entered separately under buying_groups.bfmr, even when it is the same account.",
     "gmail_address": "",
     "gmail_app_password": "",
     "// email_to": "ALERT_EMAIL_TO — defaults to gmail_address.",
-    "email_to": "",
-    "discord_webhook_url": ""
+    "email_to": ""
   },
 
   "scraping": {
@@ -45,7 +49,7 @@
       "combined_package_sender_domains": "buyformeretail.com,bfmr.com",
       "// combined_package_reply_cc": "BFMR_COMBINED_PACKAGE_REPLY_CC — optional Cc on every combined-package reply. Set it to the address BFMR emails if that is NOT the replying account (e.g. requests arrive at your main address and forward to the reply inbox) — otherwise the reply is only visible in the replying account's Sent Mail. Blank = none.",
       "combined_package_reply_cc": "",
-      "// combined_package_gmail_address": "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS / _APP_PASSWORD — a SEPARATE Gmail account for this feature's mailbox, in case replies shouldn't ride the alerts account. Both blank (default) = use the alerts account. Both set = read BFMR's requests from and reply as THIS account (it needs its own app password, and it must be the inbox the requests actually arrive in). Setting only one of the pair is refused.",
+      "// combined_package_gmail_address": "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS / _APP_PASSWORD — the Gmail account the auto-reply reads BFMR's requests from and replies as (its own app password). Required when the auto-reply is on; it never uses the alerts account, so enter it here even if it is the same one.",
       "combined_package_gmail_address": "",
       "combined_package_gmail_app_password": ""
     },

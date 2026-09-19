@@ -70,10 +70,13 @@ ENV_TO_CONFIG = {
     "DEFAULT_CASHBACK_RATE": "scraping.default_cashback_rate",
     "AMAZON_PROMO_CASHBACK_ENABLED": "scraping.amazon_promo_cashback_enabled",
     "AMAZON_GIFT_CARD_NETTING_ENABLED": "scraping.amazon_gift_card_netting_enabled",
+    # Two alert channels, each with its own switch. A channel sends when it is ON and configured.
+    "DISCORD_ALERTS_ENABLED": "alerts.discord_enabled",
+    "DISCORD_WEBHOOK_URL": "alerts.discord_webhook_url",
+    "GMAIL_ALERTS_ENABLED": "alerts.gmail_enabled",
     "GMAIL_ADDRESS": "alerts.gmail_address",
     "GMAIL_APP_PASSWORD": "alerts.gmail_app_password",
     "ALERT_EMAIL_TO": "alerts.email_to",
-    "DISCORD_WEBHOOK_URL": "alerts.discord_webhook_url",
     "BUYING_GROUP_SYNC_ENABLED": "buying_groups.sync_enabled",
     "BFMR_API_BASE_URL": "buying_groups.bfmr.api_base_url",
     "BFMR_API_KEY": "buying_groups.bfmr.api_key",
@@ -237,14 +240,20 @@ class Settings:
     amazon_gift_card_netting_enabled: bool = _get_bool(
         "AMAZON_GIFT_CARD_NETTING_ENABLED", True)
 
+    # Discord: a webhook, and a switch. OFF keeps the URL and sends nothing there.
+    discord_alerts_enabled: bool = _get_bool("DISCORD_ALERTS_ENABLED", True)
+    discord_webhook_url: str = field(
+        default=_get_str("DISCORD_WEBHOOK_URL"), repr=False)
+
+    # Gmail: the account alerts are sent FROM (an app password, not the account password), who
+    # they go to (defaults to the same address), and a switch. This account is ONLY for alerts:
+    # the BFMR combined-package auto-reply has its own pair below and never borrows this one.
+    gmail_alerts_enabled: bool = _get_bool("GMAIL_ALERTS_ENABLED", True)
     gmail_address: str = _get_str("GMAIL_ADDRESS")
     gmail_app_password: str = field(
         default=_get_str("GMAIL_APP_PASSWORD"), repr=False)
     alert_email_to: str = (_get_str("ALERT_EMAIL_TO")
                            or _get_str("GMAIL_ADDRESS"))
-
-    discord_webhook_url: str = field(
-        default=_get_str("DISCORD_WEBHOOK_URL"), repr=False)
 
     # --- Buying groups (see buying_groups/) -----------------------------------------------------
     # Master switch for the scheduled buying-group sync in main.run_buying_group_sync. OFF by
@@ -274,11 +283,10 @@ class Settings:
         "BFMR_MIN_INSURANCE_VALUE", 0.0)
     # --- BFMR combined-package auto-reply (respond_bfmr.py) -------------------------------------
     # Answers ONE kind of email: BFMR's "Combined Best Buy Package <tracking>" request for the
-    # units' serial numbers and the receipt PDF. THE MAILBOX DEFAULTS TO THE ALERTS GMAIL
-    # ACCOUNT (alerts.gmail_address / gmail_app_password above) — requests are read over IMAP
-    # and replies sent over SMTP with those credentials. To give the feature ITS OWN account
-    # instead, set BOTH combined_package_gmail_address and combined_package_gmail_app_password
-    # below; `bfmr_reply_account()` is the one place that choice is resolved.
+    # units' serial numbers and the receipt PDF. THE MAILBOX IS ITS OWN SETTING PAIR
+    # (combined_package_gmail_address / _app_password below): requests are read over IMAP and
+    # replies sent over SMTP with those credentials, and `bfmr_reply_account()` is the one place
+    # they are resolved. It does NOT fall back to the alerts account.
     #
     # Master switch for the scheduled run (main.py -> respond_bfmr.run). OFF by default for the
     # same reason as sync_enabled: it sends outward-facing mail to a third party unattended, and
@@ -297,21 +305,19 @@ class Settings:
     # main address and forward to the track/alerts inbox) — without the Cc, the reply is only
     # visible in the alerts account's Sent Mail. Blank = none.
     bfmr_combined_package_reply_cc: str = _get_str("BFMR_COMBINED_PACKAGE_REPLY_CC", "")
-    # Optional SEPARATE Gmail account for the combined-package mailbox, in case the replies
-    # shouldn't ride the alerts account. BOTH blank (the default) = use the alerts account.
-    # BOTH set = read requests from and send replies as this account instead (it needs its own
-    # app password, and it must be the inbox BFMR's requests actually arrive in). Setting only
-    # ONE of the pair is a loud error — mixing one account's address with another's password
-    # can never be what was meant.
+    # The Gmail account for the combined-package mailbox: the inbox BFMR's requests actually
+    # arrive in, with its own app password. Required for the auto-reply to run at all; setting
+    # only ONE of the pair is a loud error — mixing one account's address with another's
+    # password can never be what was meant.
     bfmr_combined_package_gmail_address: str = _get_str(
         "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS", "")
     bfmr_combined_package_gmail_app_password: str = field(
         default=_get_str("BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD", ""), repr=False)
 
     def bfmr_reply_account(self) -> tuple[str, str]:
-        """(address, app password) the combined-package auto-reply signs in with — the ONE
-        place the alerts-account-or-own-account choice is resolved, so IMAP reading and SMTP
-        sending can never disagree about which mailbox they are using."""
+        """(address, app password) the combined-package auto-reply signs in with — resolved in
+        ONE place so IMAP reading and SMTP sending can never disagree about the mailbox. The
+        alerts account is never used here, even when it is the same account."""
         address = self.bfmr_combined_package_gmail_address.strip()
         password = self.bfmr_combined_package_gmail_app_password.strip()
         if address and password:
@@ -319,10 +325,13 @@ class Settings:
         if address or password:
             raise RuntimeError(
                 "buying_groups.bfmr.combined_package_gmail_address and _app_password must be "
-                "set TOGETHER (or both left blank to use the alerts account) — one without "
-                "the other would mix two accounts' credentials."
+                "set TOGETHER — one without the other would mix two accounts' credentials."
             )
-        return self.gmail_address, self.gmail_app_password
+        raise RuntimeError(
+            "the combined-package auto-reply needs its own Gmail account: set "
+            "buying_groups.bfmr.combined_package_gmail_address and _app_password (the alerts "
+            "account is not used for it, even if it is the same account)."
+        )
 
     # MaxOutDeals authenticates with a bearer token AND an IP allowlist (its profile has a firewall
     # tab). `user` and `email` are required in the BODY of every request, not just the headers.

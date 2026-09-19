@@ -59,6 +59,16 @@ SECTIONS: tuple[tuple[str, str, Any, str], ...] = (
 )
 
 
+#: Settings shown under a panel OTHER than their config section's: the two alert channels are
+#: two panels, though both live under `alerts`
+#: in config.json.
+SECTION_OF_ENV: dict[str, str] = {
+    "DISCORD_ALERTS_ENABLED": "alerts_discord", "DISCORD_WEBHOOK_URL": "alerts_discord",
+    "GMAIL_ALERTS_ENABLED": "alerts_gmail", "GMAIL_ADDRESS": "alerts_gmail",
+    "GMAIL_APP_PASSWORD": "alerts_gmail", "ALERT_EMAIL_TO": "alerts_gmail",
+}
+
+
 @dataclass(frozen=True)
 class Setting:
     env: str
@@ -70,7 +80,7 @@ class Setting:
 
     @property
     def section(self) -> str:
-        return self.path.split(".")[0]
+        return SECTION_OF_ENV.get(self.env) or self.path.split(".")[0]
 
     @property
     def key(self) -> str:
@@ -206,36 +216,12 @@ def is_overridden(setting: Setting, environ: Mapping[str, str]) -> bool:
     return bool((environ.get(setting.env) or "").strip())
 
 
-#: Settings that, left blank, use ANOTHER setting's value at run time (the one place that choice
-#: is made is Settings.bfmr_reply_account). The page shows the fallback as the field's
-#: placeholder -- never as its value, so saving cannot copy it into the file.
-FALLBACKS: dict[str, tuple[str, str]] = {
-    "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS": ("GMAIL_ADDRESS", "the alerts account"),
-    "BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD": ("GMAIL_APP_PASSWORD", "the alerts app password"),
-}
-
-
-def _fallback_placeholder(setting: Setting, by_env: dict[str, Setting]) -> str:
-    """What a blank field will use, as placeholder text, or "" when the fallback is blank too.
-    A secret fallback is never shown -- only that one is set."""
-    source = FALLBACKS.get(setting.env)
-    if source is None:
-        return ""
-    other = by_env.get(source[0])
-    if other is None:
-        return ""
-    if setting.secret:
-        return f"uses {source[1]} (set; blank keeps it that way)" if config_value(other.path) else ""
-    value = config_value(other.path)
-    return f"{value} ({source[1]}, used while this is blank)" if value else ""
-
-
 def view(settings: list[Setting], environ: Mapping[str, str]) -> list[dict]:
     """One row per setting: the FILE's value, or -- when the file omits the key -- the code's
     default, marked `defaulted` so the page can say so (a flag that defaults to true reads as
-    ticked, not blank). A blank field with a FALLBACKS entry shows what it will use instead."""
+    ticked, not blank). No setting borrows another's value (the combined-package account used to
+    show the alerts account as its placeholder; that link is gone, 2026-09-18)."""
     defaults = code_defaults()
-    by_env = {s.env: s for s in settings}
     rows = []
     for s in settings:
         value = current_value(s)
@@ -243,7 +229,6 @@ def view(settings: list[Setting], environ: Mapping[str, str]) -> list[dict]:
         if defaulted:
             value = defaults[s.env]
         stored = config_value(s.path)
-        placeholder = _fallback_placeholder(s, by_env) if not stored else ""
         rows.append({
             "setting": s,
             "value": "" if value is None else value,
@@ -251,7 +236,6 @@ def view(settings: list[Setting], environ: Mapping[str, str]) -> list[dict]:
             "overridden": is_overridden(s, environ),
             "restart": restart_scope(s),
             "defaulted": defaulted,
-            "placeholder": placeholder,
         })
     return rows
 
@@ -429,7 +413,11 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
     "container": ("Schedule", "How often the container runs, and whether it runs at start. "
                   "Read once at container start."),
     "scraping": ("Scraping", "How far back each run looks, and the money rules the ledger applies."),
-    "alerts": ("Alerts", "Where a failed run, a logged-out session or a stale heartbeat is reported."),
+    "alerts_discord": ("Alerts: Discord", "A webhook that a failed run, a logged-out session or a stale "
+                       "heartbeat is posted to. The switch turns the channel off without losing the URL."),
+    "alerts_gmail": ("Alerts: Gmail", "The account the same alerts are emailed from (an app password), "
+                     "and who they go to. Only for alerts: the BFMR auto-reply's mailbox is its own "
+                     "setting under Buying groups, entered separately even when it is the same account."),
     "buying_groups": ("Buying groups", "BFMR and MaxOutDeals: API access, insurance, and the "
                       "combined-package auto-reply."),
     "receipts": ("Receipts", "Receipt capture: each order's proof of purchase, kept as a file beside "

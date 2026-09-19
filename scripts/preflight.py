@@ -273,16 +273,19 @@ def check_env() -> list[Result]:
 
     # Alerts are how an unattended host tells you anything at all. Neither channel configured means
     # a silent failure stays silent until you happen to look at the ledger.
-    email = _get_str("GMAIL_ADDRESS").strip() and _get_str("GMAIL_APP_PASSWORD").strip()
-    discord = _get_str("DISCORD_WEBHOOK_URL").strip()
+    def on(name: str) -> bool:  # a switch that defaults to true
+        return _get_str(name).strip().lower() not in ("false", "0", "no", "off")
+
+    email = on("GMAIL_ALERTS_ENABLED") and _get_str("GMAIL_ADDRESS").strip() and _get_str("GMAIL_APP_PASSWORD").strip()
+    discord = on("DISCORD_ALERTS_ENABLED") and _get_str("DISCORD_WEBHOOK_URL").strip()
     if email or discord:
-        channels = ", ".join(c for c, on in (("email", email), ("Discord", discord)) if on)
-        out.append(Result(OK, "alerts", f"configured ({channels})"))
+        channels = ", ".join(c for c, live in (("Gmail", email), ("Discord", discord)) if live)
+        out.append(Result(OK, "alerts", f"on and configured ({channels})"))
     else:
         out.append(Result(
             WARN, "alerts",
-            "neither Gmail nor Discord is configured. On an unattended host this means a logged-out "
-            "session or a failing run reports to nobody. Test with `python -m alerts.notifier`.",
+            "neither Gmail nor Discord is on and configured. On an unattended host this means a "
+            "logged-out session or a failing run reports to nobody. Test with `python -m alerts.notifier`.",
         ))
     return out
 
@@ -301,12 +304,24 @@ def check_money_switches() -> list[Result]:
             f"at import until this is fixed.",
         )]
 
+    out: list[Result] = []
+    # The combined-package auto-reply sends mail as ITS OWN account and never borrows the alerts
+    # one (2026-09-18); switched on without that account it would fail every run.
+    if settings.bfmr_combined_package_autoreply_enabled:
+        try:
+            settings.bfmr_reply_account()
+        except RuntimeError as exc:
+            out.append(Result(FAIL, "combined-package auto-reply", f"ON, but {exc}"))
+        else:
+            out.append(Result(OK, "combined-package auto-reply",
+                              f"ON, sending as {settings.bfmr_combined_package_gmail_address.strip()}"))
     if not settings.buying_group_sync_enabled:
-        return [Result(WARN, "buying-group sync", "DISABLED — tracking numbers are not submitted and "
-                                                  "no payout is read back (set buying_groups.sync_enabled to true in config.json).")]
+        out.append(Result(WARN, "buying-group sync", "DISABLED — tracking numbers are not submitted and "
+                                                     "no payout is read back (set buying_groups.sync_enabled to true in config.json)."))
+        return out
 
-    out = [Result(OK, "buying-group sync", "ENABLED — every run submits tracking and files BFMR "
-                                           "insurance unattended, spending real money.")]
+    out.append(Result(OK, "buying-group sync", "ENABLED — every run submits tracking and files BFMR "
+                                               "insurance unattended, spending real money."))
     if (settings.maxoutdeals_api_key or "").strip():
         out.append(Result(
             WARN, "MaxOutDeals IP allowlist",

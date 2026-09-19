@@ -42,7 +42,9 @@ fails closed on a typo rather than turning itself on.
 | Variable | `config.json` key |
 |---|---|
 | `BROWSER_USE_API_KEY` | `browser_use.api_key` |
+| `DISCORD_ALERTS_ENABLED` † | `alerts.discord_enabled` |
 | `DISCORD_WEBHOOK_URL` | `alerts.discord_webhook_url` |
+| `GMAIL_ALERTS_ENABLED` † | `alerts.gmail_enabled` |
 | `ALERT_EMAIL_TO` | `alerts.email_to` |
 | `GMAIL_ADDRESS` | `alerts.gmail_address` |
 | `GMAIL_APP_PASSWORD` | `alerts.gmail_app_password` |

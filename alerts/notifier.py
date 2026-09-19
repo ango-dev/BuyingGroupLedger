@@ -11,6 +11,9 @@ log = logging.getLogger(__name__)
 
 
 def send_email(subject: str, body: str) -> None:
+    if not settings.gmail_alerts_enabled:
+        log.info("Gmail alerts are off (alerts.gmail_enabled); not emailing: %s", subject)
+        return
     if not settings.gmail_address or not settings.gmail_app_password or not settings.alert_email_to:
         log.warning("Email alert not configured, skipping: %s", subject)
         return
@@ -52,6 +55,9 @@ def _smtp_send(msg, recipients: list[str], account: tuple[str, str] | None = Non
 
 
 def send_discord(message: str) -> None:
+    if not settings.discord_alerts_enabled:
+        log.info("Discord alerts are off (alerts.discord_enabled); not posting.")
+        return
     if not settings.discord_webhook_url:
         log.warning("Discord webhook not configured, skipping alert")
         return

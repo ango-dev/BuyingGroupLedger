@@ -461,10 +461,8 @@ section of the file with its fields in a label / input grid (the variable name a
 are checkboxes; secrets are password fields that show only whether a value is set (blank keeps it,
 *clear* blanks it). A key `config.json` omits shows the value the code applies for it, tagged
 *default* (so a flag that defaults to on reads as ticked); saving writes it to the file. The
-combined-package Gmail address and app password, left blank, use the alerts account at run time,
-and the page shows that: the alerts address (or "uses the alerts app password") greyed in the box
-as a placeholder with a *falls back* tag, never as a value, so saving cannot copy it into the file;
-when both are blank the box is simply empty. The sticky bar at the end of the scalar form says whether there are unsaved
+The combined-package Gmail address and app password are the auto-reply's own account, entered
+separately from the alerts account even when they are the same (the two are not linked). The sticky bar at the end of the scalar form says whether there are unsaved
 edits and saves them all at once.
 
 **Profiles, warehouses and cards are entry cards.** Each entry is its own card with a form: a

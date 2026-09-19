@@ -82,10 +82,10 @@ def _pin_mail_settings(monkeypatch):
     monkeypatch.setattr(respond_bfmr, "settings",
                         dataclasses.replace(respond_bfmr.settings,
                                             bfmr_combined_package_reply_cc="",
-                                            bfmr_combined_package_gmail_address="",
-                                            bfmr_combined_package_gmail_app_password="",
-                                            gmail_address="jane.fixture@example.com",
-                                            gmail_app_password="fixture-pw"))
+                                            bfmr_combined_package_gmail_address="jane.fixture@example.com",
+                                            bfmr_combined_package_gmail_app_password="fixture-pw",
+                                            gmail_address="alerts.fixture@example.com",
+                                            gmail_app_password="alerts-fixture-pw"))
 
 
 @pytest.fixture
@@ -291,19 +291,20 @@ def test_enabled_master_switch_runs_with_apply(monkeypatch):
 
 
 class TestReplyAccountChoice:
-    """The mailbox is the alerts account UNLESS the feature's own pair is set — resolved in one
-    place (settings.bfmr_reply_account) so IMAP and SMTP can never use different accounts."""
+    """The mailbox is the feature's OWN pair, never the alerts account — resolved in one place
+    (settings.bfmr_reply_account) so IMAP and SMTP can never use different accounts."""
 
     @staticmethod
     def _settings(**overrides):
         import dataclasses
         return dataclasses.replace(respond_bfmr.settings, **overrides)
 
-    def test_both_blank_falls_back_to_the_alerts_account(self):
+    def test_both_blank_is_refused_the_alerts_account_is_never_borrowed(self):
         s = self._settings(gmail_address="alerts@example.com", gmail_app_password="alerts-pw",
                            bfmr_combined_package_gmail_address="",
                            bfmr_combined_package_gmail_app_password="")
-        assert s.bfmr_reply_account() == ("alerts@example.com", "alerts-pw")
+        with pytest.raises(RuntimeError, match="its own Gmail account"):
+            s.bfmr_reply_account()
 
     def test_both_set_uses_the_separate_account(self):
         s = self._settings(gmail_address="alerts@example.com", gmail_app_password="alerts-pw",

@@ -656,3 +656,36 @@ class TestCostcoTokenBootstrapIsNotAMisconfiguration:
                 if "paid agent" in lowered:
                     assert "never run" in lowered, (
                         f"message implies the agent runs for an auth failure: {result.detail}")
+
+
+class TestTheAutoReplyNeedsItsOwnAccount:
+    """2026-09-18: the combined-package auto-reply no longer borrows the alerts account, so ON
+    without its own pair is a FAIL at preflight rather than a failed send every run."""
+
+    def _with(self, monkeypatch, **overrides):
+        import dataclasses
+        import importlib
+        import sys
+
+        # The module preflight's `from config.settings import settings` resolves to is the one in
+        # sys.modules; after the tests above drop and re-import it, the package attribute points
+        # at a different module object, so patch the registry's.
+        cfg = sys.modules.get("config.settings") or importlib.import_module("config.settings")
+        monkeypatch.setattr(cfg, "settings", dataclasses.replace(cfg.settings, **overrides))
+
+    def test_on_without_an_account_fails(self, monkeypatch):
+        self._with(monkeypatch, bfmr_combined_package_autoreply_enabled=True,
+                   bfmr_combined_package_gmail_address="", bfmr_combined_package_gmail_app_password="",
+                   gmail_address="alerts@example.com", gmail_app_password="pw")
+        result = _by_name(preflight.check_money_switches(), "combined-package auto-reply")
+        assert result.level == preflight.FAIL and "its own Gmail account" in result.detail
+
+    def test_on_with_its_account_is_ok_and_off_says_nothing(self, monkeypatch):
+        self._with(monkeypatch, bfmr_combined_package_autoreply_enabled=True,
+                   bfmr_combined_package_gmail_address="bfmr@example.com",
+                   bfmr_combined_package_gmail_app_password="pw")
+        result = _by_name(preflight.check_money_switches(), "combined-package auto-reply")
+        assert result.level == preflight.OK, result.detail
+        assert "bfmr@example.com" in result.detail
+        self._with(monkeypatch, bfmr_combined_package_autoreply_enabled=False)
+        assert not [r for r in preflight.check_money_switches() if r.name == "combined-package auto-reply"]
