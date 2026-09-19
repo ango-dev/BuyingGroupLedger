@@ -120,6 +120,7 @@ def test_the_expenses_grid_writes_undoes_narrows_and_deletes(client, served, pag
     assert page.evaluate('document.querySelectorAll("td.sel-cell").length') == 0
 
     # the Add-an-Expense form's profile picker sits exactly beside its inputs
+    page.evaluate("document.querySelector('details.add-row').open = true")  # folded by default
     boxes = page.evaluate("""() => Array.from(document.querySelectorAll('.expense-form .egrid > label, .expense-form .egrid > .lbl'))
         .slice(0, 4).map(el => { const c = el.querySelector('input, .summary-text').getBoundingClientRect(); return [Math.round(c.top), Math.round(c.height), Math.round(c.width)]; })""")
     assert len({b[0] for b in boxes}) == 1 and len({b[1] for b in boxes}) == 1 and len({b[2] for b in boxes}) == 1, boxes

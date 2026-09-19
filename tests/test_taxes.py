@@ -253,6 +253,7 @@ class TestTaxesPage:
         assert response.status_code == 200
         assert "A receipt is required" in response.text and "Email is not an address" in response.text
         assert 'value="boxes"' in response.text  # the draft survives
+        assert '<details class="add-row" id="expense-form" open>' in response.text  # open again, with the draft
         # who paid: the profile OR the email, one is enough
         neither = client.post("/taxes/expense", params={"year": "2026"},
                               data={"date": "2026-03-04", "description": "boxes", "amount": "1", "receipt_url": "https://x/r"})
@@ -304,6 +305,8 @@ class TestTaxesPage:
         assert 'class="grid compact expenses sheetlike" data-cell-url="/taxes/expense/cell?year=2026"' in body
         assert 'class="num actions"' not in body and "del-expense-" not in body  # no per-row buttons
         assert "Edit Expense" not in body and 'action="/taxes/expense?year=2026"' in body  # the form only adds
+        assert '<details class="add-row" id="expense-form" >' in body  # folded above the list, closed by default
+        assert body.index('<details class="add-row"') < body.index('class="grid compact expenses sheetlike"')
         assert body.count('name="sel"') == 2 and 'id="sel-all"' in body and 'id="delete-selected"' in body
         assert 'action="/taxes/expenses/delete?year=2026" data-confirm=' in body and 'data-confirm-many="Delete the {n} selected expenses?' in body
         assert f'data-field="amount" data-entry-id="{ids[0]}" data-raw="12.50"' in body

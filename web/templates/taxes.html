@@ -40,6 +40,26 @@
 <section class="panel" id="s-expenses">
   <header><h2>Expenses — {{ year }}</h2>
     <p class="muted">Everything spent for the business in {{ year }} beyond the ledger's purchases: supplies, memberships, card annual fees. Every entry needs its date, amount, who paid (the profile, or the email of the account), and a receipt — uploaded (kept under <code>data/expenses/</code>, inside every backup) or linked. Counted under Other expenses (line 27a).</p></header>
+  {#- Above the list, folded like Orders' "Add a row": closed by default, open
+      when a refused add re-renders with what was typed. -#}
+  <details class="add-row" id="expense-form" {{ 'open' if draft }}>
+    <summary>Add an expense</summary>
+  {#- One four-column grid, every field filling its cell, the wide ones spanning two. It only ADDS: an entry
+      is edited in the grid above. -#}
+  <form method="post" action="/taxes/expense?year={{ year }}" enctype="multipart/form-data" class="expense-form">
+    <div class="egrid">
+      <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
+      <label>Amount <input type="text" name="amount" value="{{ draft.get('amount', '') }}" placeholder="0.00" inputmode="decimal" required></label>
+      <span class="lbl">Paid by — profile {{ choose('profile', [('', '— none —')] + (profile_labels | list), draft.get('profile', ''), '', 'pick') }}</span>
+      <label>or the email of the account that paid <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com"></label>
+      <label class="span-2">Description <input type="text" name="description" value="{{ draft.get('description', '') }}" placeholder="what it was" required></label>
+      <label class="span-2">Category <input type="text" name="category" value="{{ draft.get('category', '') }}" placeholder="optional: supplies, membership, annual fee…"></label>
+      <span class="lbl span-2">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
+      <label class="span-2">or a link to it <input type="text" name="receipt_url" value="{{ draft.get('receipt_url', '') }}" placeholder="https://…"></label>
+    </div>
+    <div class="inline-form"><button type="submit" class="primary">Add expense</button></div>
+  </form>
+  </details>
   {% if inputs.expenses %}
   {#- The list is a GRID like the Orders table: static/edit.js drives it --
       click, type, Enter; a range fill; Ctrl+C / Ctrl+V; undo; row numbers select rows and Delete
@@ -73,22 +93,6 @@
   {% else %}
   <p class="muted">No expenses entered for {{ year }} yet.</p>
   {% endif %}
-  {#- One four-column grid, every field filling its cell, the wide ones spanning two. It only ADDS: an entry
-      is edited in the grid above. -#}
-  <h3 id="expense-form">Add an Expense</h3>
-  <form method="post" action="/taxes/expense?year={{ year }}" enctype="multipart/form-data" class="expense-form">
-    <div class="egrid">
-      <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
-      <label>Amount <input type="text" name="amount" value="{{ draft.get('amount', '') }}" placeholder="0.00" inputmode="decimal" required></label>
-      <span class="lbl">Paid by — profile {{ choose('profile', [('', '— none —')] + (profile_labels | list), draft.get('profile', ''), '', 'pick') }}</span>
-      <label>or the email of the account that paid <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com"></label>
-      <label class="span-2">Description <input type="text" name="description" value="{{ draft.get('description', '') }}" placeholder="what it was" required></label>
-      <label class="span-2">Category <input type="text" name="category" value="{{ draft.get('category', '') }}" placeholder="optional: supplies, membership, annual fee…"></label>
-      <span class="lbl span-2">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
-      <label class="span-2">or a link to it <input type="text" name="receipt_url" value="{{ draft.get('receipt_url', '') }}" placeholder="https://…"></label>
-    </div>
-    <div class="inline-form"><button type="submit" class="primary">Add expense</button></div>
-  </form>
 </section>
 
 <form method="post" action="/taxes/save" class="tax-form">
