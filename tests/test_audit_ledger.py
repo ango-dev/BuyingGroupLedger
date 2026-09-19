@@ -1393,3 +1393,48 @@ class TestMandatoryByStage:
         assert result_for(sheet, "mandatory_by_stage").status == "PASS"
         sheet = build(row_cells(2, Status=Cell("cancelled"), Retailer=Cell("")))
         assert result_for(sheet, "mandatory_by_stage").status == "FAIL"
+
+
+class TestImpossibleValues:
+
+    def _fails(self, **cells):
+        result = result_for(build(row_cells(2, **cells)), "impossible_values")
+        assert result.status == "FAIL", result
+        return result.details[0]
+
+    def test_a_healthy_row_passes(self):
+        assert result_for(build(row_cells(2), row_cells(3)), "impossible_values").status == "PASS"
+
+    def test_amounts_that_cannot_be(self):
+        assert "Shipping -3.0 is negative" in self._fails(**{"Shipping": Cell(-3.0)})
+        assert "Quantity 0 is under one" in self._fails(**{"Quantity": Cell(0)})
+        assert "Gift Card 900.0 exceeds" in self._fails(**{"Gift Card": Cell(900.0)})
+        assert "Rewards Used 799.0 exceeds Total Cost 798.0" in self._fails(**{"Rewards Used": Cell(799.0)})
+        assert "a cancelled row carries Total Cost" in self._fails(Status=Cell("cancelled"))
+        odd = result_for(build(row_cells(2, Status=Cell("paid"), **{"Buying Group": Cell("BFMR"), "Actual Payout": Cell(-5.0, fmt="currency"),
+                                                                     "Payout Date": Cell("2026-08-20")})), "impossible_values")
+        assert odd.status == "WARN" and "negative (a clawback" in odd.details[0]
+
+    def test_dates_that_cannot_be(self):
+        assert "Order Date 2999-01-01 is in the future" in self._fails(**{"Order Date": Cell("2999-01-01")})
+        assert "Last Scraped At 2026-08-01 is before the Order Date 2026-08-06" in self._fails(**{"Last Scraped At": Cell("2026-08-01T10:00:00Z")})
+        odd = result_for(build(row_cells(2, Status=Cell("return"), **{"Return Qty": Cell(1), "Return Date": Cell("2026-08-07"),
+                                                                       "Buying Group": Cell("BFMR")})), "impossible_values")
+        assert odd.status == "WARN" and "Return Date 2026-08-07 is before the Delivery Date 2026-08-09" in odd.details[0]
+
+    def test_identifiers_that_do_not_fit_their_retailer(self):
+        assert "is not the shape of a Best Buy order number" in self._fails(**{"Order ID": Cell("111-1234567-1234567")})
+        assert "Order Link points at another site than Best Buy" in self._fails(**{"Order Link": Cell("https://www.amazon.com/gp/order/1")})
+        assert "Receipt Link is filed under another retailer than Best Buy" in self._fails(**{"Receipt Link": Cell("/receipts/costco/2026-08/1.pdf")})
+        assert "a Tracking Link with no Tracking Number" in self._fails(**{"Tracking Number": Cell(""), "Tracking Submitted": Cell(False), "Tracking Link": Cell("https://ups.com/t/1")})
+        assert "Card Last 4 '76' is not four digits" in self._fails(**{"Card Last 4": Cell("76")})
+        amazon = build(row_cells(2, Retailer=Cell("Amazon"), **{"Order ID": Cell("111-1234567-1234567"), "Order Link": Cell("https://www.amazon.com/gp/your-account/order-details?orderID=111-1234567-1234567"),
+                                                                 "Receipt Link": Cell("/receipts/amazon/2026-08/111-1234567-1234567.pdf")}))
+        assert result_for(amazon, "impossible_values").status == "PASS"
+
+    def test_a_payment_from_nobody_and_insurance_at_the_wrong_group(self):
+        from config.warehouses import GIFT_CARD
+
+        assert "paid, but no buying group to have paid it" in self._fails(Status=Cell("paid"), **{"Buying Group": Cell(GIFT_CARD), "Actual Payout": Cell(10.0, fmt="currency"), "Payout Date": Cell("2026-08-20")})
+        odd = result_for(build(row_cells(2, **{"Buying Group": Cell("MOD"), "Insurance": Cell(2.0, fmt="currency")})), "impossible_values")
+        assert odd.status == "WARN" and "Insurance on a MaxOutDeals row" in odd.details[0]

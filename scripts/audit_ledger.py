@@ -1343,6 +1343,112 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
     return Result("mandatory_by_stage", "PASS", "every row carries what its stage requires")
 
 
+#: What each retailer's identifiers look like: the shape of its order numbers, the domain its
+#: order links live on, and the slug its receipt files are keyed under (receipts/sources.py).
+RETAILER_SHAPES = {
+    "amazon": (r"^\d{3}-\d{7}-\d{7}$", ("amazon.com",), "amazon"),
+    "amazon business": (r"^\d{3}-\d{7}-\d{7}$", ("amazon.com",), "amazon-business"),
+    "best buy": (r"^BBY01-\d+$", ("bestbuy.com",), "bestbuy"),
+    "costco": (r"^\d+$", ("costco.com",), "costco"),
+}
+#: Amounts that can never be negative (a payout can: a clawback nets below zero, so it is a WARN).
+NEVER_NEGATIVE = ("Quantity", "Cost Per Item", "Total Cost", "Shipping", "Sales Tax", "Gift Card",
+                  "Rewards Used", "Insurance", "Expected Payout", "Return Qty")
+
+
+@check("impossible_values")
+def check_impossible_values(sheet: Sheet, opts: Options) -> Result:
+    """Values and combinations that cannot be true of a real order, whatever its stage. mandatory_by_stage says what each stage must and must not carry; this is the
+    rest: amounts below zero or above what they are part of, a quantity under one, dates in the
+    future or before the order, identifiers that do not fit their retailer, links without what
+    they link, money on a cancelled row, a payment from nobody. Each FAIL names the row and the
+    contradiction; the few that have an innocent reading are WARNs."""
+    import re
+    from datetime import date
+
+    from config.warehouses import is_deliberately_unrouted
+
+    grid, raw = sheet.grids.formatted, sheet.grids.unformatted
+    today = date.today().isoformat()
+    fails, warns = [], []
+    for row_number, _ in sheet.ledger_rows(grid):
+        def cell(name: str) -> str:
+            return str(sheet.cell(grid, row_number, name)).strip()
+
+        def number(name: str):
+            return _parse_display_number(sheet.cell(raw, row_number, name))
+
+        status = cell("Status").lower()
+        bad, odd = [], []
+        # --- amounts ---
+        for name in NEVER_NEGATIVE:
+            value = number(name)
+            if value is not None and value < 0:
+                bad.append(f"{name} {value} is negative")
+        payout = number("Actual Payout")
+        if payout is not None and payout < 0:
+            odd.append(f"Actual Payout {payout} is negative (a clawback, or a typo?)")
+        qty = number("Quantity")
+        if qty is not None and status not in MONEY_FREE_STATUSES and qty < 1:
+            bad.append(f"Quantity {qty} is under one")
+        cost, ship, tax = number("Total Cost") or 0.0, number("Shipping") or 0.0, number("Sales Tax") or 0.0
+        gift, rewards = number("Gift Card"), number("Rewards Used")
+        if gift is not None and cost and gift > cost + ship + tax + 0.01:
+            bad.append(f"Gift Card {gift} exceeds the order's cost, shipping and tax ({round(cost + ship + tax, 2)})")
+        if rewards is not None and cost and rewards > cost + 0.01:
+            bad.append(f"Rewards Used {rewards} exceeds Total Cost {cost}")
+        if status == "cancelled":
+            money = [n for n in ("Actual Payout", "Expected Payout", "Insurance", "Total Cost") if number(n)]
+            if money:
+                bad.append("a cancelled row carries " + ", ".join(money))
+        # --- dates ---
+        order_date = cell("Order Date")[:10]
+        for name in ("Order Date", "Delivery Date", "Payout Date", "Return Date"):
+            when = cell(name)[:10]
+            if len(when) == 10 and when > today:
+                bad.append(f"{name} {when} is in the future")
+        scraped = cell("Last Scraped At")[:10]
+        if len(scraped) == 10 and len(order_date) == 10 and scraped < order_date:
+            bad.append(f"Last Scraped At {scraped} is before the Order Date {order_date}")
+        delivered, returned = cell("Delivery Date")[:10], cell("Return Date")[:10]
+        if len(delivered) == 10 and len(returned) == 10 and returned < delivered:
+            odd.append(f"Return Date {returned} is before the Delivery Date {delivered} (refused at the door?)")
+        # --- identity and links ---
+        retailer = cell("Retailer").lower()
+        shape = RETAILER_SHAPES.get(retailer)
+        order_id, order_link, receipt = cell("Order ID"), cell("Order Link"), cell("Receipt Link")
+        if shape:
+            pattern, domains, slug = shape
+            if order_id and not re.match(pattern, order_id):
+                bad.append(f"Order ID {order_id!r} is not the shape of a {cell('Retailer')} order number")
+            if order_link.startswith("http") and not any(f".{d}/" in order_link or f"//{d}/" in order_link or order_link.endswith(d) for d in domains):
+                bad.append(f"Order Link points at another site than {cell('Retailer')}")
+            if receipt.startswith("/receipts/") and not receipt.startswith(f"/receipts/{slug}/"):
+                bad.append(f"Receipt Link is filed under another retailer than {cell('Retailer')}")
+        if cell("Tracking Link") and not cell("Tracking Number"):
+            bad.append("a Tracking Link with no Tracking Number")
+        last4 = cell("Card Last 4")
+        if last4 and not (last4.isdigit() and len(last4) == 4):
+            bad.append(f"Card Last 4 {last4!r} is not four digits")
+        # --- who paid ---
+        group = cell("Buying Group")
+        if status == "paid" and (not group or is_deliberately_unrouted(group)):
+            bad.append("paid, but no buying group to have paid it")
+        if number("Insurance") and group.lower().replace(" ", "") in ("mod", "maxoutdeals"):
+            odd.append("Insurance on a MaxOutDeals row (only BFMR files insurance)")
+        if bad:
+            fails.append(f"row {row_number} ({status or 'no status'}): " + "; ".join(bad))
+        if odd:
+            warns.append(f"row {row_number} ({status or 'no status'}): " + "; ".join(odd))
+    if fails:
+        return Result("impossible_values", "FAIL", f"{len(fails)} row(s) hold a value that cannot be true",
+                      _truncate(fails + warns, opts.max_detail))
+    if warns:
+        return Result("impossible_values", "WARN", f"{len(warns)} row(s) hold a value worth a second look",
+                      _truncate(warns, opts.max_detail))
+    return Result("impossible_values", "PASS", "no impossible value on any row")
+
+
 @check("paid_rows_have_a_payout")
 def check_paid_rows_have_a_payout(sheet: Sheet, opts: Options) -> Result:
     """A row the buying group reports as `paid` must carry the amount it was paid.
