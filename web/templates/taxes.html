@@ -44,7 +44,8 @@
   {#- The list is a GRID like the Orders table: static/edit.js drives it --
       click, type, Enter; a range fill; Ctrl+C / Ctrl+V; undo; row numbers select rows and Delete
       removes them after one confirmation (this form, answered by the page's dialog). A cell
-      posts to data-cell-url and gets the <td> back. The row's own edit / ✕ buttons stay. -#}
+      posts to data-cell-url and gets the <td> back; the receipt cell's ⤒ uploads a file. No
+      per-row buttons. -#}
   <form id="bulk" method="post" action="/taxes/expenses/delete?year={{ year }}" data-confirm="Delete every selected expense? Their uploaded receipts are deleted too.">
     <div class="muted count">{{ inputs.expenses | length }} expense(s) · <span id="sel-count">0</span> selected {% with id='expense-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}</div>
     <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Delete the selected expense? Its uploaded receipt is deleted too." data-confirm-many="Delete the {n} selected expenses? Their uploaded receipts are deleted too.">Delete selected</button>
@@ -55,30 +56,27 @@
           beside the name selects the column. -#}
       {% set ecols = (('date', 'Date'), ('description', 'Description'), ('category', 'Category'), ('profile', 'Profile'), ('email', 'Email'), ('receipt_url', 'Receipt'), ('amount', 'Amount')) %}
       <thead><tr><th class="rownum" title="select / unselect every expense"><input type="checkbox" id="sel-all" hidden aria-label="select all">#</th>
-        {% for field, heading in ecols %}{% set active = esort == field %}{% set link = ('&esort=' ~ field ~ '&edir=asc') if not active else (('&esort=' ~ field ~ '&edir=desc') if edir == 'asc' else '') %}<th class="col-{{ field }} {{ 'num' if field == 'amount' }} {{ 'sorted' if active }}"><a href="/taxes?year={{ year }}{{ link | safe }}#s-expenses" title="{{ 'sort ascending' if not active else ('sort descending' if edir == 'asc' else 'clear the sort') }}">{{ heading }}{% if active %} {{ '▼' if edir == 'desc' else '▲' }}{% endif %}</a></th>{% endfor %}<th></th></tr></thead>
+        {% for field, heading in ecols %}{% set active = esort == field %}{% set link = ('&esort=' ~ field ~ '&edir=asc') if not active else (('&esort=' ~ field ~ '&edir=desc') if edir == 'asc' else '') %}<th class="col-{{ field }} {{ 'num' if field == 'amount' }} {{ 'sorted' if active }}"><a href="/taxes?year={{ year }}{{ link | safe }}#s-expenses" title="{{ 'sort ascending' if not active else ('sort descending' if edir == 'asc' else 'clear the sort') }}">{{ heading }}{% if active %} {{ '▼' if edir == 'desc' else '▲' }}{% endif %}</a></th>{% endfor %}</tr></thead>
       <tbody>
         {% for e in expenses %}
-        <tr{% if edit_entry and edit_entry.id == e.id %} class="editing"{% endif %}>
+        <tr>
           <td class="rownum muted" title="expense {{ loop.index }} — click to select"><input type="checkbox" name="sel" value="{{ e.id }}" hidden aria-label="select expense {{ loop.index }}">{{ loop.index }}</td>
           {% for field in ('date', 'description', 'category', 'profile', 'email', 'receipt_url', 'amount') %}{% with e=e, field=field, entry_id=e.id, error='' %}{% include "_expense_cell.html" %}{% endwith %}{% endfor %}
-          <td class="num actions"><a class="button small" href="/taxes?year={{ year }}&edit={{ e.id }}#expense-form" title="edit this expense in the form (to upload a receipt)">edit</a> <button type="submit" form="del-expense-{{ e.id }}" class="danger small" title="remove this expense">✕</button></td>
         </tr>
         {% endfor %}
       </tbody>
-      <tfoot><tr class="total"><td colspan="8">Total</td><td class="num">{{ inputs.expense_total | money }}</td><td></td></tr></tfoot>
+      <tfoot><tr class="total"><td colspan="7">Total</td><td class="num">{{ inputs.expense_total | money }}</td></tr></tfoot>
     </table>
     </div>
   </form>
   <script type="application/json" id="cell-choices">{{ expense_choices | tojson }}</script>
-  {% for e in inputs.expenses %}<form method="post" id="del-expense-{{ e.id }}" action="/taxes/expense/{{ e.id }}/delete?year={{ year }}" class="entry-delete" hidden data-confirm="Remove the expense {{ e.description }} ({{ e.amount | money }}) from {{ year }}? Its uploaded receipt is deleted too."></form>{% endfor %}
   {% else %}
   <p class="muted">No expenses entered for {{ year }} yet.</p>
   {% endif %}
-  {#- One four-column grid, every field filling its cell, the wide ones spanning two. The same form adds an
-      expense or, opened from a row's edit button (?edit=<id>), saves that entry in place: the
-      receipt it has stays unless a new one is given. -#}
-  <h3 id="expense-form">{{ 'Edit Expense' if edit_entry else 'Add an Expense' }}</h3>
-  <form method="post" action="{{ '/taxes/expense/' ~ edit_entry.id if edit_entry else '/taxes/expense' }}?year={{ year }}" enctype="multipart/form-data" class="expense-form">
+  {#- One four-column grid, every field filling its cell, the wide ones spanning two. It only ADDS: an entry
+      is edited in the grid above. -#}
+  <h3 id="expense-form">Add an Expense</h3>
+  <form method="post" action="/taxes/expense?year={{ year }}" enctype="multipart/form-data" class="expense-form">
     <div class="egrid">
       <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
       <label>Amount <input type="text" name="amount" value="{{ draft.get('amount', '') }}" placeholder="0.00" inputmode="decimal" required></label>
@@ -86,10 +84,10 @@
       <label>or the email of the account that paid <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com"></label>
       <label class="span-2">Description <input type="text" name="description" value="{{ draft.get('description', '') }}" placeholder="what it was" required></label>
       <label class="span-2">Category <input type="text" name="category" value="{{ draft.get('category', '') }}" placeholder="optional: supplies, membership, annual fee…"></label>
-      <span class="lbl span-2">Receipt{% if edit_entry and edit_entry.receipt.file %} <span class="muted">(now <a href="/taxes/receipt/{{ edit_entry.id }}?year={{ year }}" rel="noopener">{{ edit_entry.receipt.name }}</a>; upload to replace it)</span>{% endif %} {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
+      <span class="lbl span-2">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
       <label class="span-2">or a link to it <input type="text" name="receipt_url" value="{{ draft.get('receipt_url', '') }}" placeholder="https://…"></label>
     </div>
-    <div class="inline-form"><button type="submit" class="primary">{{ 'Save changes' if edit_entry else 'Add expense' }}</button>{% if edit_entry %} <a class="button" href="/taxes?year={{ year }}#s-expenses">Cancel</a>{% endif %}</div>
+    <div class="inline-form"><button type="submit" class="primary">Add expense</button></div>
   </form>
 </section>
 

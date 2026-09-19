@@ -67,31 +67,11 @@
   }
 })();
 
-// Collapsible entries (Profiles / Warehouses / Cards): which ones are open is remembered in the
-// `settings-open` cookie, so the page comes back the way it was left.
+// Collapsible entries (Profiles / Warehouses / Cards): every entry starts closed on each load --
+// nothing is remembered across a reload or a restart. The old `settings-open` cookie is
+// dropped if a browser still carries it.
 (function () {
-  var NAME = "settings-open";
-  function read() {
-    try {
-      var m = document.cookie.match(new RegExp("(?:^|; )" + NAME + "=([^;]*)"));
-      return m ? JSON.parse(decodeURIComponent(m[1])) : [];
-    } catch (e) { return []; }
-  }
-  function write(keys) {
-    try {
-      document.cookie = NAME + "=" + encodeURIComponent(JSON.stringify(keys.slice(0, 200))) +
-        "; path=/settings; max-age=" + (365 * 24 * 3600) + "; samesite=lax";
-    } catch (e) {}
-  }
-  var open = read();
-  document.querySelectorAll("details.entry-card[data-key]").forEach(function (d) {
-    if (open.indexOf(d.dataset.key) >= 0) d.setAttribute("open", "");
-    d.addEventListener("toggle", function () {
-      var keys = read().filter(function (k) { return k !== d.dataset.key; });
-      if (d.open) keys.push(d.dataset.key);
-      write(keys);
-    });
-  });
+  try { document.cookie = "settings-open=; path=/settings; max-age=0; samesite=lax"; } catch (e) {}
   document.querySelectorAll("[data-expand], [data-collapse]").forEach(function (a) {
     a.addEventListener("click", function (e) {
       e.preventDefault();

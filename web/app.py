@@ -570,19 +570,13 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             labels = profile_labels()
         except Exception:  # noqa: BLE001
             labels = []
-        # ?edit=<id>: the expense form opens on that entry; a re-render after a refused edit keeps the typed draft instead.
-        editing = extra.pop("edit_entry", None)
-        draft = extra.pop("draft", None)
-        if editing is None and request.query_params.get("edit"):
-            editing = next((e for e in inputs.expenses if e["id"] == request.query_params["edit"]), None)
-        if editing is not None and draft is None:
-            draft = {**editing, "receipt_url": (editing.get("receipt") or {}).get("url", "")}
+        draft = extra.pop("draft", None)  # a refused add re-renders the form with what was typed
         esort = str(request.query_params.get("esort") or "").strip()  # the expenses table's header sort
         edir = "asc" if str(request.query_params.get("edir") or "").lower() == "asc" else "desc"
         return page(request, "taxes.html", snapshot=snapshot, year=year, years=years,
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
-                    draft=draft or {}, edit_entry=editing, expense_choices=tax_inputs.expense_choices(inputs),
+                    draft=draft or {}, expense_choices=tax_inputs.expense_choices(inputs),
                     expenses=tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True),
                     esort=esort, edir=edir, **extra)
 
@@ -672,6 +666,27 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return page_no_snapshot(request, "_expense_cell.html", e=entry, field=field, entry_id=entry_id,
                                 year=year, error=error)
 
+    @app.post("/taxes/expense/{entry_id}/receipt")
+    async def taxes_expense_receipt(request: Request, entry_id: str):
+        """The receipt cell's ⤒ button: the chosen file becomes the entry's receipt (the old file
+        is deleted), then back to the list."""
+        year, _fields, receipt_file = await expense_form(request)
+        back = f"/taxes?year={year}"
+        if receipt_file is None:
+            return RedirectResponse(url=f"{back}&error={quote('No file was chosen')}#s-expenses", status_code=303)
+        inputs = load_tax_inputs(year)
+        try:
+            entry = tax_inputs.replace_receipt(inputs, entry_id, receipt_file, year=year, data_dir=data_dir)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="no such expense")
+        except ValueError as exc:
+            return RedirectResponse(url=f"{back}&error={quote(str(exc))}#s-expenses", status_code=303)
+        tax_inputs.save_year(tax_inputs_path, year, inputs)
+        act("settings", f"Receipt uploaded for an expense in {year}: {entry['description']} ({entry['receipt'].get('name', '')})",
+            {"year": year, "id": entry_id, "file": entry["receipt"].get("file", "")})
+        return RedirectResponse(url=f"{back}&notice={quote('Receipt uploaded for ' + entry['description'])}#s-expenses",
+                                status_code=303)
+
     @app.post("/taxes/expenses/delete")
     async def taxes_expenses_delete(request: Request):
         """Delete every selected expense (the table's row selection, confirmed once)."""
@@ -684,26 +699,6 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             act("settings", f"{len(gone)} expense(s) removed from {year}: " + ", ".join(e["description"] for e in gone[:10]),
                 {"year": year, "ids": [e["id"] for e in gone]})
         return RedirectResponse(url=f"/taxes?year={year}&notice={quote(f'Deleted {len(gone)} expense(s)')}#s-expenses",
-                                status_code=303)
-
-    @app.post("/taxes/expense/{entry_id}")
-    async def taxes_expense_update(request: Request, entry_id: str):
-        """Edit one expense in place (web/tax_inputs.update_expense): the receipt stays unless a
-        new file or a different link replaces it."""
-        year, fields, receipt_file = await expense_form(request)
-        inputs = load_tax_inputs(year)
-        try:
-            entry = tax_inputs.update_expense(inputs, entry_id, fields, year=year, data_dir=data_dir,
-                                              receipt_file=receipt_file)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="no such expense")
-        except ValueError as exc:
-            current = next((e for e in inputs.expenses if e["id"] == entry_id), None)
-            return taxes_page(request, year, error=str(exc), draft=fields, edit_entry=current)
-        tax_inputs.save_year(tax_inputs_path, year, inputs)
-        act("settings", f"Expense edited in {year}: {entry['description']} ({entry['amount']:.2f})",
-            {"year": year, "id": entry["id"], "amount": entry["amount"], "profile": entry["profile"]})
-        return RedirectResponse(url=f"/taxes?year={year}&notice={quote('Saved ' + entry['description'])}#s-expenses",
                                 status_code=303)
 
     @app.post("/taxes/expense/{entry_id}/delete")

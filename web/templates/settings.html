@@ -103,7 +103,7 @@ here, so keep the dashboard on loopback or your own network.</p>
     {# ---- the list sections: one collapsible entry per item, a dashed card to add one. An entry is a <details>
        whose summary is the readable line (name + facts as chips); the form is inside. Sub-lists
        (sign-ins, jigs, per-retailer rates) are small tables, one row each, the last row blank to
-       add one. settings.js remembers which entries are open in the `settings-open` cookie. ---- #}
+       add one. Every entry starts closed on each load; nothing is remembered. ---- #}
     {% macro secret_cell(name, is_set) -%}
       <input type="password" name="{{ name }}" value="" autocomplete="new-password" placeholder="{{ '••••••••' if is_set else '(not set)' }}" title="{{ 'set; blank keeps it' if is_set else 'not set' }}">
       {% if is_set %}<label class="clear" title="clear the stored value"><input type="checkbox" name="{{ name }}__clear" value="1"> clear</label>{% endif %}

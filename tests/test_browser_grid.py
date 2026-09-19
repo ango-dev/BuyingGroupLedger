@@ -92,6 +92,14 @@ def test_the_expenses_grid_writes_undoes_narrows_and_deletes(client, served, pag
     assert "a new answer" in page.evaluate("document.querySelector('.pop').innerText")
     page.keyboard.press("Escape")
 
+    # a click on a link inside a cell selects the cell instead of following it
+    page.click(f'td[data-field="receipt_url"][data-entry-id="{ids[1]}"] a')
+    assert "/taxes" in page.url and page.evaluate('document.querySelectorAll("td.sel-cell").length') == 1
+    assert page.evaluate('document.querySelector("td.sel-cell").dataset.field') == "receipt_url"
+    page.click(f'td[data-field="receipt_url"][data-entry-id="{ids[1]}"]', button="right")
+    assert page.evaluate("document.querySelector('.ctx button[data-act=\"open\"]').disabled") is False
+    page.keyboard.press("Escape")
+
     # the right-click menu: Clear on a category cell, then Undo from the menu
     cat2 = f'td[data-field="category"][data-entry-id="{ids[1]}"]'
     page.click(cat2, button="right")
@@ -136,4 +144,5 @@ def test_the_expenses_grid_writes_undoes_narrows_and_deletes(client, served, pag
     page.click('dialog#settings-confirm button[value="ok"]')
     page.wait_for_url("**notice=Deleted**", timeout=5000)
     assert page.evaluate('document.querySelectorAll("table.expenses tbody tr").length') == 1
+    assert page.evaluate('document.querySelectorAll("table.expenses .cell-upload").length') == 1  # the receipt cell's ⤒
     assert page.errors == []

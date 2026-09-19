@@ -682,6 +682,8 @@ class TestOverviewPage:
         assert 'src="/static/tooltip.js' in body
         js = client.get("/static/tooltip.js").text
         assert 'removeAttribute("title")' in js and "data-tip" in js  # the native bubble never shows
+        settings_js = client.get("/static/settings.js").text
+        assert "settings-open=; path=/settings; max-age=0" in settings_js and "function read()" not in settings_js  # nothing remembered
         assert 'getAttribute("data-tip-from")' in js and 'classList.add("rich")' in js  # a tip may be a table
         assert "split(/\\s+/)" in js  # several blocks in one panel: a cell's how-to plus its hand-edit note
         css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
@@ -1561,7 +1563,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        'getAttribute("data-confirm-many")', "details.dataset.narrow",
                        "function releaseSelection()", "function markSelection()", "function toggleHandSelection()",
                        '(e.key === "h" || e.key === "H")',
-                       "function selectColumn(th, add, extend)", 'addEventListener("contextmenu"', 'className = "ctx"',
+                       "function selectColumn(th, add, extend)", 'getAttribute("data-upload-url")',
+                       "function cellLink(e)", "function openLink(link)", '"Open link"', 'addEventListener("contextmenu"', 'className = "ctx"',
                        "function runCtx(act)", 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
                        "undoStack.push(step)", "redoStack = []", "toggleOff: alone",
                        "function choicesFor(field, td)", "Picker.choicesFor(field,",

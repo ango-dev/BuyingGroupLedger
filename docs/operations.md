@@ -155,7 +155,9 @@ cancelled grey and superseded dark grey with strikethrough), a frozen header, fu
 edits like a spreadsheet: click a
 cell to select it, Ctrl-click to add one to the selection (or take a selected one out), shift-click
 or drag for a range; click a column's header cell beside its name to select the whole column (the
-name itself sorts); right-click any cell for a menu of these actions with their keys; double-click, Enter or just start typing to
+name itself sorts); right-click any cell for a menu of these actions with their keys; a click on
+a link inside a cell selects the cell (so it copies), Ctrl-click, middle-click or a double-click
+opens the link; double-click, Enter or just start typing to
 edit (the keystroke replaces the value); Enter saves, and fills every cell of a selected range;
 Esc cancels; Delete clears the selection; Ctrl+C copies the selection as tab-separated values
 (it pastes into Sheets or Excel) and Ctrl+V pastes a value into every selected cell or a block
@@ -481,9 +483,9 @@ holds what the ledger cannot know:
   ledger's purchases. Every entry requires its date (in the year), amount, the profile and the
   email of the account that paid, and a receipt: an uploaded file (kept under `data/expenses/`,
   inside every backup, served back from the page) or a link. Who paid is the profile OR the
-  email of the account -- one is enough. A row's *edit* button opens it in the form and saves it
-  in place (the receipt stays unless a new file or a different link is given). Deleting an entry
-  deletes its file. The list itself is a grid like the Orders table: click a cell, type, Enter;
+  email of the account -- one is enough. Entries are edited in the grid itself; the receipt
+  cell's ⤒ button uploads a file that replaces the entry's receipt (the old file is deleted).
+  Deleting entries (the selected rows, one confirmation) deletes their files. The list itself is a grid like the Orders table: click a cell, type, Enter;
   fill a range; Ctrl+C / Ctrl+V; Ctrl+Z; the row numbers select rows and Delete removes them after
   one confirmation. A link typed into a receipt cell replaces an uploaded file; a blank leaves the
   receipt alone, since one is required.

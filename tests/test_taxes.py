@@ -263,44 +263,31 @@ class TestTaxesPage:
         assert email_only.status_code == 303
         assert ">Profile<" in client.get("/taxes", params={"year": "2026"}).text  # its own column, editable in place
 
-    def test_an_expense_is_edited_in_place_and_keeps_its_receipt_unless_replaced(self, client, tmp_path):
-        client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
-                    data={"date": "2026-03-04", "description": "boxes", "amount": "12.50", "profile": "alpha",
-                          "receipt_url": "https://x/receipt"})
-        store = tmp_path / "data" / "tax_inputs.json"
-        entry_id = json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"][0]["id"]
-        # the row's edit button opens the form on the entry
-        body = client.get("/taxes", params={"year": "2026"}).text
-        assert f'href="/taxes?year=2026&edit={entry_id}#expense-form"' in body
-        form = client.get("/taxes", params={"year": "2026", "edit": entry_id}).text
-        assert "Edit Expense" in form and f'action="/taxes/expense/{entry_id}?year=2026"' in form
-        assert 'value="boxes"' in form and 'value="https://x/receipt"' in form and ">Save changes<" in form
-        assert 'href="/taxes?year=2026#s-expenses">Cancel</a>' in form and '<tr class="editing">' in form
-        # saving with no new receipt keeps the link
-        saved = client.post(f"/taxes/expense/{entry_id}", params={"year": "2026"}, follow_redirects=False,
-                            data={"date": "2026-03-05", "description": "bigger boxes", "amount": "13", "profile": "alpha",
-                                  "receipt_url": "https://x/receipt"})
-        assert saved.status_code == 303 and "Saved" in saved.headers["location"]
-        entry = json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"][0]
-        assert entry["id"] == entry_id and entry["description"] == "bigger boxes" and entry["amount"] == 13.0
-        assert entry["date"] == "2026-03-05" and entry["receipt"] == {"url": "https://x/receipt"}
-        # a refused edit re-renders the form on the entry with the draft
-        bad = client.post(f"/taxes/expense/{entry_id}", params={"year": "2026"},
-                          data={"date": "2026-03-05", "description": "", "amount": "13", "profile": "alpha"})
-        assert bad.status_code == 200 and "Description is required" in bad.text and "Edit Expense" in bad.text
-        # an uploaded file replaces the link; a second upload replaces the file (the old one is deleted)
-        client.post(f"/taxes/expense/{entry_id}", params={"year": "2026"}, follow_redirects=False,
-                    data={"date": "2026-03-05", "description": "bigger boxes", "amount": "13", "profile": "alpha"},
-                    files={"receipt_file": ("one.pdf", b"%PDF-1", "application/pdf")})
-        entry = json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"][0]
-        assert entry["receipt"]["name"] == "one.pdf" and "url" not in entry["receipt"]
-        assert "now <a" in client.get("/taxes", params={"year": "2026", "edit": entry_id}).text
-        client.post(f"/taxes/expense/{entry_id}", params={"year": "2026"}, follow_redirects=False,
-                    data={"date": "2026-03-05", "description": "bigger boxes", "amount": "13", "profile": "alpha"},
-                    files={"receipt_file": ("two.pdf", b"%PDF-2", "application/pdf")})
-        files = sorted(p.name for p in (tmp_path / "data" / "expenses" / "2026").glob("*"))
-        assert files == [f"{entry_id}_two.pdf"]
-        assert client.post("/taxes/expense/nope", params={"year": "2026"}, data={"description": "x"}).status_code == 404
+    def test_update_expense_keeps_the_receipt_unless_replaced(self, tmp_path):
+        """The grid's cell writes and the receipt upload share update_expense: fields re-validated
+        as on add, the receipt kept unless a new file or a different link replaces it, a replaced
+        upload deleted. (The form-based edit mode went on 2026-09-19: the grid edits in place.)"""
+        from web.tax_inputs import YearInputs, add_expense, update_expense
+
+        inputs = YearInputs()
+        entry = add_expense(inputs, {"date": "2026-03-04", "description": "boxes", "amount": "12.50",
+                                     "profile": "alpha", "receipt_url": "https://x/receipt"},
+                            year=2026, data_dir=tmp_path)
+        same = update_expense(inputs, entry["id"], {"date": "2026-03-05", "description": "bigger boxes", "amount": "13",
+                                                     "profile": "alpha", "receipt_url": "https://x/receipt"},
+                              year=2026, data_dir=tmp_path)
+        assert same["description"] == "bigger boxes" and same["amount"] == 13.0 and same["receipt"] == {"url": "https://x/receipt"}
+        with pytest.raises(ValueError, match="Description is required"):
+            update_expense(inputs, entry["id"], {"date": "2026-03-05", "description": "", "amount": "13", "profile": "alpha"},
+                           year=2026, data_dir=tmp_path)
+        one = update_expense(inputs, entry["id"], {"date": "2026-03-05", "description": "bigger boxes", "amount": "13", "profile": "alpha"},
+                             year=2026, data_dir=tmp_path, receipt_file=("one.pdf", b"%PDF-1"))
+        assert one["receipt"]["name"] == "one.pdf" and "url" not in one["receipt"]
+        update_expense(inputs, entry["id"], {"date": "2026-03-05", "description": "bigger boxes", "amount": "13", "profile": "alpha"},
+                       year=2026, data_dir=tmp_path, receipt_file=("two.pdf", b"%PDF-2"))
+        assert sorted(p.name for p in (tmp_path / "expenses" / "2026").glob("*")) == [f"{entry['id']}_two.pdf"]
+        with pytest.raises(KeyError):
+            update_expense(inputs, "nope", {"description": "x"}, year=2026, data_dir=tmp_path)
 
     def test_the_expenses_table_edits_like_the_orders_grid(self, client, tmp_path):
         """the Orders grid's cells, row numbers, one-cell writes, a bulk
@@ -315,6 +302,8 @@ class TestTaxesPage:
         ids = [e["id"] for e in json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"]]
         body = client.get("/taxes", params={"year": "2026"}).text
         assert 'class="grid compact expenses sheetlike" data-cell-url="/taxes/expense/cell?year=2026"' in body
+        assert 'class="num actions"' not in body and "del-expense-" not in body  # no per-row buttons
+        assert "Edit Expense" not in body and 'action="/taxes/expense?year=2026"' in body  # the form only adds
         assert body.count('name="sel"') == 2 and 'id="sel-all"' in body and 'id="delete-selected"' in body
         assert 'action="/taxes/expenses/delete?year=2026" data-confirm=' in body and 'data-confirm-many="Delete the {n} selected expenses?' in body
         assert f'data-field="amount" data-entry-id="{ids[0]}" data-raw="12.50"' in body
@@ -359,6 +348,18 @@ class TestTaxesPage:
         blank = client.post("/taxes/expense/cell", params={"year": "2026"},
                             data={"entry_id": ids[1], "field": "receipt_url", "value": "", "expected": "https://x/new"})
         assert 'href="https://x/new"' in blank.text and "data-error" not in blank.text  # a receipt stays: it is required
+        # the receipt cell's upload button, as on the Orders table: the file replaces the receipt
+        assert f'class="cell-upload" data-upload-url="/taxes/expense/{ids[1]}/receipt?year=2026"' in body
+        up = client.post(f"/taxes/expense/{ids[1]}/receipt", params={"year": "2026"}, follow_redirects=False,
+                         files={"receipt_file": ("scan.pdf", b"%PDF-9", "application/pdf")})
+        assert up.status_code == 303 and "Receipt+uploaded" in up.headers["location"] or "Receipt%20uploaded" in up.headers["location"]
+        entry = json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"]
+        entry = next(e for e in entry if e["id"] == ids[1])
+        assert entry["receipt"]["name"] == "scan.pdf" and "url" not in entry["receipt"]
+        assert client.post("/taxes/expense/nope/receipt", params={"year": "2026"},
+                           files={"receipt_file": ("s.pdf", b"x", "application/pdf")}).status_code == 404
+        none = client.post(f"/taxes/expense/{ids[1]}/receipt", params={"year": "2026"}, follow_redirects=False)
+        assert none.status_code == 303 and "error=" in none.headers["location"]
         # the selected rows go together, one confirmation
         deleted = client.post("/taxes/expenses/delete", params={"year": "2026"}, data={"sel": ids}, follow_redirects=False)
         assert deleted.status_code == 303 and "Deleted" in deleted.headers["location"]

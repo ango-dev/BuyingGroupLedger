@@ -467,6 +467,17 @@ def sort_expenses(expenses: list[dict], field: str, desc: bool = False) -> list[
     return sorted(expenses, key=key, reverse=desc)
 
 
+def replace_receipt(inputs: YearInputs, entry_id: str, receipt_file: tuple[str, bytes], *, year: int,
+                    data_dir: Path) -> dict:
+    """The receipt cell's upload button: the uploaded file becomes the entry's receipt, the old file (if any)
+    is deleted, every other field stays. KeyError for an unknown id."""
+    entry = next((e for e in inputs.expenses if e["id"] == entry_id), None)
+    if entry is None:
+        raise KeyError(entry_id)
+    fields = {f: expense_raw(entry, f) for f in EXPENSE_CELL_FIELDS}
+    return update_expense(inputs, entry_id, fields, year=year, data_dir=data_dir, receipt_file=receipt_file)
+
+
 def remove_expenses(inputs: YearInputs, entry_ids: Iterable[str], *, data_dir: Path) -> list[dict]:
     """Drop every listed expense (the table's selected rows, one confirmation). Unknown ids are
     skipped. Returns what went."""

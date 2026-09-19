@@ -17,6 +17,8 @@
 //                    step; Ctrl+Shift+Z redoes too); the old value goes back through the same
 //                    conflict-checked POST, so a cell someone changed meanwhile is refused, not clobbered
 //   right-click      a menu of these actions, with their keys, on any cell or header cell
+//   a link in a cell a plain click selects the cell (copy works); Ctrl-click, middle-click or a
+//                    double-click on a read-only cell opens it
 //   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
 //                    pastes a single value into every selected cell, or a block cell by cell from
 //                    the top-left of the selection (through a hidden textarea, so it works on http)
@@ -354,8 +356,31 @@
     paint(true);
   }
   // ---- mouse: click selects, shift-click / drag extend ---------------------------------------------
+  // A link inside a cell (an order id, a tracking number, "order ↗"): a plain click SELECTS the
+  // cell -- so Ctrl+C copies it -- and Ctrl-click, the middle button or a double-click open the link.
+  function cellLink(e) {
+    var link = e.target.closest ? e.target.closest("a") : null;
+    var td = link ? link.closest(GRID_TD) : null;
+    return link && td && selectable(td) ? { link: link, td: td } : null;
+  }
+  function openLink(link) {
+    var href = link.getAttribute("href") || "";
+    if (!href) return;
+    if (href.charAt(0) === "/") window.location.assign(href); else window.open(href, "_blank", "noopener");
+  }
+  document.addEventListener("click", function (e) {
+    var hit = cellLink(e);
+    if (hit && !(e.ctrlKey || e.metaKey || e.shiftKey) && e.button === 0) e.preventDefault();  // selected, not followed
+  });
   document.addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
+    var hit = cellLink(e);
+    if (hit && !(e.ctrlKey || e.metaKey || e.shiftKey)) {
+      e.preventDefault();
+      selectOne(hit.td, false);
+      document.dispatchEvent(new Event("rows:clear"));
+      return;
+    }
     if (e.target.closest && e.target.closest("a, button, input, .cell-edit, .cell-empty")) return;
     var th = e.target.closest ? e.target.closest("th") : null;
     if (th && th.closest(GRID) && !th.classList.contains("rownum")) {
@@ -386,7 +411,10 @@
   document.addEventListener("mouseup", function () { if (dragging) { dragging = false; paint(true); } });
   document.addEventListener("dblclick", function (e) {
     var td = e.target.closest ? e.target.closest("td.edit") : null;
-    if (td && !td.hasAttribute("data-editing")) startEdit(td);
+    if (td && !td.hasAttribute("data-editing")) { startEdit(td); return; }
+    var cell = e.target.closest ? e.target.closest(GRID_TD) : null;  // a read-only link cell: open it
+    var link = cell && !cell.classList.contains("edit") ? cell.querySelector("a") : null;
+    if (link) { e.preventDefault(); openLink(link); }
   });
   // A cell that shows a link cannot be double-clicked into (the first click follows the link),
   // so it carries a pencil; a blank link cell shows "add" and edits on a single click.
@@ -522,9 +550,21 @@
     var button = e.target.closest ? e.target.closest(".cell-upload") : null;
     if (!button) return;
     e.preventDefault();
+    var plain = button.getAttribute("data-upload-url");  // an expense's receipt: a plain POST, the page reloads
     var orderId = button.getAttribute("data-order-id");
     var form = document.createElement("form");
     form.hidden = true;
+    if (plain) {
+      form.method = "post";
+      form.action = plain;
+      form.enctype = "multipart/form-data";
+      form.innerHTML = '<input type="file" name="receipt_file" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf">';
+      document.body.appendChild(form);
+      var chosen = form.querySelector("input[type=file]");
+      chosen.addEventListener("change", function () { if (chosen.files.length) form.submit(); else form.remove(); });
+      chosen.click();
+      return;
+    }
     form.setAttribute("hx-post", "/orders/" + encodeURIComponent(orderId) + "/receipt");
     form.setAttribute("hx-target", "#orders-table");
     form.setAttribute("hx-swap", "outerHTML");
@@ -580,7 +620,8 @@
   }
   function runCtx(act) {
     var td = active ? cellAt(active.r, active.c) : null;
-    if (act === "edit") { if (td && editable(td)) startEdit(td); }
+    if (act === "open") { var a = td && td.querySelector("a"); if (a) openLink(a); }
+    else if (act === "edit") { if (td && editable(td)) startEdit(td); }
     else if (act === "copy") copySelection();
     else if (act === "paste") pasteFromClipboard();
     else if (act === "clear") fillSelection("");
@@ -614,6 +655,7 @@
       var ledger = !!(grid_ && grid_.querySelector("td[data-order-id]"));
       var marked = handSelected().length, plain = markable().length;
       html += ctxItem("edit", "Edit", "Enter", !(cur && editable(cur)));
+      html += ctxItem("open", "Open link", "Ctrl+click", !(cur && cur.querySelector("a")));
       html += ctxItem("copy", "Copy", "Ctrl+C") + ctxItem("paste", "Paste", "Ctrl+V", !anyEditable);
       html += ctxItem("clear", "Clear", "Delete", !anyEditable) + ctxItem("today", "Fill with today", "Ctrl+;", !anyDate);
       html += "<hr>" + ctxItem("undo", "Undo", "Ctrl+Z", !undoStack.length) + ctxItem("redo", "Redo", "Ctrl+Y", !redoStack.length);
