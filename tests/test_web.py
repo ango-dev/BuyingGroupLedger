@@ -1695,3 +1695,11 @@ class TestReceiptFiles:
         assert client.get("/receipts/bestbuy/2026-09/missing.pdf").status_code == 404
         assert client.get("/receipts/../config.json").status_code in (404, 400)
         assert client.get("/receipts/bestbuy/..%2F..%2Fconfig.json").status_code in (404, 400)
+
+
+class TestTheNavOrder:
+    def test_overview_activity_orders_audit_recon_taxes_tools(self, client):
+        body = client.get("/").text
+        nav = body[body.index("<nav"):body.index("</nav>")]
+        order = [nav.index(x) for x in (">Overview<", ">Activity<", ">Orders<", ">Audit<", ">Recon<", ">Taxes<", ">Tools")]
+        assert order == sorted(order)
