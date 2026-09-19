@@ -541,6 +541,15 @@ td:hover .cell-edit, td:hover .cell-upload { opacity: 1; }
 td .cell-edit:hover, td .cell-upload:hover { color: var(--accent); border-color: var(--accent); }
 td .cell-empty { font-size: 0.85em; cursor: text; opacity: 0; }
 td:hover .cell-empty { opacity: 0.8; }
+/* ---- the grids' right-click menu (static/edit.js): the actions with their keys ---- */
+.ctx { position: fixed; z-index: 1001; min-width: 230px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18); display: none; }
+.ctx.on { display: block; }
+.ctx button { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 16px; padding: 5px 10px; border: 0; background: none; color: var(--fg); text-align: left; border-radius: 5px; font: inherit; font-size: 0.92em; cursor: pointer; box-shadow: none; }
+.ctx button:hover:not([disabled]) { background: var(--bg); }
+.ctx button[disabled] { color: var(--muted); cursor: default; opacity: 0.7; }
+.ctx .kbd { color: var(--muted); font-size: 0.85em; }
+.ctx hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+
 /* ---- in-page tooltips (static/tooltip.js): one small panel, never in the way ---- */
 .tip { position: fixed; z-index: 1000; max-width: 320px; padding: 6px 9px; font-size: 0.8em; line-height: 1.35;
   color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 6px;

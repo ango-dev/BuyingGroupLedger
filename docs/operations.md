@@ -155,7 +155,7 @@ cancelled grey and superseded dark grey with strikethrough), a frozen header, fu
 edits like a spreadsheet: click a
 cell to select it, Ctrl-click to add one to the selection (or take a selected one out), shift-click
 or drag for a range; click a column's header cell beside its name to select the whole column (the
-name itself sorts); double-click, Enter or just start typing to
+name itself sorts); right-click any cell for a menu of these actions with their keys; double-click, Enter or just start typing to
 edit (the keystroke replaces the value); Enter saves, and fills every cell of a selected range;
 Esc cancels; Delete clears the selection; Ctrl+C copies the selection as tab-separated values
 (it pastes into Sheets or Excel) and Ctrl+V pastes a value into every selected cell or a block
@@ -218,6 +218,10 @@ Last 4, shown with the card's name; *(blank)* for rows without one) are checkbox
 any combination; *All* clears the others (and re-ticks itself when the last value
 is unticked); with a dropdown open, typing narrows its list -- a "narrow: …" line shows what
 was typed (Backspace edits, Escape clears). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
+
+**Sorting.** Every table opens on its date, newest first, with no arrow; a header name cycles
+ascending, descending, then clear (back to that default). The cards view's *Sort by* and *Order*
+controls name a sort explicitly.
 
 **Two views.** The *View* control in the filter bar switches between the spreadsheet-like table and
 **cards**: one card per order under the same filters and search, sorted by the *Sort by* / *Order*

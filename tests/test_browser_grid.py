@@ -85,11 +85,24 @@ def test_the_expenses_grid_writes_undoes_narrows_and_deletes(client, served, pag
     page.click(f'td[data-field="category"][data-entry-id="{ids[1]}"]')
     page.keyboard.type("s")
     page.wait_for_timeout(150)
-    assert page.evaluate("document.querySelector('.pop').innerText").strip() == "supplies"
+    assert page.evaluate("document.querySelector('.pop').innerText").strip() == "supplies", page.evaluate(
+        "(document.activeElement ? document.activeElement.outerHTML.slice(0, 160) : 'none') + ' | pop: ' + ((document.querySelector('.pop') || {}).className) + ' | editor: ' + !!document.querySelector('input.cell-input') + ' | pop html: ' + (document.querySelector('.pop') || {}).innerHTML") + " | errors: " + repr(page.errors)
     page.keyboard.type("zz")
     page.wait_for_timeout(150)
     assert "a new answer" in page.evaluate("document.querySelector('.pop').innerText")
     page.keyboard.press("Escape")
+
+    # the right-click menu: Clear on a category cell, then Undo from the menu
+    cat2 = f'td[data-field="category"][data-entry-id="{ids[1]}"]'
+    page.click(cat2, button="right")
+    assert page.is_visible(".ctx.on") and ">Copy<" in page.inner_html(".ctx")
+    assert page.evaluate("document.querySelector('.ctx button[data-act=\"undo\"]').disabled") is False  # a write was made above
+    page.click('.ctx button[data-act="clear"]')
+    page.wait_for_selector(cat2 + '[data-raw=""]', timeout=5000)
+    page.click(cat2, button="right")
+    page.click('.ctx button[data-act="undo"]')
+    page.wait_for_selector(cat2 + '[data-raw="supplies"]', timeout=5000)
+    assert not page.is_visible(".ctx.on")
 
     # a click on a column's header cell selects the whole column
     page.click("table.expenses thead th:nth-child(4)")  # Category

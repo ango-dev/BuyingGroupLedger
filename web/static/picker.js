@@ -213,7 +213,10 @@
   document.addEventListener("mousedown", function (e) {
     if (pop && pop.classList.contains("on") && !pop.contains(e.target) && e.target !== owner) close();
   });
-  window.addEventListener("scroll", close, true);
+  // A scroll moves the panel with its input rather than closing it: opening a cell's editor near
+  // the edge of a scrolling table scrolls the cell into view, which used to close the dropdown
+  // before it showed (found by tests/test_browser_grid.py, 2026-09-19).
+  window.addEventListener("scroll", function () { if (owner && pop && pop.classList.contains("on")) place(owner); }, true);
   window.addEventListener("resize", close);
 
   // Forms: <input data-date> is a date field, <input data-month> a month field; the picker opens

@@ -791,7 +791,17 @@ class TestOrdersPage:
                           headers={"HX-Request": "true"}).text
         cells = re.findall(r'data-field="total_cost"[^>]*>\s*([^<]*)', body)
         assert [c.strip() for c in cells][:3] == ["$2,000.00", "$1,259.99", "$1,000.00"]
-        assert "sort=total_cost&amp;dir=asc" in body or "sort=total_cost&dir=asc" in body
+        # the header cycles ascending -> descending -> clear; by default the
+        # table is Order Date newest first with NO arrow, and the links carry no sort at all
+        default = client.get("/orders", headers={"HX-Request": "true"}).text
+        assert "▼" not in default and "▲" not in default and 'class="sorted"' not in default
+        assert 'href="/orders?sort=total_cost&amp;dir=asc"' in default and 'title="sort ascending"' in default
+        dates = re.findall(r'data-field="order_date"[^>]*>\s*([^<]*)', default)
+        assert [d.strip() for d in dates] == sorted((d.strip() for d in dates), reverse=True)
+        asc = client.get("/orders", params={"sort": "total_cost", "dir": "asc"}, headers={"HX-Request": "true"}).text
+        assert "Total Cost ▲" in asc and 'href="/orders?sort=total_cost&amp;dir=desc"' in asc
+        assert "Total Cost ▼" in body and 'href="/orders"' in body and 'title="clear the sort"' in body  # no query: cleared
+        assert 'name="sort" value=""' in client.get("/orders").text  # the filter form carries no sort by default
 
     def test_the_card_facet_files_by_last4_and_shows_the_name(self, client):
         body = client.get("/orders").text
@@ -1402,8 +1412,7 @@ class TestCardsHelpers:
     def test_filters_parse_view_per_and_page_with_safe_fallbacks(self):
         f = Filters.from_query({"view": "cards", "per": "48", "page": "3"})
         assert (f.view, f.per, f.page) == ("cards", 48, 3)
-        assert f.as_query() == {"sort": "order_date", "dir": "desc", "view": "cards", "per": "48",
-                                "page": "3"}
+        assert f.as_query() == {"view": "cards", "per": "48", "page": "3"}  # the default sort travels unnamed
         bad = Filters.from_query({"view": "list", "per": "7", "page": "zero"})
         assert (bad.view, bad.per, bad.page) == ("table", 24, 1)
         assert "view" not in bad.as_query() and "per" not in bad.as_query()
@@ -1552,7 +1561,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        'getAttribute("data-confirm-many")', "details.dataset.narrow",
                        "function releaseSelection()", "function markSelection()", "function toggleHandSelection()",
                        'e.target.id === "release-hand"', '(e.key === "h" || e.key === "H")', '"mark as hand edits"',
-                       "function selectColumn(th, add, extend)", 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
+                       "function selectColumn(th, add, extend)", 'addEventListener("contextmenu"', 'className = "ctx"',
+                       "function runCtx(act)", 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
                        "undoStack.push(step)", "redoStack = []", "toggleOff: alone",
                        "function choicesFor(field, td)", "Picker.choicesFor(field,",
                        '".cell-upload"', 'name="next" value="table"',

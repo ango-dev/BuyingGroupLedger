@@ -583,7 +583,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
                     draft=draft or {}, edit_entry=editing, expense_choices=tax_inputs.expense_choices(inputs),
-                    expenses=tax_inputs.sort_expenses(inputs.expenses, esort, edir == "desc") if esort else list(inputs.expenses),
+                    expenses=tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True),
                     esort=esort, edir=edir, **extra)
 
     def load_tax_inputs(year: int):

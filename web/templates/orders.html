@@ -47,8 +47,8 @@
   {{ choose('sort', SORT_CHOICES, filters.sort, 'Sort by') }}
   {{ choose('dir', [('desc', 'newest / highest first'), ('asc', 'oldest / lowest first')], 'desc' if filters.desc else 'asc', 'Order') }}
   {% else %}
-  <input type="hidden" name="sort" value="{{ filters.sort }}">
-  <input type="hidden" name="dir" value="{{ 'desc' if filters.desc else 'asc' }}">
+  <input type="hidden" name="sort" value="{{ filters.sort if filters.explicit_sort else '' }}">
+  <input type="hidden" name="dir" value="{{ ('desc' if filters.desc else 'asc') if filters.explicit_sort else '' }}">
   {% endif %}
   <span class="toolbar-sep"></span>
   {{ choose('view', [('table', 'Table'), ('cards', 'Cards')], filters.view, 'View') }}

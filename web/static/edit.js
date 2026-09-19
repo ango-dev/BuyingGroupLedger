@@ -16,6 +16,7 @@
 //   Ctrl+Z / Ctrl+Y  undo / redo the last accepted write (a range fill, a paste or Ctrl+; is one
 //                    step; Ctrl+Shift+Z redoes too); the old value goes back through the same
 //                    conflict-checked POST, so a cell someone changed meanwhile is refused, not clobbered
+//   right-click      a menu of these actions, with their keys, on any cell or header cell
 //   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
 //                    pastes a single value into every selected cell, or a block cell by cell from
 //                    the top-left of the selection (through a hidden textarea, so it works on http)
@@ -553,6 +554,95 @@
     });
     file.click();
   });
+
+  // ---- the right-click menu: the grid's actions, each with its key, on any cell or
+  // header cell; a cell outside the selection is selected first, as in Sheets. The editor's own
+  // input keeps the browser's menu. -------------------------------------------------------------
+  var ctx = null;
+  function ctxMenu() {
+    if (ctx) return ctx;
+    ctx = document.createElement("div");
+    ctx.className = "ctx";
+    ctx.setAttribute("role", "menu");
+    document.body.appendChild(ctx);
+    ctx.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("button[data-act]") : null;
+      if (!b || b.disabled) return;
+      var act = b.getAttribute("data-act");
+      hideCtx();
+      runCtx(act);
+    });
+    return ctx;
+  }
+  function hideCtx() { if (ctx) ctx.classList.remove("on"); }
+  function ctxItem(act, label, keys, disabled) {
+    return '<button type="button" role="menuitem" data-act="' + act + '"' + (disabled ? " disabled" : "") + ">" +
+      "<span>" + label + "</span>" + (keys ? '<span class="kbd">' + keys + "</span>" : "") + "</button>";
+  }
+  function pasteFromClipboard() {  // the menu's Paste: the clipboard API where the page may read it (https), else the Ctrl+V box
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(function (text) { pasteText(text); paint(true); }, function () { armPaste(); });
+    } else { armPaste(); }
+  }
+  function selectRowOf(td) {  // the row-number cell's click, as the row selection understands it
+    var num = td.parentElement ? td.parentElement.querySelector("td.rownum") : null;
+    if (!num) return;
+    num.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  }
+  function runCtx(act) {
+    var td = active ? cellAt(active.r, active.c) : null;
+    if (act === "edit") { if (td && editable(td)) startEdit(td); }
+    else if (act === "copy") copySelection();
+    else if (act === "paste") pasteFromClipboard();
+    else if (act === "clear") fillSelection("");
+    else if (act === "today") fillToday();
+    else if (act === "undo") undo();
+    else if (act === "redo") redo();
+    else if (act === "hand") toggleHandSelection();
+    else if (act === "column") { var t = td && td.closest(GRID); var th = t && t.tHead ? t.tHead.rows[0].cells[td.cellIndex] : null; if (th) selectColumn(th, false, false); }
+    else if (act === "row") { if (td) selectRowOf(td); }
+    else if (act === "delete-rows") { var button = document.getElementById("delete-selected"); if (button) button.click(); }
+  }
+  document.addEventListener("contextmenu", function (e) {
+    if (e.target.closest && e.target.closest("input, textarea, a")) return;  // the editor, a link: the browser's menu
+    var td = e.target.closest ? e.target.closest(GRID_TD) : null;
+    var th = td ? null : (e.target.closest ? e.target.closest("th") : null);
+    if (th && (!th.closest(GRID) || th.classList.contains("rownum"))) th = null;
+    if (!td && !th) { hideCtx(); return; }
+    e.preventDefault();
+    var onRow = !!(td && td.classList.contains("rownum"));
+    if (td && !onRow && !td.classList.contains("sel-cell")) { selectOne(td, false); document.dispatchEvent(new Event("rows:clear")); }
+    if (th) selectColumn(th, false, false);
+    if (onRow) { var box = td.querySelector('input[name="sel"]'); if (box && !box.checked) selectRowOf(td); }
+    var html = "";
+    if (onRow) {
+      html += ctxItem("delete-rows", "Delete selected row(s)", "Delete", !document.getElementById("delete-selected"));
+    } else {
+      var cur = active ? cellAt(active.r, active.c) : null;
+      var anyDate = false, anyEditable = false;
+      forEachSelected(function (c) { if (editable(c)) { anyEditable = true; if (c.getAttribute("data-kind") === "date") anyDate = true; } });
+      var grid_ = (td || th).closest(GRID);
+      var ledger = !!(grid_ && grid_.querySelector("td[data-order-id]"));
+      var marked = handSelected().length, plain = markable().length;
+      html += ctxItem("edit", "Edit", "Enter", !(cur && editable(cur)));
+      html += ctxItem("copy", "Copy", "Ctrl+C") + ctxItem("paste", "Paste", "Ctrl+V", !anyEditable);
+      html += ctxItem("clear", "Clear", "Delete", !anyEditable) + ctxItem("today", "Fill with today", "Ctrl+;", !anyDate);
+      html += "<hr>" + ctxItem("undo", "Undo", "Ctrl+Z", !undoStack.length) + ctxItem("redo", "Redo", "Ctrl+Y", !redoStack.length);
+      if (ledger) html += "<hr>" + ctxItem("hand", marked ? "Release hand edits" : "Mark as hand edits", "Ctrl+Shift+H", !marked && !plain);
+      html += "<hr>" + ctxItem("column", "Select column", "") + ctxItem("row", "Select row", "", !td || !td.parentElement.querySelector("td.rownum"));
+    }
+    var m = ctxMenu();
+    m.innerHTML = html;
+    m.classList.add("on");
+    var w = m.offsetWidth, h = m.offsetHeight, pad = 6;
+    m.style.left = Math.max(pad, Math.min(e.clientX, window.innerWidth - w - pad)) + "px";
+    m.style.top = Math.max(pad, Math.min(e.clientY, window.innerHeight - h - pad)) + "px";
+  });
+  document.addEventListener("mousedown", function (e) { if (ctx && ctx.classList.contains("on") && !ctx.contains(e.target)) hideCtx(); }, true);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") hideCtx(); }, true);
+  window.addEventListener("scroll", hideCtx, true);
+  window.addEventListener("resize", hideCtx);
 })();
 
 // Row selection for delete: the header checkbox ticks every row shown, the toolbar's counter

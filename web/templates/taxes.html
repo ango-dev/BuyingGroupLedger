@@ -50,12 +50,12 @@
     <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Delete the selected expense? Its uploaded receipt is deleted too." data-confirm-many="Delete the {n} selected expenses? Their uploaded receipts are deleted too.">Delete selected</button>
     <div class="sheet">
     <table class="grid compact expenses sheetlike" data-cell-url="/taxes/expense/cell?year={{ year }}">
-      {#- The header names sort, as on the Orders table (esort / edir in the URL; the stored order --
-          date, then when added -- when none is asked); the header cell beside the name selects
-          the column. -#}
+      {#- The header names sort, as on the Orders table: ascending, descending, then clear -- the
+          default, newest date first, with no arrow (esort / edir in the URL); the header cell
+          beside the name selects the column. -#}
       {% set ecols = (('date', 'Date'), ('description', 'Description'), ('category', 'Category'), ('profile', 'Profile'), ('email', 'Email'), ('receipt_url', 'Receipt'), ('amount', 'Amount')) %}
       <thead><tr><th class="rownum" title="select / unselect every expense"><input type="checkbox" id="sel-all" hidden aria-label="select all">#</th>
-        {% for field, heading in ecols %}{% set active = esort == field %}<th class="col-{{ field }} {{ 'num' if field == 'amount' }} {{ 'sorted' if active }}"><a href="/taxes?year={{ year }}&esort={{ field }}&edir={{ 'asc' if active and edir == 'desc' else 'desc' }}#s-expenses">{{ heading }}{% if active %} {{ '▼' if edir == 'desc' else '▲' }}{% endif %}</a></th>{% endfor %}<th></th></tr></thead>
+        {% for field, heading in ecols %}{% set active = esort == field %}{% set link = ('&esort=' ~ field ~ '&edir=asc') if not active else (('&esort=' ~ field ~ '&edir=desc') if edir == 'asc' else '') %}<th class="col-{{ field }} {{ 'num' if field == 'amount' }} {{ 'sorted' if active }}"><a href="/taxes?year={{ year }}{{ link | safe }}#s-expenses" title="{{ 'sort ascending' if not active else ('sort descending' if edir == 'asc' else 'clear the sort') }}">{{ heading }}{% if active %} {{ '▼' if edir == 'desc' else '▲' }}{% endif %}</a></th>{% endfor %}<th></th></tr></thead>
       <tbody>
         {% for e in expenses %}
         <tr{% if edit_entry and edit_entry.id == e.id %} class="editing"{% endif %}>

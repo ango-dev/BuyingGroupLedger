@@ -29,13 +29,17 @@
     <tr>
       <th class="rownum" title="{{ 'select / unselect every row shown' if editable else '' }}">{% if editable %}<input type="checkbox" id="sel-all" hidden aria-label="select all">{% endif %}#</th>
       {% if findings is not none %}<th class="col-finding">Finding</th>{% endif %}
+      {#- A header name cycles the sort: ascending, descending, then clear -- back to the default
+          (Order Date, newest first) with no arrow. -#}
       {% for name, heading in columns %}
-      {% set active = filters.sort == name %}
-      {% set next_dir = 'asc' if (active and filters.desc) else 'desc' %}
+      {% set active = filters.explicit_sort and filters.sort == name %}
+      {% if not active %}{% set link = filters.as_query(sort=name, dir='asc') %}{% set says = 'sort ascending' %}
+      {% elif not filters.desc %}{% set link = filters.as_query(sort=name, dir='desc') %}{% set says = 'sort descending' %}
+      {% else %}{% set link = filters.as_query(sort='', dir='') %}{% set says = 'clear the sort' %}{% endif %}
       <th class="col-{{ name }} {{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }} {{ 'sorted' if active }}">
-        <a href="{{ base }}?{{ filters.as_query(sort=name, dir=next_dir) | query }}"
-           hx-get="{{ base }}?{{ filters.as_query(sort=name, dir=next_dir) | query }}"
-           hx-target="#orders-table" hx-push-url="true">{{ heading }}{% if active %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a>
+        <a href="{{ base }}{% if link %}?{{ link | query }}{% endif %}"
+           hx-get="{{ base }}{% if link %}?{{ link | query }}{% endif %}"
+           hx-target="#orders-table" hx-push-url="true" title="{{ says }}">{{ heading }}{% if active %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a>
       </th>
       {% endfor %}
     </tr>

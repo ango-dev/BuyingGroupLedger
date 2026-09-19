@@ -123,6 +123,9 @@ class Filters:
     q: str = ""
     sort: str = DEFAULT_SORT
     desc: bool = True
+    #: Whether the sort was ASKED for (a header click, the cards view's Sort by) or is the default
+    #: -- Order Date, newest first -- which the table shows without an arrow.
+    explicit_sort: bool = False
     view: str = "table"
     per: int = DEFAULT_PER_PAGE
     page: int = 1
@@ -136,10 +139,11 @@ class Filters:
     def from_query(cls, params) -> "Filters":
         """From a request's query mapping. An unknown sort key, view or page size falls back to
         the default rather than raising -- a stale bookmark should still render."""
-        sort = str(params.get("sort") or DEFAULT_SORT).strip()
-        if sort not in FIELDNAMES:
+        sort = str(params.get("sort") or "").strip()
+        explicit = sort in FIELDNAMES
+        if not explicit:
             sort = DEFAULT_SORT
-        direction = str(params.get("dir") or "").strip().lower()
+        direction = str(params.get("dir") or "").strip().lower() if explicit else ""
         desc = direction != "asc" if direction else sort in ("order_date", "delivery_date",
                                                               "payout_date", "last_scraped_at")
         view = str(params.get("view") or "table").strip().lower()
@@ -170,6 +174,7 @@ class Filters:
             q=str(params.get("q") or "").strip(),
             sort=sort,
             desc=desc,
+            explicit_sort=explicit,
             view=view,
             per=per,
             page=page,
@@ -197,11 +202,14 @@ class Filters:
         values = {"retailer": list(self.retailers), "profile": list(self.profiles),
                   "status": list(self.statuses), "group": list(self.groups), "card": list(self.cards), "q": self.q,
                   "month": self.month, "paid": self.paid, "state": self.state,
-                  "sort": self.sort, "dir": "desc" if self.desc else "asc",
+                  "sort": self.sort if self.explicit_sort else "",
+                  "dir": ("desc" if self.desc else "asc") if self.explicit_sort else "",
                   "view": self.view if self.view != "table" else "",
                   "per": str(self.per) if self.per != DEFAULT_PER_PAGE else "",
                   "page": str(self.page) if self.page > 1 else ""}
         values = {**values, **overrides}
+        if overrides.get("sort") and "dir" not in overrides:  # a sort named without a direction keeps ours
+            values["dir"] = "desc" if self.desc else "asc"
         return {k: v for k, v in values.items() if v not in ("", None, [], ())}
 
 
