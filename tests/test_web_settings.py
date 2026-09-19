@@ -578,7 +578,8 @@ class TestAdvancedSettings:
         body = client.get("/settings").text
         assert 'id="s-database"' not in body
         foot = body[body.index('id="s-advanced"'):]
-        assert body.index('id="s-cards"') < body.index('id="s-advanced"') < body.index('id="s-apply"')
+        assert body.index('id="s-cards"') < body.index('id="s-apply"') < body.index('id="s-advanced"')  # the last thing on the page
+        assert '<button type="submit" form="scalar-form" class="primary">Save settings</button>' in foot  # its own Save
         assert "Do not change these unless you know exactly what you are doing." in foot
         assert 'for="f-LEDGER_DB_PATH"' in foot and 'for="f-WEB_LEDGER_SOURCE"' in foot
         assert 'name="LEDGER_DB_PATH" form="scalar-form"' in foot  # saved by the main form's button

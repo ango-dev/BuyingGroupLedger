@@ -522,8 +522,9 @@ advice — every line says what it holds. Nothing on the page writes the ledger.
 An **Advanced** panel at the foot of the page, behind a warning, holds the settings nobody should
 change without knowing exactly why: the ledger file's path, the dashboard's ledger source and
 snapshot path, its bind address and port, the receipts directory, the strict preflight switch and
-the buying groups' API hosts. They save with the same *Save settings* button; the Database
-section they came from is gone.
+the buying groups' API hosts. It is the last thing on the page, after Restart, and has its own
+*Save settings* button (the same form: it saves every setting on the page); the Database section
+they came from is gone.
 
 `/settings` edits `config.json` in place. A side index lists the panels; each panel is one
 section of the file with its fields in a label / input grid (the variable name and any restart or

@@ -289,20 +289,6 @@ here, so keep the dashboard on loopback or your own network.</p>
 
     {% include "_backup_panel.html" %}
 
-    {#- The advanced settings (settings_form.ADVANCED_ENVS), at the FOOT of the page behind a warning.
-       Their controls carry form="scalar-form", so the Save settings button
-        above saves them with everything else. -#}
-    <section class="panel advanced-panel" id="s-advanced">
-      <header><h2>Advanced</h2><p class="muted">{{ section_title('advanced')[1] }}</p></header>
-      <div class="banner warn"><strong>Do not change these unless you know exactly what you are doing.</strong>
-        They are not day-to-day settings: a wrong path or source shows an empty ledger or writes to the wrong file, and a wrong bind address takes the dashboard off your network. Saved with the <em>Save settings</em> button above.</div>
-      <div class="fields">
-        {% set ns = namespace(group='') %}
-        {% for row in rows if row.setting.advanced and row.setting.env not in hidden_envs %}
-{{ setting_row(row, 'advanced', ns, 'scalar-form') }}
-        {% endfor %}
-      </div>
-    </section>
     <section class="panel" id="s-apply">
       <header><h2>Apply</h2><p class="muted">Which settings need a restart is tagged on each field above.</p></header>
       <form method="post" action="/settings/restart" class="inline-form"
@@ -317,6 +303,23 @@ here, so keep the dashboard on loopback or your own network.</p>
         <span class="muted">the schedule, the timezone and every other setting are re-read on the way up; refused while a run is in progress, so nothing is aborted</span>
       </form>
       {% endif %}
+    </section>
+    {#- The advanced settings (settings_form.ADVANCED_ENVS), at the FOOT of the page behind a warning.
+       Their controls carry form="scalar-form", so the Save settings button
+        above saves them with everything else. -#}
+    <section class="panel advanced-panel" id="s-advanced">
+      <header><h2>Advanced</h2><p class="muted">{{ section_title('advanced')[1] }}</p></header>
+      <div class="banner warn"><strong>Do not change these unless you know exactly what you are doing.</strong>
+        They are not day-to-day settings: a wrong path or source shows an empty ledger or writes to the wrong file, and a wrong bind address takes the dashboard off your network.</div>
+      <div class="fields">
+        {% set ns = namespace(group='') %}
+        {% for row in rows if row.setting.advanced and row.setting.env not in hidden_envs %}
+{{ setting_row(row, 'advanced', ns, 'scalar-form') }}
+        {% endfor %}
+      </div>
+      {#- Its own Save: the same form, so
+          it saves every setting on the page, exactly as the button above does. -#}
+      <div class="inline-form advanced-save"><button type="submit" form="scalar-form" class="primary">Save settings</button><span class="muted small">saves every setting on this page, like the button above</span></div>
     </section>
   </div>
 </div>

@@ -40,8 +40,11 @@
       if (atBottom && top < window.innerHeight * 0.6) { best = i; }
     });
     if (pinned !== null) {
+      // The clicked panel holds the highlight while any of it is in view -- a panel near the end
+      // of the page never reaches the top (the page stops scrolling first), so "in view" is the
+      // test, not "at the top".
       var box = panels[pinned] && panels[pinned].getBoundingClientRect();
-      if (box && box.top <= 120 && box.bottom > 60) { best = pinned; } else { pinned = null; }
+      if (box && box.top < window.innerHeight - 40 && box.bottom > 60) { best = pinned; } else { pinned = null; }
     }
     links.forEach(function (a, i) { a.classList.toggle("active", i === best); });
   };

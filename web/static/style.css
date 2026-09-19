@@ -176,10 +176,15 @@ body.wide table.grid th { top: 0; }  /* the ledger table and the Activity table 
    add-row form, the count line or a notice off the left edge: each sticks to the left of
    the scroll region and is never wider than the viewport, so only the table moves. */
 body.wide h1, body.wide .lead, body.wide .pinned, body.wide .add-row, body.wide .count, body.wide .banner, body.wide .cards-wrap, body.wide .pager {
-  position: sticky; left: 0; max-width: calc(100vw - 16px); box-sizing: border-box; }
+  position: sticky; left: 0; max-width: 100vw; box-sizing: border-box; }
 /* the swap containers span the table's width, so a count line or notice inside them has room to stick */
 body.wide form#bulk, body.wide #orders-table, body.wide #activity-table { width: max-content; min-width: 100%; }
-body.wide .pinned { max-width: 100vw; }
+/* Their side margins became padding: a sticky block gives its margin up as it sticks, which
+   shifted them 8px on the first sideways scroll. */
+body.wide h1, body.wide .lead, body.wide .add-row, body.wide .count { margin-left: 0; margin-right: 0; padding-left: 8px; padding-right: 8px; }
+/* Sticky makes a stacking layer of its own: the filter bar's and add-row form's dropdowns must
+   paint above the sheet header (z 4), which covered them. */
+body.wide .pinned, body.wide .add-row { z-index: 7; }
 body.wide #activity-table { padding: 0 8px 16px; }
 body.wide table.sheetlike th.rownum { z-index: 4; }
 /* SEPARATE borders (spacing 0): with collapsed borders a sticky <th> leaves its borders behind as
@@ -458,6 +463,7 @@ h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px 18px; margin: 0 0 18px; scroll-margin-top: 12px; }
 .panel.advanced-panel { border-color: var(--warn); }
 .panel.advanced-panel .banner.warn { margin: 0 0 12px; }
+.panel.advanced-panel .advanced-save { margin: 14px 0 0; }
 .settings-nav a.danger-link { color: var(--warn); }
 .panel > header { margin-bottom: 10px; }
 .panel > header h2 { margin: 0 0 2px; font-size: 1.15em; }
@@ -868,8 +874,7 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
   .filters { flex-wrap: wrap; }
   .filters .reset { margin-left: 0; }
   .filters label.search { flex: 1 1 100%; max-width: none; }
-  body.wide h1 { margin: 8px 12px 6px; }
-  body.wide .lead, body.wide .count { margin-left: 12px; margin-right: 12px; }
+  body.wide h1, body.wide .lead, body.wide .count, body.wide .add-row { padding-left: 12px; padding-right: 12px; }
   .add-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .add-form .span-3 { grid-column: span 2; }
   .expense-form .egrid { grid-template-columns: 1fr; }
@@ -886,7 +891,7 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
   header nav a { padding: 14px 8px; }
   header nav .brand { margin-right: 10px; }
   main { padding: 0 14px 36px; }
-  body.wide h1 { margin: 8px 10px 6px; }
+  body.wide h1, body.wide .lead, body.wide .count, body.wide .add-row { padding-left: 10px; padding-right: 10px; }
   .expense-form .egrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (pointer: coarse) {

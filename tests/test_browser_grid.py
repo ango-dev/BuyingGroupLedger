@@ -209,11 +209,12 @@ def test_only_the_sheet_header_sticks_and_the_filter_bar_wraps_to_the_window(cli
 def test_a_sideways_scroll_moves_only_the_table(client, served, page):
     page.set_viewport_size({"width": 900, "height": 700})
     page.goto(f"{served}/orders")
+    LEFTS = """() => ['h1', '.lead', '.pinned', '.count', 'details.add-row'].map(s => { const el = document.querySelector('body.wide ' + s); return el ? [s, Math.round(el.getBoundingClientRect().left)] : [s, null]; })"""
+    before = page.evaluate(LEFTS)
     page.evaluate("document.querySelector('main').scrollLeft = 600")
     page.wait_for_timeout(100)
     assert page.evaluate("document.querySelector('main').scrollLeft") >= 500  # the table is wider than the window
-    lefts = page.evaluate("""() => ['h1', '.lead', '.pinned', '.count', 'details.add-row'].map(s => { const el = document.querySelector('body.wide ' + s); return el ? [s, Math.round(el.getBoundingClientRect().left)] : [s, null]; })""")
-    for selector, left in lefts:
-        assert left is None or left >= 0, f"{selector} slid off the left edge: {left}"
+    assert page.evaluate(LEFTS) == before, "a block above the table shifted on a sideways scroll"  # not even the margin's width
+    assert int(page.evaluate("getComputedStyle(document.querySelector('body.wide .pinned')).zIndex")) > int(page.evaluate("getComputedStyle(document.querySelector('table.sheetlike th')).zIndex") or 0)  # its dropdowns paint over the sheet header
     assert page.evaluate("document.querySelector('table.sheetlike th.col-order_date').getBoundingClientRect().left") < 0  # the table did move
     assert page.errors == []
