@@ -377,6 +377,9 @@ class TestOrdersRoutes:
         assert choices and "Costco" in json.loads(choices.group(1))["retailer"]
         assert 'class="cell-upload" data-order-id="BBY01-1"' in body
         assert 'name="order_date" data-date' in body
+        # every date-like editable uses the page's own picker: no native date / month controls anywhere
+        assert 'type="month"' not in body and 'type="date"' not in body
+        assert 'name="month" data-month' in body and 'name="paid" data-month' in body
         # The buttons live INSIDE the form that owns the selection (live: "no rows selected").
         bulk_form = body[body.index('<form id="bulk"'):body.index("</form>", body.index('<form id="bulk"'))]
         assert 'hx-post="/orders/delete"' in bulk_form and 'name="sel"' in bulk_form

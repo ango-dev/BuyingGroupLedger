@@ -218,6 +218,16 @@
     if (!el || !el.matches) return null;
     return el.matches("input[data-date]") ? "cal" : el.matches("input[data-month]") ? "month" : null;
   }
+  // Ctrl+; on a form's date field: today (as in Sheets).
+  document.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey) || e.key !== ";" || formKind(e.target) !== "cal") return;
+    e.preventDefault();
+    var d = new Date();
+    e.target.value = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+    e.target.dispatchEvent(new Event("input", { bubbles: true }));
+    e.target.dispatchEvent(new Event("change", { bubbles: true }));
+    close();
+  });
   document.addEventListener("focusin", function (e) {
     var k = formKind(e.target);
     if (k && !suppress) { state = null; open(e.target, k, null); }

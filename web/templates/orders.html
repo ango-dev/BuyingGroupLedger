@@ -32,8 +32,8 @@
   </label>
   {# The overview's tiles link here with these three; they are editable in place so a click-through
      can be widened or narrowed without going back. #}
-  <label>Placed in <input type="month" name="month" value="{{ filters.month }}" class="month"></label>
-  <label>Paid in <input type="month" name="paid" value="{{ filters.paid }}" class="month"></label>
+  <label>Placed in <input type="text" name="month" data-month value="{{ filters.month }}" class="month" placeholder="any month" autocomplete="off" title="a month, YYYY-MM; the page's own picker opens on focus"></label>
+  <label>Paid in <input type="text" name="paid" data-month value="{{ filters.paid }}" class="month" placeholder="any month" autocomplete="off" title="a month, YYYY-MM; the page's own picker opens on focus"></label>
   {{ choose('state', [('', 'any'), ('open', 'open (not paid yet)'), ('committed', 'projected (committed)'), ('settled', 'settled'), ('unpaid', 'unpaid (floating)')], filters.state, 'Payout') }}
   {% if filters.view == 'cards' %}
   {{ choose('sort', SORT_CHOICES, filters.sort, 'Sort by') }}

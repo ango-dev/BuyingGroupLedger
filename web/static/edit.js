@@ -7,6 +7,7 @@
 //   Enter            saves; with a RANGE selected, fills every editable cell in it with the value
 //   Esc              cancels the editor, or clears the selection (cells and rows both)
 //   Delete/Backspace clears every editable selected cell
+//   Ctrl+;           puts today's date into every selected date cell (as in Sheets)
 //   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
 //                    pastes a single value into every selected cell, or a block cell by cell from
 //                    the top-left of the selection (through a hidden textarea, so it works on http)
@@ -134,6 +135,16 @@
     forEachSelected(function (td) { if (editable(td)) targets.push(td); });
     targets.forEach(function (td) { writeCell(td, value); });
   }
+  function today() {
+    var d = new Date();
+    var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  }
+  function fillToday() {  // Ctrl+; -- every selected DATE cell gets today's date
+    var targets = [];
+    forEachSelected(function (td) { if (editable(td) && td.getAttribute("data-kind") === "date") targets.push(td); });
+    targets.forEach(function (td) { writeCell(td, today()); });
+  }
 
   // ---- the editor --------------------------------------------------------------------------------
   // The previous answers per choice column: rendered into #cell-choices with the table, read once
@@ -199,6 +210,7 @@
       if (thenDown) move(1, 0, false);  // Enter saves and steps down, as in Sheets
     }
     input.addEventListener("keydown", function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === ";" && kind === "date") { e.preventDefault(); input.value = today(); return; }
       if (e.key === "Enter") { e.preventDefault(); save(true); }
       else if (e.key === "Escape") { e.preventDefault(); cancel(); }
       else if (e.key === "Tab") { e.preventDefault(); save(); move(0, e.shiftKey ? -1 : 1, false); }
@@ -338,6 +350,7 @@
     else if (e.key === "Escape") { e.preventDefault(); clearSelection(); }
     else if ((e.key === "Delete" || e.key === "Backspace") && rowsChecked()) { /* the row selection owns them: see below */ }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); fillSelection(""); }
+    else if (ctrl && e.key === ";") { e.preventDefault(); fillToday(); }
     else if (ctrl && (e.key === "c" || e.key === "C")) { e.preventDefault(); copySelection(); }
     else if (ctrl && (e.key === "v" || e.key === "V")) { armPaste(); }  // not prevented: the paste must happen
     else if (!ctrl && !e.altKey && e.key.length === 1 && editable(td)) {

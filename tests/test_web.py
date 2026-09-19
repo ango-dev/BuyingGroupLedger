@@ -1475,6 +1475,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        'matches(\'[hx-trigger*="every"]\')', "sel-cell", 'execCommand("copy")',
                        'addEventListener("paste"', 'e.key === "Delete"', "fillSelection(", "all.checked = !any",
                        "if (thenDown) move(1, 0, false)", "paint(false)", "Picker.date(", "Picker.choices(",
+                       'ctrl && e.key === ";"', "function fillToday()",
                        'getElementById("cell-choices")', '".cell-upload"', 'name="next" value="table"',
                        'hx-encoding", "multipart/form-data"',
                        '(e.key === "Delete" || e.key === "Backspace") && rowsChecked()', 'getElementById("delete-selected")',

@@ -157,7 +157,9 @@ edit (the keystroke replaces the value); Enter saves, and fills every cell of a 
 Esc cancels; Delete clears the selection; Ctrl+C copies the selection as tab-separated values
 (it pastes into Sheets or Excel) and Ctrl+V pastes a value into every selected cell or a block
 cell by cell from the top-left; the arrow keys move, with Shift they extend. A date cell opens the page's own calendar (so
-does every date field on a form); Status, Retailer, Buying Group, Card Name, Card Last 4, Profile
+does every date field on a form, and the Placed in / Paid in filters open a month grid; the month
+name and the year in the calendar's head are buttons, so any month or year is a click away; Ctrl+;
+puts today's date into a date cell or field, as in Sheets); Status, Retailer, Buying Group, Card Name, Card Last 4, Profile
 and Tracking Submitted offer the column's previous answers as you type, most used first, and a new
 answer typed in is a previous answer from then on. The Receipt Link cell carries an upload button
 (⤒): pick a file and the link lands on every row of the order, the table re-rendering in place.
