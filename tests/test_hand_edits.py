@@ -236,7 +236,7 @@ class TestThePageShowsIt:
         assert "typed by hand: runs keep this value" in body  # the tip-hand block
         assert 'data-tip-from="tip-hand"' in body and "tip-cell-" not in body  # the hand note, no how-to
         assert body.count(' hand"') == 1
-        assert 'id="release-hand" class="small" hidden' in body
+        assert "release-hand" not in body  # no button on the count line: the key and the menu
         # the selection's release (Ctrl+Shift+H): the mark goes, the value stays
         td = TestClient(app).post("/orders/cell/release", data={**KEY, "field": "cashback_rate"}).text
         assert td.lstrip().startswith("<td") and ' hand"' not in td and "data-error" not in td

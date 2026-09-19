@@ -175,7 +175,7 @@ Every write is one conflict-checked cell write, run one after another. **A cell 
 on** while the count line's *keep my edits from runs* switch is on (it is, on Orders; off on Audit
 and Recon, where an edit usually fixes a finding the run should then own -- switched off, a write
 is a correction the runs may overwrite, and it releases any protection the cell had; and with
-cells selected, Ctrl+Shift+H or the count line's button toggles the mark: hand-edited cells are
+cells selected, Ctrl+Shift+H or the right-click menu toggles the mark: hand-edited cells are
 released, values kept, so the runs may write them again; unmarked cells with a value are marked
 as hand edits, so the runs keep them): the scheduled
 run's upsert, its order-level reproration and the buying-group sync all keep a hand-typed value

@@ -1560,7 +1560,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "function undo()", "function redo()", 'getAttribute("data-cell-url")', 'getAttribute("data-entry-id")',
                        'getAttribute("data-confirm-many")', "details.dataset.narrow",
                        "function releaseSelection()", "function markSelection()", "function toggleHandSelection()",
-                       'e.target.id === "release-hand"', '(e.key === "h" || e.key === "H")', '"mark as hand edits"',
+                       '(e.key === "h" || e.key === "H")',
                        "function selectColumn(th, add, extend)", 'addEventListener("contextmenu"', 'className = "ctx"',
                        "function runCtx(act)", 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
                        "undoStack.push(step)", "redoStack = []", "toggleOff: alone",
