@@ -846,6 +846,36 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     editable=writer is not None, error=error,
                     choices=cell_choices(snapshot.rows, settings_cards()) if field in CHOICE_FIELDS else None)
 
+    @app.post("/orders/cell/release", response_class=HTMLResponse)
+    async def orders_cell_release(request: Request):
+        """Release ONE cell's hand-edit mark, value kept (the grid's Ctrl+Shift+H / the count
+        line's button, over every selected hand-edited cell), answering with the cell re-rendered."""
+        form = await request.form()
+        key = {k: str(form.get(k, "")) for k in ("order_id", "order_date", "item_name", "shipment")}
+        field = str(form.get("field", ""))
+        error = ""
+        if writer is None:
+            error = "editing is off: this backend is a CSV snapshot"
+        elif field not in EDITABLE_FIELDS:
+            error = f"{field} is not editable"
+        else:
+            try:
+                writer.release_cell(key, field)
+                act("edit", f"{FIELD_TO_HEADER.get(field, field)} on {key['order_id']} "
+                            f"(shipment {key['shipment']}): hand edit released, value kept (runs may write it again)",
+                    {"order_id": key["order_id"], "item_name": key["item_name"], "shipment": key["shipment"],
+                     "field": field, "released": True})
+            except EditError as exc:
+                error = str(exc)
+            except Exception as exc:  # noqa: BLE001
+                error = f"{type(exc).__name__}: {exc}"
+        snapshot = reader.load(force=not error)
+        row = next((r for r in snapshot.rows
+                    if r.order_id == key["order_id"] and r.order_date == key["order_date"]
+                    and r.item_name == key["item_name"] and r.shipment == key["shipment"]), None)
+        return page(request, "_cell_response.html", snapshot=snapshot, row=row, col=field, key=key,
+                    editable=writer is not None, error=error, choices=None)
+
     @app.get("/orders/{order_id}", response_class=HTMLResponse)
     def order(request: Request, order_id: str):
         snapshot = load(request)

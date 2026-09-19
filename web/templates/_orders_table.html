@@ -19,6 +19,7 @@
       <tr><td>default</td><td>on for Orders; off for Audit and Recon, where an edit usually fixes a finding the run should then own</td></tr>
     </table>
   </div>
+  <button type="button" id="release-hand" class="small" hidden title="the selected hand-edited cells keep their values but lose the mark: the runs may write them again (Ctrl+Shift+H)">release hand edits</button>
   {% with id='table-hints', rows=True, protect=True %}{% include "_table_hints.html" %}{% endwith %}{% else %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
 </div>
 {% include "_cell_tips.html" %}

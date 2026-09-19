@@ -8,6 +8,8 @@
 //   Esc              cancels the editor, or clears the selection (cells and rows both)
 //   Delete/Backspace clears every editable selected cell
 //   Ctrl+;           puts today's date into every selected date cell (as in Sheets)
+//   Ctrl+Shift+H     releases the hand-edit mark on every selected hand-edited cell, value kept
+//                    (the count line's "release hand edits" button does the same)
 //   Space            toggles a Tracking Submitted checkbox cell (click does too)
 //   Ctrl+Z / Ctrl+Y  undo / redo the last accepted write (a range fill, a paste or Ctrl+; is one
 //                    step; Ctrl+Shift+Z redoes too); the old value goes back through the same
@@ -74,6 +76,8 @@
   function paint(takeFocus) {
     document.querySelectorAll("td.sel-cell").forEach(function (td) { td.classList.remove("sel-cell"); });
     forEachSelected(function (td) { td.classList.add("sel-cell"); });
+    var release = document.getElementById("release-hand");  // shown only when a hand-edited cell is selected
+    if (release) release.hidden = !handSelected().length;
     var td = active ? cellAt(active.r, active.c) : null;
     if (!td || dragging || document.activeElement === td || document.querySelector("input.cell-input")) return;
     var free = document.activeElement === document.body || inGrid(document.activeElement);
@@ -212,6 +216,28 @@
     var pad = function (n) { return (n < 10 ? "0" : "") + n; };
     return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
   }
+  // Ctrl+Shift+H, or the count line's "release hand edits" button: every selected hand-edited
+  // cell keeps its value and loses its mark, so the runs may write it again. Not
+  // an undo step: nothing about the value changed.
+  function handSelected() {
+    var out = [];
+    forEachSelected(function (td) { if (editable(td) && td.classList.contains("hand")) out.push(td); });
+    return out;
+  }
+  function releaseSelection() {
+    handSelected().forEach(function (td) {
+      var key = keyOf(td);
+      var t = td.closest("table");
+      var url = (t && t.getAttribute("data-release-url")) || "/orders/cell/release";
+      td.classList.add("saving");
+      queue = queue.then(function () {
+        return htmx.ajax("POST", url, { target: td, swap: "outerHTML", values: key });
+      }).catch(function () {});
+    });
+  }
+  document.addEventListener("click", function (e) {
+    if (e.target && e.target.id === "release-hand") releaseSelection();
+  });
   function fillToday() {  // Ctrl+; -- every selected DATE cell gets today's date (one undo step)
     var targets = [], step = newStep("edit");
     forEachSelected(function (td) { if (editable(td) && td.getAttribute("data-kind") === "date") targets.push(td); });
@@ -440,6 +466,7 @@
     else if ((e.key === "Delete" || e.key === "Backspace") && rowsChecked()) { /* the row selection owns them: see below */ }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); fillSelection(""); }
     else if (ctrl && e.key === ";") { e.preventDefault(); fillToday(); }
+    else if (ctrl && e.shiftKey && (e.key === "h" || e.key === "H")) { e.preventDefault(); releaseSelection(); }
     else if (ctrl && (e.key === "c" || e.key === "C")) { e.preventDefault(); copySelection(); }
     else if (ctrl && (e.key === "v" || e.key === "V")) { armPaste(); }  // not prevented: the paste must happen
     else if (!ctrl && !e.altKey && e.key.length === 1 && editable(td)) {
@@ -746,10 +773,11 @@
   });
   // Type to narrow: with a dropdown open, printable keys build a filter shown at the top of the menu and
   // the labels that do not contain it hide; Backspace edits it, Escape clears it (a second Escape
-  // closes the menu). Closing forgets it.
-  function narrowLine(details) {
+  // closes the menu). Closing forgets it. No prompt is shown before anything is typed.
+  function narrowLine(details, wanted) {  // the "narrow: …" line exists only while something is typed
     var menu = details.querySelector(".menu");
     var line = menu ? menu.querySelector(".narrow") : null;
+    if (!wanted) { if (line) line.remove(); return null; }
     if (menu && !line) {
       line = document.createElement("div");
       line.className = "narrow muted small";
@@ -759,8 +787,8 @@
   }
   function applyNarrow(details) {
     var typed = (details.dataset.narrow || "").toLowerCase();
-    var line = narrowLine(details);
-    if (line) line.textContent = typed ? "narrow: " + details.dataset.narrow : "type to narrow";
+    var line = narrowLine(details, !!typed);
+    if (line) line.textContent = "narrow: " + details.dataset.narrow;
     details.querySelectorAll(".menu label").forEach(function (label) {
       if (label.classList.contains("all")) return;
       label.hidden = !!typed && label.textContent.toLowerCase().indexOf(typed) < 0;

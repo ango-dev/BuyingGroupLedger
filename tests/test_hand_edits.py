@@ -224,17 +224,24 @@ class TestThePageShowsIt:
         from web.app import create_app
         from web.ledger_reader import DbReader
 
-        LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "cashback_rate", "0.06")
+        writer = LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir)
+        writer.write_cell(KEY, "cashback_rate", "0.06")
         (logs_dir / "failures").mkdir()
-        app = create_app(DbReader(db), logs_dir=logs_dir, failures_dir=logs_dir / "failures",
+        app = create_app(DbReader(db), writer=writer, logs_dir=logs_dir, failures_dir=logs_dir / "failures",
                          clock=lambda: datetime(2026, 9, 18, 12, tzinfo=timezone.utc),
                          settings=dataclasses.replace(settings, container_run_interval_hours=6))
         body = TestClient(app).get("/orders").text
         i = body.index('class="num edit hand"')
         assert 'data-field="cashback_rate"' in body[i:i + 80]
         assert "typed by hand: runs keep this value" in body  # the tip-hand block
-        assert 'data-tip-from="tip-hand tip-cell-' in body  # the hand-edited cell names it
+        assert 'data-tip-from="tip-hand"' in body and "tip-cell-" not in body  # the hand note, no how-to
         assert body.count(' hand"') == 1
+        assert 'id="release-hand" class="small" hidden' in body
+        # the selection's release (Ctrl+Shift+H): the mark goes, the value stays
+        td = TestClient(app).post("/orders/cell/release", data={**KEY, "field": "cashback_rate"}).text
+        assert td.lstrip().startswith("<td") and ' hand"' not in td and "data-error" not in td
+        assert 'data-raw="0.06"' in td and hand_edits.protected(db) == {}
+        assert ws.get_all_values()[1][FIELDNAMES.index("cashback_rate")] == "0.06"
 
 
 class TestTheCli:

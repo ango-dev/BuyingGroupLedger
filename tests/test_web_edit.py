@@ -375,7 +375,7 @@ class TestOrdersRoutes:
         assert 'class="hint-mark"' in body and "· works like a spreadsheet" not in body
         assert 'data-tip-from="table-hints"' in body and '<div id="table-hints" hidden>' in body
         assert '<div class="muted count">' in body  # a div: the hidden blocks inside keep the pill on the right
-        assert 'data-tip-from="tip-cell-date"' in body and '<div id="tip-cell-date" hidden>' in body  # a cell's how-to
+        assert "tip-cell-" not in body and 'id="tip-hand" hidden' in body  # no how-to on a cell; the hand note stays
         assert "Ctrl+Z / Ctrl+Y" in body
         assert '<td colspan="2">Rows</td>' in body  # the hint pill's table (the switch, the cells and the heartbeat have theirs too)
         assert "Delete or Backspace removes the selected rows (asked once)" in body

@@ -173,7 +173,9 @@ checkbox: a click, Space or Enter toggles it. The Receipt Link cell carries an u
 Every write is one conflict-checked cell write, run one after another. **A cell you edit is protected from then
 on** while the count line's *keep my edits from runs* switch is on (it is, on Orders; off on Audit
 and Recon, where an edit usually fixes a finding the run should then own -- switched off, a write
-is a correction the runs may overwrite, and it releases any protection the cell had): the scheduled
+is a correction the runs may overwrite, and it releases any protection the cell had; and with
+hand-edited cells selected, Ctrl+Shift+H or the count line's *release hand edits* button drops
+their marks and keeps their values, so the runs may write them again): the scheduled
 run's upsert, its order-level reproration and the buying-group sync all keep a hand-typed value
 (`ledger_db/hand_edits`, a table in the ledger file that the dashboard's writer fills; the cell
 shows a coloured left edge and says so in its tooltip). Clearing the cell puts back what the run had
@@ -212,7 +214,8 @@ already exists is refused.
 **Filters select all that apply.** Retailer, Profile, Status, Buying group and Card (by Card
 Last 4, shown with the card's name; *(blank)* for rows without one) are checkbox dropdowns: tick
 any combination; *All* clears the others (and re-ticks itself when the last value
-is unticked); with a dropdown open, typing narrows its list (Backspace edits, Escape clears). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
+is unticked); with a dropdown open, typing narrows its list -- a "narrow: …" line shows what
+was typed (Backspace edits, Escape clears). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
 
 **Two views.** The *View* control in the filter bar switches between the spreadsheet-like table and
 **cards**: one card per order under the same filters and search, sorted by the *Sort by* / *Order*

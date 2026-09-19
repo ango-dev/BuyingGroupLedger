@@ -295,6 +295,15 @@ class LedgerCellWriter:
         return {"row_number": row_number, "field": field, "value": coerced, "restored": restored}
 
     # --- the same cell across rows (bulk edit) --------------------------------------------------
+    def release_cell(self, key: dict, field: str) -> dict:
+        """Drop the hand-edit mark on one cell and KEEP its value: the runs may write it again.
+       Returns {"row_number", "field"}."""
+        self._guard()
+        worksheet = self._opener()
+        row_number = _Grid(worksheet).locate(key)
+        _release(worksheet, key, field)
+        return {"row_number": row_number, "field": field}
+
     def write_cells(self, keys: list[dict], field: str, value: str) -> dict:
         """Set `field` to `value` on every row in `keys`, in one read and at most two batched
         writes (RAW values, USER_ENTERED blanks). A key that cannot be located is reported, not

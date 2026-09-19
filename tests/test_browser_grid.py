@@ -99,11 +99,12 @@ def test_the_expenses_grid_writes_undoes_narrows_and_deletes(client, served, pag
     # a checkbox dropdown (the year picker is a radio one) narrows as one types, too
     opened = page.evaluate("""() => { const d = document.querySelector('details.multi[data-param]'); d.setAttribute('open', ''); d.querySelector('summary').focus(); return d.dataset.param; }""")
     assert opened
+    assert not page.evaluate("!!document.querySelector('details.multi[open] .menu .narrow')")
     page.keyboard.type("zzz")
     assert page.evaluate("document.querySelector('details.multi[open] .menu .narrow').textContent") == "narrow: zzz"
     assert page.evaluate("Array.from(document.querySelectorAll('details.multi[open] .menu label:not(.all)')).every(l => l.hidden)")
     page.keyboard.press("Escape")
-    assert page.evaluate("document.querySelector('details.multi[open] .menu .narrow').textContent") == "type to narrow"
+    assert not page.evaluate("!!document.querySelector('details.multi[open] .menu .narrow')")  # no prompt before typing
     page.keyboard.press("Escape")
     assert not page.evaluate("!!document.querySelector('details.multi[open]')")
 

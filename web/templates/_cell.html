@@ -7,7 +7,7 @@
 {%- set hand = row and col in row.hand_edited -%}
 <td class="{{ 'num' if col in MONEY_FIELDS or col in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }}{{ ' mono' if col in ('order_id', 'tracking_number', 'package_id', 'card_last4') }}{{ ' item' if col == 'item_name' }}{{ ' edit' if editable_cell }}{{ ' error' if error }}{{ ' hand' if hand }}"
     data-field="{{ col }}"
-    {%- if editable_cell %} data-raw="{{ raw }}" data-order-id="{{ key.order_id }}" data-order-date="{{ key.order_date }}" data-item-name="{{ key.item_name }}" data-shipment="{{ key.shipment }}" tabindex="0" data-kind="{{ 'check' if col == 'tracking_submitted' else 'date' if col in DATE_FIELDS else 'choice' if col in CHOICE_FIELDS else 'text' }}" data-tip-from="{{ 'tip-hand ' if hand }}tip-cell-{{ 'check' if col == 'tracking_submitted' else 'date' if col in DATE_FIELDS else 'choice' if col in CHOICE_FIELDS else 'text' }}"{% elif hand %} data-tip-from="tip-hand"{% endif %}
+    {%- if editable_cell %} data-raw="{{ raw }}" data-order-id="{{ key.order_id }}" data-order-date="{{ key.order_date }}" data-item-name="{{ key.item_name }}" data-shipment="{{ key.shipment }}" tabindex="0" data-kind="{{ 'check' if col == 'tracking_submitted' else 'date' if col in DATE_FIELDS else 'choice' if col in CHOICE_FIELDS else 'text' }}" {% if hand %} data-tip-from="tip-hand"{% endif %}{% elif hand %} data-tip-from="tip-hand"{% endif %}
     {%- if error %} data-error="{{ error }}"{% endif %}>
   {%- if error %}<span class="cell-error" title="{{ error }}">⚠ {{ error }}</span> {% endif -%}
   {%- if row -%}
