@@ -8,7 +8,15 @@
 {#- The how-it-works prose sits behind the hint pill's tooltip, on the right; the counter and the keep-my-edits switch stay in view. -#}
 <p class="muted count">{{ rows | length }} of {{ total }} row(s)
   {% if editable %}· <span id="sel-count">0</span> selected
-  <label class="muted protect" title="ON: a cell you type is kept by every run until you clear it. OFF: the write is a correction the runs may overwrite (the scraper fills the cell again when it has the value) and any protection the cell had is released. Off by default here on Audit and Recon, where an edit usually fixes a finding the run should then own."><input type="checkbox" id="protect-edits"{% if not scope %} checked{% endif %}> keep my edits from runs</label>
+  <label class="muted protect" data-tip-from="protect-hints"><input type="checkbox" id="protect-edits"{% if not scope %} checked{% endif %}> keep my edits from runs</label>
+  <div id="protect-hints" hidden>
+    <p class="tip-title">keep my edits from runs</p>
+    <table class="tip-table">
+      <tr><td>on</td><td>a cell you type is kept by every run until you clear it</td></tr>
+      <tr><td>off</td><td>the write is a correction: the runs may overwrite it (the scraper fills the cell again when it has the value), and any protection the cell had is released</td></tr>
+      <tr><td>default</td><td>on for Orders; off for Audit and Recon, where an edit usually fixes a finding the run should then own</td></tr>
+    </table>
+  </div>
   {% with id='table-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}{% else %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
 </p>
 <div class="sheet" id="sheet">

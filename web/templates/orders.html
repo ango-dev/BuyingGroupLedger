@@ -7,8 +7,9 @@
    over their own rows, with a Finding column. `base` is the page's own URL,
    `scope` names it, both from the route. #}
 {# The page scrolls as one: the title, then the lead where the page has one
-   (Audit, Recon), scroll away; the filter bar (and the add-row form) in .pinned stick to the top
-   once they have, and the table's header sticks just below (edit.js measures --pinned-h). #}
+   (Audit, Recon), scroll away, as do the add-row form and the count line; the filter bar in
+   .pinned sticks to the top once they have, and the table's header sticks just below (edit.js
+   measures --pinned-h). #}
 {% block heading %}<h1>Orders</h1>{% endblock %}
 {% block lead %}<p class="muted small lead">Every row of the ledger, as a table that edits like a spreadsheet or as one card per order. Filter, sort and search; add a row, select rows to delete, upload a receipt; a cell you type is kept by every run until you clear it.</p>{% endblock %}
 <div class="pinned">
@@ -58,8 +59,10 @@
    dropdowns say no previous answers") and the add-row form (static/picker.js reads it; a
    choice-cell write re-renders it out of band). #}
 {% if editable %}<script type="application/json" id="cell-choices">{{ choices | tojson }}</script>{% endif %}
+</div>
 {% if editable and not scope %}
-  {# Outside the filter form (a form cannot nest inside another), inside the pinned bar. #}
+  {# Outside the filter form (a form cannot nest inside another) and BELOW the pinned bar, so it
+     scrolls away with the count line; only the filter bar stays. #}
   <details class="add-row" {{ 'open' if add_open }}>
     <summary>Add a row</summary>
     {# Every field is the page's own design: the calendar on the date, the column's previous
@@ -89,7 +92,6 @@
     </form>
   </details>
 {% endif %}
-</div>
 
 {# The in-page confirmation. htmx's hx-confirm question is routed here (static/edit.js listens
    for htmx:confirm), so the browser's own dialog is never shown. #}

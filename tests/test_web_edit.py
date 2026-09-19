@@ -374,7 +374,7 @@ class TestOrdersRoutes:
         # text on the line
         assert 'class="hint-mark"' in body and "· works like a spreadsheet" not in body
         assert 'data-tip-from="table-hints"' in body and '<div id="table-hints" hidden>' in body
-        assert body.count('<table class="tip-table">') == 1 and '<td colspan="2">Rows</td>' in body
+        assert body.count('<table class="tip-table">') == 2 and '<td colspan="2">Rows</td>' in body
         assert "Delete or Backspace removes the selected rows from the ledger (asked once)" in body
         # the editor's kind per cell: a calendar on dates, previous answers on choice columns
         assert re.search(r'data-field="payout_date"[^>]*data-kind="date"', body)
@@ -435,7 +435,9 @@ class TestOrdersRoutes:
 
     def test_the_keep_my_edits_switch_is_on_for_orders_and_off_for_audit_and_rides_the_write(self, sheet, tmp_path, logs_dir):
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
-        assert 'id="protect-edits" checked' in client.get("/orders").text
+        page = client.get("/orders").text
+        assert 'id="protect-edits" checked' in page
+        assert 'data-tip-from="protect-hints"' in page and '<div id="protect-hints" hidden>' in page  # a table tip
         audit = client.get("/audit").text
         assert 'id="protect-edits">' in audit and 'id="protect-edits" checked' not in audit
         # the route passes `protect` through: the write lands, and the activity log says it was a correction

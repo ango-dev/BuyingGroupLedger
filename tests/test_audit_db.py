@@ -84,6 +84,10 @@ class TestAuditOverTheDatabase:
         assert page.index("<h1>Audit</h1>") < page.index('<div class="lead">') < page.index('<div class="pinned">') < page.index('id="filters"')
         orders = client.get("/orders").text
         assert orders.index("<h1>Orders</h1>") < orders.index('<div class="pinned">') < orders.index('id="filters"') < orders.index('<details class="add-row"')
+        # the add-row form is BELOW the pinned bar (the bar's div closes before it), so it scrolls
+        # away with the count line
+        bar = orders[orders.index('<div class="pinned">'):orders.index('<details class="add-row"')]
+        assert bar.count("<div") == bar.count("</div>")
         assert '<details class="audit-results">' in page and 'class="audit-results" open' not in page  # starts closed
         # the four tiles are links that filter the rows: Fail / Warning to their checks, Pass / Flagged to all
         assert page.count('<a class="tile link') == 5 and 'href="/audit?check=' in page and 'href="/audit"' in page
