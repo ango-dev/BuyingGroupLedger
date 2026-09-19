@@ -27,6 +27,7 @@ Apply for real (backs the ledger up to data/ledger_backup_<timestamp>.csv FIRST)
     python -m scripts.backfill_amazon_promo --apply
 """
 
+from scrapers.amazon_mapping import OrderPageShapeError
 import argparse
 import csv
 import logging
@@ -186,7 +187,14 @@ def rebuild_orders(retailer: str, profile_label: str, order_ids: list[str], card
                     "profile and re-run; this script never attempts a login."
                 )
             # known_open_ids keeps a cancelled order's rows rather than dropping them at discovery.
-            rows = build_order_items(page.content(), profile.label, known_open_ids={oid})
+            try:
+                rows = build_order_items(page.content(), profile.label, known_open_ids={oid})
+            except OrderPageShapeError as exc:
+                # 2026-09-19: the mapping raises on a page it cannot identify (no order id, no
+                # order date, no shipment cards) instead of returning []; here that is one skipped
+                # order, said out loud, not a dead script.
+                log.warning("%s %s: page shape changed, skipped (%s)", retailer, oid, exc)
+                continue
             if not rows:
                 log.warning("%s %s: no rows parsed (page shape changed?)", retailer, oid)
                 continue

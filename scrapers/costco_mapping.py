@@ -265,6 +265,19 @@ def build_order_items(
     return items
 
 
+#: Where each capture-mandatory cell is read from (models.order.CAPTURE_*), for the dossier's
+#: "could not be read" problems.
+FIELD_SOURCES: dict[str, str] = {
+    "order_id": "orderNumber",
+    "order_date": "orderPlacedDate",
+    "item_name": "shipToAddress[].orderLineItems[].itemDescription",
+    "quantity": "shipToAddress[].orderLineItems[].quantity",
+    "cost_per_item": "shipToAddress[].orderLineItems[].price net of discountAmount, over quantity",
+    "delivery_address": "shipToAddress[] firstName/lastName/line1-3/city/state/postalCode",
+    "card_last4": "orderPayment[].cardNumber (coupon, wallet and shop-card tenders skipped)",
+}
+
+
 def _build_one_order(detail: dict, profile_label: str, known_open_ids,
                      keep_digital_last4s: frozenset[str] = frozenset()) -> list[OrderItem]:
     if not isinstance(detail, dict):
@@ -280,6 +293,9 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids,
     if not any((s or {}).get("orderLineItems") for s in detail["shipToAddress"]):
         raise PayloadShapeError(f"order {order_id}: no `orderLineItems` on any address -- shape changed?", detail)
     order_date = _date(detail.get("orderPlacedDate"))
+    if not order_date:
+        # Part of the upsert key: a blank would file the rows under a new key. Record nothing, loudly.
+        raise PayloadShapeError(f"order {order_id}: `orderPlacedDate` is missing or not a date -- shape changed?", detail)
     card_last4 = _card_last4(detail.get("orderPayment"))
     # Shipping is ORDER-LEVEL, repeated on every shipment row (same value) — matches the Best Buy
     # mapping and the agent path, so the API and agent writers agree on this field.
@@ -318,11 +334,17 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids,
                     "package_index": {},
                     "address": address,
                     "cancelled": False,
+                    # A line whose `price` is missing or unreadable: the per-unit cost cannot be
+                    # derived, so it stays None (the capture gate reports it) -- never a $0 cost.
+                    "price_unreadable": False,
                 }
                 groups[key] = group
                 order_keys.append(key)
             line_quantity = _int(line_item.get("quantity"))
-            line_price = _num(line_item.get("price")) or 0.0
+            line_price = _num(line_item.get("price"))
+            if line_price is None:
+                group["price_unreadable"] = True
+                line_price = 0.0
             group["gross_total"] += line_price * line_quantity
             group["discount_total"] += _num(line_item.get("discountAmount")) or 0.0
             group["quantity"] += line_quantity
@@ -364,7 +386,7 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids,
     # reaches this loop, since digital lines never become a group, so it's correctly excluded here.)
     for key in order_keys:
         group = groups[key]
-        if group["quantity"]:
+        if group["quantity"] and not group["price_unreadable"]:
             group["unit_price"] = round(
                 (group["gross_total"] - group["discount_total"]) / group["quantity"], 2
             )

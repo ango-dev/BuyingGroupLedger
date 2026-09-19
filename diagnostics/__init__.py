@@ -10,7 +10,8 @@ exactly what a coding agent needs to fix the selector, and it costs nothing.
 Public surface (see dossier.py): `collecting(...)` opens a dossier for a scrape; `current()`,
 `note()`, `snapshot()`, `snapshot_html()`, `record_response()`, `problem()` and `add_secrets()` write into whichever
 dossier is open and are no-ops when none is — so the API clients and mapping code can call them
-unconditionally.
+unconditionally. `report_unreadable_rows()` is the capture gate: every mandatory cell the built
+rows could not read becomes a problem with the page or payload attached (2026-09-19).
 """
 
 from diagnostics.dossier import (  # noqa: F401
@@ -20,7 +21,10 @@ from diagnostics.dossier import (  # noqa: F401
     current,
     note,
     problem,
+    problem_count,
+    problems_since,
     record_response,
+    report_unreadable_rows,
     snapshot,
     snapshot_html,
 )

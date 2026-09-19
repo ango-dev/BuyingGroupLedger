@@ -194,6 +194,19 @@ def build_order_items(
     return items
 
 
+#: Where each capture-mandatory cell is read from (models.order.CAPTURE_*), for the dossier's
+#: "could not be read" problems.
+FIELD_SOURCES: dict[str, str] = {
+    "order_id": "order.userOrderId",
+    "order_date": "order.created",
+    "item_name": "order.items[].itemDesc",
+    "quantity": "order.items[].quantity",
+    "cost_per_item": "order.items[].price.unitCurrentPrice",
+    "delivery_address": "order.user.addresses[] matched by items[].fulfillment.addressId",
+    "card_last4": "order.payments[].creditCardNumber (displayCreditCardNumber for a keyed card)",
+}
+
+
 def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[OrderItem]:
     order = payload.get("order") if isinstance(payload, dict) else None
     if not isinstance(order, dict):
@@ -210,6 +223,9 @@ def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[
         raise PayloadShapeError(f"order {order_id}: ss-api payload has no `groups.fulfillmentGroups` -- shape changed?", payload)
 
     order_date = _date(order.get("created"))
+    if not order_date:
+        # Part of the upsert key: a blank would file the rows under a new key. Record nothing, loudly.
+        raise PayloadShapeError(f"order {order_id}: `order.created` is missing or not a date -- shape changed?", payload)
     card_last4 = _card_last4(order.get("payments"))
     shipping_total = _num((order.get("price") or {}).get("shippingTotal"))
     # Both ORDER-LEVEL like shipping: repeated on every row, prorated at sync, netted by the COGS

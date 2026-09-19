@@ -25,6 +25,7 @@ import logging
 from datetime import date
 
 import diagnostics
+from scrapers.amazon_mapping import FIELD_SOURCES as _FIELD_SOURCES
 from config.cards import boosted_last4s, load_cards
 from config.settings import settings
 from scrapers.amazon_mapping import (RETAILER, TRANSACTIONS_URL, OrderPageShapeError, build_order_items,
@@ -168,6 +169,7 @@ class AmazonApiClient:
         keep_digital = boosted_last4s(RETAILER, load_cards())
         rows = []
         for oid, html in details_html.items():
+            problems_before = diagnostics.problem_count()
             try:
                 built = build_order_items(
                 html, self.profile.label, known_open_ids=frozenset(open_ids),
@@ -193,8 +195,16 @@ class AmazonApiClient:
             ) if r]
             for reason in reasons:
                 diagnostics.problem(f"order {oid}: {reason}")
-            if reasons:
-                diagnostics.snapshot_html(html, f"order-details for {oid}: " + "; ".join(reasons),
+            # THE CAPTURE GATE (2026-09-19): every mandatory cell the rows could not read (a
+            # quantity element with no digit, a missing unit price, no shipping address) is a
+            # problem too. The page is attached once when ANYTHING was reported for this order --
+            # the gate, the tender checks, or the mapping itself (an unparsed order summary).
+            reported = [f"order {oid}: {reason}" for reason in reasons]
+            for messages in diagnostics.report_unreadable_rows(built, _FIELD_SOURCES).values():
+                reported.extend(messages)
+            reported += [p for p in diagnostics.problems_since(problems_before) if p not in reported]
+            if reported:
+                diagnostics.snapshot_html(html, f"order-details for {oid}: " + "; ".join(reported)[:400],
                                           url=ORDER_DETAILS_URL.format(oid))
             rows.extend(built)
 

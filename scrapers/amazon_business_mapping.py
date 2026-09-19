@@ -42,6 +42,8 @@ preserved; digital items skipped; cost_per_item = the unit price charged (total_
 import logging
 import re
 
+import diagnostics
+
 from bs4 import BeautifulSoup
 
 from config.warehouses import GIFT_CARD
@@ -207,6 +209,19 @@ _DIGITAL_ITEM_MARKERS = ("gift card balance reload", "egift card", "e-gift card"
 # that, it can be broad without endangering a physical product: a "Gift Card Holder Box" SHIPS, so its
 # status is an ordinary "Delivered <date>", it is never digital, and it is never tested against this.
 _GIFT_CARD_HINTS = ("gift card", "egift", "e-gift", "balance reload")
+
+
+#: Where each capture-mandatory cell is read from (models.order.CAPTURE_*): the dossier's
+#: "could not be read" problems name these so a report says which source stopped matching.
+FIELD_SOURCES: dict[str, str] = {
+    "order_id": SELECTORS["order_id"],
+    "order_date": SELECTORS["order_date"],
+    "item_name": SELECTORS["item_title"],
+    "quantity": SELECTORS["item_quantity"] + " (absent on a qty-1 line, present with the number otherwise)",
+    "cost_per_item": SELECTORS["item_unit_price"],
+    "delivery_address": SELECTORS["shipping_address"],
+    "card_last4": "'ending in NNNN' in #orderDetails, else " + _PAYMENT_INSTRUMENT_SELECTOR,
+}
 
 
 # --- small pure helpers -------------------------------------------------------------------------
@@ -1084,7 +1099,12 @@ def build_order_items(
 
     order_id = _order_id(region, order_details_html or "")
     if not order_id:
-        return []
+        # No order id anywhere on the document: not an order-details page (a sign-in bounce, an
+        # error page) or the id moved. Returning [] here recorded nothing and said nothing.
+        raise OrderPageShapeError(
+            f"order-details page carries no order id ({SELECTORS['order_id']} matched nothing and "
+            f"no order-details link names one) -- not an order page, or the shape changed?"
+        )
     if not region.select(SELECTORS["item_title"]):
         # An order ALWAYS lists its items — even a fully cancelled or all-digital one. Zero title
         # elements means the selector no longer matches, and returning [] here is exactly the silent
@@ -1097,6 +1117,13 @@ def build_order_items(
 
     date_el = region.select_one("[data-component='orderDate']")
     order_date = _parse_full_date(date_el.get_text(" ", strip=True) if date_el else "")
+    if not order_date:
+        # Order Date is part of the upsert key: a blank would file every row under a NEW key
+        # (a duplicate of the real row) -- record nothing, loudly, instead.
+        raise OrderPageShapeError(
+            f"order {order_id}: order date could not be read ({SELECTORS['order_date']} matched "
+            f"nothing, or held no 'Month D, YYYY') -- shape changed?"
+        )
 
     card_m = _ENDING_IN_RE.search(region_text)
     card_last4 = card_m.group(1) if card_m else _card_last4_from_widget(region)
@@ -1104,6 +1131,12 @@ def build_order_items(
     summary_el = region.select_one("[data-component='orderSummary']")
     if not _summary_parsed(summary_el):
         summary_el = None  # a stub is a missing summary: amounts unknown, never a fake 0
+        # ...and a dossier problem (2026-09-19): the amounts stay blank to fill on a re-read, but
+        # a summary that stopped rendering or parsing is a shape change worth the page.
+        diagnostics.problem(
+            f"order {order_id}: the order summary could not be read ({SELECTORS['order_summary']} "
+            f"matched nothing, or showed no Grand Total / Item(s) Subtotal) -- Shipping, Sales Tax, "
+            f"Gift Card and Rewards Used recorded blank this run")
     shipping = None
     if summary_el:
         st = summary_el.get_text("\n", strip=True)
@@ -1128,8 +1161,17 @@ def build_order_items(
     addr_el = region.select_one("[data-component='shippingAddress']")
     delivery_address = _format_address(addr_el.get_text("\n", strip=True)) if addr_el else ""
 
+    status_cards = region.select("[data-component='shipmentStatus']")
+    if not status_cards:
+        # Every captured order page carries at least one shipment card (21 of 21, digital orders
+        # included); titles with no card means the card selector moved, and the loop below
+        # would build zero rows in silence.
+        raise OrderPageShapeError(
+            f"order {order_id}: order-details page lists items but no shipment cards "
+            f"({SELECTORS['shipment_status']} matched nothing) -- shape changed?"
+        )
     rows: list[OrderItem] = []
-    for i, status_el in enumerate(region.select("[data-component='shipmentStatus']")):
+    for i, status_el in enumerate(status_cards):
         wrapper = _shipment_wrapper(status_el)
         if wrapper is None:
             continue
@@ -1182,9 +1224,15 @@ def build_order_items(
             # payment, which is what audit_ledger's cogs_inputs_complete counts as a year-boundary
             # straddle. config.warehouses.tag_and_filter_personal preserves this tag.
             item_group = GIFT_CARD if kept_gift_card else ""
+            # The quantity element is ABSENT on a qty-1 line and present with the number otherwise
+            # (5 titles / 0 elements on 113-9990002's capture; 2 / 1 on 113-9990003's), so absent
+            # means 1. Present but without a digit is a reader failure: None, which the client's
+            # capture gate reports as a dossier problem (it used to default to 1 in silence --
+            # the 2026-09-04 under-count class).
             qty_el = container.select_one(".od-item-view-qty")
-            quantity = None
-            if qty_el:
+            if qty_el is None:
+                quantity = 1
+            else:
                 qm = re.search(r"\d+", qty_el.get_text())
                 quantity = int(qm.group(0)) if qm else None
             price_el = container.select_one("[data-component='unitPrice']")
@@ -1211,7 +1259,7 @@ def build_order_items(
                     tracking_url=tracking_url,
                     delivery_address=delivery_address,
                     item_name=item_name,
-                    quantity=None if cancelled else (quantity or 1),
+                    quantity=None if cancelled else quantity,
                     cost_per_item=cost_per_item,
                     shipping=shipping,
                     gift_card=gift_card,

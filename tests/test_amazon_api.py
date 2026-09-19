@@ -359,3 +359,33 @@ class TestAmazonPoints:
         assert rows[0].rewards_used is None
         assert d.problems and "Amazon points" in d.problems[0] and pts in d.problems[0]
         assert d.snapshots and "points amount unreadable" in d.snapshots[0]["label"]
+
+
+class TestTheCaptureGate:
+    """2026-09-19: a mandatory cell the page did not yield is a dossier problem naming the selector,
+    with the page attached; the rows still record (blank never overwrites, the next re-read may fill)."""
+
+    OID = "111-2223334-5556667"
+
+    def _page(self):
+        return _details(self.OID, "August 9, 2026",
+                        [_shipment(self.OID, 0, "Arriving Monday", [_item("MacBook", "$10.00")])])
+
+    def test_an_unreadable_unit_price_is_reported_with_the_page_and_the_row_still_records(self, monkeypatch, tmp_path):
+        import diagnostics
+        html = self._page().replace('data-component="unitPrice"', 'data-component="unitPriceRENAMED"')
+        _install_fake(monkeypatch, _history((self.OID, "August 9, 2026")), {self.OID: html})
+        with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
+            rows = AmazonApiClient(_Profile()).fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+        assert rows and rows[0].item_name == "MacBook" and rows[0].cost_per_item is None
+        assert any(self.OID in p and "Cost Per Item could not be read" in p and "unitPrice" in p for p in d.problems)
+        assert d.snapshots and self.OID in d.snapshots[-1]["label"] and "Cost Per Item" in d.snapshots[-1]["label"]
+
+    def test_a_complete_page_reports_nothing(self, monkeypatch, tmp_path):
+        import diagnostics
+        html = self._page()
+        _install_fake(monkeypatch, _history((self.OID, "August 9, 2026")), {self.OID: html})
+        with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
+            rows = AmazonApiClient(_Profile()).fetch_order_items("2026-08-08", set(), set(), today="2026-08-10")
+        assert rows and rows[0].cost_per_item == 10.0
+        assert d.problems == [] and d.snapshots == []

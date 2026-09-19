@@ -379,6 +379,50 @@ def problem(message: str) -> None:
         d.problem(message)
 
 
+def problem_count() -> int:
+    """How many problems the open dossier holds (0 with none open) -- a client measures it before
+    a parse and attaches its page when the count grew, whoever reported the problem."""
+    d = _current.get()
+    return len(d.problems) if d is not None else 0
+
+
+def problems_since(count: int) -> list[str]:
+    d = _current.get()
+    return list(d.problems[count:]) if d is not None else []
+
+
+def report_unreadable_rows(rows, sources: dict[str, str] | None = None, evidence=None) -> dict[str, list[str]]:
+    """THE CAPTURE GATE (2026-09-19): every mandatory cell the built rows could not read becomes a
+    problem, so the run ends with a dossier + alert even though the rows are recorded (blank never
+    overwrites; the next re-read may fill them). Grouped by order id; `sources` names the selector
+    or JSON path each field is read from (the mapping's FIELD_SOURCES) so the report says WHAT
+    stopped matching; `evidence(order_id, messages)` is called once per order with a gap so the
+    caller can attach that order's page or payload. Returns {order_id: [messages]}. Outside a
+    dossier it reports nothing (the mappings stay pure and offline-testable)."""
+    from models.order import CAPTURE_FIELD_LABELS, unreadable_fields
+
+    found: dict[str, list[str]] = {}
+    for row in rows or []:
+        for field in unreadable_fields(row):
+            source = (sources or {}).get(field)
+            where = f" (read from {source})" if source else ""
+            found.setdefault(row.order_id, []).append(
+                f"order {row.order_id} / shipment {row.shipment}: {CAPTURE_FIELD_LABELS[field]} could "
+                f"not be read for '{row.item_name}'{where} -- recorded blank. A cell that used to "
+                f"read is a shape change: fix the reader against the attached page/payload.")
+    if _current.get() is None:
+        return found
+    for order_id, messages in found.items():
+        for message in messages:
+            problem(message)
+        if evidence is not None:
+            try:
+                evidence(order_id, messages)
+            except Exception:  # noqa: BLE001 -- never let diagnostics mask the scrape
+                log.debug("Dossier evidence callback failed.", exc_info=True)
+    return found
+
+
 def add_secrets(*values) -> None:
     d = _current.get()
     if d is not None:

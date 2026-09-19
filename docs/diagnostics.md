@@ -55,6 +55,35 @@ The paid Browser-Use agent fallback has been REMOVED entirely (it was flag-gated
 2026-08-29 until its removal). The dossier is the failure path; there is no paid retry.
 Since 2026-08-29 the answer to a broken selector is a fix made from the dossier, not a paid run.
 
+## What a capture must read
+
+A page or payload that stopped yielding a cell it used to yield is a **shape change** -- the thing
+this app breaks on -- and since 2026-09-19 it always leaves a dossier, in one of two ways:
+
+- **Identity cells raise.** Order ID, Order Date and Item Name are the upsert key; a blank one
+  cannot be recorded at all, so the mapping raises its shape error (`OrderPageShapeError` /
+  `PayloadShapeError`): nothing is recorded for that retailer that run, the dossier holds the page
+  or payload, the alert names it. Same for an Amazon order page with no order id at all (a sign-in
+  bounce or an error page, which used to parse as "no rows" in silence), one with items but no
+  shipment cards, and a Best Buy / Costco payload with no order date.
+- **The other mandatory cells are reported.** Quantity, Cost Per Item, Delivery Address and Card
+  Last 4 (`models.order.CAPTURE_MANDATORY_FIELDS`) are recorded blank when unreadable -- a blank
+  never overwrites, and the next re-read of an open order may fill the cell -- but every blank is a
+  `diagnostics.problem` naming the order, the shipment, the item and **the selector or JSON path the
+  cell is read from** (each mapping's `FIELD_SOURCES`), with that order's page or payload attached.
+  The run then ends with the "completed with N problem(s)" alert and dossier. An unparsed Amazon
+  order summary (Shipping / Sales Tax / Gift Card / Rewards Used) is reported the same way.
+
+Two former defaults are gone: an Amazon quantity element that is present but holds no digit is
+unread, not 1 (the element is simply absent on a qty-1 line, and that still means 1), and a Costco
+line with no readable price has a blank cost, not $0.00.
+
+Exemptions are deliberate and few: a cancelled or superseded row carries no money; a gift-card row
+has no package, so no address; a Quantity of `*` is the undisclosed-split marker. The ledger audit's
+`mandatory_by_stage` demands the same cells under the same names afterwards --
+`tests/test_capture_mandatory.py` pins that the two lists agree -- so a gap the run reports is the
+gap the Audit page would show, caught while the page is still in hand.
+
 ## Preflight
 
 ```bash

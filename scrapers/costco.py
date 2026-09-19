@@ -12,7 +12,7 @@ from scrapers.base import (
     ScrapeUnavailableError,
 )
 from scrapers import costco_signin
-from scrapers.costco_mapping import ORDER_DETAILS_URL, PayloadShapeError, build_order_items
+from scrapers.costco_mapping import FIELD_SOURCES, ORDER_DETAILS_URL, PayloadShapeError, build_order_items
 
 log = logging.getLogger(__name__)
 
@@ -238,5 +238,12 @@ class CostcoScraper(BaseRetailerScraper):
             from scrapers.costco_api import CostcoApiError
             diagnostics.record_response("getOrderDetails order (shape)", 200, exc.payload)
             raise CostcoApiError(str(exc)) from exc
+        # THE CAPTURE GATE (2026-09-19): a mandatory cell the payload did not yield is a dossier
+        # problem with that order's getOrderDetails payload attached; the rows are still recorded.
+        detail_by_id = {str((d or {}).get("orderNumber") or ""): d for d in details if isinstance(d, dict)}
+        diagnostics.report_unreadable_rows(
+            items, FIELD_SOURCES,
+            evidence=lambda oid, msgs: diagnostics.record_response(
+                f"getOrderDetails order {oid} (unreadable cells)", 200, detail_by_id.get(oid)))
         log.info("Costco [%s]: built %d ledger row(s) from the API.", self.profile.label, len(items))
         return items

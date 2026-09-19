@@ -59,7 +59,7 @@ class BestBuyScraper(BaseRetailerScraper):
 
     def _scrape_via_api(self):
         from scrapers.bestbuy_api import BestBuyApiClient, BestBuyApiError
-        from scrapers.bestbuy_mapping import PayloadShapeError, build_order_items
+        from scrapers.bestbuy_mapping import FIELD_SOURCES, PayloadShapeError, build_order_items
 
         state = self._load_order_state()
         open_ids = {o["order_id"] for o in state.get("open_orders", [])}
@@ -74,5 +74,12 @@ class BestBuyScraper(BaseRetailerScraper):
             # The browser is closed by now; attach the payload that failed so the dossier holds it.
             diagnostics.record_response("ss-api order payload (shape)", 200, exc.payload)
             raise BestBuyApiError(str(exc)) from exc
+        # THE CAPTURE GATE (2026-09-19): a mandatory cell the payload did not yield is a dossier
+        # problem with that order's payload attached; the rows are still recorded (blank).
+        payload_by_id = {str(((p or {}).get("order") or {}).get("userOrderId") or ""): p for p in payloads}
+        diagnostics.report_unreadable_rows(
+            items, FIELD_SOURCES,
+            evidence=lambda oid, msgs: diagnostics.record_response(
+                f"ss-api order {oid} (unreadable cells)", 200, payload_by_id.get(oid)))
         log.info("Best Buy [%s]: built %d ledger row(s) from the ss-api.", self.profile.label, len(items))
         return items

@@ -724,8 +724,11 @@ class TestZeroItemTitlesIsAShapeChange:
             _item("Amazon.com eGift Card", "$50.00")])])
         assert build_order_items(html) == []
 
-    def test_a_page_that_is_not_an_order_at_all_is_still_an_empty_result(self):
-        assert build_order_items("<html><body>Sign in</body></html>") == []
+    def test_a_page_that_is_not_an_order_at_all_is_a_shape_error(self):
+        """2026-09-19: the client asked for an order and got a sign-in bounce / error page. That used
+        to be [] -- nothing recorded, nothing said -- which is the silent failure the dossier is for."""
+        with pytest.raises(OrderPageShapeError, match="no order id"):
+            build_order_items("<html><body>Sign in</body></html>")
 
 
 def test_a_kept_gift_card_is_paid_with_a_zero_payout_dated_on_the_order():
@@ -1398,3 +1401,64 @@ def test_cash_back_frame_uses_the_pages_total_before_tax():
     r = build_order_items(html, today="2026-09-14")[0]
     assert r.rewards_used == 53.17
     assert r.shipping == 0.0
+
+from scrapers.amazon_mapping import FIELD_SOURCES, SELECTORS  # noqa: E402  (capture-gate tests)
+from scrapers.amazon_mapping import OrderPageShapeError  # noqa: E402
+
+
+# --- the capture gate + shape checks (2026-09-19) ----------------------------------------------
+class TestWhatACaptureMustRead:
+    """A cell that used to read and now does not is a shape change: identity cells raise (nothing
+    recorded, dossier), the rest come back None for the client's capture gate to report -- never a
+    quiet blank and never a quiet default."""
+
+    OID = "111-2223334-5556667"
+
+    def _page(self, **kw):
+        return _details(self.OID, "August 11, 2026",
+                        [_shipment(self.OID, 0, "Arriving Friday", [_item("Switch 2", "$449.00", qty=4)])], **kw)
+
+    def test_a_missing_quantity_element_is_one_unit(self):
+        html = _details(self.OID, "August 11, 2026",
+                        [_shipment(self.OID, 0, "Arriving Friday", [_item("Switch 2", "$449.00")])])
+        assert build_order_items(html, today="2026-08-11")[0].quantity == 1
+
+    def test_a_quantity_element_with_no_digit_is_unread_not_one(self):
+        html = self._page().replace('<div class="od-item-view-qty"><span>4</span></div>',
+                                    '<div class="od-item-view-qty"><span></span></div>')
+        row = build_order_items(html, today="2026-08-11")[0]
+        assert row.quantity is None and row.total_cost is None
+
+    def test_a_missing_unit_price_is_a_blank_cost_not_a_dropped_row(self):
+        html = self._page().replace('data-component="unitPrice"', 'data-component="unitPriceRENAMED"')
+        row = build_order_items(html, today="2026-08-11")[0]
+        assert row.item_name == "Switch 2" and row.cost_per_item is None
+
+    def test_no_order_date_is_a_shape_error(self):
+        html = self._page().replace('<div data-component="orderDate">August 11, 2026</div>', "")
+        with pytest.raises(OrderPageShapeError, match="order date could not be read"):
+            build_order_items(html, today="2026-08-11")
+
+    def test_no_order_id_anywhere_is_a_shape_error_not_an_empty_result(self):
+        html = self._page().replace(self.OID, "")
+        with pytest.raises(OrderPageShapeError, match="no order id"):
+            build_order_items(html, today="2026-08-11")
+
+    def test_items_with_no_shipment_cards_is_a_shape_error_not_zero_rows(self):
+        html = self._page().replace('data-component="shipmentStatus"', 'data-component="shipmentStatusRENAMED"')
+        with pytest.raises(OrderPageShapeError, match="no shipment cards"):
+            build_order_items(html, today="2026-08-11")
+
+    def test_an_unreadable_order_summary_is_a_dossier_problem_and_blank_amounts(self, tmp_path):
+        import diagnostics
+        html = self._page().replace('data-component="orderSummary"', 'data-component="orderSummaryRENAMED"')
+        with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
+            row = build_order_items(html, today="2026-08-11")[0]
+        assert row.shipping is None and row.sales_tax is None
+        assert d.problems and "order summary could not be read" in d.problems[0] and self.OID in d.problems[0]
+
+    def test_field_sources_cover_every_capture_field_with_declared_selectors(self):
+        from models.order import CAPTURE_IDENTITY_FIELDS, CAPTURE_MANDATORY_FIELDS
+        assert set(FIELD_SOURCES) == set(CAPTURE_IDENTITY_FIELDS + CAPTURE_MANDATORY_FIELDS)
+        for field in ("order_id", "order_date", "item_name", "cost_per_item", "delivery_address"):
+            assert FIELD_SOURCES[field] in SELECTORS.values()

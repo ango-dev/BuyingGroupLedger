@@ -70,6 +70,46 @@ RETIRED_STATUSES = ("superseded",)
 # not, because Quantity is the multiplier that double-counted the re-labelled package).
 MONEY_FREE_STATUSES = ("cancelled", "superseded")
 
+# WHAT A CAPTURE MUST READ (2026-09-19). A retailer page or payload that stopped yielding a cell it
+# used to yield is a SHAPE CHANGE -- the thing this app breaks on -- and it must leave a failure
+# dossier, never a quiet blank. Two tiers:
+#   IDENTITY fields are the upsert key (Order ID + Order Date + Item Name). A blank one cannot be
+#   recorded at all, so each mapping RAISES its shape error: nothing recorded that run, dossier +
+#   alert, the next run retries.
+#   MANDATORY fields are recorded blank (a blank never overwrites, and the next re-read of an open
+#   order may fill the cell) but every blank is a dossier PROBLEM reported by the retailer client
+#   with the page or payload attached -- see diagnostics.report_unreadable_rows and the FIELD_SOURCES
+#   table each mapping declares (which selector / JSON path the cell is read from).
+# A cancelled or superseded row carries no money and is exempt; a gift-card row has no package, so
+# it needs no address; a Quantity of "*" is the undisclosed-split marker, deliberate, not a gap.
+# scripts/audit_ledger.py's mandatory_by_stage checks the same cells on the ledger afterwards;
+# tests/test_capture_mandatory.py pins that every field here is on its lists too.
+CAPTURE_IDENTITY_FIELDS = ("order_id", "order_date", "item_name")
+CAPTURE_MANDATORY_FIELDS = ("quantity", "cost_per_item", "delivery_address", "card_last4")
+CAPTURE_FIELD_LABELS = {
+    "order_id": "Order ID", "order_date": "Order Date", "item_name": "Item Name",
+    "quantity": "Quantity", "cost_per_item": "Cost Per Item",
+    "delivery_address": "Delivery Address", "card_last4": "Card Last 4",
+}
+
+
+def unreadable_fields(row) -> list[str]:
+    """The CAPTURE_MANDATORY_FIELDS this row could not read (field names, in that order), or []
+    when the row is complete or exempt (money-free status, or a gift-card row's address)."""
+    from config.warehouses import is_deliberately_unrouted  # local: config imports models
+
+    if (row.status or "").lower() in MONEY_FREE_STATUSES:
+        return []
+    gift_card = is_deliberately_unrouted(row.buying_group or "")
+    gaps = []
+    for field in CAPTURE_MANDATORY_FIELDS:
+        if field == "delivery_address" and gift_card:
+            continue
+        value = getattr(row, field, None)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            gaps.append(field)
+    return gaps
+
 # CSV/ledger column order — keep in sync with output/csv_writer.py and ledger/sync.py HEADER,
 # which is this same list in display-name form, positionally 1:1. tests/test_schema.py pins BOTH.
 #
