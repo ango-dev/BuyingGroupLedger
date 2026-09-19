@@ -440,6 +440,9 @@ def _as_text(value) -> str:
     return str(value)
 
 
+from ledger_db.store import FORMULA_FIELDS  # noqa: E402
+
+
 class DbReader:
     """Serve the ledger from data/ledger.sqlite3 (ledger_db). Every load reads the file: it is
     local and a few hundred rows, and a scheduled run or a dashboard edit may have changed it
@@ -476,6 +479,12 @@ class DbReader:
                 cells = {}
                 for field in FIELDNAMES:
                     value = rec.get(field)
+                    if field in FORMULA_FIELDS:
+                        # COGS and Total Profit are DERIVED: LedgerRow computes them from the row
+                        # (cogs_of / profit_of) when the cell is blank. A number stored here is a
+                        # leftover of the Sheet era's mirror and is stale the moment a cell it
+                        # depends on changes, so it is never read.
+                        value = None
                     if field == "tracking_submitted" and value is not None and value != "":
                         cells[field] = "TRUE" if int(value) else "FALSE"
                     else:

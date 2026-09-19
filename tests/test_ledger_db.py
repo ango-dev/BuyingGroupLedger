@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from models.order import FIELDNAMES
-from ledger.sync import HEADER, _cogs_formula, _profit_formula
+from ledger.sync import HEADER, _cogs_formula, _col_letter, _profit_formula
 from ledger_db.store import KEY_FIELDS, LedgerDb, columns, ledger_rows_ddl, sql_type
 from ledger_db.worksheet import DbWorksheet
 from web.ledger_reader import DbReader
@@ -198,6 +198,21 @@ class TestDbReader:
         assert snapshot.rows[1].is_settled and snapshot.rows[1].profit == 136.0
         assert snapshot.rows[2].is_money_free and snapshot.rows[2].cogs is None
         assert snapshot.rows[0].text("package_id") == "00009999990206101794"
+
+    def test_a_stored_cogs_number_is_never_trusted(self, seeded):
+        """Rows mirrored from the Sheet carry its last computed COGS / Total Profit. The adapter
+        never stores those columns, and a stored number goes stale the moment Shipping, Sales Tax,
+        Gift Card, Rewards Used or the rate changes, so the reader computes both from the row every time."""
+        with seeded.connect() as conn:
+            conn.execute('UPDATE "ledger_rows" SET "cogs" = 12345.0, "total_profit" = 999.0')
+        reader = DbReader(seeded, ttl_seconds=300, clock=self.Clock())
+        rows = reader.load().rows
+        assert rows[0].cogs == 960.0 and rows[0].number("cogs") is None
+        assert rows[1].profit == 136.0
+        ws = DbWorksheet(seeded)
+        shipping = FIELDNAMES.index("shipping") + 1
+        ws.batch_update([{"range": f"{_col_letter(shipping)}2", "values": [["10"]]}])
+        assert DbReader(seeded, ttl_seconds=300, clock=self.Clock()).load().rows[0].cogs == 969.6
 
     def test_every_load_sees_the_latest_write(self, seeded):
         reader = DbReader(seeded, ttl_seconds=300, clock=self.Clock())
