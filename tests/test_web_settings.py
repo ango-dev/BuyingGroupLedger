@@ -266,6 +266,8 @@ class TestSettingsPage:
     def test_restart_calls_the_restarter(self, client):
         response = client.post("/settings/restart")
         assert response.status_code == 200 and client.restarts == [1]
+        assert "Restarting the dashboard" in response.text and 'fetch("/health"' in response.text  # the styled page polls
+        assert "<nav>" not in response.text and 'content="20;url=/settings"' in response.text
 
     def test_the_container_can_be_restarted_from_the_page_but_never_mid_run(self, client):
         """a container restart without ssh. It signals PID 1 (the compose

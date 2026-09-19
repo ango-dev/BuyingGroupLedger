@@ -926,5 +926,7 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
 .login-field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 .login-remember { display: block; margin: 0 0 14px; line-height: 1.5; }
 .login-actions { display: flex; align-items: center; gap: 12px; }
-.login-help { margin: 14px 0 0; }
+.restarting h1 { display: flex; align-items: center; gap: 10px; }
+.restarting .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 header .meta .signout { display: inline; margin: 0; }

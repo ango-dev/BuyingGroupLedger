@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Restarting{% endblock %}
+{#- Shown after the Settings page's Restart buttons: no header (the process behind it is going
+    away), one card, and a poll of /health that sends the browser back to Settings the moment
+    the dashboard answers again -- the meta refresh is the fallback for a browser without JS. -#}
+{% block header %}{% endblock %}
+{% block content %}
+<meta http-equiv="refresh" content="{{ seconds }};url=/settings">
+<div class="login-wrap">
+  <div class="login panel restarting" role="status" aria-live="polite">
+    <div class="login-brand">
+      <img src="/static/logo.svg?v={{ asset_version }}" alt="" width="36" height="36">
+      <span class="wordmark">Buying Group <strong>Ledger</strong></span>
+    </div>
+    <h1><span class="spinner" aria-hidden="true"></span> Restarting the {{ what }}</h1>
+    <p class="muted">{{ note }}</p>
+    <p class="muted small">This page returns to Settings by itself.</p>
+  </div>
+</div>
+<script>
+  (function () {
+    var started = Date.now();
+    function probe() {
+      // Wait for the old process to go before believing an answer, then poll until one comes.
+      fetch("/health", { cache: "no-store" }).then(function (r) {
+        if (r.ok && Date.now() - started > {{ grace }} * 1000) { location.replace("/settings"); } else { setTimeout(probe, 1000); }
+      }).catch(function () { setTimeout(probe, 1000); });
+    }
+    setTimeout(probe, 1500);
+  })();
+</script>
+{% endblock %}

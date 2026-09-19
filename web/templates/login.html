@@ -18,14 +18,12 @@
     </label>
     <label class="check login-remember">
       <input type="checkbox" name="remember" value="on" {% if remember %}checked{% endif %} {% if locked %}disabled{% endif %}>
-      Remember me on this device for {{ remember_label }}
-      <span class="muted small">— otherwise the sign-in ends after {{ session_label }}</span>
+      Remember me
     </label>
     <div class="login-actions">
       <button type="submit" class="primary" {% if locked %}disabled{% endif %}>Sign in</button>
       {% if locked %}<span class="muted small">Locked for {{ retry_label }}.</span>{% endif %}
     </div>
-    <p class="muted small login-help">Both lengths are in Settings → Dashboard → Sign-in, with the password and the rate limit.</p>
   </form>
 </div>
 {% endblock %}

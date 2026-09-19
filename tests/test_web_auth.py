@@ -199,8 +199,7 @@ class TestTheGate:
         assert health.status_code == 200 and health.json()["password_protected"] is True
         login = client.get("/login")
         assert login.status_code == 200
-        assert "Remember me on this device for 2 years" in login.text
-        assert "the sign-in ends after 6 hours" in login.text
+        assert "Remember me" in login.text and "2 years" not in login.text  # terse
         assert "<nav>" not in login.text  # no header for a visitor who is not signed in
 
     def test_an_htmx_fragment_request_sends_the_window_to_the_login_page(self, client):
@@ -235,8 +234,6 @@ class TestSigningIn:
 
     def test_the_lengths_come_from_the_settings(self, tmp_path, clock):
         client = _app(tmp_path, clock, web_session_hours=1, web_remember_days=30)
-        login = client.get("/login").text
-        assert "for 30 days" in login and "after 1 hour" in login
         assert _max_age(_sign_in(client)) == 3600
         assert _max_age(_sign_in(client, remember=True)) == 30 * 86400
 

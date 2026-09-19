@@ -1535,19 +1535,17 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                                                   "heartbeat shows it finished."], status=423)
         act("settings", "Container restart requested from the Settings page")
         restart_container()
-        return HTMLResponse("<!doctype html><meta http-equiv='refresh' content='30;url=/settings'>"
-                            "<p style='font-family:system-ui;padding:20px'>Restarting the container; "
-                            "the scheduler and the dashboard come back in about half a minute and this "
-                            "page reloads then. config.json is re-read on the way up.</p>")
+        return page(request, "restarting.html", what="container", seconds=90, grace=8,
+                    note="The scheduler and the dashboard come back in about half a minute; "
+                         "config.json is re-read on the way up.")
 
     @app.post("/settings/restart", response_class=HTMLResponse)
     def settings_restart(request: Request):
         act("settings", "Dashboard restart requested from the Settings page")
         restart()
-        return HTMLResponse("<!doctype html><meta http-equiv='refresh' content='6;url=/settings'>"
-                            "<p style='font-family:system-ui;padding:20px'>Restarting the dashboard; "
-                            "this page reloads in a few seconds. On a desktop, run "
-                            "<code>python -m web</code> again.</p>")
+        return page(request, "restarting.html", what="dashboard", seconds=20, grace=2,
+                    note="Back in a few seconds." if in_container
+                    else "Back once you run python -m web again on this machine.")
 
     @app.get("/health")
     def health(request: Request):
