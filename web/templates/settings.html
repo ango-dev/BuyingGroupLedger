@@ -59,8 +59,10 @@ here, so keep the dashboard on loopback or your own network.</p>
       <section class="panel" id="s-{{ section }}">
         <header><h2>{{ title }}</h2>{% if blurb %}<p class="muted">{{ blurb }}</p>{% endif %}</header>
         <div class="fields">
+          {% set ns = namespace(group='') %}
           {% for row in rows if row.setting.section == section and row.setting.env not in hidden_envs %}
           {% set s = row.setting %}
+          {% if s.subgroup != ns.group %}{% set ns.group = s.subgroup %}{% if ns.group %}<h3 class="subgroup" id="s-{{ section }}-{{ ns.group | lower }}">{{ ns.group }}</h3>{% endif %}{% endif %}
           {% set label, sub = field_label(s) %}
           <div class="field">
             <div class="field-label">

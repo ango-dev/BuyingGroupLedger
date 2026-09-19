@@ -412,6 +412,8 @@ h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
 .panel > header { margin-bottom: 10px; }
 .panel > header h2 { margin: 0 0 2px; font-size: 1.15em; }
 .panel > header p { margin: 0; }
+.panel .fields h3.subgroup { grid-column: 1 / -1; margin: 12px 0 2px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 0.95em; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.panel .fields h3.subgroup:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .fields { display: flex; flex-direction: column; }
 .field { display: grid; grid-template-columns: minmax(200px, 300px) minmax(0, 1fr); gap: 6px 20px; padding: 10px 0; border-top: 1px solid var(--line); }
 .field:first-child { border-top: 0; }

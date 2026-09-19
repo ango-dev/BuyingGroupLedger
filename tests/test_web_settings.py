@@ -443,16 +443,18 @@ class TestEntryCards:
         assert 'value=""' in address and "me@example.com" not in address and ">falls back<" not in address
         assert "falls back" not in body
 
-    def test_the_alert_channels_are_two_panels_each_with_a_switch(self, client):
+    def test_the_alerts_card_is_one_panel_split_into_discord_and_gmail(self, client):
         body = client.get("/settings").text
-        assert 'id="s-alerts_discord"' in body and 'id="s-alerts_gmail"' in body and 'id="s-alerts"' not in body
-        assert body.index('id="s-alerts_discord"') < body.index('id="s-alerts_gmail"')
-        discord = body[body.index('id="s-alerts_discord"'):body.index('id="s-alerts_gmail"')]
+        assert 'id="s-alerts"' in body and 'id="s-alerts_discord"' not in body
+        panel = body[body.index('id="s-alerts"'):body.index("</section>", body.index('id="s-alerts"'))]
+        assert '<h3 class="subgroup" id="s-alerts-discord">Discord</h3>' in panel
+        assert '<h3 class="subgroup" id="s-alerts-gmail">Gmail</h3>' in panel
+        discord = panel[panel.index("s-alerts-discord"):panel.index("s-alerts-gmail")]
+        gmail = panel[panel.index("s-alerts-gmail"):]
         assert 'name="DISCORD_ALERTS_ENABLED"' in discord and 'name="DISCORD_WEBHOOK_URL"' in discord
         assert 'name="GMAIL_ADDRESS"' not in discord
-        gmail = body[body.index('id="s-alerts_gmail"'):body.index('id="s-alerts_gmail"') + 6000]
         assert 'name="GMAIL_ALERTS_ENABLED"' in gmail and 'name="GMAIL_ADDRESS"' in gmail and 'name="ALERT_EMAIL_TO"' in gmail
-        assert ">Alerts: Discord<" in body and ">Alerts: Gmail<" in body
+        assert panel.count('<h3 class="subgroup"') == 2 and 'class="subgroup"' not in body[:body.index('id="s-alerts"')]
 
     def test_saving_the_shown_defaults_is_not_a_change_but_does_write_them(self, client):
         form = {}

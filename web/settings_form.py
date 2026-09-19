@@ -59,13 +59,12 @@ SECTIONS: tuple[tuple[str, str, Any, str], ...] = (
 )
 
 
-#: Settings shown under a panel OTHER than their config section's: the two alert channels are
-#: two panels, though both live under `alerts`
-#: in config.json.
-SECTION_OF_ENV: dict[str, str] = {
-    "DISCORD_ALERTS_ENABLED": "alerts_discord", "DISCORD_WEBHOOK_URL": "alerts_discord",
-    "GMAIL_ALERTS_ENABLED": "alerts_gmail", "GMAIL_ADDRESS": "alerts_gmail",
-    "GMAIL_APP_PASSWORD": "alerts_gmail", "ALERT_EMAIL_TO": "alerts_gmail",
+#: Sub-groups inside a panel: the Alerts card is one card split into its two channels. The
+#: template writes a sub-heading where the group changes; settings without one stand alone.
+SUBGROUP_OF_ENV: dict[str, str] = {
+    "DISCORD_ALERTS_ENABLED": "Discord", "DISCORD_WEBHOOK_URL": "Discord",
+    "GMAIL_ALERTS_ENABLED": "Gmail", "GMAIL_ADDRESS": "Gmail",
+    "GMAIL_APP_PASSWORD": "Gmail", "ALERT_EMAIL_TO": "Gmail",
 }
 
 
@@ -80,7 +79,11 @@ class Setting:
 
     @property
     def section(self) -> str:
-        return SECTION_OF_ENV.get(self.env) or self.path.split(".")[0]
+        return self.path.split(".")[0]
+
+    @property
+    def subgroup(self) -> str:
+        return SUBGROUP_OF_ENV.get(self.env, "")
 
     @property
     def key(self) -> str:
@@ -413,11 +416,11 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
     "container": ("Schedule", "How often the container runs, and whether it runs at start. "
                   "Read once at container start."),
     "scraping": ("Scraping", "How far back each run looks, and the money rules the ledger applies."),
-    "alerts_discord": ("Alerts: Discord", "A webhook that a failed run, a logged-out session or a stale "
-                       "heartbeat is posted to. The switch turns the channel off without losing the URL."),
-    "alerts_gmail": ("Alerts: Gmail", "The account the same alerts are emailed from (an app password), "
-                     "and who they go to. Only for alerts: the BFMR auto-reply's mailbox is its own "
-                     "setting under Buying groups, entered separately even when it is the same account."),
+    "alerts": ("Alerts", "Where a failed run, a logged-out session or a stale heartbeat is reported: "
+               "a Discord webhook and a Gmail account, each with its own switch (off keeps the "
+               "configuration and sends nothing). The Gmail account here is only for alerts -- the "
+               "BFMR auto-reply's mailbox is its own setting under Buying groups, entered separately "
+               "even when it is the same account."),
     "buying_groups": ("Buying groups", "BFMR and MaxOutDeals: API access, insurance, and the "
                       "combined-package auto-reply."),
     "receipts": ("Receipts", "Receipt capture: each order's proof of purchase, kept as a file beside "
