@@ -1417,6 +1417,10 @@ class TestImpossibleValues:
 
     def test_dates_that_cannot_be(self):
         assert "Order Date 2999-01-01 is in the future" in self._fails(**{"Order Date": Cell("2999-01-01")})
+        # an estimated delivery date on an open row is fine; on a delivered row a future date is impossible
+        estimate = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell("2999-01-01")}))
+        assert result_for(estimate, "impossible_values").status == "PASS"
+        assert "Delivery Date 2999-01-01 is in the future" in self._fails(**{"Delivery Date": Cell("2999-01-01")})
         assert "Last Scraped At 2026-08-01 is before the Order Date 2026-08-06" in self._fails(**{"Last Scraped At": Cell("2026-08-01T10:00:00Z")})
         odd = result_for(build(row_cells(2, Status=Cell("return"), **{"Return Qty": Cell(1), "Return Date": Cell("2026-08-07"),
                                                                        "Buying Group": Cell("BFMR")})), "impossible_values")
@@ -1436,6 +1440,9 @@ class TestImpossibleValues:
     def test_a_payment_from_nobody_and_insurance_at_the_wrong_group(self):
         from config.warehouses import GIFT_CARD
 
-        assert "paid, but no buying group to have paid it" in self._fails(Status=Cell("paid"), **{"Buying Group": Cell(GIFT_CARD), "Actual Payout": Cell(10.0, fmt="currency"), "Payout Date": Cell("2026-08-20")})
+        assert "paid, but no buying group to have paid it" in self._fails(Status=Cell("paid"), **{"Buying Group": Cell(""), "Actual Payout": Cell(10.0, fmt="currency"), "Payout Date": Cell("2026-08-20")})
+        # a bought gift card is paid when its value is spent elsewhere: the marker is its group
+        gift = build(row_cells(2, Status=Cell("paid"), **{"Buying Group": Cell(GIFT_CARD), "Actual Payout": Cell(10.0, fmt="currency"), "Payout Date": Cell("2026-08-20")}))
+        assert result_for(gift, "impossible_values").status == "PASS"
         odd = result_for(build(row_cells(2, **{"Buying Group": Cell("MOD"), "Insurance": Cell(2.0, fmt="currency")})), "impossible_values")
         assert odd.status == "WARN" and "Insurance on a MaxOutDeals row" in odd.details[0]

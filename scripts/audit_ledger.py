@@ -1405,6 +1405,11 @@ def check_impossible_values(sheet: Sheet, opts: Options) -> Result:
         order_date = cell("Order Date")[:10]
         for name in ("Order Date", "Delivery Date", "Payout Date", "Return Date"):
             when = cell(name)[:10]
+            # A Delivery Date ahead of today on an open row is the retailer's ESTIMATE (the
+            # dashboard tags it "est."); the run flips the row to delivered when the package
+            # lands. Once delivered, a future date is impossible.
+            if name == "Delivery Date" and status in ("ordered", "shipped"):
+                continue
             if len(when) == 10 and when > today:
                 bad.append(f"{name} {when} is in the future")
         scraped = cell("Last Scraped At")[:10]
@@ -1432,7 +1437,10 @@ def check_impossible_values(sheet: Sheet, opts: Options) -> Result:
             bad.append(f"Card Last 4 {last4!r} is not four digits")
         # --- who paid ---
         group = cell("Buying Group")
-        if status == "paid" and (not group or is_deliberately_unrouted(group)):
+        # A gift-card row (Buying Group = the marker) is paid when its value is spent in other
+        # orders, with no group of its own, so
+        # only a BLANK group is nobody.
+        if status == "paid" and not group:
             bad.append("paid, but no buying group to have paid it")
         if number("Insurance") and group.lower().replace(" ", "") in ("mod", "maxoutdeals"):
             odd.append("Insurance on a MaxOutDeals row (only BFMR files insurance)")

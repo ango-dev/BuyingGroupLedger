@@ -122,7 +122,7 @@ def sheet():
         row(order_date="2026-09-08", status="shipped", retailer="Best Buy", item_name="MacBook",
             shipment="1", quantity="1", order_id="BBY01-1", tracking_number="5238",
             buying_group="BFMR", cost_per_item="1000", total_cost="1000", cashback_rate="0.04",
-            insurance="6.4", payout_amount="1230"),
+            insurance="6.4", payout_amount="1230", delivery_date="2026-09-12"),
         row(order_date="2026-08-20", status="paid", retailer="Costco", item_name="iPad",
             shipment="1", quantity="2", order_id="1399000017", total_cost="400",
             payout_amount="500", payout_date="2026-09-01"),
@@ -377,6 +377,9 @@ class TestOrdersRoutes:
         # Tracking Submitted is a real checkbox, and a check cell, never a text editor
         assert re.search(r'data-field="tracking_submitted"[^>]*data-kind="check"', body)
         assert 'type="checkbox" class="cell-check"' in body and "☑" not in body and "☐" not in body
+        # an open row's delivery date is the retailer's estimate and says so
+        est = re.search(r"data-field=\"delivery_date\"[^>]*>\s*2026-09-12 <span class=\"tag committed\" title=\"the retailer's estimated delivery date[^\"]*\">est\.</span>", body)
+        assert est, "the shipped row's delivery date should carry the est. tag"
         choices = re.search(r'<script type="application/json" id="cell-choices">(.*?)</script>', body, re.S)
         parsed = json.loads(choices.group(1))
         assert choices and "Costco" in parsed["values"]["retailer"]

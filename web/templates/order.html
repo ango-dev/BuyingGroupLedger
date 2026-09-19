@@ -57,7 +57,7 @@
     <dt>Tracking Number</dt>
     <dd class="mono">{% if s.tracking_number %}{% if s.tracking_url %}<a href="{{ s.tracking_url }}" rel="noopener">{{ s.tracking_number }}</a>{% else %}{{ s.tracking_number }}{% endif %}{% else %}<span class="muted">none yet</span>{% endif %}</dd>
     <dt>Tracking Submitted</dt><dd>{{ '✓ submitted to the buying group' if s.tracking_submitted else 'not submitted' }}</dd>
-    <dt>Delivery Date</dt><dd>{{ s.delivery_date or '—' }}</dd>
+    <dt>Delivery Date</dt><dd>{{ s.delivery_date or '—' }}{% if s.delivery_date and s.status in ('ordered', 'shipped') %} <span class="tag committed" title="the retailer's estimated delivery date; the run flips the row to delivered when the package lands">est.</span>{% endif %}</dd>
     <dt>Package ID</dt><dd class="mono">{{ s.package_id or '—' }}</dd>
   </dl>
   <div class="card-rows-wrap">
