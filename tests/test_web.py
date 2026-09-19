@@ -681,6 +681,7 @@ class TestOverviewPage:
         assert 'src="/static/tooltip.js' in body
         js = client.get("/static/tooltip.js").text
         assert 'removeAttribute("title")' in js and "data-tip" in js  # the native bubble never shows
+        assert 'getAttribute("data-tip-from")' in js and 'classList.add("rich")' in js  # a tip may be a table
         css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
         assert ".tip {" in css and ".tip.on" in css
 

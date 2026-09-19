@@ -1,0 +1,27 @@
+{#- The table's how-to. The pill is the tooltip's handle; the hidden
+    block is what tooltip.js shows (data-tip-from), so the panel can hold a table. `id` must be
+    unique per page: the Orders table and an order's Shipments table each pass their own. -#}
+<span class="hint-mark" tabindex="0" role="img" aria-label="how this table works" data-tip-from="{{ id }}">
+  <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1.1 2V17h5v-1.2c.1-.8.5-1.5 1.1-2A6 6 0 0 0 12 3z"/></svg>hint
+</span>
+<div id="{{ id }}" hidden>
+  <p class="tip-title">works like a spreadsheet</p>
+  <table class="tip-table">
+    <tr class="sec"><td colspan="2">Cells</td></tr>
+    <tr><td>select</td><td>click; Ctrl-click adds or removes one; shift-click or drag for a range</td></tr>
+    <tr><td>edit</td><td>double-click, Enter, or just type</td></tr>
+    <tr><td>save</td><td>Enter (fills a selected range) and steps down; Esc cancels</td></tr>
+    <tr><td>today</td><td>Ctrl+; in a date cell</td></tr>
+    <tr><td>clear</td><td>Delete</td></tr>
+    <tr><td>copy / paste</td><td>Ctrl+C / Ctrl+V, one cell or a block</td></tr>
+    <tr><td>move</td><td>arrow keys; Esc clears the selection</td></tr>
+    {% if rows %}
+    <tr class="sec"><td colspan="2">Rows</td></tr>
+    <tr><td>select</td><td>click a row number; Ctrl-click adds one; drag down the numbers or shift-click for a range</td></tr>
+    <tr><td>all / none</td><td>click #</td></tr>
+    <tr><td>delete rows</td><td>Delete or Backspace removes the selected rows from the ledger (asked once)</td></tr>
+    <tr class="sec"><td colspan="2">Edits</td></tr>
+    <tr><td>keep my edits</td><td>on: a cell you type is kept by every run; off: a correction the runs may overwrite</td></tr>
+    {% endif %}
+  </table>
+</div>

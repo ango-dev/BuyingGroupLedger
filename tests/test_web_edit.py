@@ -370,8 +370,11 @@ class TestOrdersRoutes:
         assert 'hx-post="/orders/bulk"' not in body and 'id="delete-selected" class="danger" hidden' in body
         assert 'id="bulkbar"' not in body  # no bar: the count line carries the counter and the hint
         assert 'id="sel-count">0</span> selected' in body
-        # the how-it-works prose is a ? mark's tooltip, not text on the line
+        # the how-it-works prose is the hint pill's tooltip -- a hidden table tooltip.js shows -- not
+        # text on the line
         assert 'class="hint-mark"' in body and "· works like a spreadsheet" not in body
+        assert 'data-tip-from="table-hints"' in body and '<div id="table-hints" hidden>' in body
+        assert body.count('<table class="tip-table">') == 1 and '<td colspan="2">Rows</td>' in body
         assert "Delete or Backspace removes the selected rows from the ledger (asked once)" in body
         # the editor's kind per cell: a calendar on dates, previous answers on choice columns
         assert re.search(r'data-field="payout_date"[^>]*data-kind="date"', body)
@@ -787,6 +790,7 @@ class TestOrderPageEditing:
         body = client.get("/orders/BBY01-1").text
         assert 'class="num edit"' in body and 'data-field="insurance"' in body
         assert 'data-order-id="BBY01-1"' in body and "works like a spreadsheet" in body
+        assert 'data-tip-from="shipment-hints"' in body and '<td colspan="2">Rows</td>' not in body  # no row tools here
         cogs_td = re.search(r'<td class="([^"]*)"\s+data-field="cogs"', body)
         assert cogs_td and "edit" not in cogs_td.group(1)
         # An edit made from the order page lands exactly as one from the table.

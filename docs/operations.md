@@ -193,8 +193,8 @@ to write to).
 **Rows: select, add, delete.** Selection is Sheets-style: click a row number to select that row
 and nothing else (it tints blue; a plain click on a cell likewise drops the row selection), Ctrl-click
 to add a row (or take one out), drag down the numbers or shift-click for a range, click the `#`
-header for every row shown (or, with anything selected, to clear); Esc clears. The counter sits on the table's count line, and the how-it-works hints for cells and rows are the
-tooltip of its **?** mark (hover or focus it). With rows
+header for every row shown (or, with anything selected, to clear); Esc clears. The counter sits on the table's count line, and the how-it-works hints for cells, rows and edits
+are a small table behind the **hint** pill (a light bulb) at the line's right end (hover or focus it). With rows
 selected, the Delete or Backspace key removes them after ONE confirmation that names the count (rows are
 removed bottom-up so the located numbers stay valid; all-or-nothing); there is no bar or button. Setting one value on many rows is the grid's range
 fill: select the cells, type the value, Enter — the field/value bar that did this is gone

@@ -195,9 +195,20 @@ table.sheetlike tr.status-superseded td { background: #666666; color: #f4f4f4; t
 table.sheetlike tr[class*="status-"] td a { color: #1d4ed8; }
 table.sheetlike tr.status-superseded td a { color: #cfe0ff; }
 table.sheetlike tr[class*="status-"] td.rownum { background: var(--bg); color: var(--muted); text-decoration: none; }
-.hint-mark { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--line); color: var(--muted); font-size: 0.72em; font-weight: 600; cursor: help; margin-left: 4px; vertical-align: 1px; }
+/* ---- the tables' hint pill (a light bulb + "hint"), its tooltip a table ---- */
+.hint-mark { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 0.8em; font-weight: 500; cursor: help; user-select: none; }
+.hint-mark svg { color: #d9a400; }
 .hint-mark:hover, .hint-mark:focus { color: var(--accent); border-color: var(--accent); outline: none; }
-h2 .hint-mark { font-size: 0.55em; }
+.count { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.count .hint-mark { margin-left: auto; }
+h2.with-hint { display: flex; align-items: center; gap: 10px; }
+h2.with-hint .hint-mark { font-size: 0.68em; }
+.tip.rich { max-width: 480px; padding: 8px 10px; }
+.tip .tip-title { margin: 0 0 4px; font-weight: 600; }
+.tip table.tip-table { border-collapse: collapse; font-size: 0.95em; }
+.tip table.tip-table tr.sec td { padding: 6px 0 2px; color: var(--muted); font-size: 0.85em; text-transform: uppercase; letter-spacing: .04em; }
+.tip table.tip-table td { padding: 1px 8px 1px 0; vertical-align: top; }
+.tip table.tip-table tr:not(.sec) td:first-child { white-space: nowrap; color: var(--muted); }
 .count label.protect { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; cursor: pointer; }
 .count label.protect input { margin: 0; accent-color: var(--accent); }
 td input.cell-check { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: var(--accent); cursor: pointer; }
