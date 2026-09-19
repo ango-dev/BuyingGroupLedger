@@ -1334,18 +1334,18 @@ class TestMandatoryByStage:
         unsubmitted = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell(""), "Tracking Submitted": Cell(False)}))
         assert "missing Tracking Submitted (not ticked)" in result_for(unsubmitted, "mandatory_by_stage").details[0]
         for name in ("Order Link", "Delivery Address", "Card", "Card Last 4", "Buying Group"):
-            bare = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Delivery Date": Cell(""), name: Cell("")}))
+            bare = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Delivery Date": Cell(""), "Tracking Submitted": Cell(False), name: Cell("")}))
             assert f"row 2 (ordered): missing {name}" in result_for(bare, "mandatory_by_stage").details[0], name
 
     def test_a_cell_a_stage_should_not_have_yet_is_a_stale_status_warning(self):
-        ordered = build(row_cells(2, Status=Cell("ordered"), **{"Delivery Date": Cell("")}))  # keeps its tracking number
+        ordered = build(row_cells(2, Status=Cell("ordered"), **{"Delivery Date": Cell(""), "Tracking Submitted": Cell(False)}))  # keeps its tracking number
         result = result_for(ordered, "mandatory_by_stage")
         assert result.status == "WARN" and "row 2 (ordered): carries Tracking Number" in result.details[0]
-        clean = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Delivery Date": Cell("")}))
+        clean = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Delivery Date": Cell(""), "Tracking Submitted": Cell(False)}))
         assert result_for(clean, "mandatory_by_stage").status == "PASS"
 
     def test_an_estimated_delivery_date_on_an_open_row_is_not_stale(self):
-        ordered = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell("")}))  # keeps its Delivery Date
+        ordered = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Tracking Submitted": Cell(False)}))  # keeps its Delivery Date
         assert result_for(ordered, "mandatory_by_stage").status == "PASS"
 
     def test_a_gift_card_has_no_package_but_one_sold_to_a_group_is_submitted(self):
@@ -1369,6 +1369,23 @@ class TestMandatoryByStage:
                                                                 "Tracking Number": Cell(""), "Delivery Address": Cell(""),
                                                                 "Delivery Date": Cell(""), "Tracking Submitted": Cell(True)}))
         assert result_for(sold_ok, "mandatory_by_stage").status == "PASS"
+
+    def test_impossible_combinations_fail(self):
+        """orders 111-9990011-9990011 said Tracking Submitted with no tracking number."""
+        ticked_no_number = build(row_cells(2, Status=Cell("delivered"), **{"Tracking Number": Cell(""), "Tracking Submitted": Cell(True)}))
+        result = result_for(ticked_no_number, "mandatory_by_stage")
+        assert result.status == "FAIL"
+        assert any("Tracking Submitted ticked with no Tracking Number" in d for d in result.details)
+        ordered_ticked = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Tracking Submitted": Cell(True)}))
+        assert any("ticked on an ordered row" in d for d in result_for(ordered_ticked, "mandatory_by_stage").details)
+        dated_unpaid = build(row_cells(2, **{"Payout Date": Cell("2026-08-20")}))
+        assert any("a Payout Date with no Actual Payout" in d for d in result_for(dated_unpaid, "mandatory_by_stage").details)
+        early = build(row_cells(2, **{"Delivery Date": Cell("2026-08-01")}))  # the order date is 2026-08-06
+        assert any("Delivery Date 2026-08-01 is before the Order Date 2026-08-06" in d for d in result_for(early, "mandatory_by_stage").details)
+        # a payout on a row that is not paid yet is a stale status, a warning
+        paid_but_open = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell(""), "Actual Payout": Cell(100.0, fmt="currency")}))
+        result = result_for(paid_but_open, "mandatory_by_stage")
+        assert result.status == "WARN" and "carries Actual Payout" in result.details[0]
 
     def test_a_money_free_row_needs_only_its_identity(self):
         sheet = build(row_cells(2, Status=Cell("superseded"), **{"Cost Per Item": Cell(""), "Total Cost": Cell(""),

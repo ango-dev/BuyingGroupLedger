@@ -1263,8 +1263,9 @@ MANDATORY_BY_STAGE = {
 UNEXPECTED_BY_STAGE = {
     # Delivery Date is NOT here: the scraper fills it with the retailer's estimate before delivery.
     #
-    "ordered": ("Tracking Number", "Payout Date"),
-    "shipped": ("Payout Date",),
+    "ordered": ("Tracking Number", "Payout Date", "Actual Payout"),
+    "shipped": ("Payout Date", "Actual Payout"),
+    "delivered": ("Payout Date", "Actual Payout"),
 }
 #: A gift-card row (Buying Group = the gift-card marker, or an item name that says so) has no
 #: package: no tracking number, no delivery address, no delivery date. One SOLD to a buying group
@@ -1280,8 +1281,10 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
     order link, delivery address, card, card last 4 and COGS; each stage carries what that stage implies (a shipped row a tracking number, a
     delivered row a delivery date and the retailer's receipt, a paid row an amount, a date and its insurance, a
     return its quantity and date). A cell that should still be blank
-    at a stage (a tracking number on an `ordered` row) is a stale status, a WARN. The one place a
-    cell deleted by accident from the table is caught."""
+    at a stage (a tracking number on an `ordered` row, a payout on an open one) is a stale
+    status, a WARN. An IMPOSSIBLE combination -- Tracking Submitted ticked with no tracking number
+    or on an ordered row, a payout date with no amount, a delivery / payout / return date before the
+    order date -- is a FAIL. The one place a cell deleted by accident from the table is caught."""
     from config.warehouses import is_deliberately_unrouted
 
     grid = sheet.grids.formatted
@@ -1308,6 +1311,24 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
                     if cell(name).lower() not in ("true", "1", "yes", "checked")]
         if missing:
             fails.append(f"row {row_number} ({status or 'no status'}): missing {', '.join(missing)}")
+        # IMPOSSIBLE combinations. A ticked Tracking
+        # Submitted needs a number to have been submitted, unless the row is a gift card sold to a
+        # group (the tick is the card's submission); an ordered row has nothing to submit at all.
+        submitted = cell("Tracking Submitted").lower() in ("true", "1", "yes", "checked")
+        impossible = []
+        if submitted and status == "ordered":
+            impossible.append("Tracking Submitted ticked on an ordered row -- nothing has shipped")
+        elif submitted and not cell("Tracking Number") and not (gift_card and group and not unrouted):
+            impossible.append("Tracking Submitted ticked with no Tracking Number")
+        if cell("Payout Date") and not cell("Actual Payout"):
+            impossible.append("a Payout Date with no Actual Payout")
+        order_date = cell("Order Date")
+        for name in ("Delivery Date", "Payout Date", "Return Date"):
+            when = cell(name)
+            if order_date and when and len(when) >= 10 and len(order_date) >= 10 and when[:10] < order_date[:10]:
+                impossible.append(f"{name} {when} is before the Order Date {order_date}")
+        if impossible:
+            fails.append(f"row {row_number} ({status or 'no status'}): {'; '.join(impossible)}")
         stale = [name for name in UNEXPECTED_BY_STAGE.get(status, ()) if cell(name)]
         if stale:
             warns.append(f"row {row_number} ({status}): carries {', '.join(stale)} -- is the status stale?")
