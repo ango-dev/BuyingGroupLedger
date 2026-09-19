@@ -721,6 +721,16 @@ table.schedule { width: 100%; }
 table.schedule td.num, table.schedule th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.schedule tr.total td { font-weight: 600; border-top: 1px solid var(--line); }
 table.schedule td.neg { color: var(--bad); }
+/* ---- the Taxes page's Add-an-Expense form: one four-column grid ---- */
+.expense-form .egrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px; align-items: end; }
+.expense-form .egrid > label, .expense-form .egrid > .lbl { display: flex; flex-direction: column; gap: 3px; font-size: 0.85em; color: var(--muted); min-width: 0; }
+.expense-form .egrid .span-2 { grid-column: span 2; }
+.expense-form .egrid input[type=text], .expense-form .egrid input[type=email] { width: 100%; box-sizing: border-box; }
+.expense-form .egrid details.multi { font-size: inherit; }
+.expense-form .egrid details.multi .summary-text { display: flex; width: 100%; box-sizing: border-box; }
+.expense-form .egrid .dropzone { width: 100%; box-sizing: border-box; margin: 0; }
+.expense-form .inline-form { margin: 12px 0 0; }
+@media (max-width: 900px) { .expense-form .egrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tax-form .entry-table input[type=text] { width: 100%; box-sizing: border-box; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
 .tax-form .entry-table td.narrow { width: 160px; }
 .tax-form textarea.json { margin-top: 4px; }

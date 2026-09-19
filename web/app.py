@@ -593,7 +593,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         tax_inputs.save_year(tax_inputs_path, year, inputs)
         act("settings", f"Tax inputs for {year} saved",
             {"year": year, "programs": inputs.program_total, "bonuses": inputs.bonus_total,
-             "fees": inputs.fee_total, "sites": inputs.site_total, "other": len(inputs.other)})
+             "sites": inputs.site_total, "other": len(inputs.other)})
         return RedirectResponse(url=f"/taxes?year={year}&notice=Saved+{year}", status_code=303)
 
     @app.post("/taxes/expense")

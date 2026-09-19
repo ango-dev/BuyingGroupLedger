@@ -7,8 +7,9 @@ WHAT THE PAGE ASKS FOR, AND WHY EACH IS DERIVED OR TYPED.
   so the page asks for exactly what the setup implies.
 - **Cards**: one row per card USED in the tax year -- every distinct Card Last 4 on the year's
   ledger rows, whether or not the Cards settings know it -- minus any last-4 the settings mark `virtual` (a
-  virtual number of another card has no bonus or fee of its own). Two amounts each: the sign-up
-  bonus received (income) and the annual fee paid (expense).
+  virtual number of another card has no bonus of its own). One amount each: the sign-up bonus
+  received (income). A card's ANNUAL FEE is an expense and goes in the expense list with its
+  receipt, like every other expense; an older year file's `fees` section is ignored.
 - **Cashback sites**: the usual portals plus any the user adds.
 - **Expenses**: the user's own list of everything spent for the business in the year beyond the
   ledger's purchases -- each with a date, a description, an amount, the profile and the email of
@@ -57,7 +58,7 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 @dataclass(frozen=True)
 class Prompt:
     kind: str    # "program" | "card"
-    key: str     # stable id the stored amount is keyed by ("card:<last4>": bonus:/fee: fields)
+    key: str     # stable id the stored amount is keyed by ("card:<last4>": the bonus: field)
     label: str
     hint: str = ""
 
@@ -70,7 +71,6 @@ class Prompt:
 class YearInputs:
     programs: dict[str, float] = field(default_factory=dict)   # prompt key -> cashback received
     bonuses: dict[str, float] = field(default_factory=dict)    # "bonus:<last4>" -> bonus received
-    fees: dict[str, float] = field(default_factory=dict)       # "fee:<last4>" -> annual fee paid
     sites: dict[str, float] = field(default_factory=dict)      # site name -> cashback received
     expenses: list[dict] = field(default_factory=list)         # see add_expense
     other: list[dict] = field(default_factory=list)            # {label, amount, kind}
@@ -83,10 +83,6 @@ class YearInputs:
     @property
     def bonus_total(self) -> float:
         return round(sum(self.bonuses.values()), 2)
-
-    @property
-    def fee_total(self) -> float:
-        return round(sum(self.fees.values()), 2)
 
     @property
     def site_total(self) -> float:
@@ -105,7 +101,7 @@ class YearInputs:
         return round(sum(float(o.get("amount") or 0) for o in self.other if o.get("kind") != "income"), 2)
 
     def to_json(self) -> dict:
-        return {"programs": self.programs, "bonuses": self.bonuses, "fees": self.fees, "sites": self.sites,
+        return {"programs": self.programs, "bonuses": self.bonuses, "sites": self.sites,
                 "expenses": self.expenses, "other": self.other, "notes": self.notes}
 
     @classmethod
@@ -144,7 +140,7 @@ class YearInputs:
                 "receipt": dict(e.get("receipt") or {}), "added_at": str(e.get("added_at") or ""),
             })
         expenses.sort(key=lambda e: (e["date"], e["added_at"]))
-        return cls(programs=amounts("programs"), bonuses=amounts("bonuses"), fees=amounts("fees"),
+        return cls(programs=amounts("programs"), bonuses=amounts("bonuses"),
                    sites=amounts("sites"), expenses=expenses, other=other,
                    notes=str(payload.get("notes") or ""))
 
@@ -236,27 +232,25 @@ def _amount(text) -> float | None:
     return round(float(text), 2)
 
 
-def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt]) -> tuple[dict, dict, dict, dict, list, str]:
-    """The save form's amounts -> (programs, bonuses, fees, sites, other, notes). A blank amount
+def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt]) -> tuple[dict, dict, dict, list, str]:
+    """The save form's amounts -> (programs, bonuses, sites, other, notes). A blank amount
     is "none"; a bad one raises ValueError naming the field. The expense list is not on this form
     (it has its own add / delete routes) and is left as stored. The open list is income only."""
     errors: list[str] = []
     programs: dict[str, float] = {}
     bonuses: dict[str, float] = {}
-    fees: dict[str, float] = {}
     sites: dict[str, float] = {}
     other: list[dict] = []
     for p in prompts:
         if p.kind == "card":
-            for prefix, target, word in (("bonus", bonuses, "sign-up bonus"), ("fee", fees, "annual fee")):
-                key = f"{prefix}:{p.last4}"
-                try:
-                    value = _amount(form.get(key))
-                except ValueError:
-                    errors.append(f"{p.label} {word}: not a number")
-                    continue
-                if value is not None:
-                    target[key] = value
+            key = f"bonus:{p.last4}"
+            try:
+                value = _amount(form.get(key))
+            except ValueError:
+                errors.append(f"{p.label} sign-up bonus: not a number")
+                continue
+            if value is not None:
+                bonuses[key] = value
             continue
         try:
             value = _amount(form.get(p.key))
@@ -288,12 +282,12 @@ def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt]) -> tuple[dict
         other.append({"label": label, "amount": value, "kind": "income"})
     if errors:
         raise ValueError("; ".join(errors))
-    return programs, bonuses, fees, sites, other, str(form.get("notes") or "").strip()
+    return programs, bonuses, sites, other, str(form.get("notes") or "").strip()
 
 
 def apply_form(inputs: YearInputs, form: Mapping[str, str], prompts: Iterable[Prompt]) -> YearInputs:
-    programs, bonuses, fees, sites, other, notes = parse_form(form, prompts)
-    return YearInputs(programs=programs, bonuses=bonuses, fees=fees, sites=sites,
+    programs, bonuses, sites, other, notes = parse_form(form, prompts)
+    return YearInputs(programs=programs, bonuses=bonuses, sites=sites,
                       expenses=list(inputs.expenses), other=other, notes=notes)
 
 
@@ -420,7 +414,7 @@ def schedule_c(report: dict, inputs: YearInputs) -> dict:
     insurance = float(t.get("insurance") or 0)
     other_income = round(inputs.program_total + inputs.site_total + inputs.bonus_total + inputs.other_income, 2)
     gross_income = round(payouts - cogs + other_income, 2)
-    other_expenses = round(inputs.expense_total + inputs.fee_total + inputs.other_expense, 2)
+    other_expenses = round(inputs.expense_total + inputs.other_expense, 2)
     total_expenses = round(insurance + other_expenses, 2)
     net = round(gross_income - total_expenses, 2)
     lines = [
@@ -438,8 +432,8 @@ def schedule_c(report: dict, inputs: YearInputs) -> dict:
         {"part": "II", "line": "15", "name": "Insurance (other than health)", "amount": round(insurance, 2),
          "what": "buying-group shipment insurance premiums"},
         {"part": "II", "line": "27a", "name": "Other expenses", "amount": other_expenses,
-         "what": f"the expense list {inputs.expense_total:,.2f} ({len(inputs.expenses)} receipt(s)) + "
-                 f"card annual fees {inputs.fee_total:,.2f}"
+         "what": f"the expense list {inputs.expense_total:,.2f} ({len(inputs.expenses)} receipt(s)) -- "
+                 "card annual fees go in that list, with their receipts"
                  + (f" + other expense rows {inputs.other_expense:,.2f}" if inputs.other_expense else "")},
         {"part": "II", "line": "28", "name": "Total expenses", "amount": total_expenses,
          "what": "lines 8 through 27a"},

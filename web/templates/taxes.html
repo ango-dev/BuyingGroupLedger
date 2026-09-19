@@ -39,7 +39,7 @@
 
 <section class="panel" id="s-expenses">
   <header><h2>Expenses — {{ year }}</h2>
-    <p class="muted">Everything spent for the business in {{ year }} beyond the ledger's purchases: supplies, memberships, fees. Every entry needs its date, amount, the profile and email of the account that paid, and a receipt — uploaded (kept under <code>data/expenses/</code>, inside every backup) or linked. Counted under Other expenses (line 27a).</p></header>
+    <p class="muted">Everything spent for the business in {{ year }} beyond the ledger's purchases: supplies, memberships, card annual fees. Every entry needs its date, amount, the profile and email of the account that paid, and a receipt — uploaded (kept under <code>data/expenses/</code>, inside every backup) or linked. Counted under Other expenses (line 27a).</p></header>
   {% if inputs.expenses %}
   <table class="grid compact expenses">
     <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Profile</th><th>Email</th><th>Receipt</th><th class="num">Amount</th><th></th></tr></thead>
@@ -61,20 +61,17 @@
   <p class="muted">No expenses entered for {{ year }} yet.</p>
   {% endif %}
   <h3>Add an Expense</h3>
+  {#- One four-column grid, every field filling its cell, the wide ones spanning two. -#}
   <form method="post" action="/taxes/expense?year={{ year }}" enctype="multipart/form-data" class="expense-form">
-    <div class="fgrid four">
+    <div class="egrid">
       <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
       <label>Amount <input type="text" name="amount" value="{{ draft.get('amount', '') }}" placeholder="0.00" inputmode="decimal" required></label>
       <span class="lbl">Profile {{ choose('profile', [('', '— choose —')] + (profile_labels | list), draft.get('profile', ''), '', 'field') }}</span>
       <label>Email of the account that paid <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com" required></label>
-    </div>
-    <div class="fgrid two">
-      <label>Description <input type="text" name="description" value="{{ draft.get('description', '') }}" placeholder="what it was" required></label>
-      <label>Category <input type="text" name="category" value="{{ draft.get('category', '') }}" placeholder="optional: supplies, membership, fees…"></label>
-    </div>
-    <div class="fgrid two">
-      <span class="field-block">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
-      <label>or a link to it <input type="text" name="receipt_url" value="{{ draft.get('receipt_url', '') }}" placeholder="https://…"></label>
+      <label class="span-2">Description <input type="text" name="description" value="{{ draft.get('description', '') }}" placeholder="what it was" required></label>
+      <label class="span-2">Category <input type="text" name="category" value="{{ draft.get('category', '') }}" placeholder="optional: supplies, membership, annual fee…"></label>
+      <span class="lbl span-2">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
+      <label class="span-2">or a link to it <input type="text" name="receipt_url" value="{{ draft.get('receipt_url', '') }}" placeholder="https://…"></label>
     </div>
     <div class="inline-form"><button type="submit" class="primary">Add expense</button></div>
   </form>
@@ -96,13 +93,12 @@
   </section>
 
   <section class="panel" id="s-cards">
-    <header><h2>Cards</h2><p class="muted">One row per card used on an order placed in {{ year }} — every Card Last 4 on the year's rows, whether or not the Cards settings list it, minus any marked <em>virtual</em> there. The sign-up bonus received in {{ year }} counts under Other income (line 6); the annual fee paid under Other expenses (line 27a). Blank = none.</p></header>
+    <header><h2>Cards</h2><p class="muted">One row per card used on an order placed in {{ year }} — every Card Last 4 on the year's rows, whether or not the Cards settings list it, minus any marked <em>virtual</em> there. The sign-up bonus received in {{ year }} counts under Other income (line 6). Blank = none. A card's <strong>annual fee is an expense</strong>: add it to the Expenses list above with its receipt (category <em>annual fee</em>).</p></header>
     {% if card_prompts %}
-    <table class="entry-table"><thead><tr><th>Card</th><th>Sign-up Bonus</th><th>Annual Fee</th></tr></thead><tbody>
+    <table class="entry-table"><thead><tr><th>Card</th><th>Sign-up Bonus</th></tr></thead><tbody>
       {% for p in card_prompts %}
       <tr><td>{{ p.label }}</td>
-          <td class="narrow"><input type="text" name="bonus:{{ p.last4 }}" value="{{ inputs.bonuses.get('bonus:' ~ p.last4, '') }}" placeholder="0.00" inputmode="decimal"></td>
-          <td class="narrow"><input type="text" name="fee:{{ p.last4 }}" value="{{ inputs.fees.get('fee:' ~ p.last4, '') }}" placeholder="0.00" inputmode="decimal"></td></tr>
+          <td class="narrow"><input type="text" name="bonus:{{ p.last4 }}" value="{{ inputs.bonuses.get('bonus:' ~ p.last4, '') }}" placeholder="0.00" inputmode="decimal"></td></tr>
       {% endfor %}
     </tbody></table>
     {% else %}<p class="muted small">No card appears on an order placed in {{ year }}.</p>{% endif %}

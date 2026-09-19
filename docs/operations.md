@@ -470,7 +470,8 @@ holds what the ledger cannot know:
   separate from any card or portal: one row per retailer login in your profiles. Line 6.
 - **Cards** — one row per card used on an order placed in the year (every Card Last 4 on the
   year's rows, whether or not the Cards settings list it), minus any the settings mark `virtual`:
-  the sign-up bonus received (line 6) and the annual fee paid (line 27a).
+  the sign-up bonus received (line 6). A card's annual fee is an expense: it goes in the
+  Expenses list with its receipt.
 - **Cashback sites** — the usual portals plus any you add. Line 6.
 - **Other income** — an open list of income lines, and notes for the preparer. Income only: every
   expense goes through the expense list, with its receipt.

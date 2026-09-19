@@ -64,7 +64,6 @@ class TestStorage:
     def test_round_trip_per_year(self, tmp_path):
         path = tmp_path / "data" / "tax_inputs.json"
         inputs = YearInputs(programs={"program:a:costco": 130.0}, bonuses={"bonus:0315": 200.0},
-                            fees={"fee:0315": 95.0},
                             sites={"Rakuten": 55.5}, other=[{"label": "refund", "amount": 3.0, "kind": "income"}],
                             expenses=[{"id": "abc", "date": "2026-02-01", "description": "boxes", "amount": 12.0,
                                        "category": "", "profile": "alpha", "email": "a@b.co",
@@ -87,17 +86,20 @@ class TestStorage:
     def test_parse_form(self):
         prompts = [tax_inputs.Prompt("program", "program:a:costco", "Costco Executive — a"),
                    tax_inputs.Prompt("card", "card:0315", "USB …0315")]
-        programs, bonuses, fees, sites, other, notes = parse_form(
+        programs, bonuses, sites, other, notes = parse_form(
             {"program:a:costco": "$130.00", "bonus:0315": "", "fee:0315": "95", "site.0.name": "Rakuten",
              "site.0.amount": "55.50", "site.1.name": "", "site.1.amount": "9", "other.0.label": "refund",
              "other.0.amount": "3", "other.1.label": "", "notes": " n "}, prompts)
-        assert programs == {"program:a:costco": 130.0} and bonuses == {} and fees == {"fee:0315": 95.0}
+        assert programs == {"program:a:costco": 130.0} and bonuses == {}  # fee:0315 is ignored: a fee is an expense
         assert sites == {"Rakuten": 55.5} and notes == "n"
         assert other == [{"label": "refund", "amount": 3.0, "kind": "income"}]  # income only
         with pytest.raises(ValueError, match="Costco Executive — a: not a number"):
             parse_form({"program:a:costco": "lots"}, prompts)
-        with pytest.raises(ValueError, match="USB …0315 annual fee: not a number"):
-            parse_form({"fee:0315": "lots"}, prompts)
+        with pytest.raises(ValueError, match="USB …0315 sign-up bonus: not a number"):
+            parse_form({"bonus:0315": "lots"}, prompts)
+        # an older year file's fees section is dropped on read
+        legacy = YearInputs.from_json({"bonuses": {"bonus:0315": 1}, "fees": {"fee:0315": 95}})
+        assert legacy.bonuses == {"bonus:0315": 1.0} and not hasattr(legacy, "fees") and "fees" not in legacy.to_json()
 
 
 class TestExpenses:
@@ -138,7 +140,7 @@ class TestScheduleC:
                   "totals": {"payouts": 1000.0, "payout_rows": 3, "cogs": 700.0, "insurance": 10.0,
                              "gross_cost": 720.0, "shipping": 5.0, "sales_tax": 0.0, "returns": 0.0,
                              "gift_card": 0.0, "cashback": 25.0}}
-        inputs = YearInputs(programs={"p": 30.0}, bonuses={"b": 200.0}, fees={"f": 5.0}, sites={"Rakuten": 50.0},
+        inputs = YearInputs(programs={"p": 30.0}, bonuses={"b": 200.0}, sites={"Rakuten": 50.0},
                             expenses=[{"id": "1", "date": "2026-01-01", "description": "boxes", "amount": 12.0,
                                        "category": "", "profile": "a", "email": "a@b.co", "receipt": {}, "added_at": ""}],
                             other=[{"label": "fee", "amount": 8.0, "kind": "expense"},
@@ -148,8 +150,8 @@ class TestScheduleC:
         assert by[("I", "1")] == 1000.0 and by[("I", "4")] == 700.0
         assert by[("I", "6")] == 283.0 and s["other_income"] == 283.0      # 30 + 50 + 200 + 3
         assert by[("I", "7")] == 583.0                                       # 1000 - 700 + 283
-        assert by[("II", "15")] == 10.0 and by[("II", "27a")] == 25.0       # 12 + 5 + 8 (legacy expense row)
-        assert by[("II", "28")] == 35.0 and by[("II", "31")] == 548.0 and s["net"] == 548.0
+        assert by[("II", "15")] == 10.0 and by[("II", "27a")] == 20.0       # 12 + 8 (legacy expense row)
+        assert by[("II", "28")] == 30.0 and by[("II", "31")] == 553.0 and s["net"] == 553.0
         assert by[("III", "36")] == 725.0 and by[("III", "—")] == -25.0 and by[("III", "42")] == 700.0
 
 
@@ -190,7 +192,11 @@ class TestTaxesPage:
         assert "Costco Executive — alpha" in body and "Prime Business — alpha" in body
         # the year's cards: 0315 (rows 2, 9), 4331 (rows 3, 4); 4351 is virtual in the settings; row 8 has none
         assert "USB Prime Business …0315" in body and "Amex Business Gold …4331" in body
-        assert 'name="bonus:0315"' in body and 'name="fee:0315"' in body and "Sign-up Bonus" in body
+        assert 'name="bonus:0315"' in body and "Sign-up Bonus" in body
+        assert 'name="fee:0315"' not in body and "Annual Fee" not in body  # a fee is an expense, with a receipt
+        assert "annual fee is an expense" in body
+        # the Add-an-Expense form is one four-column grid
+        assert body.count('class="egrid"') == 1 and body.count('class="span-2"') == 3 and 'class="lbl span-2"' in body
         assert "…4351" not in body
         assert 'name="site.0.name" value="TopCashback"' in body
         assert "No expenses entered for 2026 yet." in body and 'action="/taxes/expense?year=2026"' in body
@@ -209,7 +215,7 @@ class TestTaxesPage:
         body = client.get("/taxes", params={"year": "2026"}).text
         assert 'value="30.0"' in body and 'name="site.5.name" value="Honey"' in body and "for Pat" in body
         assert "$280.50" in body   # line 6: 30 + 40 + 2.5 + 200 + 8
-        assert "$95.00" in body    # line 27a: the annual fee
+        assert "$95.00" not in body and "fees" not in saved  # fee:4331 was ignored: a fee is an expense
         bad = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "lots"})
         assert bad.status_code == 200 and "Costco Executive — alpha: not a number" in bad.text
         assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["programs"] == {"program:alpha:costco": 30.0}
