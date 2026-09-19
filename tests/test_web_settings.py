@@ -554,8 +554,40 @@ class TestEntryCards:
 
     def test_titles_and_labels_fall_back_to_the_key(self):
         assert settings_form.section_title("scraping")[0] == "Scraping"
+        assert settings_form.section_title("advanced")[0] == "Advanced"
         assert settings_form.section_title("brand_new") == ("Brand new", "")
         by_env = {s.env: s for s in settings_form.schema()}
         assert settings_form.field_label(by_env["LOOKBACK_DAYS"]) == ("Lookback days", "")
         assert settings_form.field_label(by_env["BFMR_API_KEY"]) == ("Api key", "bfmr")
         assert settings_form.RETAILER_KEYS == ("amazon", "amazon-business", "bestbuy", "costco")
+
+
+class TestAdvancedSettings:
+
+    def test_the_advanced_keys_leave_their_sections_for_the_foot_of_the_page(self):
+        rows = settings_form.schema()
+        by_env = {s.env: s for s in rows}
+        assert by_env["LEDGER_DB_PATH"].advanced and by_env["WEB_LEDGER_SOURCE"].advanced and by_env["WEB_PORT"].advanced
+        assert not by_env["LOOKBACK_DAYS"].advanced and not by_env["WEB_PUBLIC_URL"].advanced
+        sections = settings_form.sections_in_order(rows)
+        assert "database" not in sections and "advanced" not in sections  # Database emptied; Advanced is its own panel
+        assert "web" in sections  # the Dashboard panel keeps its day-to-day settings
+        assert settings_form.restart_scope(by_env["LEDGER_DB_PATH"]) == "dashboard"  # unchanged: still the database section by path
+
+    def test_the_page_renders_them_at_the_bottom_behind_a_warning_and_saves_them(self, client, config_file):
+        body = client.get("/settings").text
+        assert 'id="s-database"' not in body
+        foot = body[body.index('id="s-advanced"'):]
+        assert body.index('id="s-cards"') < body.index('id="s-advanced"') < body.index('id="s-apply"')
+        assert "Do not change these unless you know exactly what you are doing." in foot
+        assert 'for="f-LEDGER_DB_PATH"' in foot and 'for="f-WEB_LEDGER_SOURCE"' in foot
+        assert 'name="LEDGER_DB_PATH" form="scalar-form"' in foot  # saved by the main form's button
+        assert 'for="f-LEDGER_DB_PATH"' not in body[:body.index('id="s-advanced"')]
+        assert '<a href="#s-advanced" class="danger-link">Advanced</a>' in body
+        response = client.post("/settings", data={"LEDGER_DB_PATH": "data/elsewhere.sqlite3", "LOOKBACK_DAYS": "9"},
+                               follow_redirects=False)
+        assert response.status_code == 303
+        import json as _json
+        saved = _json.loads(config_file.read_text(encoding="utf-8")) if hasattr(config_file, "read_text") else None
+        if saved is not None:
+            assert saved["database"]["path"] == "data/elsewhere.sqlite3"

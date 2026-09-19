@@ -14,6 +14,10 @@
     };
     form.addEventListener("input", check);
     form.addEventListener("change", check);
+    // The Advanced panel's controls sit outside the form element (bound with form="scalar-form"):
+    // FormData sees them, the form's own listeners do not.
+    document.addEventListener("input", function (e) { if (e.target.getAttribute && e.target.getAttribute("form") === form.id) check(); });
+    document.addEventListener("change", function (e) { if (e.target.getAttribute && e.target.getAttribute("form") === form.id) check(); });
     window.addEventListener("beforeunload", function (e) {
       if (dirty.classList.contains("on")) { e.preventDefault(); e.returnValue = ""; }
     });

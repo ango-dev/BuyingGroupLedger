@@ -68,6 +68,16 @@ SUBGROUP_OF_ENV: dict[str, str] = {
 }
 
 
+#: Settings nobody should touch without knowing exactly why.
+#: They leave their sections and gather in the Advanced panel at the foot of the page, behind a
+#: warning; a section left empty by this (Database) disappears from the page.
+ADVANCED_ENVS: frozenset[str] = frozenset({
+    "LEDGER_DB_PATH", "WEB_LEDGER_SOURCE", "WEB_SNAPSHOT_PATH", "WEB_LEDGER_CACHE_TTL_SECONDS",
+    "WEB_ENABLED", "WEB_BIND_HOST", "WEB_PORT", "RECEIPTS_DIR", "PREFLIGHT_STRICT",
+    "BFMR_API_BASE_URL", "MAXOUTDEALS_API_BASE_URL",
+})
+
+
 @dataclass(frozen=True)
 class Setting:
     env: str
@@ -84,6 +94,10 @@ class Setting:
     @property
     def subgroup(self) -> str:
         return SUBGROUP_OF_ENV.get(self.env, "")
+
+    @property
+    def advanced(self) -> bool:
+        return self.env in ADVANCED_ENVS
 
     @property
     def key(self) -> str:
@@ -195,8 +209,12 @@ def restart_needed(changes: Mapping[str, Any]) -> str:
 
 
 def sections_in_order(settings: list[Setting]) -> list[str]:
+    """The panels in the order the settings come, leaving out a section whose every setting is
+    advanced (those sit in the Advanced panel at the foot of the page instead)."""
     seen: list[str] = []
     for s in settings:
+        if s.advanced:
+            continue
         if s.section not in seen:
             seen.append(s.section)
     return seen
@@ -428,6 +446,11 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
     "web": ("Dashboard", "This web dashboard: its ledger source, bind address and port. "
             "Read once at dashboard start."),
     "database": ("Database", "The SQLite file that is the ledger. Read once at dashboard start."),
+    "advanced": ("Advanced", "Where the ledger lives, which backend the dashboard serves, where it "
+                 "listens, where receipts go, and the buying groups' API hosts. A wrong value here "
+                 "shows an empty ledger, writes to the wrong file, or takes the dashboard off the "
+                 "network -- the runs and the page were set up around these once and do not need "
+                 "them changed."),
     "backups": ("Backups", "Scheduled backups of config.json, .state.json, .env and data/ (the "
                 "ledger) into backups/, on the container's clock, and how many to keep. Read once "
                 "at container start; the Backup & Restore panel below shows the schedule."),
