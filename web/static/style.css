@@ -365,6 +365,8 @@ details.multi .menu { position: absolute; top: 100%; left: 0; z-index: 6; margin
 details.multi .menu label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 1.15em;
   color: var(--fg); white-space: nowrap; padding: 2px 4px; border-radius: 4px; }
 details.multi .menu label:hover { background: var(--bg); }
+details.multi .menu label[hidden] { display: none; }  /* narrowed away by typing (edit.js) */
+details.multi .menu .narrow { padding: 2px 6px 4px; margin-bottom: 3px; border-bottom: 1px solid var(--line); font-size: 0.85em; color: var(--muted); white-space: nowrap; }
 details.multi .menu label.all { border-bottom: 1px solid var(--line); padding-bottom: 5px; margin-bottom: 3px; }
 
 /* --- The row list inside a card: the same editable cells as the big table, in a scroll box the
@@ -729,9 +731,10 @@ table.schedule td.neg { color: var(--bad); }
 /* every control the same height, so the labels line up across the row */
 .expense-form .egrid input[type=text], .expense-form .egrid input[type=email],
 .expense-form .egrid details.multi .summary-text, .expense-form .egrid .dropzone { width: 100%; min-height: 34px; box-sizing: border-box; margin: 0; }
-.expense-form .egrid details.multi { font-size: inherit; }
+/* the profile picker wears class "pick", not "field": the settings page's .field rule is a two-column grid */
+.expense-form .egrid details.multi { display: block; font-size: inherit; }
 .expense-form .egrid details.multi summary { display: block; }
-.expense-form .egrid details.multi .summary-text { display: flex; align-items: center; max-width: none; padding: 5px 8px; }
+.expense-form .egrid details.multi .summary-text { display: flex; align-items: center; font-size: 1em; max-width: none; padding: 5px 8px; }
 .expense-form .egrid .dropzone { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; min-width: 0; max-width: none; padding: 4px 12px; }
 .expense-form .inline-form { margin: 12px 0 0; }
 .grid.expenses tr.editing td { background: color-mix(in srgb, var(--accent) 12%, transparent); }

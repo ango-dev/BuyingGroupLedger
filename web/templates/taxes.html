@@ -48,7 +48,6 @@
   <form id="bulk" method="post" action="/taxes/expenses/delete?year={{ year }}" data-confirm="Delete every selected expense? Their uploaded receipts are deleted too.">
     <div class="muted count">{{ inputs.expenses | length }} expense(s) · <span id="sel-count">0</span> selected {% with id='expense-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}</div>
     <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Delete the selected expense? Its uploaded receipt is deleted too." data-confirm-many="Delete the {n} selected expenses? Their uploaded receipts are deleted too.">Delete selected</button>
-    {% include "_cell_tips.html" %}
     <div class="sheet">
     <table class="grid compact expenses sheetlike" data-cell-url="/taxes/expense/cell?year={{ year }}">
       <thead><tr><th class="rownum" title="select / unselect every expense"><input type="checkbox" id="sel-all" hidden aria-label="select all">#</th><th>Date</th><th>Description</th><th>Category</th><th>Profile</th><th>Email</th><th>Receipt</th><th class="num">Amount</th><th></th></tr></thead>
@@ -78,7 +77,7 @@
     <div class="egrid">
       <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
       <label>Amount <input type="text" name="amount" value="{{ draft.get('amount', '') }}" placeholder="0.00" inputmode="decimal" required></label>
-      <span class="lbl">Paid by — profile {{ choose('profile', [('', '— none —')] + (profile_labels | list), draft.get('profile', ''), '', 'field') }}</span>
+      <span class="lbl">Paid by — profile {{ choose('profile', [('', '— none —')] + (profile_labels | list), draft.get('profile', ''), '', 'pick') }}</span>
       <label>or the email of the account that paid <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com"></label>
       <label class="span-2">Description <input type="text" name="description" value="{{ draft.get('description', '') }}" placeholder="what it was" required></label>
       <label class="span-2">Category <input type="text" name="category" value="{{ draft.get('category', '') }}" placeholder="optional: supplies, membership, annual fee…"></label>

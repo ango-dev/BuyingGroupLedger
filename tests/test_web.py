@@ -778,6 +778,11 @@ class TestOrdersPage:
         assert body.count('<tr class="status-') == 1 and "529900000012" in body
         body = client.get("/orders", params={"q": "fitbit"}).text
         assert body.count('<tr class="status-') == 1 and "111-0000002-0000002" in body
+        # the card's name is searchable, and the cards view sorts by card
+        body = client.get("/orders", params={"q": "venmo"}).text
+        assert body.count('<tr class="status-') >= 1 and "Venmo Visa" in body[body.index("<tbody"):]
+        cards = client.get("/orders", params={"view": "cards"}).text  # the Sort-by control is the cards view's
+        assert 'name="sort" value="card_name"' in cards and 'name="sort" value="card_last4"' in cards
         body = client.get("/orders", params={"profile": "nobody"}).text
         assert "No rows match." in body
 
@@ -1530,7 +1535,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        'contains("cell-check")', 'e.key === " " && td.getAttribute("data-kind") === "check"',
                        "Picker.forget()", 'setProperty("--pinned-h"', 'getElementById("protect-edits")',
                        "function undo()", "function redo()", 'getAttribute("data-cell-url")', 'getAttribute("data-entry-id")',
-                       'getAttribute("data-confirm-many")', 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
+                       'getAttribute("data-confirm-many")', "type to narrow", "details.dataset.narrow", 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
                        "undoStack.push(step)", "redoStack = []", "toggleOff: alone",
                        "function choicesFor(field, td)", "Picker.choicesFor(field,",
                        '".cell-upload"', 'name="next" value="table"',

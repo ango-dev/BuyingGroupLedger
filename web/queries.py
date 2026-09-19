@@ -63,8 +63,8 @@ NUMERIC_SORT = {
 }
 
 #: Which fields a free-text search looks in.
-SEARCH_FIELDS = ("order_id", "item_name", "tracking_number", "package_id", "card_last4",
-                 "delivery_address")
+SEARCH_FIELDS = ("order_id", "item_name", "tracking_number", "package_id", "card_name", "card_last4",
+                 "delivery_address")  # the card's name too
 
 DEFAULT_SORT = "order_date"
 #: The columns a card's per-row mini-table shows (the same editable cells as the big table).
@@ -78,8 +78,9 @@ ORDER_COLUMNS = ("item_name", "status", "quantity", "cost_per_item", "total_cost
                  "tracking_number", "delivery_date", "package_id", "buying_group", "card_last4")
 #: What the cards view can sort by (the table sorts by any column header).
 SORT_CHOICES = tuple((f, FIELD_TO_HEADER[f]) for f in (
-    "order_date", "order_id", "status", "retailer", "buying_group", "item_name", "delivery_date",
-    "total_cost", "expected_payout", "payout_amount", "payout_date", "total_profit", "last_scraped_at"))
+    "order_date", "order_id", "status", "retailer", "buying_group", "card_name", "card_last4", "item_name",
+    "delivery_date", "total_cost", "expected_payout", "payout_amount", "payout_date", "total_profit",
+    "last_scraped_at"))  # the card columns: 
 #: The two ways the Orders page shows the ledger: the spreadsheet-like table, or one card per ORDER.
 VIEWS = ("table", "cards")
 PER_PAGE_CHOICES = (12, 24, 48, 96)

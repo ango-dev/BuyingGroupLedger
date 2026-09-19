@@ -198,7 +198,7 @@
       var fresh = findCell(key);
       if (!fresh || fresh.hasAttribute("data-error")) return;  // refused: nothing to undo
       recorded(mine, { order_id: key.order_id, order_date: key.order_date, item_name: key.item_name,
-                       shipment: key.shipment, field: key.field, before: raw,
+                       shipment: key.shipment, entry_id: key.entry_id, field: key.field, before: raw,
                        after: fresh.getAttribute("data-raw") || "" });
     }).catch(function () {});
   }
@@ -743,6 +743,54 @@
     document.querySelectorAll("details.multi[open]").forEach(function (d) {
       if (!d.contains(e.target)) d.removeAttribute("open");
     });
+  });
+  // Type to narrow: with a dropdown open, printable keys build a filter shown at the top of the menu and
+  // the labels that do not contain it hide; Backspace edits it, Escape clears it (a second Escape
+  // closes the menu). Closing forgets it.
+  function narrowLine(details) {
+    var menu = details.querySelector(".menu");
+    var line = menu ? menu.querySelector(".narrow") : null;
+    if (menu && !line) {
+      line = document.createElement("div");
+      line.className = "narrow muted small";
+      menu.insertBefore(line, menu.firstChild);
+    }
+    return line;
+  }
+  function applyNarrow(details) {
+    var typed = (details.dataset.narrow || "").toLowerCase();
+    var line = narrowLine(details);
+    if (line) line.textContent = typed ? "narrow: " + details.dataset.narrow : "type to narrow";
+    details.querySelectorAll(".menu label").forEach(function (label) {
+      if (label.classList.contains("all")) return;
+      label.hidden = !!typed && label.textContent.toLowerCase().indexOf(typed) < 0;
+    });
+  }
+  document.addEventListener("toggle", function (e) {
+    var details = e.target;
+    if (!details.matches || !details.matches("details.multi") || details.classList.contains("nav-menu")) return;
+    details.dataset.narrow = "";
+    applyNarrow(details);
+  }, true);
+  document.addEventListener("keydown", function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var details = e.target.closest ? e.target.closest("details.multi[open]") : null;
+    if (!details || details.classList.contains("nav-menu")) return;  // the Tools menu is links, not choices
+    if (e.key === " " && e.target.tagName === "INPUT") return;  // Space still ticks a focused box
+    var typed = details.dataset.narrow || "";
+    if (e.key === "Escape") {
+      if (!typed) { details.removeAttribute("open"); return; }
+      details.dataset.narrow = "";
+    } else if (e.key === "Backspace") {
+      if (!typed) return;
+      details.dataset.narrow = typed.slice(0, -1);
+    } else if (e.key.length === 1) {
+      details.dataset.narrow = typed + e.key;
+    } else {
+      return;
+    }
+    e.preventDefault();
+    applyNarrow(details);
   });
 })();
 

@@ -212,7 +212,7 @@ already exists is refused.
 **Filters select all that apply.** Retailer, Profile, Status, Buying group and Card (by Card
 Last 4, shown with the card's name; *(blank)* for rows without one) are checkbox dropdowns: tick
 any combination; *All* clears the others (and re-ticks itself when the last value
-is unticked). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
+is unticked); with a dropdown open, typing narrows its list (Backspace edits, Escape clears). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
 
 **Two views.** The *View* control in the filter bar switches between the spreadsheet-like table and
 **cards**: one card per order under the same filters and search, sorted by the *Sort by* / *Order*
