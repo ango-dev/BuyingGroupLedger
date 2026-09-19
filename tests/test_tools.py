@@ -36,10 +36,8 @@ class TestTheRegistry:
             t.argv({"--limit": "three"})
         with pytest.raises(ValueError, match="not one of"):
             t.argv({"--retailer": "walmart"})
-        report = tools.tool("tax_report")
-        assert report.argv({"Year": "2026", "--no-rows": "on"}) == ["2026", "--no-rows"]
         with pytest.raises(ValueError, match="required"):
-            report.argv({})
+            tools.tool("fix_superseded_shipments").argv({"--apply": "on"})
         fix = tools.tool("fix_superseded_shipments")
         assert fix.argv({"--order": "A1, B2", "--apply": "on"}) == ["--order", "A1", "--order", "B2", "--apply"]
 
@@ -225,10 +223,12 @@ class TestTheRoutes:
         # the profile login sits inside Accounts, first; the run is its own group, first of all
         assert menu.index(">Run<") < menu.index("tool=run_once") < menu.index(">Accounts<") \
             < menu.index("tool=profile") < menu.index("tool=costco_token")
-        for key in ("run_once", "preflight", "tax_report", "backfill_tracking", "costco_token"):
+        for key in ("run_once", "preflight", "bg_probe", "backfill_tracking", "costco_token"):
             assert f'href="/tools?tool={key}"' in menu
             assert f'id="t-{key}"' not in body  # not shown until picked
-        assert 'tool=audit_ledger' in menu and 'tool=migrate_expected_payout' in menu
+        # what has its own page, or was a one-time migration, is not a tool
+        for gone in ("audit_ledger", "tax_report", "migrate_expected_payout", "migrate_receipts_local"):
+            assert f"tool={gone}" not in menu and gone not in {t.key for t in tools.TOOLS}
         assert 'class="multi nav-menu' in client.get("/settings").text  # on every page
         assert "Log a Profile In" in body and 'action="/tools/profile/start"' in body
         assert "after 30 minutes" in body
@@ -260,7 +260,7 @@ class TestTheRoutes:
         assert 'id="job-' in client.get("/tools", params={"tool": "preflight"}).text
         assert response.headers["location"] == "/tools?tool=preflight#t-preflight"
         assert client.get("/tools/jobs/nope").status_code == 404
-        bad = client.post("/tools/run/tax_report", data={"Year": "soon"})
+        bad = client.post("/tools/run/backfill_receipts", data={"--limit": "soon"})
         assert bad.status_code == 400 and "whole number" in bad.text
 
     def test_a_writing_tool_is_refused_while_a_run_is_in_progress(self, client):

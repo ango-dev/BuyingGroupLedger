@@ -105,6 +105,8 @@ class Tool:
 APPLY = Field("--apply", "Apply", "flag", "write for real (unticked = dry run: shows what it would do)")
 RETAILER = Field("--retailer", "Retailer", "select", "one retailer only", choices=RETAILER_CHOICES)
 
+# What is NOT here: the audit (the Audit page), the tax report (the Taxes page), and the one-time migrations
+# that have run (commitments to Expected Payout, receipts home from OCI -- both scripts deleted).
 TOOLS: tuple[Tool, ...] = (
     # A real run, exactly as the schedule does it:
     # `python -m main [retailer]` -- main.py takes its own run lock and exits quietly if one is
@@ -119,10 +121,6 @@ TOOLS: tuple[Tool, ...] = (
     Tool("preflight", "scripts.preflight", "Preflight check",
          "Config and dependency check: the misconfigurations that would otherwise fail silently. Offline.",
          "Checks", (Field("--strict", "Strict", "flag", "treat warnings as failures"),)),
-    Tool("tax_report", "scripts.tax_report", "Tax report",
-         "Cash-basis totals for one year, straight off the ledger. Writes nothing.",
-         "Checks", (Field("", "Year", "int", "the tax year, e.g. 2026", required=True),
-                    Field("--no-rows", "Totals only", "flag", "skip the row listing"))),
     Tool("bg_probe", "scripts.bg_probe", "Buying-group probe",
          "Read-only recon against the BFMR and MaxOutDeals APIs: what they know about your packages. Submits nothing.",
          "Checks", (Field("--tracking", "Tracking numbers", "list", "space-separated; blank = the ledger's open ones"),
@@ -170,25 +168,12 @@ TOOLS: tuple[Tool, ...] = (
     Tool("sort_ledger", "scripts.sort_ledger", "Sort the ledger",
          "Sort newest-first and re-stamp the formulas (the run does this itself after an append).",
          "Ledger Fixes", (APPLY,), writes=True),
-    Tool("audit_ledger", "scripts.audit_ledger", "Audit the ledger",
-         "The read-only invariant audit: keys, money, missing mandatory cells, staleness. The Audit page "
-         "shows the same findings by row.",
-         "Checks", (Field("--stale-days", "Stale after (days)", "int", default="3"),
-                    Field("--strict", "Strict", "flag"))),
-    Tool("migrate_receipts_local", "scripts.migrate_receipts_local", "Bring receipts home from OCI",
-         "One-time, after the 2026-09-18 OCI removal: download every receipt the ledger still links to in the old "
-         "bucket into receipts.dir and rewrite the links. Run before revoking the PAR.",
-         "Ledger Fixes", (APPLY,), writes=True),
     Tool("hand_edits", "scripts.hand_edits", "Hand-edited cells",
          "The cells typed on the dashboard that no run may overwrite. Lists them; Forget releases an order's "
          "cells (or one field of them) so the next run may write them again.",
          "Ledger Fixes", (Field("--forget", "Forget order", "text", "an order number; blank = just list"),
                           Field("--field", "Field", "text", "with Forget: release only this field, e.g. cashback_rate")),
          writes=True),
-    Tool("migrate_expected_payout", "scripts.migrate_expected_payout", "Move commitments to Expected Payout",
-         "One-time, after the 2026-09-18 column: move each open row's committed payout out of Actual Payout into "
-         "Expected Payout, so the Reconciliation page can compare the promise with the payment.",
-         "Ledger Fixes", (APPLY,), writes=True),
 )
 
 GROUPS = ("Run", "Accounts", "Checks", "Ledger Fixes")

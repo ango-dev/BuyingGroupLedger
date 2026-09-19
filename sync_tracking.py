@@ -599,8 +599,8 @@ def allocate_expected_payouts(
     The forward-looking half of the payout write. BFMR publishes the payout price from the moment
     a purchase exists, so Expected Payout carries it from purchase link onward (its OWN column
     since 2026-09-18 -- from 2026-09-11 to then it shared Actual Payout with a blank date; the
-    dashboard's Reconciliation page needs the promise kept beside the payment, so
-    scripts/migrate_expected_payout moves the old commitments over), and a tracker read that
+    dashboard's Reconciliation page needs the promise kept beside the payment; a one-time
+    migration moved the old commitments over), and a tracker read that
     disagrees with the cell is BFMR CHANGING the committed price. That is the event this function
     detects: the cell is updated to the current commitment (the ledger mirrors what BFMR will
     actually pay) and the change is reported for an alert naming old -> new.

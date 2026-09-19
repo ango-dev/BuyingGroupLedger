@@ -47,9 +47,7 @@ blank and its orders are never "reconciled". Total Profit is blank until Actual 
 **(Payout Date, Status)** pair — the cash-basis tax report keys income on Payout Date, the audit's
 straddle line (`cogs_inputs_complete`) counts a dated-or-`paid` payout as settled. *From
 2026-09-11 to 2026-09-18 the commitment shared the Actual Payout cell with a blank date;
-`python -m scripts.migrate_expected_payout --apply` (also under Tools → Ledger Fixes) moves the
-open rows' commitments into the new column once, and a ledger still holding that shape reads
-correctly on the dashboard in the meantime.*
+a one-time migration moved the open rows' commitments into the new column (run, then deleted).*
 
 > **Changing the column order is a MIGRATION, not an edit.** The ledger file does it itself the
 > next time it is opened: `ledger_db/store.py` rebuilds the `ledger_rows` table in the new

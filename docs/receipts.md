@@ -53,13 +53,8 @@ python -m scripts.backfill_receipts --apply       # capture them (a cloud browse
 Both are on the dashboard's Tools menu too. `receipt_verify` reads files; `backfill_receipts` spends
 browser sessions and asks first.
 
-## Moving off OCI (2026-09-18)
-
-Receipts used to live in an OCI bucket linked by a pre-authenticated request. One run of
-`python -m scripts.migrate_receipts_local --apply` (Tools → Ledger Fixes) downloads every hosted
-receipt the ledger still links to into `receipts.dir` and rewrites the links; run it **before**
-revoking the PAR in the console, since the link is what fetches the object. Rows whose download
-fails keep their old link for a re-run. After that, delete the bucket and the customer secret key.
+Receipts lived in an OCI bucket until 2026-09-18; a one-time migration brought them into
+`receipts.dir` and rewrote the links, and was deleted once it had run.
 
 ## Probing a retailer's receipt page
 

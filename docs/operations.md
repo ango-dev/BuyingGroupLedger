@@ -424,14 +424,6 @@ Neither writes anything.
 Both pages share the Orders page's remembered **view and page size** (cards or table) but never
 replay or rewrite its remembered filters.
 
-**One-time migration for ledgers from before 2026-09-18.** The commitment used to live in Payout
-Amount with a blank date. `python -m scripts.migrate_expected_payout` (Tools → Ledger Fixes →
-*Move commitments to Expected Payout*) lists each open row's commitment and `--apply` moves it
-into Expected Payout, clearing Actual Payout and re-stamping the profit formula. Run it once after
-deploying; the next sync fills Expected Payout itself from then on. A ledger still holding the old
-shape reads correctly on the dashboard in the meantime (an undated Actual Payout on an open row is
-still shown as projected), but the Reconciliation page cannot compare an order until its
-commitment has its own cell.
 
 ### The Taxes page
 
