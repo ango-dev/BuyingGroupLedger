@@ -3,4 +3,4 @@
    (web/recon_view.py), its rows in the Orders view with the two figures beside each. #}
 {% block title %}Reconciliation{% endblock %}
 {% block heading %}<h1>Reconciliation</h1>{% endblock %}
-{% block lead %}{% endblock %}{# the lead is _recon_lead.html, inside the table's scroll region #}
+{% block lead %}{% include "_recon_lead.html" %}{% endblock %}

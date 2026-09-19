@@ -4,7 +4,7 @@
    filter picks which checks' rows to show. #}
 {% block title %}Audit{% endblock %}
 {% block heading %}<h1>Audit</h1>{% endblock %}
-{% block lead %}{% endblock %}{# the lead is _audit_lead.html, inside the table's scroll region #}
+{% block lead %}{% include "_audit_lead.html" %}{% endblock %}
 {% block extra_filters %}
   {% set flagged = audit.flagged_checks %}
   <details class="multi" data-param="check">

@@ -172,6 +172,17 @@ body.wide #bulk { display: flex; flex-direction: column; flex: 1 1 auto; min-hei
 body.wide #orders-table { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 body.wide .count { margin: 4px 8px; flex: 0 0 auto; }
 body.wide .sheet { overflow: auto; flex: 1 1 auto; min-height: 0; background: var(--card); border-top: 1px solid var(--line); }
+/* Orders: .pinned is transparent to the flex column (heading and filter bar are its children).
+   Audit / Recon (body.scoped): the page scrolls as one -- the lead first, then .pinned sticks to the
+   top of main once the lead has scrolled away, and the table's header sticks just below it
+   (--pinned-h is measured by edit.js). */
+body.wide .pinned { display: contents; }
+body.wide.scoped main { display: block; overflow: auto; }
+body.wide.scoped .pinned { display: block; position: sticky; top: 0; left: 0; z-index: 6; background: var(--bg); max-width: 100vw; }
+body.wide.scoped #bulk, body.wide.scoped #orders-table { display: block; }
+body.wide.scoped .sheet { overflow: visible; flex: none; }
+body.wide.scoped table.sheetlike th { top: var(--pinned-h, 0px); }
+body.wide.scoped table.sheetlike th.rownum { z-index: 4; }
 /* SEPARATE borders (spacing 0): with collapsed borders a sticky <th> leaves its borders behind as
    it scrolls, and the row underneath shows through the 1px gaps between the headers. */
 table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: separate; }
@@ -661,7 +672,7 @@ td.finding b.over, .card .finding b.over { color: var(--ok); }
 /* The lead renders INSIDE the scroll region (see _audit_lead.html): it scrolls away with the rows
    while the filter bar stays pinned, exactly as Orders behaves; sticky left so a sideways scroll of
    the wide table does not drag it off screen. */
-.sheet > .lead { position: sticky; left: 0; margin: 8px 8px 4px; max-width: calc(100vw - 16px); box-sizing: border-box; }
+.lead { position: sticky; left: 0; margin: 8px 8px 4px; max-width: calc(100vw - 16px); box-sizing: border-box; }
 .lead .tiles.stats a.tile.link.current { border-width: 2px; }
 table.audit { width: 100%; font-size: 0.85em; border-top: 1px solid var(--line); }
 table.audit th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 12px 4px; }

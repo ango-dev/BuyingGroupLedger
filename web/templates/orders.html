@@ -6,9 +6,11 @@
 {# The Audit and Reconciliation pages extend this template: the same filter bar, table and cards
    over their own rows, with a Finding column. `base` is the page's own URL,
    `scope` names it, both from the route. #}
-{% block heading %}<h1>Orders</h1>{% endblock %}
+{# On the Audit / Recon pages the lead (description, tiles, panel) comes FIRST and scrolls away,
+   while the heading and the filter bar in .pinned stick to the top once it has. On Orders .pinned is display: contents. #}
 {% block lead %}{% endblock %}
-
+<div class="pinned">
+{% block heading %}<h1>Orders</h1>{% endblock %}
 <form id="filters" class="filters" method="get" action="{{ base }}"
       hx-get="{{ base }}" hx-target="#orders-table" hx-indicator="#orders-table" hx-push-url="true"
       hx-trigger="change, keyup changed delay:300ms from:#q, submit">
@@ -50,6 +52,7 @@
   <noscript><button type="submit">Apply</button></noscript>
   <a class="button small reset" href="{{ base }}?reset=1" title="clear the filters, search and sort (the view and page size stay)">Reset</a>
 </form>
+</div>
 
 {# The in-page confirmation. htmx's hx-confirm question is routed here (static/edit.js listens
    for htmx:confirm), so the browser's own dialog is never shown. #}
