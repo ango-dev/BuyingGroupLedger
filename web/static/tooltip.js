@@ -2,8 +2,8 @@
 // the chart slices have -- shows its text in one small panel after a short hover, positioned under
 // (or over) the element and kept inside the viewport. The native attribute is moved to data-tip on
 // first hover so the browser's own bubble never appears. Focus shows it too, for the keyboard.
-// An element with data-tip-from="<id>" shows that hidden element's MARKUP instead (a list or a
-// table -- the tables' hint pill), in a wider panel.
+// An element with data-tip-from="<id> [<id> ...]" shows those hidden elements' MARKUP instead (a
+// list or a table -- the tables' hint pill, a cell's how-to), in a wider panel.
 (function () {
   "use strict";
   var DELAY = 280;
@@ -66,10 +66,13 @@
 
   function show(el) {
     var p = panel();
-    var from = el.getAttribute("data-tip-from");
-    var source = from ? document.getElementById(from) : null;
-    if (source) {
-      p.innerHTML = source.innerHTML;  // the page's own markup, never user data
+    var from = (el.getAttribute("data-tip-from") || "").trim();
+    var html = from ? from.split(/\s+/).map(function (id) {
+      var source = document.getElementById(id);
+      return source ? source.innerHTML : "";
+    }).join("") : "";
+    if (html) {
+      p.innerHTML = html;  // the page's own markup, never user data
       p.classList.add("rich");
     } else {
       var text = textOf(el);

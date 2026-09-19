@@ -1,0 +1,32 @@
+{#- The cells' tooltips, once per page: a <td> names the blocks that apply in
+    data-tip-from ("tip-hand tip-cell-date"), and tooltip.js shows them together. -#}
+<div id="tip-hand" hidden>
+  <p class="tip-title">typed by hand: runs keep this value</p>
+  <table class="tip-table"><tr><td>clear it</td><td>the run's own value comes back</td></tr></table>
+</div>
+<div id="tip-cell-text" hidden>
+  <table class="tip-table">
+    <tr><td>edit</td><td>double-click, Enter, or just type</td></tr>
+    <tr><td>save</td><td>Enter</td></tr>
+    <tr><td>cancel</td><td>Esc</td></tr>
+  </table>
+</div>
+<div id="tip-cell-date" hidden>
+  <table class="tip-table">
+    <tr><td>edit</td><td>double-click, Enter, or just type (a calendar opens)</td></tr>
+    <tr><td>today</td><td>Ctrl+;</td></tr>
+    <tr><td>save</td><td>Enter, or pick a day</td></tr>
+    <tr><td>cancel</td><td>Esc</td></tr>
+  </table>
+</div>
+<div id="tip-cell-choice" hidden>
+  <table class="tip-table">
+    <tr><td>edit</td><td>double-click, Enter, or just type</td></tr>
+    <tr><td>previous answers</td><td>offered as you type; your own counts next time</td></tr>
+    <tr><td>save</td><td>Enter, or pick one</td></tr>
+    <tr><td>cancel</td><td>Esc</td></tr>
+  </table>
+</div>
+<div id="tip-cell-check" hidden>
+  <table class="tip-table"><tr><td>toggle</td><td>click, Space or Enter</td></tr></table>
+</div>

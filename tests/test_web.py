@@ -673,7 +673,8 @@ class TestOverviewPage:
         assert "Realized profit" in body and "$193.00" in body
         assert "Open Rows" in body
         assert "Blank Card Last 4" not in body and "COGS Input Gaps" not in body and ">Scheduler<" not in body
-        assert "stale after 12h without a completed run (Settings" in body  # the header pill's tooltip
+        assert 'data-tip-from="tip-heartbeat"' in body  # the header pill's tooltip, a table
+        assert "<td>stale after</td><td>12h without a completed run</td>" in body
         assert "no automatic writes" not in body and "loaded 2026" not in body  # header: pill + stamp gone
 
     def test_every_page_loads_the_in_page_tooltip_layer(self, client):
@@ -682,6 +683,7 @@ class TestOverviewPage:
         js = client.get("/static/tooltip.js").text
         assert 'removeAttribute("title")' in js and "data-tip" in js  # the native bubble never shows
         assert 'getAttribute("data-tip-from")' in js and 'classList.add("rich")' in js  # a tip may be a table
+        assert "split(/\\s+/)" in js  # several blocks in one panel: a cell's how-to plus its hand-edit note
         css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
         assert ".tip {" in css and ".tip.on" in css
 
@@ -1517,6 +1519,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        'ctrl && e.key === ";"', "function fillToday()", "function toggleCheck(td)",
                        'contains("cell-check")', 'e.key === " " && td.getAttribute("data-kind") === "check"',
                        "Picker.forget()", 'setProperty("--pinned-h"', 'getElementById("protect-edits")',
+                       "function undo()", "function redo()", 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
+                       "undoStack.push(step)", "redoStack = []", "toggleOff: alone",
                        "function choicesFor(field, td)", "Picker.choicesFor(field,",
                        '".cell-upload"', 'name="next" value="table"',
                        'hx-encoding", "multipart/form-data"',

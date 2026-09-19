@@ -19,8 +19,16 @@
     </a>
     <form method="post" action="/activity/acknowledge" class="ack">
       <input type="hidden" name="kind" value="{{ c.ack.kind }}"><input type="hidden" name="through" value="{{ c.ack.through }}">
-      <button type="submit" title="Drop this card and the count on the Activity link for these {{ c.count }}; a newer one shows again. The acknowledgement is recorded in Activity.">acknowledge</button>
+      <button type="submit" data-tip-from="tip-ack-{{ loop.index }}">acknowledge</button>
     </form>
+    <div id="tip-ack-{{ loop.index }}" hidden>
+      <p class="tip-title">acknowledge these {{ c.count }}</p>
+      <table class="tip-table">
+        <tr><td>drops</td><td>this card and the count on the Activity link</td></tr>
+        <tr><td>newer ones</td><td>show again</td></tr>
+        <tr><td>on record</td><td>as an Activity event</td></tr>
+      </table>
+    </div>
   </div>
   {% else %}
   <a class="tile link {{ c.tone }}" href="{{ c.href }}">

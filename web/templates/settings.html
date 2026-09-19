@@ -69,8 +69,8 @@ here, so keep the dashboard on loopback or your own network.</p>
               <label for="f-{{ s.env }}">{% if sub %}<span class="sub">{{ sub }} · </span>{% endif %}{{ label }}</label>
               <div class="meta">
                 <span class="mono small muted">{{ s.env }}</span>
-                {% if row.overridden %}<span class="tag stale" title="exported in the environment; the file value is saved but does not reach the running process">env override</span>{% endif %}
-                {% if row.defaulted %}<span class="tag" title="config.json does not set this key; this is the value the code applies, and saving writes it to the file">default</span>{% endif %}
+                {% if row.overridden %}<span class="tag stale" title="set in the environment: the file's value is saved but the process keeps the exported one">env override</span>{% endif %}
+                {% if row.defaulted %}<span class="tag" title="not in config.json: the code's default applies; saving writes it to the file">default</span>{% endif %}
                 {% if row.restart == 'container' %}<span class="tag" title="the container reads this once at start: docker compose restart to apply">container restart</span>
                 {% elif row.restart == 'dashboard' %}<span class="tag" title="the dashboard reads this once at start: Restart dashboard to apply">dashboard restart</span>{% endif %}
               </div>

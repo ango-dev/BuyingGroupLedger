@@ -158,7 +158,10 @@ or drag for a range; double-click, Enter or just start typing to
 edit (the keystroke replaces the value); Enter saves, and fills every cell of a selected range;
 Esc cancels; Delete clears the selection; Ctrl+C copies the selection as tab-separated values
 (it pastes into Sheets or Excel) and Ctrl+V pastes a value into every selected cell or a block
-cell by cell from the top-left; the arrow keys move, with Shift they extend. A date cell opens the page's own calendar (so
+cell by cell from the top-left; the arrow keys move, with Shift they extend; Ctrl+Z undoes the
+last accepted write and Ctrl+Y (or Ctrl+Shift+Z) redoes it -- a range fill, a paste or Ctrl+; is one
+step, the old value goes back through the same conflict check, and the stacks are the page load's
+(added and deleted rows are not undone this way). Clicking the only selected row again deselects it. A date cell opens the page's own calendar (so
 does every date field on a form, and the Placed in / Paid in filters open a month grid; the month
 name and the year in the calendar's head are buttons, so any month or year is a click away; Ctrl+;
 puts today's date into a date cell or field, as in Sheets); Status, Retailer, Buying Group, Card Name, Card Last 4 and Profile

@@ -9,6 +9,9 @@
 //   Delete/Backspace clears every editable selected cell
 //   Ctrl+;           puts today's date into every selected date cell (as in Sheets)
 //   Space            toggles a Tracking Submitted checkbox cell (click does too)
+//   Ctrl+Z / Ctrl+Y  undo / redo the last accepted write (a range fill, a paste or Ctrl+; is one
+//                    step; Ctrl+Shift+Z redoes too); the old value goes back through the same
+//                    conflict-checked POST, so a cell someone changed meanwhile is refused, not clobbered
 //   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
 //                    pastes a single value into every selected cell, or a block cell by cell from
 //                    the top-left of the selection (through a hidden textarea, so it works on http)
@@ -110,42 +113,99 @@
   function clearSelection() { ranges = []; anchor = null; paint(false); }
   document.addEventListener("cells:clear", clearSelection);  // a plain click on a row number
 
+  // ---- undo / redo -------------------------
+  // Every write the server ACCEPTED goes on the undo stack with what the cell showed before; one
+  // user action (a range fill, a paste, Ctrl+;) is one step. Undoing a step writes its old values
+  // back, in reverse, through the same conflict-checked POST -- so a cell someone else changed
+  // meanwhile is refused, not clobbered -- and the writes that succeed form the redo step. A cell
+  // no longer on the page (the filter changed, the row went) is skipped. Added and deleted rows are
+  // not undoable here. The stacks are this page load's: a full reload starts empty.
+  var undoStack = [], redoStack = [], UNDO_LIMIT = 100;
+  function newStep(mode) { return { mode: mode || "edit", entries: [] }; }
+  function keyOf(td) {
+    return { order_id: td.getAttribute("data-order-id"), order_date: td.getAttribute("data-order-date"),
+             item_name: td.getAttribute("data-item-name"), shipment: td.getAttribute("data-shipment"),
+             field: td.getAttribute("data-field") };
+  }
+  function findCell(k) {  // the cell for a key + field as it is NOW (swaps replace the element)
+    var tds = document.querySelectorAll('td[data-field="' + k.field + '"][data-order-id]');
+    for (var i = 0; i < tds.length; i++) {
+      var td = tds[i];
+      if (td.getAttribute("data-order-id") === k.order_id && td.getAttribute("data-order-date") === k.order_date &&
+          td.getAttribute("data-item-name") === k.item_name && td.getAttribute("data-shipment") === k.shipment) return td;
+    }
+    return null;
+  }
+  function recorded(step, entry) {
+    if (!step.entries.length) {  // the step's first accepted write puts it on its stack
+      if (step.mode === "undo") { redoStack.push(step); }
+      else {
+        undoStack.push(step);
+        if (step.mode === "edit") redoStack = [];  // a fresh edit forks the history, as everywhere
+        if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+      }
+    }
+    step.entries.push(entry);
+  }
+  function replay(from, mode) {  // revert one step: write each entry's `before` back, last first
+    var step = from.pop();
+    if (!step) return;
+    var next = newStep(mode), first = null;
+    step.entries.slice().reverse().forEach(function (en) {
+      var td = findCell(en);
+      if (!td || !editable(td)) return;
+      if (!first) first = en;
+      writeCell(td, en.before, next);
+    });
+    if (first) queue = queue.then(function () { var td = findCell(first); if (td) selectOne(td, true); });
+  }
+  function undo() { replay(undoStack, "undo"); }
+  function redo() { replay(redoStack, "redo"); }
+
   // ---- writes, one after another ----------------------------------------------------------------
   var queue = Promise.resolve();
-  function writeCell(td, value) {
+  function writeCell(td, value, step) {
     if (!editable(td)) return;
     var raw = td.getAttribute("data-raw") || "";
     if (value === raw) return;
+    var key = keyOf(td);
     var values = {
-      order_id: td.getAttribute("data-order-id"),
-      order_date: td.getAttribute("data-order-date"),
-      item_name: td.getAttribute("data-item-name"),
-      shipment: td.getAttribute("data-shipment"),
-      field: td.getAttribute("data-field"),
+      order_id: key.order_id,
+      order_date: key.order_date,
+      item_name: key.item_name,
+      shipment: key.shipment,
+      field: key.field,
       value: value,
       expected: raw,
       // the count line's switch: on = a hand edit the runs keep; off = a correction they may overwrite
       protect: (function () { var box = document.getElementById("protect-edits"); return box && !box.checked ? "0" : "1"; })()
     };
+    var mine = step || newStep("edit");
     td.classList.add("saving");
     queue = queue.then(function () {
       return htmx.ajax("POST", "/orders/cell", { target: td, swap: "outerHTML", values: values });
+    }).then(function () {
+      var fresh = findCell(key);
+      if (!fresh || fresh.hasAttribute("data-error")) return;  // refused: nothing to undo
+      recorded(mine, { order_id: key.order_id, order_date: key.order_date, item_name: key.item_name,
+                       shipment: key.shipment, field: key.field, before: raw,
+                       after: fresh.getAttribute("data-raw") || "" });
     }).catch(function () {});
   }
   function fillSelection(value) {
-    var targets = [];
+    var targets = [], step = newStep("edit");
     forEachSelected(function (td) { if (editable(td)) targets.push(td); });
-    targets.forEach(function (td) { writeCell(td, value); });
+    targets.forEach(function (td) { writeCell(td, value, step); });
   }
   function today() {
     var d = new Date();
     var pad = function (n) { return (n < 10 ? "0" : "") + n; };
     return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
   }
-  function fillToday() {  // Ctrl+; -- every selected DATE cell gets today's date
-    var targets = [];
+  function fillToday() {  // Ctrl+; -- every selected DATE cell gets today's date (one undo step)
+    var targets = [], step = newStep("edit");
     forEachSelected(function (td) { if (editable(td) && td.getAttribute("data-kind") === "date") targets.push(td); });
-    targets.forEach(function (td) { writeCell(td, today()); });
+    targets.forEach(function (td) { writeCell(td, today(), step); });
   }
 
   // ---- the editor --------------------------------------------------------------------------------
@@ -300,11 +360,13 @@
     if (!sel || !text) return;
     var rows = text.replace(/\r/g, "").replace(/\n$/, "").split("\n").map(function (l) { return l.split("\t"); });
     if (rows.length === 1 && rows[0].length === 1) { fillSelection(rows[0][0]); return; }
-    // A block: cell by cell from the top-left of the last range, as far as the table goes.
+    // A block: cell by cell from the top-left of the last range, as far as the table goes (one
+    // undo step).
+    var step = newStep("edit");
     rows.forEach(function (line, dr) {
       line.forEach(function (value, dc) {
         var td = cellAt(sel.r1 + dr, sel.c1 + dc);
-        if (editable(td)) writeCell(td, value);
+        if (editable(td)) writeCell(td, value, step);
       });
     });
   }
@@ -351,9 +413,12 @@
   }
   document.addEventListener("keydown", function (e) {
     if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    var ctrl = e.ctrlKey || e.metaKey;
+    // Undo / redo need no selection: they act on this page's last accepted write.
+    if (ctrl && (e.key === "z" || e.key === "Z") && document.querySelector(GRID)) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if (ctrl && (e.key === "y" || e.key === "Y") && document.querySelector(GRID)) { e.preventDefault(); redo(); return; }
     var td = active ? cellAt(active.r, active.c) : null;
     if (!td || !inGrid(document.activeElement)) return;
-    var ctrl = e.ctrlKey || e.metaKey;
     if (e.key === "ArrowUp") { e.preventDefault(); move(-1, 0, e.shiftKey); }
     else if (e.key === "ArrowDown") { e.preventDefault(); move(1, 0, e.shiftKey); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); move(0, -1, e.shiftKey); }
@@ -501,10 +566,14 @@
       setRow(tr, !box.checked);  // joins, or leaves, the selection; the rest stays
       press = box.checked ? { tr: tr, moved: false, rows: rows, on: [tr] } : null;
     } else {
+      // Clicking the ONLY selected row again deselects it; with others selected
+      // a plain click narrows to this row, as in Sheets, and the next click deselects it. The
+      // deselect waits for mouseup so a drag that starts on it still selects a range.
+      var alone = box.checked && document.querySelectorAll('input[name="sel"]:checked').length === 1;
       document.dispatchEvent(new Event("rows:clear"));   // this row, and nothing else --
       document.dispatchEvent(new Event("cells:clear"));  // not the cells either, as in Sheets
       setRow(tr, true);
-      press = { tr: tr, moved: false, rows: rows, on: [tr] };
+      press = { tr: tr, moved: false, rows: rows, on: [tr], toggleOff: alone };
     }
     last = tr;
     changed(tr);
@@ -533,7 +602,10 @@
     last = tr;
     changed(tr);
   });
-  document.addEventListener("mouseup", function () { press = null; });
+  document.addEventListener("mouseup", function () {
+    if (press && press.toggleOff && !press.moved) { setRow(press.tr, false); changed(press.tr); }
+    press = null;
+  });
   document.addEventListener("change", function (e) {
     if (e.target && (e.target.name === "sel" || e.target.id === "sel-all")) syncClasses();
   });

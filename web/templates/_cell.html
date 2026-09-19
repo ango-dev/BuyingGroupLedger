@@ -7,7 +7,7 @@
 {%- set hand = row and col in row.hand_edited -%}
 <td class="{{ 'num' if col in MONEY_FIELDS or col in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }}{{ ' mono' if col in ('order_id', 'tracking_number', 'package_id', 'card_last4') }}{{ ' item' if col == 'item_name' }}{{ ' edit' if editable_cell }}{{ ' error' if error }}{{ ' hand' if hand }}"
     data-field="{{ col }}"
-    {%- if editable_cell %} data-raw="{{ raw }}" data-order-id="{{ key.order_id }}" data-order-date="{{ key.order_date }}" data-item-name="{{ key.item_name }}" data-shipment="{{ key.shipment }}" tabindex="0" data-kind="{{ 'check' if col == 'tracking_submitted' else 'date' if col in DATE_FIELDS else 'choice' if col in CHOICE_FIELDS else 'text' }}" title="{{ 'typed by hand: runs keep this value (clear it to get the run\'s value back); ' if hand }}double-click or press Enter to edit{{ ' (a calendar opens)' if col in DATE_FIELDS else ' (previous answers are offered)' if col in CHOICE_FIELDS }}"{% elif hand %} title="typed by hand: runs keep this value"{% endif %}
+    {%- if editable_cell %} data-raw="{{ raw }}" data-order-id="{{ key.order_id }}" data-order-date="{{ key.order_date }}" data-item-name="{{ key.item_name }}" data-shipment="{{ key.shipment }}" tabindex="0" data-kind="{{ 'check' if col == 'tracking_submitted' else 'date' if col in DATE_FIELDS else 'choice' if col in CHOICE_FIELDS else 'text' }}" data-tip-from="{{ 'tip-hand ' if hand }}tip-cell-{{ 'check' if col == 'tracking_submitted' else 'date' if col in DATE_FIELDS else 'choice' if col in CHOICE_FIELDS else 'text' }}"{% elif hand %} data-tip-from="tip-hand"{% endif %}
     {%- if error %} data-error="{{ error }}"{% endif %}>
   {%- if error %}<span class="cell-error" title="{{ error }}">⚠ {{ error }}</span> {% endif -%}
   {%- if row -%}
@@ -20,9 +20,9 @@
     {%- elif col in LINK_FIELDS -%}
       {%- if raw -%}<a href="{{ raw }}" rel="noopener" title="{{ raw }}">{{ 'receipt' if col == 'receipt_url' else 'tracking' if col == 'tracking_url' else 'order' }} ↗</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the link" aria-label="edit {{ col }}">✎</button>{% endif %}{%- elif editable_cell -%}<span class="muted cell-empty">add ↗</span>{%- endif -%}{%- if col == 'receipt_url' and editable_cell -%}<button type="button" class="cell-upload" data-order-id="{{ key.order_id }}" title="upload a receipt file for this order (the link goes on every row of it)" aria-label="upload a receipt for {{ key.order_id }}">⤒</button>{%- endif -%}
     {%- elif col == 'tracking_submitted' -%}
-      <input type="checkbox" class="cell-check" {{ 'checked' if row.tracking_submitted }} {{ '' if editable_cell else 'disabled' }} aria-label="tracking submitted" title="{{ 'submitted to the buying group' if row.tracking_submitted else 'not submitted' }}{{ ' — click, Space or Enter toggles' if editable_cell }}">
+      <input type="checkbox" class="cell-check" {{ 'checked' if row.tracking_submitted }} {{ '' if editable_cell else 'disabled' }} aria-label="tracking submitted" title="{{ 'submitted to the buying group' if row.tracking_submitted else 'not submitted' }}">
     {%- elif col == 'delivery_date' -%}
-      {{ text }}{% if raw and row.status in ('ordered', 'shipped') %} <span class="tag committed" title="the retailer's estimated delivery date; the run flips the row to delivered when the package lands">est.</span>{% endif %}
+      {{ text }}{% if raw and row.status in ('ordered', 'shipped') %} <span class="tag committed" title="the retailer's estimated delivery date, until the run sees the package land">est.</span>{% endif %}
     {%- elif col == 'payout_amount' -%}
       {{ text }}{% if row.is_committed and raw %} <span class="tag committed" title="committed by the buying group, not yet paid">proj.</span>{% endif %}
     {%- elif col == 'expected_payout' -%}
