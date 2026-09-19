@@ -304,6 +304,21 @@ class LedgerCellWriter:
         _release(worksheet, key, field)
         return {"row_number": row_number, "field": field}
 
+    def protect_cell(self, key: dict, field: str) -> dict:
+        """Mark one cell's CURRENT value as a hand edit, so no run overwrites it -- the other half
+        of the Ctrl+Shift+H toggle. Recorded
+        with no previous value: clearing the cell later clears it (and releases it). An empty cell
+        is refused: a mark on nothing would only stop the run from filling it."""
+        self._guard()
+        worksheet = self._opener()
+        grid = _Grid(worksheet)
+        row_number = grid.locate(key)
+        current = _text(grid.cell(row_number, field))
+        if current == "":
+            raise EditError("an empty cell cannot be marked as a hand edit")
+        _protect(worksheet, key, field, current, previous=None)
+        return {"row_number": row_number, "field": field, "value": current}
+
     def write_cells(self, keys: list[dict], field: str, value: str) -> dict:
         """Set `field` to `value` on every row in `keys`, in one read and at most two batched
         writes (RAW values, USER_ENTERED blanks). A key that cannot be located is reported, not

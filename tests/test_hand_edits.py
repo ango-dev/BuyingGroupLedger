@@ -242,6 +242,12 @@ class TestThePageShowsIt:
         assert td.lstrip().startswith("<td") and ' hand"' not in td and "data-error" not in td
         assert 'data-raw="0.06"' in td and hand_edits.protected(db) == {}
         assert ws.get_all_values()[1][FIELDNAMES.index("cashback_rate")] == "0.06"
+        # the other half of the toggle: the current value becomes a hand edit
+        td = TestClient(app).post("/orders/cell/protect", data={**KEY, "field": "cashback_rate"}).text
+        assert ' hand"' in td and "data-error" not in td and hand_edits.protected(db) == {KEYT: {"cashback_rate"}}
+        assert hand_edits.previous_value(db, KEYT, "cashback_rate") in (None, "")
+        empty = TestClient(app).post("/orders/cell/protect", data={**KEY, "field": "insurance"}).text
+        assert 'data-error="an empty cell cannot be marked as a hand edit"' in empty
 
 
 class TestTheCli:

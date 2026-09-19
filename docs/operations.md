@@ -175,8 +175,9 @@ Every write is one conflict-checked cell write, run one after another. **A cell 
 on** while the count line's *keep my edits from runs* switch is on (it is, on Orders; off on Audit
 and Recon, where an edit usually fixes a finding the run should then own -- switched off, a write
 is a correction the runs may overwrite, and it releases any protection the cell had; and with
-hand-edited cells selected, Ctrl+Shift+H or the count line's *release hand edits* button drops
-their marks and keeps their values, so the runs may write them again): the scheduled
+cells selected, Ctrl+Shift+H or the count line's button toggles the mark: hand-edited cells are
+released, values kept, so the runs may write them again; unmarked cells with a value are marked
+as hand edits, so the runs keep them): the scheduled
 run's upsert, its order-level reproration and the buying-group sync all keep a hand-typed value
 (`ledger_db/hand_edits`, a table in the ledger file that the dashboard's writer fills; the cell
 shows a coloured left edge and says so in its tooltip). Clearing the cell puts back what the run had

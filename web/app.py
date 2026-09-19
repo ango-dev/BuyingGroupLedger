@@ -850,9 +850,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     choices=cell_choices(snapshot.rows, settings_cards()) if field in CHOICE_FIELDS else None)
 
     @app.post("/orders/cell/release", response_class=HTMLResponse)
-    async def orders_cell_release(request: Request):
-        """Release ONE cell's hand-edit mark, value kept (the grid's Ctrl+Shift+H / the count
-        line's button, over every selected hand-edited cell), answering with the cell re-rendered."""
+    @app.post("/orders/cell/protect", response_class=HTMLResponse)
+    async def orders_cell_mark(request: Request):
+        """The hand-edit mark on ONE cell, value kept: /release drops it (the runs may write the
+        cell again), /protect sets it on the cell's current value. The grid's Ctrl+Shift+H and the
+        count line's button toggle every selected cell this way. Answers with the cell re-rendered."""
+        releasing = request.url.path.endswith("/release")
         form = await request.form()
         key = {k: str(form.get(k, "")) for k in ("order_id", "order_date", "item_name", "shipment")}
         field = str(form.get("field", ""))
@@ -863,11 +866,15 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             error = f"{field} is not editable"
         else:
             try:
-                writer.release_cell(key, field)
-                act("edit", f"{FIELD_TO_HEADER.get(field, field)} on {key['order_id']} "
-                            f"(shipment {key['shipment']}): hand edit released, value kept (runs may write it again)",
+                if releasing:
+                    writer.release_cell(key, field)
+                    what = "hand edit released, value kept (runs may write it again)"
+                else:
+                    writer.protect_cell(key, field)
+                    what = "marked as a hand edit (runs keep this value)"
+                act("edit", f"{FIELD_TO_HEADER.get(field, field)} on {key['order_id']} (shipment {key['shipment']}): {what}",
                     {"order_id": key["order_id"], "item_name": key["item_name"], "shipment": key["shipment"],
-                     "field": field, "released": True})
+                     "field": field, "released": releasing, "protected": not releasing})
             except EditError as exc:
                 error = str(exc)
             except Exception as exc:  # noqa: BLE001

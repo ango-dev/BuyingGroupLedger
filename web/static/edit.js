@@ -9,8 +9,9 @@
 //   Esc              cancels the editor, or clears the selection (cells and rows both)
 //   Delete/Backspace clears every editable selected cell
 //   Ctrl+;           puts today's date into every selected date cell (as in Sheets)
-//   Ctrl+Shift+H     releases the hand-edit mark on every selected hand-edited cell, value kept
-//                    (the count line's "release hand edits" button does the same)
+//   Ctrl+Shift+H     toggles the hand-edit mark on the selection: marked cells are released (values
+//                    kept, the runs may write them again), else the selected values are marked (the
+//                    count line's button does the same, worded for what it would do)
 //   Space            toggles a Tracking Submitted checkbox cell (click does too)
 //   Ctrl+Z / Ctrl+Y  undo / redo the last accepted write (a range fill, a paste or Ctrl+; is one
 //                    step; Ctrl+Shift+Z redoes too); the old value goes back through the same
@@ -77,8 +78,15 @@
   function paint(takeFocus) {
     document.querySelectorAll("td.sel-cell").forEach(function (td) { td.classList.remove("sel-cell"); });
     forEachSelected(function (td) { td.classList.add("sel-cell"); });
-    var release = document.getElementById("release-hand");  // shown only when a hand-edited cell is selected
-    if (release) release.hidden = !handSelected().length;
+    var release = document.getElementById("release-hand");  // the toggle's button: worded for what it would do
+    if (release) {
+      var marked = handSelected().length, plain = marked ? 0 : markable().length;
+      release.hidden = !marked && !plain;
+      release.textContent = marked ? "release hand edits" : "mark as hand edits";
+      release.title = marked
+        ? "the selected hand-edited cells keep their values but lose the mark: the runs may write them again (Ctrl+Shift+H)"
+        : "the selected cells' current values become hand edits the runs keep (Ctrl+Shift+H)";
+    }
     var td = active ? cellAt(active.r, active.c) : null;
     if (!td || dragging || document.activeElement === td || document.querySelector("input.cell-input")) return;
     var free = document.activeElement === document.body || inGrid(document.activeElement);
@@ -217,27 +225,35 @@
     var pad = function (n) { return (n < 10 ? "0" : "") + n; };
     return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
   }
-  // Ctrl+Shift+H, or the count line's "release hand edits" button: every selected hand-edited
-  // cell keeps its value and loses its mark, so the runs may write it again. Not
-  // an undo step: nothing about the value changed.
+  // Ctrl+Shift+H, or the count line's button, TOGGLES the hand-edit mark on the selection: with hand-edited cells selected they are released -- value
+  // kept, the runs may write them again; with none, every selected cell that holds a value is
+  // marked as a hand edit. Not an undo step: no value changes.
   function handSelected() {
     var out = [];
     forEachSelected(function (td) { if (editable(td) && td.classList.contains("hand")) out.push(td); });
     return out;
   }
-  function releaseSelection() {
-    handSelected().forEach(function (td) {
+  function markable() {  // the selected cells a mark could go on: editable, with a value, not marked
+    var out = [];
+    forEachSelected(function (td) {
+      if (editable(td) && !td.classList.contains("hand") && (td.getAttribute("data-raw") || "") !== "") out.push(td);
+    });
+    return out;
+  }
+  function postMark(tds, path) {
+    tds.forEach(function (td) {
       var key = keyOf(td);
-      var t = td.closest("table");
-      var url = (t && t.getAttribute("data-release-url")) || "/orders/cell/release";
       td.classList.add("saving");
       queue = queue.then(function () {
-        return htmx.ajax("POST", url, { target: td, swap: "outerHTML", values: key });
+        return htmx.ajax("POST", path, { target: td, swap: "outerHTML", values: key });
       }).catch(function () {});
     });
   }
+  function releaseSelection() { postMark(handSelected(), "/orders/cell/release"); }
+  function markSelection() { postMark(markable(), "/orders/cell/protect"); }
+  function toggleHandSelection() { if (handSelected().length) releaseSelection(); else markSelection(); }
   document.addEventListener("click", function (e) {
-    if (e.target && e.target.id === "release-hand") releaseSelection();
+    if (e.target && e.target.id === "release-hand") toggleHandSelection();
   });
   function fillToday() {  // Ctrl+; -- every selected DATE cell gets today's date (one undo step)
     var targets = [], step = newStep("edit");
@@ -491,7 +507,7 @@
     else if ((e.key === "Delete" || e.key === "Backspace") && rowsChecked()) { /* the row selection owns them: see below */ }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); fillSelection(""); }
     else if (ctrl && e.key === ";") { e.preventDefault(); fillToday(); }
-    else if (ctrl && e.shiftKey && (e.key === "h" || e.key === "H")) { e.preventDefault(); releaseSelection(); }
+    else if (ctrl && e.shiftKey && (e.key === "h" || e.key === "H")) { e.preventDefault(); toggleHandSelection(); }
     else if (ctrl && (e.key === "c" || e.key === "C")) { e.preventDefault(); copySelection(); }
     else if (ctrl && (e.key === "v" || e.key === "V")) { armPaste(); }  // not prevented: the paste must happen
     else if (!ctrl && !e.altKey && e.key.length === 1 && editable(td)) {
