@@ -147,3 +147,41 @@ def test_the_expenses_grid_writes_undoes_narrows_and_deletes(client, served, pag
     assert page.evaluate('document.querySelectorAll("table.expenses tbody tr").length') == 1
     assert page.evaluate('document.querySelectorAll("table.expenses .cell-upload").length') == 1  # the receipt cell's ⤒
     assert page.errors == []
+
+
+@pytest.fixture
+def phone():
+    """A phone-sized, touch-capable page (iPhone-ish): a coarse pointer, 390px wide."""
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(channel="chrome", headless=True)
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"no local Chrome for Playwright: {type(exc).__name__}")
+        context = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2,
+                                      is_mobile=True, has_touch=True)
+        page = context.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.errors = errors  # type: ignore[attr-defined]
+        yield page
+        browser.close()
+
+
+def test_a_phone_fits_the_pages_and_taps_edit(client, served, phone, tmp_path):
+    client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                data={"date": "2026-03-04", "description": "boxes", "amount": "12.50", "profile": "alpha",
+                      "category": "supplies", "receipt_url": "https://x/r"})
+    for path in ("/", "/orders", "/orders?view=cards", "/taxes?year=2026", "/settings", "/activity", "/audit"):
+        phone.goto(f"{served}{path}")
+        over = phone.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        assert over == 0, f"{path} sticks out {over}px past a phone's viewport"
+    assert phone.evaluate("window.matchMedia('(pointer: coarse)').matches")
+    phone.goto(f"{served}/taxes?year=2026")
+    cell = 'td[data-field="description"]'
+    phone.tap(cell)  # the first tap selects
+    assert phone.evaluate('document.querySelectorAll("td.sel-cell").length') == 1
+    assert not phone.evaluate('!!document.querySelector("input.cell-input")')
+    phone.tap(cell)  # the second tap on the selected cell edits
+    phone.wait_for_selector("input.cell-input", timeout=3000)
+    phone.keyboard.press("Escape")
+    assert phone.errors == []

@@ -221,6 +221,12 @@ any combination; *All* clears the others (and re-ticks itself when the last valu
 is unticked); with a dropdown open, typing narrows its list -- a "narrow: …" line shows what
 was typed (Backspace edits, Escape clears). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
 
+**On a phone or an iPad** (a window under 760px wide, or a touch screen) the header's links scroll
+sideways, the filter bar wraps, the forms stack, and the grids take touch: a tap selects a cell, a
+second tap on the selected cell opens its editor, a long press opens the right-click menu, and a
+tap on a hint pill shows its tip. A full-size window is laid out as before. The cards view is the
+easier way to read the ledger on a phone; the table still scrolls in both directions.
+
 **Sorting.** Every table opens on its date, newest first, with no arrow; a header name cycles
 ascending, descending, then clear (back to that default). The cards view's *Sort by* and *Order*
 controls name a sort explicitly.

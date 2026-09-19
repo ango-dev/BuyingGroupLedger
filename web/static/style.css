@@ -159,7 +159,7 @@ table.ledger td { white-space: nowrap; }
    both themes. */
 /* The page scrolls as one (main), the filter bar sticking to the top as the title scrolls away;
    the table's header row and its row-number column stick within it. */
-body.wide { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+body.wide { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }  /* dvh: the phone's real viewport under its toolbars */
 body.wide header.top { flex: 0 0 auto; }
 body.wide main { flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%; margin: 0; overflow: auto;
   max-width: none; padding: 0; display: block; }
@@ -821,4 +821,40 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important;
     transition-duration: .01ms !important; transition-delay: 0s !important; }
+}
+
+/* ---- narrow windows and phones: everything here is gated on width or on
+   a coarse pointer, so a desktop window is untouched. The header's link row scrolls sideways
+   instead of overflowing the page (it stuck out 359px on a phone), the filter bar wraps, the
+   wide pages' controls fit the viewport, and the grids get touch affordances. ---- */
+@media (max-width: 760px) {
+  header.top { padding: 0 12px; gap: 4px; }
+  header nav { width: 100%; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  header nav::-webkit-scrollbar { display: none; }
+  header nav a { padding: 12px 8px; white-space: nowrap; flex: 0 0 auto; }
+  header nav .brand { margin-right: 8px; }
+  header nav .brand .wordmark { display: none; }
+  header nav details.nav-menu { flex: 0 0 auto; }
+  header .meta { width: 100%; justify-content: space-between; padding-bottom: 6px; }
+  header .meta .pill { max-width: 62vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  details.multi .menu { max-width: calc(100vw - 24px); }
+  main { padding: 0 12px 32px; }
+  .filters { flex-wrap: wrap; }
+  .filters .reset { margin-left: 0; }
+  .filters label.search { flex: 1 1 100%; max-width: none; }
+  body.wide h1 { margin: 8px 12px 6px; }
+  body.wide .lead, body.wide .count { margin-left: 12px; margin-right: 12px; }
+  .add-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .add-form .span-3 { grid-column: span 2; }
+  .expense-form .egrid { grid-template-columns: 1fr; }
+  .expense-form .egrid .span-2 { grid-column: span 1; }
+  .tiles.attention { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .panel { padding: 12px 14px 14px; }
+  .ctx { min-width: 200px; }
+  .ctx button { padding: 9px 10px; }  /* finger-sized */
+}
+@media (pointer: coarse) {
+  /* no double-tap zoom on the grids, so a second tap edits and a long press opens the menu */
+  table.sheetlike td, table.sheetlike th, table.order-rows td, table.order-rows th { touch-action: manipulation; }
+  table.sheetlike td.edit, table.order-rows td.edit { cursor: default; }
 }

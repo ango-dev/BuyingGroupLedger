@@ -686,6 +686,9 @@ class TestOverviewPage:
         assert "settings-open=; path=/settings; max-age=0" in settings_js and "function read()" not in settings_js  # nothing remembered
         assert 'getAttribute("data-tip-from")' in js and 'classList.add("rich")' in js  # a tip may be a table
         assert "split(/\\s+/)" in js  # several blocks in one panel: a cell's how-to plus its hand-edit note
+        assert 'matchMedia("(pointer: coarse)")' in js  # a tap shows a tip where there is no hover
+        css = client.get("/static/style.css").text
+        assert "@media (max-width: 760px)" in css and "@media (pointer: coarse)" in css and "100dvh" in css
         css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
         assert ".tip {" in css and ".tip.on" in css
 
@@ -1574,7 +1577,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        "function releaseSelection()", "function markSelection()", "function toggleHandSelection()",
                        '(e.key === "h" || e.key === "H")',
                        "function selectColumn(th, add, extend)", 'getAttribute("data-upload-url")',
-                       "function cellLink(e)", "function openLink(link)", '"Open link"', 'addEventListener("contextmenu"', 'className = "ctx"',
+                       "function cellLink(e)", "function openLink(link)", '"Open link"',
+                       'matchMedia("(pointer: coarse)")', "function openMenuAt(target, x, y)", 'addEventListener("touchstart"', 'addEventListener("contextmenu"', 'className = "ctx"',
                        "function runCtx(act)", 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
                        "undoStack.push(step)", "redoStack = []", "toggleOff: alone",
                        "function choicesFor(field, td)", "Picker.choicesFor(field,",

@@ -17,6 +17,7 @@
 //                    step; Ctrl+Shift+Z redoes too); the old value goes back through the same
 //                    conflict-checked POST, so a cell someone changed meanwhile is refused, not clobbered
 //   right-click      a menu of these actions, with their keys, on any cell or header cell
+//   touch            a tap selects, a second tap on the selected cell edits, a long press opens the menu
 //   a link in a cell a plain click selects the cell (copy works); Ctrl-click, middle-click or a
 //                    double-click on a read-only cell opens it
 //   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
@@ -35,6 +36,9 @@
   // The Orders table and an order page's shipment tables are all grids; the selection lives in
   // ONE of them at a time (the one last clicked), and a cell swap keeps the table element.
   var GRID = "table.sheetlike, table.order-rows";
+  // A touch screen (a phone, an iPad): taps instead of clicks, no hover, no keyboard until an
+  // input has focus.
+  var COARSE = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
   var GRID_TD = "table.sheetlike td, table.order-rows td";  // NOT GRID + " td": the comma would split it
   var grid = null;     // the table the selection is in
   function table() { return grid && grid.isConnected ? grid : null; }
@@ -394,12 +398,16 @@
     var open = document.querySelector("input.cell-input");
     if (open) open.blur();  // commits or cancels the open editor first
     var same = td.closest(GRID) === table();
+    // On a touch screen a tap on the cell that is ALREADY selected opens its editor (there is no
+    // keyboard to "just type" with, and a double-tap zooms), as Sheets does on a phone.
+    var again = COARSE && same && active && td === cellAt(active.r, active.c) && !e.shiftKey && !(e.ctrlKey || e.metaKey);
     var added = true;
     if (e.shiftKey && anchor && same) { active = coordsOf(td); setSelection(anchor, active); }
     else if ((e.ctrlKey || e.metaKey) && same) { added = toggleOne(td); }
     else { selectOne(td, false); document.dispatchEvent(new Event("rows:clear")); }
     dragging = added;  // set after the first paint, which focuses the clicked cell
     e.preventDefault();  // no text selection while dragging a range
+    if (again && editable(td)) { dragging = false; startEdit(td); }
   });
   document.addEventListener("mousemove", function (e) {
     if (!dragging) return;
@@ -633,13 +641,12 @@
     else if (act === "row") { if (td) selectRowOf(td); }
     else if (act === "delete-rows") { var button = document.getElementById("delete-selected"); if (button) button.click(); }
   }
-  document.addEventListener("contextmenu", function (e) {
-    if (e.target.closest && e.target.closest("input, textarea, a")) return;  // the editor, a link: the browser's menu
-    var td = e.target.closest ? e.target.closest(GRID_TD) : null;
-    var th = td ? null : (e.target.closest ? e.target.closest("th") : null);
+  var ctxOpenedAt = 0;
+  function openMenuAt(target, x, y) {  // the menu for the cell or header cell under (x, y); false when none applies
+    var td = target.closest ? target.closest(GRID_TD) : null;
+    var th = td ? null : (target.closest ? target.closest("th") : null);
     if (th && (!th.closest(GRID) || th.classList.contains("rownum"))) th = null;
-    if (!td && !th) { hideCtx(); return; }
-    e.preventDefault();
+    if (!td && !th) { hideCtx(); return false; }
     var onRow = !!(td && td.classList.contains("rownum"));
     if (td && !onRow && !td.classList.contains("sel-cell")) { selectOne(td, false); document.dispatchEvent(new Event("rows:clear")); }
     if (th) selectColumn(th, false, false);
@@ -665,11 +672,40 @@
     var m = ctxMenu();
     m.innerHTML = html;
     m.classList.add("on");
+    ctxOpenedAt = Date.now();
     var w = m.offsetWidth, h = m.offsetHeight, pad = 6;
-    m.style.left = Math.max(pad, Math.min(e.clientX, window.innerWidth - w - pad)) + "px";
-    m.style.top = Math.max(pad, Math.min(e.clientY, window.innerHeight - h - pad)) + "px";
+    m.style.left = Math.max(pad, Math.min(x, window.innerWidth - w - pad)) + "px";
+    m.style.top = Math.max(pad, Math.min(y, window.innerHeight - h - pad)) + "px";
+    return true;
+  }
+  document.addEventListener("contextmenu", function (e) {
+    if (e.target.closest && e.target.closest("input, textarea, a")) return;  // the editor, a link: the browser's menu
+    if (openMenuAt(e.target, e.clientX, e.clientY)) e.preventDefault();
   });
-  document.addEventListener("mousedown", function (e) { if (ctx && ctx.classList.contains("on") && !ctx.contains(e.target)) hideCtx(); }, true);
+  // A long press on a touch screen opens the same menu (iOS never fires contextmenu); the touch's
+  // own synthetic click and mousedown, which follow the release, must not close it at once.
+  var press = null;
+  document.addEventListener("touchstart", function (e) {
+    if (e.touches.length !== 1) { press = null; return; }
+    var t = e.touches[0], target = e.target;
+    if (!(target.closest && (target.closest(GRID_TD) || target.closest("th")))) return;
+    press = { x: t.clientX, y: t.clientY, target: target, timer: setTimeout(function () {
+      press = null;
+      openMenuAt(target, t.clientX, t.clientY);
+    }, 550) };
+  }, { passive: true });
+  document.addEventListener("touchmove", function (e) {
+    if (!press) return;
+    var t = e.touches[0];
+    if (Math.abs(t.clientX - press.x) > 8 || Math.abs(t.clientY - press.y) > 8) { clearTimeout(press.timer); press = null; }
+  }, { passive: true });
+  document.addEventListener("touchend", function () { if (press) { clearTimeout(press.timer); press = null; } }, { passive: true });
+  document.addEventListener("touchcancel", function () { if (press) { clearTimeout(press.timer); press = null; } }, { passive: true });
+  document.addEventListener("mousedown", function (e) {
+    if (!ctx || !ctx.classList.contains("on") || ctx.contains(e.target)) return;
+    if (Date.now() - ctxOpenedAt < 600) return;  // the tap that opened it, echoed as a mouse event
+    hideCtx();
+  }, true);
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") hideCtx(); }, true);
   window.addEventListener("scroll", hideCtx, true);
   window.addEventListener("resize", hideCtx);

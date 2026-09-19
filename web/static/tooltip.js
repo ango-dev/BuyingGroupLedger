@@ -123,4 +123,15 @@
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") hide(); });
   window.addEventListener("scroll", function () { if (current) place(current); }, { passive: true });
   window.addEventListener("resize", function () { if (current) place(current); });
+  // A touch screen has no hover: a tap on a tipped element (the hint pill, a heartbeat pill, a
+  // tag) shows its tip, a second tap or a tap elsewhere hides it.
+  if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) {
+    document.addEventListener("click", function (e) {
+      var el = target(e.target);
+      if (!el || el.closest("a, button, input, td, th")) { if (current) hide(); return; }
+      if (el === current) { hide(); return; }
+      clearTimeout(timer);
+      show(el);
+    });
+  }
 })();
