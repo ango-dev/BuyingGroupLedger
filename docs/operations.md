@@ -433,8 +433,8 @@ Neither writes anything.
   commitment (MOD publishes none) is not compared. Fix a figure by editing the cell; take a real
   shortfall up with the group.
 
-Both pages share the Orders page's remembered **view and page size** (cards or table) but never
-replay or rewrite its remembered filters.
+Each page -- Orders, Audit, Recon -- remembers its **own** view, page size and filters, and
+its Reset button clears only its own.
 
 
 ### The Taxes page

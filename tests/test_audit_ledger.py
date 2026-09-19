@@ -1330,7 +1330,10 @@ class TestMandatoryByStage:
         shipped_no_receipt = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell(""), "Receipt Link": Cell("")}))
         assert result_for(shipped_no_receipt, "mandatory_by_stage").status == "PASS"
         # from ordered on: the order link, the delivery address, the card and its last 4, and COGS
-        for name in ("Order Link", "Delivery Address", "Card", "Card Last 4"):
+        # shipped onward: the tracking number has been SUBMITTED (the box is ticked)
+        unsubmitted = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell(""), "Tracking Submitted": Cell(False)}))
+        assert "missing Tracking Submitted (not ticked)" in result_for(unsubmitted, "mandatory_by_stage").details[0]
+        for name in ("Order Link", "Delivery Address", "Card", "Card Last 4", "Buying Group"):
             bare = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Delivery Date": Cell(""), name: Cell("")}))
             assert f"row 2 (ordered): missing {name}" in result_for(bare, "mandatory_by_stage").details[0], name
 

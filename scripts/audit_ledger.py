@@ -1244,7 +1244,13 @@ MANDATORY_ALWAYS = ("Order Date", "Status", "Retailer", "Item Name", "Shipment",
 # ordered onward: the order link, where it ships to, which card paid and its
 # last 4, and COGS (computed from the cost inputs -- blank only when they are)
 MANDATORY_COSTED = ("Quantity", "Cost Per Item", "Total Cost", "Profile", "Order Link", "Delivery Address",
-                    "Card", "Card Last 4", "COGS")
+                    "Card", "Card Last 4", "COGS", "Buying Group")
+#: Cells that must hold TRUE from a stage on: a shipped row's tracking number has been submitted to
+#: the buying group.
+MANDATORY_TICKED_BY_STAGE = {
+    "shipped": ("Tracking Submitted",), "delivered": ("Tracking Submitted",),
+    "paid": ("Tracking Submitted",), "return": ("Tracking Submitted",),
+}
 MANDATORY_BY_STAGE = {
     "shipped": ("Tracking Number",),
     # delivered: the retailer's receipt too -- from then on the order is a cost
@@ -1280,6 +1286,8 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
             required += MANDATORY_COSTED
         required += MANDATORY_BY_STAGE.get(status, ())
         missing = [name for name in required if not cell(name)]
+        missing += [f"{name} (not ticked)" for name in MANDATORY_TICKED_BY_STAGE.get(status, ())
+                    if cell(name).lower() not in ("true", "1", "yes", "checked")]
         if missing:
             fails.append(f"row {row_number} ({status or 'no status'}): missing {', '.join(missing)}")
         stale = [name for name in UNEXPECTED_BY_STAGE.get(status, ()) if cell(name)]

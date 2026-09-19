@@ -29,21 +29,21 @@ def db(tmp_path):
     db = LedgerDb(tmp_path / "ledger.sqlite3")
     DbWorksheet(db).update(range_name="A2", values=[
         # open, committed, complete
-        row(profile_label="profile-p", order_date="2026-09-08", status="shipped", retailer="Best Buy", item_name="MacBook",
+        row(profile_label="profile-p", order_date="2026-09-08", status="shipped", tracking_submitted="True", retailer="Best Buy", item_name="MacBook",
             shipment="1", quantity="1", order_id="BBY01-1", tracking_number="5238",
             buying_group="BFMR", cost_per_item="1000", total_cost="1000", card_name="Amex",
             cashback_rate="0.04", insurance="6.4", expected_payout="1230", card_last4="4331",
             order_url="https://www.bestbuy.com/order/BBY01-1", delivery_address="1 Main St",
             last_scraped_at="2026-09-18T10:00:00+00:00"),
         # delivered with no rate: the COGS input gap the audit fails on
-        row(profile_label="profile-p", order_date="2026-08-10", status="delivered", retailer="Amazon", item_name="Fitbit",
+        row(profile_label="profile-p", order_date="2026-08-10", status="delivered", tracking_submitted="True", retailer="Amazon", item_name="Fitbit",
             shipment="1", quantity="1", order_id="111-2", tracking_number="TBA1",
             delivery_date="2026-08-13", buying_group="BFMR", cost_per_item="100", total_cost="100",
             order_url="https://www.amazon.com/o/111-2", delivery_address="1 Main St", card_name="Amex",
             card_last4="4331", receipt_url="/receipts/amazon/2026-08/111-2.pdf",
             last_scraped_at="2026-09-18T10:00:00+00:00"),
         # settled, short-paid against its commitment
-        row(profile_label="profile-p", order_date="2026-08-20", status="paid", retailer="Costco", item_name="iPad",
+        row(profile_label="profile-p", order_date="2026-08-20", status="paid", tracking_submitted="True", retailer="Costco", item_name="iPad",
             shipment="1", quantity="2", order_id="1399000017", tracking_number="1Z1",
             buying_group="BFMR", cost_per_item="200", total_cost="400", cashback_rate="0.09",
             payout_amount="500", payout_date="2026-09-01", expected_payout="520", insurance="2.4",
@@ -94,7 +94,7 @@ class TestAuditOverTheDatabase:
 
         ws = DbWorksheet(db)
         ws.update(range_name="A3", values=[row(
-            order_date="2026-08-10", status="delivered", retailer="Amazon", item_name="Fitbit",
+            order_date="2026-08-10", status="delivered", tracking_submitted="True", retailer="Amazon", item_name="Fitbit",
             shipment="1", quantity="1", order_id="111-2", tracking_number="TBA1",
             delivery_date="2026-08-13", buying_group="BFMR", cost_per_item="100", total_cost="100",
             card_name="Prime", cashback_rate="0.05", card_last4="0315",

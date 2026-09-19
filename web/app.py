@@ -248,11 +248,16 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     from web.queries import PER_PAGE_CHOICES as _PER, VIEWS as _VIEWS
 
     VIEW_COOKIE, PER_COOKIE, FILTERS_COOKIE = "ledger-view", "ledger-per", "ledger-filters"
+
+    def cookie(base: str, scope: str = "") -> str:
+        """Orders, Audit and Recon each remember their OWN view, page size and filters: the scoped pages
+        keep theirs under a suffixed cookie name."""
+        return f"{base}-{scope}" if scope else base
     COOKIE_MAX_AGE = 365 * 24 * 3600
     #: Never remembered: a page number is where you were, not how you look at the ledger.
     TRANSIENT = {"page", "notice", "error", "remember", "refresh"}
 
-    def remembered(request: Request, params, replay: bool = True) -> QueryParams:
+    def remembered(request: Request, params, replay: bool = True, scope: str = "") -> QueryParams:
         """The request's params with the remembered view / page size filled in when the request
         does not say. A BARE
         /orders -- no query at all, the nav link -- comes back with the whole remembered filter
@@ -262,12 +267,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             from urllib.parse import parse_qsl
 
             items = [(k, v) for k, v in items if k in TRANSIENT] + \
-                parse_qsl(request.cookies.get(FILTERS_COOKIE, ""), keep_blank_values=False)
+                parse_qsl(request.cookies.get(cookie(FILTERS_COOKIE, scope), ""), keep_blank_values=False)
         names = {k for k, _v in items}
-        view = request.cookies.get(VIEW_COOKIE, "")
+        view = request.cookies.get(cookie(VIEW_COOKIE, scope), "")
         if "view" not in names and view in _VIEWS:
             items.append(("view", view))
-        per = request.cookies.get(PER_COOKIE, "")
+        per = request.cookies.get(cookie(PER_COOKIE, scope), "")
         if "per" not in names and per.isdigit() and int(per) in _PER:
             items.append(("per", per))
         return QueryParams(items)
@@ -280,15 +285,15 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         if request.query_params.get("remember") != "1":
             return response
         if "view" in request.query_params:
-            response.set_cookie(VIEW_COOKIE, filters.view, max_age=COOKIE_MAX_AGE, samesite="lax")
+            response.set_cookie(cookie(VIEW_COOKIE, scope), filters.view, max_age=COOKIE_MAX_AGE, samesite="lax")
         if "per" in request.query_params:
-            response.set_cookie(PER_COOKIE, str(filters.per), max_age=COOKIE_MAX_AGE, samesite="lax")
+            response.set_cookie(cookie(PER_COOKIE, scope), str(filters.per), max_age=COOKIE_MAX_AGE, samesite="lax")
         explicit = [(k, v) for k, v in request.query_params.multi_items() if k not in TRANSIENT]
-        if explicit and not scope:  # the Audit / Recon pages share the layout memory, not the filters
+        if explicit:  # each page's own memory (Orders, Audit and Recon are separate)
             from urllib.parse import urlencode
 
-            response.set_cookie(FILTERS_COOKIE, urlencode(explicit, doseq=True), max_age=COOKIE_MAX_AGE,
-                                samesite="lax")
+            response.set_cookie(cookie(FILTERS_COOKIE, scope), urlencode(explicit, doseq=True),
+                                max_age=COOKIE_MAX_AGE, samesite="lax")
         return response
 
     # The Audit and Reconciliation pages ARE the Orders view (table or cards, the same filters,
@@ -342,9 +347,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         scope = scope or str(params.get("scope") or "")
         if scope not in SCOPES:
             scope = ""
-        # A bare /audit or /recon never replays the remembered Orders filters (they are another
-        # page's memory); the view and page size are layout and are shared.
-        filters = Filters.from_query(remembered(request, params, replay=not scope))
+        # Each page replays ITS OWN memory: a bare /audit comes back as the Audit page was left.
+        filters = Filters.from_query(remembered(request, params, scope=scope))
         rows = snapshot.rows
         findings = None
         if scope == "audit":
@@ -405,7 +409,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     def scoped(request: Request, scope: str):
         """The Audit / Reconciliation page: the Orders view over that scope's rows."""
         if request.query_params.get("reset"):
-            return RedirectResponse(url=SCOPES[scope], status_code=303)
+            response = RedirectResponse(url=SCOPES[scope], status_code=303)
+            response.delete_cookie(cookie(FILTERS_COOKIE, scope))
+            return response
         context = orders_context(request, scope=scope, notice=request.query_params.get("notice", ""))
         if request.headers.get("HX-Request", "").lower() == "true":
             response = page(request, partial_for(context["filters"]), **context)

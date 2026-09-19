@@ -1567,14 +1567,22 @@ class TestAuditPage:
         assert "<html" not in response.text and '<td class="finding">' in response.text
         assert 'hx-get="/audit?' in response.text  # the sort links stay on the page
 
-    def test_the_orders_filters_memory_is_not_replayed_or_written_here(self, client):
-        client.get("/orders", params={"remember": "1", "retailer": "Costco"})
+    def test_each_page_remembers_its_own_view_and_filters(self, client):
+        """Orders,
+        Audit and Recon each keep their own view, page size and filters."""
+        client.get("/orders", params={"remember": "1", "retailer": "Costco", "view": "cards"})
         body = client.get("/audit").text
-        assert "111-0000002-0000002" in body  # an Amazon row: the Costco memory did not apply
-        response = client.get("/audit", params={"remember": "1", "retailer": "Amazon", "view": "cards"})
-        assert response.cookies.get("ledger-view") == "cards"  # layout is shared
-        assert 'class="card status-' in client.get("/orders").text  # the shared layout memory applied
+        assert "111-0000002-0000002" in body  # an Amazon row: the Orders memory did not apply
+        assert 'class="card status-' not in body  # nor its cards view
+        response = client.get("/audit", params={"remember": "1", "retailer": "Amazon", "view": "table", "per": "48"})
+        assert response.cookies.get("ledger-view-audit") == "table" and response.cookies.get("ledger-per-audit") == "48"
+        assert "retailer=Amazon" in response.cookies.get("ledger-filters-audit")
         assert "retailer=Amazon" not in (client.cookies.get("ledger-filters") or "")
+        assert 'class="card status-' in client.get("/orders").text  # Orders kept its cards
+        again = client.get("/audit").text  # a bare /audit replays the Audit memory
+        assert 'name="per" value="48" checked' in again and "111-0000002-0000002" in again
+        client.get("/audit", params={"reset": "1"}, follow_redirects=False)
+        assert not client.cookies.get("ledger-filters-audit")
 
     def test_the_report_is_cached_until_the_ledger_changes(self, client, snapshot_path):
         from web import audit_view
