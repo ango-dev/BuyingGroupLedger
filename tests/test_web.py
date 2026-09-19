@@ -1451,6 +1451,8 @@ class TestStaticAssetsCarryTheirBlocks:
         js = (self.ROOT / "picker.js").read_text(encoding="utf-8")
         for needle in ("window.Picker", "function renderDays", "function renderMonths", "function renderYears",
                        "function renderChoices", 'data-pick="', 'matches("input[data-month]")', "month: function",
+                       'matches("input[data-choices]")', "choicesFor: choicesFor", "function formChoices(el)",
+                       'getElementById("cell-choices")', "data.card_pairs",
                        "state.filter = owner.value", 'v === current ? " current"',
                        "stopImmediatePropagation", 'matches("input[data-date]")', 'addEventListener("mousedown", function (e) { e.preventDefault(); })'):
             assert needle in js, f"picker.js lost its {needle!r} block"
@@ -1465,7 +1467,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "border-spacing: 0; border-collapse: separate; }", "body.wide.scoped main",
                        "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: #d64545; }",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
-                       ".add-form", "tr.selected td", ".cards {", ".card ol.items",
+                       ".add-form", ".add-form .actions", ".add-form label.span-3", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
                        "table.activity { width: 100%", ".dropzone.dragover",
                        ".filters { display: flex; flex-wrap: nowrap", ".filters label.search {",
@@ -1492,8 +1494,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        "if (thenDown) move(1, 0, false)", "paint(false)", "Picker.date(", "Picker.choices(",
                        'ctrl && e.key === ";"', "function fillToday()", "function toggleCheck(td)",
                        'contains("cell-check")', 'e.key === " " && td.getAttribute("data-kind") === "check"',
-                       'getElementById("cell-choices")', "choicesCache = null;  // #cell-choices",
-                       "function choicesFor(field, td)", "data.card_pairs",
+                       "Picker.forget()",
+                       "function choicesFor(field, td)", "Picker.choicesFor(field,",
                        '".cell-upload"', 'name="next" value="table"',
                        'hx-encoding", "multipart/form-data"',
                        '(e.key === "Delete" || e.key === "Backspace") && rowsChecked()', 'getElementById("delete-selected")',

@@ -65,29 +65,36 @@
 
 {% if editable and not scope %}
   {# Outside the filter form: a form cannot nest inside another. #}
+  {# The previous answers per choice column and the Card Name / Card Last 4 pairings, for the
+     table's cell editor and the form below (static/picker.js reads it; a choice-cell write
+     re-renders it out of band). #}
+  {% if editable %}<script type="application/json" id="cell-choices">{{ choices | tojson }}</script>{% endif %}
   <details class="add-row" {{ 'open' if add_open }}>
     <summary>Add a row</summary>
+    {# Every field is the page's own design: the calendar on the date, the column's previous
+       answers on the choice fields (Card Name and Card Last 4 narrowing each other), the page's
+       dropdown on Status, the drop zone on the receipt. #}
     <form method="post" action="/orders/add" class="add-form" enctype="multipart/form-data">
       {% set af = add_form or {} %}
       <label>Order Date <input name="order_date" data-date value="{{ af.get('order_date', '') }}" placeholder="YYYY-MM-DD" required autocomplete="off"></label>
-      <label>Order ID <input name="order_id" value="{{ af.get('order_id', '') }}" required></label>
-      <label>Item Name <input name="item_name" value="{{ af.get('item_name', '') }}" required class="wide"></label>
-      <label>Shipment <input name="shipment" value="{{ af.get('shipment', '1') }}" size="3"></label>
+      <label>Order ID <input name="order_id" value="{{ af.get('order_id', '') }}" required autocomplete="off"></label>
+      <label class="span-3">Item Name <input name="item_name" value="{{ af.get('item_name', '') }}" required autocomplete="off"></label>
+      <label>Shipment <input name="shipment" value="{{ af.get('shipment', '1') }}" inputmode="numeric"></label>
       {{ choose('status', [('ordered', 'ordered'), ('shipped', 'shipped'), ('delivered', 'delivered'), ('cancelled', 'cancelled'), ('paid', 'paid'), ('return', 'return')], af.get('status', 'ordered'), 'Status', 'inline') }}
-      <label>Retailer <input name="retailer" value="{{ af.get('retailer', '') }}" list="retailers"></label>
-      <datalist id="retailers">{% for v in facets.retailers %}<option value="{{ v }}">{% endfor %}</datalist>
-      <label>Quantity <input name="quantity" value="{{ af.get('quantity', '') }}" size="4"></label>
-      <label>Cost Per Item <input name="cost_per_item" value="{{ af.get('cost_per_item', '') }}" size="8"></label>
-      <label>Buying Group <input name="buying_group" value="{{ af.get('buying_group', '') }}" list="groups"></label>
-      <datalist id="groups">{% for v in facets.groups %}<option value="{{ v }}">{% endfor %}</datalist>
-      <label>Tracking Number <input name="tracking_number" value="{{ af.get('tracking_number', '') }}"></label>
+      <label>Retailer <input name="retailer" value="{{ af.get('retailer', '') }}" data-choices="retailer" autocomplete="off"></label>
+      <label>Quantity <input name="quantity" value="{{ af.get('quantity', '') }}" inputmode="numeric"></label>
+      <label>Cost Per Item <input name="cost_per_item" value="{{ af.get('cost_per_item', '') }}" inputmode="decimal"></label>
+      <label>Buying Group <input name="buying_group" value="{{ af.get('buying_group', '') }}" data-choices="buying_group" autocomplete="off"></label>
+      <label class="span-2">Tracking Number <input name="tracking_number" value="{{ af.get('tracking_number', '') }}" autocomplete="off"></label>
       <span class="field-block">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'photo or PDF; the link becomes Receipt Link', required=False, klass='compact') }}</span>
-      <label>or a Receipt Link <input name="receipt_url" value="{{ af.get('receipt_url', '') }}" placeholder="https://..." class="wide"></label>
-      <label>Card Last 4 <input name="card_last4" value="{{ af.get('card_last4', '') }}" size="4"></label>
-      <label>Profile <input name="profile_label" value="{{ af.get('profile_label', '') }}" list="profiles"></label>
-      <datalist id="profiles">{% for v in facets.profiles %}<option value="{{ v }}">{% endfor %}</datalist>
+      <label class="span-2">or a Receipt Link <input name="receipt_url" value="{{ af.get('receipt_url', '') }}" placeholder="https://..." autocomplete="off"></label>
+      <label>Card Name <input name="card_name" value="{{ af.get('card_name', '') }}" data-choices="card_name" data-pair="card_last4" autocomplete="off"></label>
+      <label>Card Last 4 <input name="card_last4" value="{{ af.get('card_last4', '') }}" data-choices="card_last4" data-pair="card_name" inputmode="numeric" autocomplete="off"></label>
+      <label>Profile <input name="profile_label" value="{{ af.get('profile_label', '') }}" data-choices="profile_label" autocomplete="off"></label>
+      <div class="actions">
       <button type="submit">Add row</button>
       <span class="muted small">Total Cost is computed from Quantity × Cost Per Item; everything else can be edited in the table afterwards. The row lands at the bottom and sorts into place on the next sync.</span>
+      </div>
     </form>
   </details>
 {% endif %}

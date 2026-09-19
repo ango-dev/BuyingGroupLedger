@@ -382,6 +382,13 @@ class TestOrdersRoutes:
         assert isinstance(parsed["card_pairs"], list)
         assert 'class="cell-upload" data-order-id="BBY01-1"' in body
         assert 'name="order_date" data-date' in body
+        # the Add-a-row form is the page's own design throughout: no native datalists, the choice
+        # fields open the column's answers, Card Name / Card Last 4 narrow each other
+        assert "<datalist" not in body and 'list="retailers"' not in body
+        assert 'name="retailer" value="" data-choices="retailer"' in body
+        assert 'name="card_name" value="" data-choices="card_name" data-pair="card_last4"' in body
+        assert 'name="card_last4" value="" data-choices="card_last4" data-pair="card_name"' in body
+        assert 'class="actions"' in body
         # every date-like editable uses the page's own picker: no native date / month controls anywhere
         assert 'type="month"' not in body and 'type="date"' not in body
         assert 'name="month" data-month' in body and 'name="paid" data-month' in body

@@ -287,11 +287,17 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 button.danger:hover { background: var(--bad); color: #fff; }
 .add-row { margin: 8px 8px 0; }
 .add-row summary { cursor: pointer; color: var(--accent); }
-.add-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 8px 0 4px; padding: 10px 12px;
+/* A grid of even fields, labels above; wide fields span; the button and the note take the last
+   row. */
+.add-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 12px; align-items: end; margin: 8px 0 4px; padding: 10px 12px;
   background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
 .add-form label { display: flex; flex-direction: column; font-size: 0.85em; color: var(--muted); gap: 3px; }
 .add-form input, .add-form select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
-.add-form input.wide { min-width: 360px; }
+.add-form input { width: 100%; box-sizing: border-box; min-width: 0; }
+.add-form label.span-2, .add-form .field-block { grid-column: span 2; }
+.add-form label.span-3 { grid-column: span 3; }
+.add-form .actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 4px; border-top: 1px solid var(--line); }
+.add-form details.multi { min-width: 0; }
 table.sheetlike td.sel, table.sheetlike th.sel { width: 26px; text-align: center; padding: 0 4px; }
 /* Sheets-style: the row number is the row's handle; a selected row tints blue over its colour. */
 table.sheetlike td.rownum { cursor: pointer; user-select: none; }

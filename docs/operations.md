@@ -196,7 +196,9 @@ selected, the Delete or Backspace key removes them after ONE confirmation that n
 removed bottom-up so the located numbers stay valid; all-or-nothing); there is no bar or button. Setting one value on many rows is the grid's range
 fill: select the cells, type the value, Enter — the field/value bar that did this is gone
 (2026-09-18).
-*Add a row* takes the key columns (Order Date, Order ID, Item Name, Shipment) plus the common ones;
+*Add a row* takes the key columns (Order Date, Order ID, Item Name, Shipment) plus the common ones,
+each field in the page's own design (the calendar, the previous answers with the same Card Name /
+Card Last 4 narrowing as the table, the drop zone);
 it lands where the sync's own append would (after the last occupied row), Total Cost is computed
 from Quantity × Cost Per Item, and the row sorts into date order on the next sync. A key that
 already exists is refused.

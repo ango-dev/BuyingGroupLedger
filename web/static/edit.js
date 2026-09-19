@@ -147,40 +147,16 @@
   }
 
   // ---- the editor --------------------------------------------------------------------------------
-  // The previous answers per choice column: rendered into #cell-choices with the table and
-  // re-rendered out of band by every choice-cell write (so a value typed and then changed back
-  // is not offered); the parsed copy is dropped after any swap and re-read on the next open.
-  var choicesCache = null;
-  function choicesData() {
-    if (!choicesCache) {
-      var node = document.getElementById("cell-choices");
-      try { choicesCache = node ? JSON.parse(node.textContent) : {}; } catch (err) { choicesCache = {}; }
-      if (!choicesCache.values) choicesCache = { values: choicesCache, card_pairs: [] };
-    }
-    return choicesCache;
-  }
+  // The column's previous answers come from static/picker.js (#cell-choices); the row's other
+  // card field narrows Card Name / Card Last 4.
   function siblingRaw(td, field) {
     var tr = td.parentElement;
     var other = tr ? tr.querySelector('td[data-field="' + field + '"]') : null;
     return other ? (other.getAttribute("data-raw") || other.textContent || "").trim() : "";
   }
-  // The column's previous answers. Card Name and Card Last 4 narrow each other: with the row's
-  // Card Name filled, the last-4 list holds only the numbers that name is paired with (in the
-  // ledger or the settings' cards), and vice versa; an unpaired value falls back to the full list.
   function choicesFor(field, td) {
-    var data = choicesData();
-    var all = data.values[field] || [];
-    var pairs = data.card_pairs || [];
-    var other = field === "card_last4" ? "card_name" : field === "card_name" ? "card_last4" : null;
-    if (!other || !td) return all;
-    var have = siblingRaw(td, other);
-    if (!have) return all;
-    var matched = [];
-    pairs.forEach(function (p) {
-      var mine = field === "card_last4" ? p[1] : p[0], theirs = field === "card_last4" ? p[0] : p[1];
-      if (theirs === have && matched.indexOf(mine) < 0) matched.push(mine);
-    });
-    return matched.length ? matched : all;
+    if (!window.Picker) return [];
+    return Picker.choicesFor(field, function (other) { return siblingRaw(td, other); });
   }
   function armed(td) {
     if (!td.getAttribute("data-original-html")) td.setAttribute("data-original-html", td.innerHTML);
@@ -400,7 +376,7 @@
     var td = e.target && e.target.matches && e.target.matches("td[data-error]") ? e.target : null;
     if (td) { td.focus(); }
     if (e.target && e.target.id === "orders-table") { ranges = []; anchor = null; active = null; }
-    choicesCache = null;  // #cell-choices may just have been re-rendered out of band
+    if (window.Picker) Picker.forget();  // #cell-choices may just have been re-rendered out of band
     paint(false);
   });
 

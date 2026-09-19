@@ -242,7 +242,61 @@
     if (k && owner !== e.target) { state = null; open(e.target, k, null); }
   });
 
+  // ---- the previous answers (#cell-choices: {values: {column: [...]}, card_pairs: [[name, last4]]}) --
+  // Read once, dropped by `forget` after any swap (a choice-cell write re-renders the element).
+  // Card Name and Card Last 4 narrow each other: `lookup(otherField)` gives the row's or the
+  // form's other value; with it filled, only the paired values are offered, else the full list.
+  var choicesCache = null;
+  function choicesData() {
+    if (!choicesCache) {
+      var node = document.getElementById("cell-choices");
+      try { choicesCache = node ? JSON.parse(node.textContent) : {}; } catch (err) { choicesCache = {}; }
+      if (!choicesCache.values) choicesCache = { values: choicesCache, card_pairs: [] };
+    }
+    return choicesCache;
+  }
+  function choicesFor(field, lookup) {
+    var data = choicesData();
+    var all = data.values[field] || [];
+    var other = field === "card_last4" ? "card_name" : field === "card_name" ? "card_last4" : null;
+    var have = other && lookup ? (lookup(other) || "").trim() : "";
+    if (!have) return all;
+    var matched = [];
+    (data.card_pairs || []).forEach(function (p) {
+      var mine = field === "card_last4" ? p[1] : p[0], theirs = field === "card_last4" ? p[0] : p[1];
+      if (theirs === have && matched.indexOf(mine) < 0) matched.push(mine);
+    });
+    return matched.length ? matched : all;
+  }
+  // Forms: <input data-choices="column"> opens the column's answers on focus; data-pair names the
+  // sibling field that narrows it.
+  function formChoices(el) {
+    var field = el.getAttribute("data-choices");
+    var form = el.form || el.closest("form");
+    return choicesFor(field, function (other) {
+      var sib = form ? form.querySelector('[name="' + other + '"]') : null;
+      return sib ? sib.value : "";
+    });
+  }
+  document.addEventListener("focusin", function (e) {
+    var el = e.target;
+    if (el && el.matches && el.matches("input[data-choices]") && !suppress) {
+      state = { values: formChoices(el), hi: -1, shown: [], filter: "" };
+      open(el, "choices", null);
+    }
+  });
+  document.addEventListener("click", function (e) {
+    var el = e.target;
+    if (el && el.matches && el.matches("input[data-choices]") && owner !== el) {
+      state = { values: formChoices(el), hi: -1, shown: [], filter: "" };
+      open(el, "choices", null);
+    }
+  });
+  document.addEventListener("htmx:afterSwap", function () { choicesCache = null; });
+
   window.Picker = {
+    choicesFor: choicesFor,
+    forget: function () { choicesCache = null; },
     date: function (input, pickFn) { state = null; open(input, "cal", pickFn); },
     month: function (input, pickFn) { state = null; open(input, "month", pickFn); },
     choices: function (input, values, pickFn, typed) {  // `typed`: what opened the editor, if a keystroke
