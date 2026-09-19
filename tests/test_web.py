@@ -1781,7 +1781,7 @@ class TestOverviewAttention:
         activity.record("alert", "Costco [p]: deterministic path failed", {}, path=logs_dir / "activity.jsonl",
                         at=NOW)
         body = client.get("/").text
-        assert ">Alerts<" in body and 'href="/activity?type=alert&amp;days=7"' in body or 'href="/activity?type=alert&days=7"' in body
+        assert ">Alerts<" in body and 'href="/activity?type=alert&amp;days=7&amp;unacked=1"' in body  # only the unacknowledged
 
     def test_a_loud_card_is_acknowledged_per_kind_and_a_newer_one_comes_back(self, client, logs_dir):
         """and the dossiers with them."""
@@ -1797,6 +1797,8 @@ class TestOverviewAttention:
         body = client.get("/").text
         assert ">Alerts<" in body and ">Failure dossiers<" in body
         assert body.count('action="/activity/acknowledge"') == 2 and 'name="kind" value="alert"' in body
+        assert ">acknowledge all<" in body and 'data-confirm="Acknowledge all 1 alerts?' in body  # asked once
+        assert 'id="settings-confirm"' in body
         assert f'name="through" value="{stamp}"' in body
         response = client.post("/activity/acknowledge", data={"kind": "alert", "through": stamp}, follow_redirects=False)
         assert response.status_code == 303 and response.headers["location"] == "/"
@@ -1820,6 +1822,45 @@ class TestOverviewAttention:
         assert ">Acknowledged<" in client.get("/activity").text  # on the record, as a dashboard event
         elsewhere = client.post("/activity/acknowledge", data={"kind": "alert", "next": "//evil"}, follow_redirects=False)
         assert elsewhere.headers["location"] == "/"  # never off-site
+
+    def test_one_alert_is_acknowledged_on_its_own_from_the_activity_page(self, client, logs_dir):
+        import re
+        from datetime import timedelta
+        from diagnostics import activity
+
+        path = logs_dir / "activity.jsonl"
+        first, second = NOW - timedelta(hours=3), NOW - timedelta(hours=1)
+        activity.record("alert", "Costco [p]: first", {"message": "a"}, path=path, at=first)
+        activity.record("alert", "Costco [p]: second", {"message": "b"}, path=path, at=second)
+        activity.record("alert", "old", {}, path=path, at=NOW - timedelta(days=9))  # outside the week: no button
+        body = client.get("/activity", params={"type": "alert", "days": "0"}).text
+        assert body.count('class="ack-one"') == 2
+        row = body[body.index("Costco [p]: first"):]
+        assert row.index('class="ack-one"') < row.index(">details<")  # the button sits left of details
+        stamp = first.isoformat(timespec="seconds")
+        assert f'name="at" value="{stamp}"' in body and 'name="next" value="/activity?type=alert&amp;days=0"' in body
+        done = client.post("/activity/acknowledge", follow_redirects=False,
+                           data={"kind": "alert", "at": stamp, "summary": "Costco [p]: first", "next": "/activity?type=alert&days=0"})
+        assert done.status_code == 303 and done.headers["location"] == "/activity?type=alert&days=0"
+        newest = activity.read(path)[0]
+        assert newest["kind"] == "ack" and newest["summary"] == "Acknowledged alert: Costco [p]: first"
+        assert newest["details"] == {"kind": "alert", "at": stamp, "summary": "Costco [p]: first"}
+        body = client.get("/activity", params={"type": "alert", "days": "0"}).text
+        assert body.count('class="ack-one"') == 1 and "Costco [p]: second" in body[body.index('class="ack-one"'):]
+        # the overview's card lists only what is still to acknowledge
+        only = client.get("/activity", params={"type": "alert", "days": "7", "unacked": "1"}).text
+        assert "Costco [p]: second" in only and "Costco [p]: first" not in only[only.index("<table"):]
+        assert "unacknowledged only" in only and 'name="unacked" value="1"' in only and "unacked=1" in only  # the tag, and the links keep it
+        assert re.search(r'>Activity <span class="badge"[^>]*>1</span>', body)
+        overview = client.get("/").text
+        section = overview[overview.index('aria-label="needs attention"'):]
+        assert section.index('<div class="value">1</div>') < section.index("</form>")
+        # an unknown one records nothing; acknowledging all then clears the rest
+        client.post("/activity/acknowledge", data={"kind": "alert", "at": stamp, "summary": "never happened"}, follow_redirects=False)
+        assert activity.read(path)[0]["kind"] == "ack" and activity.read(path)[0]["details"]["summary"] == "Costco [p]: first"
+        client.post("/activity/acknowledge", data={"kind": "alert"}, follow_redirects=False)
+        assert 'class="ack-one"' not in client.get("/activity", params={"type": "alert", "days": "0"}).text
+        assert ">Alerts<" not in client.get("/").text
 
     def test_nothing_is_shown_when_nothing_is_wrong(self, tmp_path, logs_dir):
         from web.ledger_reader import LedgerRow

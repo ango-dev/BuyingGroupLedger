@@ -17,14 +17,15 @@
       <div class="value">{{ c.count }}</div>
       <div class="hint">{{ c.text }}</div>
     </a>
-    <form method="post" action="/activity/acknowledge" class="ack">
+    <form method="post" action="/activity/acknowledge" class="ack" data-confirm="Acknowledge all {{ c.count }} {{ c.label | lower }}? They leave this card and the Activity badge (each stays on the Activity page, where one can also be acknowledged on its own).">
       <input type="hidden" name="kind" value="{{ c.ack.kind }}"><input type="hidden" name="through" value="{{ c.ack.through }}">
-      <button type="submit" data-tip-from="tip-ack-{{ loop.index }}">acknowledge</button>
+      <button type="submit" data-tip-from="tip-ack-{{ loop.index }}">acknowledge all</button>
     </form>
     <div id="tip-ack-{{ loop.index }}" hidden>
-      <p class="tip-title">acknowledge these {{ c.count }}</p>
+      <p class="tip-title">acknowledge all {{ c.count }}</p>
       <table class="tip-table">
-        <tr><td>drops</td><td>this card and the count on the Activity link</td></tr>
+        <tr><td>drops</td><td>this card and the count on the Activity link (asked once)</td></tr>
+        <tr><td>one at a time</td><td>each row on the Activity page has its own button</td></tr>
         <tr><td>newer ones</td><td>show again</td></tr>
         <tr><td>on record</td><td>as an Activity event</td></tr>
       </table>
@@ -39,6 +40,7 @@
   {% endif %}
   {% endfor %}
 </section>
+{% include "_confirm_dialog.html" %}
 {% endif %}
 
 {#- A stat tile is a LINK: it opens the Orders page filtered the same way the number was counted.

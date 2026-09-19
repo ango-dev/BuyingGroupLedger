@@ -279,10 +279,12 @@ never open.
 **Needs-attention cards** sit at the top of the overview only when something needs a hand:
 unacknowledged alerts and failure dossiers from the last seven days, failing and warning audit
 checks, short- and over-paid orders -- five to a row, each linking to Activity, Audit or Recon
-filtered to the matter. The two loud cards carry an *acknowledge* button: it drops that card, and
-the count on the nav's Activity link, for everything up to the newest one shown, records the
-acknowledgement in the Activity log (kind *Acknowledged*), and a newer alert or dossier shows
-again. **Nav badges**: on every page the Activity, Audit and Recon links wear their counts --
+filtered to the matter. The two loud cards carry an *acknowledge all* button (asked once): it
+drops that card, and the count on the nav's Activity link, for everything up to the newest one
+shown, records the acknowledgement in the Activity log (kind *Acknowledged*), and a newer alert
+or dossier shows again. The card opens Activity on the still-unacknowledged ones only (an
+*unacknowledged only* tag in the filter bar, with an ✕ to widen). There every alert or dossier
+still to acknowledge has its own *acknowledge* button, left of *details*, for one at a time. **Nav badges**: on every page the Activity, Audit and Recon links wear their counts --
 unacknowledged alerts plus dossiers of the last week, the rows a failing audit check flags, the
 orders paid short of or over their commitment. Nothing waiting, no badge.
 

@@ -138,32 +138,5 @@
   </div>
 </form>
 
-<dialog id="settings-confirm" class="confirm">
-  <form method="dialog">
-    <p class="question"></p>
-    <div class="inline-form">
-      <button type="submit" value="cancel">Cancel</button>
-      <button type="submit" value="ok" class="danger">Confirm</button>
-    </div>
-  </form>
-</dialog>
-<script>
-  // The in-page confirmation for the expense delete forms (the same dialog the Settings page uses).
-  (function () {
-    var dialog = document.getElementById("settings-confirm");
-    if (!dialog || typeof dialog.showModal !== "function") return;
-    document.querySelectorAll("form[data-confirm]").forEach(function (f) {
-      f.addEventListener("submit", function (e) {
-        if (f.dataset.confirmed === "1") return;
-        e.preventDefault();
-        dialog.querySelector(".question").textContent = f.dataset.confirm;
-        dialog.returnValue = "";
-        dialog.onclose = function () {
-          if (dialog.returnValue === "ok") { f.dataset.confirmed = "1"; f.requestSubmit ? f.requestSubmit() : f.submit(); }
-        };
-        dialog.showModal();
-      });
-    });
-  })();
-</script>
+{% include "_confirm_dialog.html" %}
 {% endblock %}

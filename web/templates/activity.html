@@ -42,6 +42,10 @@ From <code>{{ activity_path }}</code> and the dossiers under <code>{{ failures_d
   <span class="tag">run {{ run_label(filters.run_id) }} <a href="/activity?{{ filters.as_query(run='') | query }}" title="show every run">✕</a></span>
   <input type="hidden" name="run" value="{{ filters.run_id }}">
   {% endif %}
+  {% if filters.unacked %}
+  <span class="tag">unacknowledged only <a href="/activity?{{ filters.as_query(unacked='') | query }}" title="show the acknowledged ones too">✕</a></span>
+  <input type="hidden" name="unacked" value="1">
+  {% endif %}
   {{ choose('dir', [('desc', 'newest first'), ('asc', 'oldest first')], 'desc' if filters.desc else 'asc', 'Order') }}
   <noscript><button type="submit">Apply</button></noscript>
   <a class="button small reset" href="/activity?reset=1" title="clear the type, window, search, run and order (hidden types stay)">Reset</a>

@@ -213,13 +213,15 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     def loud_summary() -> dict:
         """The alerts and failure dossiers from the last seven days of the activity log that nobody
-        has ACKNOWLEDGED, per kind: {"alert": {"count", "newest", "ats"}, "dossier": {...}}. An
-        acknowledgement is itself an activity event (kind `ack`, details {kind, through}): every
-        event of that kind up to `through` is dealt with, a newer one shows again. Cached on the log file's size
+        has ACKNOWLEDGED, per kind: {"alert": {"count", "newest", "events": [{at, summary}]},
+        "dossier": {...}}. An acknowledgement is itself an activity event (kind `ack`): with
+        details {kind, through} every event of that kind up to `through` is dealt with (the
+        overview's "acknowledge all"); with details {kind, at, summary} that one event is (the
+        Activity page's per-row button, user 2026-09-19). A newer one shows again. Cached on the log file's size
         and mtime: every page's nav reads it."""
         from datetime import timedelta
 
-        empty = {kind: {"count": 0, "newest": "", "ats": []} for kind in LOUD_KINDS}
+        empty = {kind: {"count": 0, "newest": "", "events": []} for kind in LOUD_KINDS}
         try:
             stat = activity_path.stat()
         except OSError:
@@ -234,17 +236,23 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return empty
         since = (clock() - timedelta(days=LOUD_DAYS)).isoformat(timespec="seconds")
         through = {kind: "" for kind in LOUD_KINDS}
+        singly: dict[str, set] = {kind: set() for kind in LOUD_KINDS}
         for e in events:
             if e.get("kind") == "ack":
                 details = e.get("details") or {}
                 kind = str(details.get("kind", ""))
-                if kind in through:
+                if kind not in through:
+                    continue
+                if details.get("at"):
+                    singly[kind].add((str(details.get("at", "")), str(details.get("summary", ""))))
+                else:
                     through[kind] = max(through[kind], str(details.get("through", "")))
         out = {}
         for kind in LOUD_KINDS:
-            ats = [str(e.get("at", "")) for e in events
-                   if e.get("kind") == kind and since <= str(e.get("at", "")) and str(e.get("at", "")) > through[kind]]
-            out[kind] = {"count": len(ats), "newest": max(ats) if ats else "", "ats": ats}
+            fresh = [{"at": str(e.get("at", "")), "summary": str(e.get("summary", ""))} for e in events
+                     if e.get("kind") == kind and since <= str(e.get("at", "")) and str(e.get("at", "")) > through[kind]
+                     and (str(e.get("at", "")), str(e.get("summary", ""))) not in singly[kind]]
+            out[kind] = {"count": len(fresh), "newest": max(f["at"] for f in fresh) if fresh else "", "events": fresh}
         _loud_cache["stamp"], _loud_cache["value"] = stamp, out
         return out
 
@@ -281,11 +289,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         loud = loud_summary()
         if loud["alert"]["count"]:
             cards.append({"tone": "bad", "label": "Alerts", "count": loud["alert"]["count"],
-                          "text": "unacknowledged, last 7 days", "href": "/activity?type=alert&days=7",
+                          "text": "unacknowledged, last 7 days", "href": "/activity?type=alert&days=7&unacked=1",
                           "ack": {"kind": "alert", "through": loud["alert"]["newest"]}})
         if loud["dossier"]["count"]:
             cards.append({"tone": "bad", "label": "Failure dossiers", "count": loud["dossier"]["count"],
-                          "text": "runs that recorded nothing", "href": "/activity?type=dossier&days=7",
+                          "text": "runs that recorded nothing", "href": "/activity?type=dossier&days=7&unacked=1",
                           "ack": {"kind": "dossier", "through": loud["dossier"]["newest"]}})
         try:
             report = audit_report(snapshot)
@@ -1035,10 +1043,14 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         shown = activity_module.filter_events(events, kinds=filters.kinds, q=filters.q,
                                               days=filters.days, run_id=filters.run_id, now=clock(),
                                               hidden=filters.hidden)
+        loud = loud_summary()  # the rows still to acknowledge carry their own button
+        unacked = {(kind, f["at"], f["summary"]) for kind in LOUD_KINDS for f in loud[kind]["events"]}
+        if filters.unacked:  # the overview's card: only what is still to acknowledge
+            shown = [e for e in shown if (e.get("kind"), e.get("at"), e.get("summary")) in unacked]
         if not filters.desc:
             shown = list(reversed(shown))
         context = {"events": shown, "total": len(events), "filters": filters,
-                   "counts": activity_module.counts_by_kind(events),
+                   "counts": activity_module.counts_by_kind(events), "unacked": unacked,
                    "activity_path": str(activity_path), "failures_dir": str(failures_dir)}
         name = "_activity_rows.html" if request.headers.get("HX-Request") else "activity.html"
         response = page_no_snapshot(request, name, wide=True, **context)  # the Orders layout
@@ -1072,8 +1084,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     @app.post("/activity/acknowledge")
     async def acknowledge(request: Request):
-        """Acknowledge the alerts or the failure dossiers up to `through` (the newest one the
-        overview's card showed; blank = the newest there is now): the card and the nav badge drop
+        """Acknowledge the alerts or the failure dossiers: with `at` (and `summary`) that ONE event
+        (the Activity page's per-row button); otherwise every one up to `through` (the newest the
+        overview's card showed; blank = the newest there is now). The card and the nav badge drop
         them, the Activity log records the acknowledgement (kind `ack`) so it survives a restart
         and is itself on the record, and a newer alert or dossier shows again."""
         form = await request.form()
@@ -1081,11 +1094,18 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         if kind not in LOUD_KINDS:
             raise HTTPException(status_code=400, detail=f"kind must be one of {', '.join(LOUD_KINDS)}")
         loud = loud_summary()[kind]
-        through = str(form.get("through", "")).strip() or loud["newest"]
-        if through:
-            count = sum(1 for at in loud["ats"] if at <= through)
-            act("ack", f"Acknowledged {count} {activity_module.KINDS[kind].lower()}(s) through {through}",
-                {"kind": kind, "through": through, "count": count})
+        label = activity_module.KINDS[kind].lower()
+        at = str(form.get("at", "")).strip()
+        if at:
+            summary = str(form.get("summary", ""))
+            if any(f["at"] == at and f["summary"] == summary for f in loud["events"]):
+                act("ack", f"Acknowledged {label}: {summary}", {"kind": kind, "at": at, "summary": summary})
+        else:
+            through = str(form.get("through", "")).strip() or loud["newest"]
+            if through:
+                count = sum(1 for f in loud["events"] if f["at"] <= through)
+                act("ack", f"Acknowledged {count} {label}(s) through {through}",
+                    {"kind": kind, "through": through, "count": count})
         target = str(form.get("next", "/"))
         return RedirectResponse(url=target if target.startswith("/") and not target.startswith("//") else "/",
                                 status_code=303)

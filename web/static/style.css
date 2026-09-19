@@ -653,6 +653,7 @@ header nav details.nav-menu .menu a.current { color: var(--accent); font-weight:
 .session iframe.live { width: 100%; height: 70vh; min-height: 480px; border: 1px solid var(--line); border-radius: 8px; background: #000; }
 .tag.kind-tool { background: #d8e6f0; }
 .tag.kind-ack { background: #dfe8dc; }
+#activity-table form.ack-one { display: inline; }
 
 /* ---- the overview's needs-attention cards: shown only when something needs a hand ---- */
 .tiles.attention { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0 0 14px; }  /* five to a row */

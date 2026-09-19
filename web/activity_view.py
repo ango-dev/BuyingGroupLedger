@@ -31,6 +31,8 @@ class ActivityFilters:
     #: so an empty `hidden` means "hide nothing" rather than "the form did not say".
     hidden: tuple[str, ...] = ()
     hide_set: bool = False
+    #: Only the alerts / dossiers still to acknowledge -- what the overview's card links to.
+    unacked: bool = False
 
     @classmethod
     def from_query(cls, params) -> "ActivityFilters":
@@ -49,6 +51,7 @@ class ActivityFilters:
             desc=str(params.get("dir") or "desc").strip().lower() != "asc",
             hidden=tuple(k for k in _values(params, "hide") if k in KINDS),
             hide_set=str(params.get("hide_set") or "") == "1",
+            unacked=str(params.get("unacked") or "").strip().lower() in ("1", "true", "yes"),
         )
 
     def with_hidden(self, hidden) -> "ActivityFilters":
@@ -58,6 +61,7 @@ class ActivityFilters:
 
     def as_query(self, **overrides) -> dict:
         values = {"type": list(self.kinds), "days": str(self.days) if self.days != DEFAULT_DAYS else "",
-                  "q": self.q, "run": self.run_id, "dir": "" if self.desc else "asc"}
+                  "q": self.q, "run": self.run_id, "dir": "" if self.desc else "asc",
+                  "unacked": "1" if self.unacked else ""}
         values = {**values, **overrides}
         return {k: v for k, v in values.items() if v not in ("", None, [], ())}
