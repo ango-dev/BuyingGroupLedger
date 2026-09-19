@@ -274,6 +274,7 @@ class TestSettingsPage:
 
         body = client.get("/settings").text
         assert 'action="/settings/restart-container"' in body and "Restart container" in body
+        assert 'class="danger attention"' not in body  # nothing due until a save says so
         (client.logs_dir / ".run.lock").write_text("pid 1", encoding="utf-8")
         refused = client.post("/settings/restart-container")
         assert refused.status_code == 423 and "run is in progress" in refused.text
@@ -578,11 +579,19 @@ class TestAdvancedSettings:
         body = client.get("/settings").text
         assert 'id="s-database"' not in body
         foot = body[body.index('id="s-advanced"'):]
-        assert body.index('id="s-cards"') < body.index('id="s-apply"') < body.index('id="s-advanced"')  # the last thing on the page
-        assert '<button type="submit" form="scalar-form" class="primary">Save settings</button>' in foot  # its own Save
+        assert body.index('id="s-cards"') < body.index('id="s-advanced"') and 'id="s-apply"' not in body  # the last panel; no Apply panel
+        assert '<details class="panel advanced-panel" id="s-advanced">' in body  # folded, closed by default
+        # the bottom bar: Save on the left, the two restarts on the right
+        bar = body[body.index('<div class="savebar fixed" id="savebar">'):body.index("</div>\n</div>", body.index('id="savebar"'))]
+        assert '<button type="submit" form="scalar-form" class="primary">Save settings</button>' in bar
+        assert bar.index("Save settings") < bar.index('action="/settings/restart"') < bar.index('action="/settings/restart-container"')
+        assert 'id="needs"' in bar and "restart-due" not in bar
+        assert 'name="WEB_PORT" data-restart="dashboard"' in body and 'name="LOOKBACK_DAYS" data-restart' not in body  # only a real scope is tagged
+        after = client.get("/settings", params={"restart": "dashboard"}).text
+        assert "Saved — restart the dashboard to apply it" in after and 'class="primary attention"' in after
         assert "Do not change these unless you know exactly what you are doing." in foot
         assert 'for="f-LEDGER_DB_PATH"' in foot and 'for="f-WEB_LEDGER_SOURCE"' in foot
-        assert 'name="LEDGER_DB_PATH" form="scalar-form"' in foot  # saved by the main form's button
+        assert 'name="LEDGER_DB_PATH" data-restart="dashboard" form="scalar-form"' in foot  # saved by the main form's button
         assert 'for="f-LEDGER_DB_PATH"' not in body[:body.index('id="s-advanced"')]
         assert '<a href="#s-advanced" class="danger-link">Advanced</a>' in body
         response = client.post("/settings", data={"LEDGER_DB_PATH": "data/elsewhere.sqlite3", "LOOKBACK_DAYS": "9"},

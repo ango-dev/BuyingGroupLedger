@@ -48,7 +48,6 @@ here, so keep the dashboard on loopback or your own network.</p>
     <a href="#s-cards">Cards</a>
     <div class="group">Maintenance</div>
     <a href="#s-backup">Backup &amp; Restore</a>
-    <a href="#s-apply">Restart</a>
     <a href="#s-advanced" class="danger-link">Advanced</a>
   </nav>
 
@@ -73,15 +72,15 @@ here, so keep the dashboard on loopback or your own network.</p>
             </div>
             <div class="field-input">
               {% if s.kind == 'bool' %}
-                <label class="switch"><input type="checkbox" id="f-{{ s.env }}" name="{{ s.env }}"{% if form_id %} form="{{ form_id }}"{% endif %} value="on" {{ 'checked' if row.value is sameas true or row.value in ('true', 'True', '1', 'yes', 'on') }}> <span class="muted small">enabled</span></label>
+                <label class="switch"><input type="checkbox" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="on" {{ 'checked' if row.value is sameas true or row.value in ('true', 'True', '1', 'yes', 'on') }}> <span class="muted small">enabled</span></label>
               {% elif s.secret %}
-                <input type="password" id="f-{{ s.env }}" name="{{ s.env }}"{% if form_id %} form="{{ form_id }}"{% endif %} value="" autocomplete="new-password"
+                <input type="password" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="" autocomplete="new-password"
                        placeholder="{{ '•••••••• (set; blank keeps it)' if row.secret_set else '(not set)' }}">
                 {% if row.secret_set %}<label class="small clear"><input type="checkbox" name="{{ s.env }}__clear"{% if form_id %} form="{{ form_id }}"{% endif %} value="1"> clear</label>{% endif %}
               {% elif s.kind in ('int', 'float') %}
-                <input type="number" id="f-{{ s.env }}" name="{{ s.env }}"{% if form_id %} form="{{ form_id }}"{% endif %} value="{{ row.value }}" step="{{ '1' if s.kind == 'int' else 'any' }}">
+                <input type="number" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="{{ row.value }}" step="{{ '1' if s.kind == 'int' else 'any' }}">
               {% else %}
-                <input type="text" id="f-{{ s.env }}" name="{{ s.env }}"{% if form_id %} form="{{ form_id }}"{% endif %} value="{{ row.value }}" {% if s.kind == 'rate' %}placeholder="0.02 or 2%"{% endif %}>
+                <input type="text" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="{{ row.value }}" {% if s.kind == 'rate' %}placeholder="0.02 or 2%"{% endif %}>
               {% endif %}
               {% if s.help %}<div class="muted small help">{{ s.help }}</div>{% endif %}
             </div>
@@ -100,10 +99,6 @@ here, so keep the dashboard on loopback or your own network.</p>
         </div>
       </section>
       {% endfor %}
-      <div class="savebar">
-        <span class="dirty" id="dirty">No unsaved changes</span>
-        <button type="submit" class="primary">Save settings</button>
-      </div>
     </form>
 
     {# ---- the list sections: one collapsible entry per item, a dashed card to add one. An entry is a <details>
@@ -289,26 +284,11 @@ here, so keep the dashboard on loopback or your own network.</p>
 
     {% include "_backup_panel.html" %}
 
-    <section class="panel" id="s-apply">
-      <header><h2>Apply</h2><p class="muted">Which settings need a restart is tagged on each field above.</p></header>
-      <form method="post" action="/settings/restart" class="inline-form"
-            data-confirm="Restart the dashboard process now? In Docker it comes back within seconds; run `python -m web` again on a desktop.">
-        <button type="submit">Restart dashboard</button>
-        <span class="muted">re-reads config.json for the web and database settings; the scheduler is untouched</span>
-      </form>
-      {% if in_container %}
-      <form method="post" action="/settings/restart-container" class="inline-form"
-            data-confirm="Restart the whole container now? The scheduler and the dashboard come back in about half a minute. It is refused while a run is in progress.">
-        <button type="submit" class="danger">Restart container</button>
-        <span class="muted">the schedule, the timezone and every other setting are re-read on the way up; refused while a run is in progress, so nothing is aborted</span>
-      </form>
-      {% endif %}
-    </section>
-    {#- The advanced settings (settings_form.ADVANCED_ENVS), at the FOOT of the page behind a warning.
-       Their controls carry form="scalar-form", so the Save settings button
-        above saves them with everything else. -#}
-    <section class="panel advanced-panel" id="s-advanced">
-      <header><h2>Advanced</h2><p class="muted">{{ section_title('advanced')[1] }}</p></header>
+    {#- The advanced settings (settings_form.ADVANCED_ENVS): the last thing on the page, folded closed
+        behind a warning. Their controls carry form="scalar-form", so the bottom
+        bar's Save saves them with everything else. -#}
+    <details class="panel advanced-panel" id="s-advanced">
+      <summary><h2>Advanced</h2></summary><header><p class="muted">{{ section_title('advanced')[1] }}</p></header>
       <div class="banner warn"><strong>Do not change these unless you know exactly what you are doing.</strong>
         They are not day-to-day settings: a wrong path or source shows an empty ledger or writes to the wrong file, and a wrong bind address takes the dashboard off your network.</div>
       <div class="fields">
@@ -317,13 +297,34 @@ here, so keep the dashboard on loopback or your own network.</p>
 {{ setting_row(row, 'advanced', ns, 'scalar-form') }}
         {% endfor %}
       </div>
-      {#- Its own Save: the same form, so
-          it saves every setting on the page, exactly as the button above does. -#}
-      <div class="inline-form advanced-save"><button type="submit" form="scalar-form" class="primary">Save settings</button><span class="muted small">saves every setting on this page, like the button above</span></div>
-    </section>
+    </details>
   </div>
 </div>
 
+{#- The bottom bar follows the scroll: Save on one side, the two restarts on the
+    other. While editing it says which restart the changed fields will need (their data-restart);
+    after a save that needs one it says so and marks the button. -#}
+<div class="savebar fixed" id="savebar">
+  <div class="left">
+    <button type="submit" form="scalar-form" class="primary">Save settings</button>
+    <span class="dirty" id="dirty">No unsaved changes</span>
+    <span class="needs" id="needs"></span>
+  </div>
+  <div class="right">
+    {% if restart == 'dashboard' %}<span class="restart-due">Saved — restart the dashboard to apply it</span>
+    {% elif restart == 'container' %}<span class="restart-due">Saved — restart the container to apply it</span>{% endif %}
+    <form method="post" action="/settings/restart" class="inline-form"
+          data-confirm="Restart the dashboard process now? It re-reads config.json for the web and database settings; the scheduler is untouched. In Docker it comes back within seconds; run `python -m web` again on a desktop.">
+      <button type="submit" class="{{ 'primary attention' if restart == 'dashboard' }}" title="re-reads config.json for the dashboard's settings; the scheduler is untouched">Restart dashboard</button>
+    </form>
+    {% if in_container %}
+    <form method="post" action="/settings/restart-container" class="inline-form"
+          data-confirm="Restart the whole container now? The schedule, the timezone and every other setting are re-read on the way up; the scheduler and the dashboard come back in about half a minute. It is refused while a run is in progress, so nothing is aborted.">
+      <button type="submit" class="danger {{ 'attention' if restart == 'container' }}" title="re-reads every setting on the way up; refused while a run is in progress">Restart container</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
 <dialog id="settings-confirm" class="confirm">
   <form method="dialog">
     <p class="question"></p>

@@ -215,6 +215,8 @@ def test_a_sideways_scroll_moves_only_the_table(client, served, page):
     page.wait_for_timeout(100)
     assert page.evaluate("document.querySelector('main').scrollLeft") >= 500  # the table is wider than the window
     assert page.evaluate(LEFTS) == before, "a block above the table shifted on a sideways scroll"  # not even the margin's width
+    widths = page.evaluate("""() => { const m = document.querySelector('main'); return ['h1', '.lead', '.pinned', '.count'].map(s => Math.round(document.querySelector('body.wide ' + s).getBoundingClientRect().width) - m.clientWidth); }""")
+    assert widths == [0, 0, 0, 0], widths  # each exactly as wide as the scroll region
     assert int(page.evaluate("getComputedStyle(document.querySelector('body.wide .pinned')).zIndex")) > int(page.evaluate("getComputedStyle(document.querySelector('table.sheetlike th')).zIndex") or 0)  # its dropdowns paint over the sheet header
     assert page.evaluate("document.querySelector('table.sheetlike th.col-order_date').getBoundingClientRect().left") < 0  # the table did move
     assert page.errors == []

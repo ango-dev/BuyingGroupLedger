@@ -5,12 +5,26 @@
   var form = document.getElementById("scalar-form");
   var dirty = document.getElementById("dirty");
   if (form && dirty) {
-    var initial = new URLSearchParams(new FormData(form)).toString();
+    var snapshot = function () {  // {name: value} over the form, including controls bound to it from outside
+      var out = {};
+      new FormData(form).forEach(function (v, k) { out[k] = String(v); });
+      return out;
+    };
+    var initial = snapshot();
+    var needs = document.getElementById("needs");
     var check = function () {
-      var now = new URLSearchParams(new FormData(form)).toString();
-      var changed = now !== initial;
+      var now = snapshot(), changed = false, scope = "";
+      Object.keys(initial).concat(Object.keys(now)).forEach(function (k) {
+        if (initial[k] === now[k]) return;
+        changed = true;
+        // which restart this field's change will need (the row's tag, on the control as data-restart)
+        var el = form.elements[k] || document.querySelector('[name="' + k + '"]');
+        var r = el && el.dataset ? (el.dataset.restart || "") : "";
+        if (r === "container" || (r === "dashboard" && scope !== "container")) scope = r;
+      });
       dirty.textContent = changed ? "Unsaved changes" : "No unsaved changes";
       dirty.classList.toggle("on", changed);
+      if (needs) needs.textContent = changed && scope ? "· needs a " + scope + " restart after saving" : "";
     };
     form.addEventListener("input", check);
     form.addEventListener("change", check);
@@ -21,7 +35,7 @@
     window.addEventListener("beforeunload", function (e) {
       if (dirty.classList.contains("on")) { e.preventDefault(); e.returnValue = ""; }
     });
-    form.addEventListener("submit", function () { dirty.classList.remove("on"); });
+    form.addEventListener("submit", function () { dirty.classList.remove("on"); if (needs) needs.textContent = ""; });
   }
 
   // Side index: highlight the panel nearest the top of the viewport.

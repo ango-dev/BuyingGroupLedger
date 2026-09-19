@@ -684,6 +684,7 @@ class TestOverviewPage:
         assert 'removeAttribute("title")' in js and "data-tip" in js  # the native bubble never shows
         settings_js = client.get("/static/settings.js").text
         assert "settings-open=; path=/settings; max-age=0" in settings_js and "function read()" not in settings_js  # nothing remembered
+        assert "needs a \" + scope + \" restart after saving" in settings_js  # the bottom bar's live wording
         assert 'getAttribute("data-tip-from")' in js and 'classList.add("rich")' in js  # a tip may be a table
         assert "split(/\\s+/)" in js  # several blocks in one panel: a cell's how-to plus its hand-edit note
         assert 'matchMedia("(pointer: coarse)")' in js  # a tap shows a tip where there is no hover
@@ -1573,7 +1574,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "if (thenDown) move(1, 0, false)", "paint(false)", "Picker.date(", "Picker.choices(",
                        'ctrl && e.key === ";"', "function fillToday()", "function toggleCheck(td)",
                        'contains("cell-check")', 'e.key === " " && td.getAttribute("data-kind") === "check"',
-                       "Picker.forget()", 'getElementById("protect-edits")',
+                       "Picker.forget()", 'getElementById("protect-edits")', 'setProperty("--scrollport"',
                        "function undo()", "function redo()", 'getAttribute("data-cell-url")', 'getAttribute("data-entry-id")',
                        'getAttribute("data-confirm-many")', "details.dataset.narrow",
                        "function releaseSelection()", "function markSelection()", "function toggleHandSelection()",

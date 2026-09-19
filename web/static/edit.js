@@ -853,6 +853,21 @@
   document.addEventListener("rows:cleared", syncClasses);
 })();
 
+// The scroll region's visible width, for the blocks above a wide table that stick to its left
+// edge: they must be exactly as wide as the scrollport, which 100vw is not when a classic
+// vertical scrollbar takes its 15px. Measured on load, resize and every swap.
+(function () {
+  "use strict";
+  function measure() {
+    var main = document.querySelector("body.wide main");
+    if (main) document.documentElement.style.setProperty("--scrollport", main.clientWidth + "px");
+  }
+  document.addEventListener("DOMContentLoaded", measure);
+  window.addEventListener("resize", measure);
+  document.addEventListener("htmx:afterSwap", measure);
+  measure();
+})();
+
 // The # header is the select-all handle (the header checkbox is hidden, like the row ones).
 (function () {
   "use strict";
