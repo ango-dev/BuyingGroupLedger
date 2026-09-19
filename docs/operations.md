@@ -193,7 +193,8 @@ to write to).
 **Rows: select, add, delete.** Selection is Sheets-style: click a row number to select that row
 and nothing else (it tints blue; a plain click on a cell likewise drops the row selection), Ctrl-click
 to add a row (or take one out), drag down the numbers or shift-click for a range, click the `#`
-header for every row shown (or, with anything selected, to clear); Esc clears. The counter sits on the table's count line. With rows
+header for every row shown (or, with anything selected, to clear); Esc clears. The counter sits on the table's count line, and the how-it-works hints for cells and rows are the
+tooltip of its **?** mark (hover or focus it). With rows
 selected, the Delete or Backspace key removes them after ONE confirmation that names the count (rows are
 removed bottom-up so the located numbers stay valid; all-or-nothing); there is no bar or button. Setting one value on many rows is the grid's range
 fill: select the cells, type the value, Enter — the field/value bar that did this is gone
@@ -251,7 +252,8 @@ closing the session is what saves the cookies, and the profile id is written to 
 the page and the session stays open; it is closed for you after `web.tool_session_minutes`
 (default 60). The recon probes and the one-off migrations stay on the command line.
 
-**The Activity page** is the app's own account of what it did, newest first: for every scheduled
+**The Activity page** is the app's own account of what it did, newest first (the last seven days by
+default; the *Last* control widens it): for every scheduled
 run, what each retailer's scrape found and what the ledger write updated or added (split boxes,
 ignored tracking numbers, key conflicts named), what the buying-group sync submitted, insured and
 read back and how many rows it updated, the emails the BFMR auto-reply sent; every alert (with
@@ -270,6 +272,16 @@ healthcheck and is not linked.
 **Open rows** on the overview are `ordered`, `shipped` **or `delivered`** (the buying group has not
 paid yet), which is deliberately wider than the scrapers' terminal statuses; a gift-card row is
 never open.
+
+**Needs-attention cards** sit at the top of the overview only when something needs a hand:
+unacknowledged alerts and failure dossiers from the last seven days, failing and warning audit
+checks, short- and over-paid orders -- five to a row, each linking to Activity, Audit or Recon
+filtered to the matter. The two loud cards carry an *acknowledge* button: it drops that card, and
+the count on the nav's Activity link, for everything up to the newest one shown, records the
+acknowledgement in the Activity log (kind *Acknowledged*), and a newer alert or dossier shows
+again. **Nav badges**: on every page the Activity, Audit and Recon links wear their counts --
+unacknowledged alerts plus dossiers of the last week, the rows a failing audit check flags, the
+orders paid short of or over their commitment. Nothing waiting, no badge.
 
 **The overview's two stat sections** carry the same eight tiles in the same order — rows and
 orders, open rows, spend (Total Cost over rows that carry money), actual return

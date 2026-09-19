@@ -8,11 +8,27 @@
    with. Nothing to show means nothing is shown. #}
 <section class="tiles stats attention" aria-label="needs attention">
   {% for c in attention %}
+  {% if c.ack %}
+  {#- A loud card (alerts, failure dossiers) is dismissed by acknowledging it: the button posts
+      the newest event the card counted, so one that lands meanwhile is not swallowed. -#}
+  <div class="tile {{ c.tone }} ackable">
+    <a class="body" href="{{ c.href }}">
+      <div class="label">{{ c.label }}</div>
+      <div class="value">{{ c.count }}</div>
+      <div class="hint">{{ c.text }}</div>
+    </a>
+    <form method="post" action="/activity/acknowledge" class="ack">
+      <input type="hidden" name="kind" value="{{ c.ack.kind }}"><input type="hidden" name="through" value="{{ c.ack.through }}">
+      <button type="submit" title="Drop this card and the count on the Activity link for these {{ c.count }}; a newer one shows again. The acknowledgement is recorded in Activity.">acknowledge</button>
+    </form>
+  </div>
+  {% else %}
   <a class="tile link {{ c.tone }}" href="{{ c.href }}">
     <div class="label">{{ c.label }}</div>
     <div class="value">{{ c.count }}</div>
     <div class="hint">{{ c.text }}</div>
   </a>
+  {% endif %}
   {% endfor %}
 </section>
 {% endif %}

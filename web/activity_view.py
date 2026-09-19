@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from diagnostics.activity import KINDS
 
-DEFAULT_DAYS = 30
+DEFAULT_DAYS = 7  # the last week by default
 DAY_CHOICES = (1, 7, 30, 90, 0)
 
 

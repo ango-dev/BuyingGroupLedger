@@ -1726,11 +1726,34 @@ class TestReceiptFiles:
 
 
 class TestTheNavOrder:
-    def test_overview_activity_orders_audit_recon_taxes_tools(self, client):
+    def test_overview_orders_activity_audit_recon_taxes_tools(self, client):
         body = client.get("/").text
         nav = body[body.index("<nav"):body.index("</nav>")]
-        order = [nav.index(x) for x in (">Overview<", ">Activity<", ">Orders<", ">Audit<", ">Recon<", ">Taxes<", ">Tools")]
+        order = [nav.index(x) for x in (">Overview<", ">Orders<", ">Activity", ">Audit", ">Recon", ">Taxes<", ">Tools")]
         assert order == sorted(order)
+
+
+class TestNavBadges:
+
+    @staticmethod
+    def _nav(body: str) -> str:
+        return body[body.index("<nav"):body.index("</nav>")]
+
+    def test_audit_and_recon_counts_ride_every_page_and_activity_counts_the_loud_week(self, client, logs_dir):
+        import re
+        from datetime import timedelta
+        from diagnostics import activity
+
+        nav = self._nav(client.get("/orders").text)
+        assert re.search(r'>Audit <span class="badge"[^>]*>\d+</span></a>', nav)  # the fixture ledger fails checks
+        assert re.search(r'>Recon <span class="badge"[^>]*>\d+</span></a>', nav)  # and short-pays an order
+        assert ">Activity</a>" in nav  # nothing loud yet: no badge at all
+        path = logs_dir / "activity.jsonl"
+        activity.record("alert", "boom", {}, path=path, at=NOW)
+        activity.record("dossier", "boom", {}, path=path, at=NOW)
+        activity.record("alert", "old", {}, path=path, at=NOW - timedelta(days=8))  # outside the week
+        assert re.search(r'>Activity <span class="badge"[^>]*>2</span></a>', self._nav(client.get("/orders").text))
+        assert re.search(r'>Activity <span class="badge"[^>]*>2</span></a>', self._nav(client.get("/audit").text))
 
 
 class TestActivityLayout:
@@ -1754,6 +1777,44 @@ class TestOverviewAttention:
                         at=NOW)
         body = client.get("/").text
         assert ">Alerts<" in body and 'href="/activity?type=alert&amp;days=7"' in body or 'href="/activity?type=alert&days=7"' in body
+
+    def test_a_loud_card_is_acknowledged_per_kind_and_a_newer_one_comes_back(self, client, logs_dir):
+        """and the dossiers with them."""
+        import re
+        from datetime import timedelta
+        from diagnostics import activity
+
+        path = logs_dir / "activity.jsonl"
+        earlier = NOW - timedelta(hours=2)
+        stamp = earlier.isoformat(timespec="seconds")
+        activity.record("alert", "Costco [p]: deterministic path failed", {}, path=path, at=earlier)
+        activity.record("dossier", "costco [p]: failure dossier written -- Boom", {"name": "x"}, path=path, at=earlier)
+        body = client.get("/").text
+        assert ">Alerts<" in body and ">Failure dossiers<" in body
+        assert body.count('action="/activity/acknowledge"') == 2 and 'name="kind" value="alert"' in body
+        assert f'name="through" value="{stamp}"' in body
+        response = client.post("/activity/acknowledge", data={"kind": "alert", "through": stamp}, follow_redirects=False)
+        assert response.status_code == 303 and response.headers["location"] == "/"
+        body = client.get("/").text
+        assert ">Alerts<" not in body and ">Failure dossiers<" in body  # each kind on its own
+        assert re.search(r'>Activity <span class="badge"[^>]*>1</span>', body)
+        newest = activity.read(path)[0]
+        assert newest["kind"] == "ack" and newest["summary"] == f"Acknowledged 1 alert(s) through {stamp}"
+        assert newest["details"] == {"kind": "alert", "through": stamp, "count": 1}
+        # no `through`: the newest one shown
+        client.post("/activity/acknowledge", data={"kind": "dossier"}, follow_redirects=False)
+        body = client.get("/").text
+        assert ">Failure dossiers<" not in body and 'aria-label="needs attention"' in body  # the audit / recon cards stay
+        assert ">Activity</a>" in body[body.index("<nav"):body.index("</nav>")]  # no badge
+        # a newer alert shows again, alone
+        activity.record("alert", "again", {}, path=path, at=NOW - timedelta(minutes=5))
+        body = client.get("/").text
+        section = body[body.index('aria-label="needs attention"'):]
+        assert ">Alerts<" in section and section.index('<div class="value">1</div>') < section.index("</form>")
+        assert client.post("/activity/acknowledge", data={"kind": "run"}).status_code == 400
+        assert ">Acknowledged<" in client.get("/activity").text  # on the record, as a dashboard event
+        elsewhere = client.post("/activity/acknowledge", data={"kind": "alert", "next": "//evil"}, follow_redirects=False)
+        assert elsewhere.headers["location"] == "/"  # never off-site
 
     def test_nothing_is_shown_when_nothing_is_wrong(self, tmp_path, logs_dir):
         from web.ledger_reader import LedgerRow

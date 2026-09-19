@@ -59,6 +59,7 @@ header nav a { color: var(--muted); font-weight: 500; padding: 14px 10px; border
   text-decoration: none; }
 header nav a:hover { color: var(--fg); text-decoration: none; }
 header nav a.active { color: var(--fg); border-bottom-color: var(--accent); }
+header nav a .badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 2px; border-radius: 999px; background: #d64545; color: #fff; font-size: 0.72em; font-weight: 600; line-height: 1.5; text-align: center; vertical-align: 1px; }
 header nav .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--fg); margin-right: 18px; padding: 8px 0 8px; border-bottom-color: transparent !important; }
 header nav .brand .logo { width: 28px; height: 28px; border-radius: 7px; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
 header nav .brand .wordmark { font-size: 1.12em; font-weight: 500; letter-spacing: -0.015em; white-space: nowrap; line-height: 1; }
@@ -194,6 +195,9 @@ table.sheetlike tr.status-superseded td { background: #666666; color: #f4f4f4; t
 table.sheetlike tr[class*="status-"] td a { color: #1d4ed8; }
 table.sheetlike tr.status-superseded td a { color: #cfe0ff; }
 table.sheetlike tr[class*="status-"] td.rownum { background: var(--bg); color: var(--muted); text-decoration: none; }
+.hint-mark { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--line); color: var(--muted); font-size: 0.72em; font-weight: 600; cursor: help; margin-left: 4px; vertical-align: 1px; }
+.hint-mark:hover, .hint-mark:focus { color: var(--accent); border-color: var(--accent); outline: none; }
+h2 .hint-mark { font-size: 0.55em; }
 .count label.protect { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; cursor: pointer; }
 .count label.protect input { margin: 0; accent-color: var(--accent); }
 td input.cell-check { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: var(--accent); cursor: pointer; }
@@ -637,12 +641,20 @@ header nav details.nav-menu .menu a.current { color: var(--accent); font-weight:
 .session .guidance { margin: 0; padding-left: 18px; font-size: 0.9em; color: var(--muted); }
 .session iframe.live { width: 100%; height: 70vh; min-height: 480px; border: 1px solid var(--line); border-radius: 8px; background: #000; }
 .tag.kind-tool { background: #d8e6f0; }
+.tag.kind-ack { background: #dfe8dc; }
 
 /* ---- the overview's needs-attention cards: shown only when something needs a hand ---- */
-.tiles.attention { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin: 0 0 14px; }
+.tiles.attention { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0 0 14px; }  /* five to a row */
 .tiles.attention .tile.bad { border-color: #d64545; border-width: 2px; }
 .tiles.attention .tile.warn { border-color: #e0a800; border-width: 2px; }
 .tiles.attention .tile .label { color: var(--fg); font-weight: 600; }
+.tiles.attention .tile.ackable { display: flex; flex-direction: column; padding: 0; }
+.tiles.attention .tile.ackable > a.body { display: block; flex: 1; padding: 9px 11px 4px; color: var(--fg); text-decoration: none; }
+.tiles.attention .tile.ackable > a.body:hover .label { color: var(--accent); }
+.tiles.attention .tile.ackable form.ack { padding: 0 11px 8px; }
+.tiles.attention .tile.ackable form.ack button { font-size: 0.7em; padding: 1px 7px; line-height: 1.5; }
+@media (max-width: 1180px) { .tiles.attention { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .tiles.attention { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* ---- the Audit page's tiles: fixed edges, the same in both themes ---- */
 .tiles.audit-stats .tile.fail { border-color: #d64545; }

@@ -204,7 +204,7 @@ class TestThePage:
 
         body = client.get("/activity").text
         assert "<h1>Activity</h1>" in body and 'id="activity-filters"' in body
-        assert body.count("<tr class=\"kind-") == 3  # the January event is outside the default 30 days
+        assert body.count("<tr class=\"kind-") == 3  # the January event is outside the default 7 days
         assert "3 event(s) of 4" in body
         assert "costco_p_20260917T080000Z" in body and 'href="/failures' not in body  # the Failures page is gone
         assert 'href="/orders/111-1"' in body  # an order id links to its page
@@ -304,3 +304,10 @@ class TestThePage:
     def test_an_empty_log_renders(self, client):
         body = client.get("/activity").text
         assert "Nothing recorded yet" in body and "0 event(s)" in body
+
+
+def test_the_default_window_is_the_last_week():
+    from web.activity_view import DEFAULT_DAYS, ActivityFilters
+
+    assert DEFAULT_DAYS == 7 and ActivityFilters.from_query({}).days == 7
+    assert "days" not in ActivityFilters.from_query({}).as_query()  # the default is not a query

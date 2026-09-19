@@ -40,10 +40,14 @@
       <span class="wordmark">Buying Group <strong>Ledger</strong></span>
     </a>
     <a href="/" class="{{ 'active' if path == '/' }}">Overview</a>
-    <a href="/activity" class="{{ 'active' if path.startswith('/activity') }}">Activity</a>
+    {#- The badges: what each page has waiting -- Activity's unacknowledged
+        alerts and failure dossiers from the last seven days, Audit's rows a failing check flags,
+        Recon's orders paid short or over. Nothing waiting, no badge. -#}
+    {% set badges = nav_badges() %}
     <a href="/orders" class="{{ 'active' if path.startswith('/orders') }}">Orders</a>
-    <a href="/audit" class="{{ 'active' if path.startswith('/audit') }}">Audit</a>
-    <a href="/recon" class="{{ 'active' if path.startswith('/recon') }}">Recon</a>
+    <a href="/activity" class="{{ 'active' if path.startswith('/activity') }}">Activity{% if badges.activity %} <span class="badge" title="unacknowledged alerts and failure dossiers from the last 7 days">{{ badges.activity }}</span>{% endif %}</a>
+    <a href="/audit" class="{{ 'active' if path.startswith('/audit') }}">Audit{% if badges.audit %} <span class="badge" title="rows a failing check flags">{{ badges.audit }}</span>{% endif %}</a>
+    <a href="/recon" class="{{ 'active' if path.startswith('/recon') }}">Recon{% if badges.recon %} <span class="badge" title="orders paid short of or over their commitment">{{ badges.recon }}</span>{% endif %}</a>
     <a href="/taxes" class="{{ 'active' if path.startswith('/taxes') }}">Taxes</a>
     <details class="multi nav-menu {{ 'active' if path.startswith('/tools') }}">
       <summary><span class="nav-link">Tools <span class="caret">▾</span></span></summary>

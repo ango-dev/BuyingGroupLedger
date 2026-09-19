@@ -369,7 +369,10 @@ class TestOrdersRoutes:
         assert 'class="sel"' not in body  # the row number is the handle; no checkbox column
         assert 'hx-post="/orders/bulk"' not in body and 'id="delete-selected" class="danger" hidden' in body
         assert 'id="bulkbar"' not in body  # no bar: the count line carries the counter and the hint
-        assert 'id="sel-count">0</span> selected' in body and "Delete removes them (asked once)" in body
+        assert 'id="sel-count">0</span> selected' in body
+        # the how-it-works prose is a ? mark's tooltip, not text on the line
+        assert 'class="hint-mark"' in body and "· works like a spreadsheet" not in body
+        assert "Delete or Backspace removes the selected rows from the ledger (asked once)" in body
         # the editor's kind per cell: a calendar on dates, previous answers on choice columns
         assert re.search(r'data-field="payout_date"[^>]*data-kind="date"', body)
         assert re.search(r'data-field="profile_label"[^>]*data-kind="choice"', body)

@@ -1,8 +1,8 @@
 """The activity log: one line per thing the app DID -- a run's scrapes and ledger writes, what the
 buying-group sync submitted, insured and read back, the emails the auto-reply sent, every alert,
-every failure dossier, and every change made from the dashboard (cell edits,
-added / deleted rows, receipts, backups, settings). The dashboard's Activity page is a filterable
-table over it.
+every failure dossier, and every change made from the dashboard (cell edits, added / deleted
+rows, receipts, backups, settings, an acknowledged alert). The dashboard's Activity page is a
+filterable table over it.
 
 FORMAT: `logs/activity.jsonl`, append-only, one JSON object per line:
 
@@ -40,6 +40,7 @@ KINDS: dict[str, str] = {
     "alert": "Alert",
     "health": "Container health",
     "dossier": "Failure dossier",
+    "ack": "Acknowledged",
     "mirror": "DB mirror",
     "edit": "Dashboard edit",
     "backup": "Backup",

@@ -49,7 +49,7 @@
   <div class="tile"><div class="label">{{ 'Projected' if order.payout_state == 'committed' else 'Total' }} Profit</div><div class="value money">{{ order.totals.profit | money }}</div></div>
 </section>
 
-<h2>Shipments {% if editable %}<span class="muted small">— works like a spreadsheet: click, type, Enter; Delete clears; Ctrl+C / Ctrl+V; drag for a range</span>{% endif %}</h2>
+<h2>Shipments {% if editable %}<span class="hint-mark" tabindex="0" role="img" aria-label="how this table works" title="works like a spreadsheet: click a cell, type, Enter; Delete clears; Ctrl+C / Ctrl+V; drag for a range, Ctrl-click adds; Ctrl+; puts today in a date cell">?</span>{% endif %}</h2>
 {% for s in order.shipments %}
 <section class="shipment">
   <h3>Shipment {{ s.shipment }} <span class="tag status-{{ s.status }}">{{ s.status }}</span></h3>

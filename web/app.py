@@ -207,28 +207,86 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         }
         return templates.TemplateResponse(request=request, name=name, context={**base, **context})
 
-    def needs_attention(snapshot) -> list[dict]:
-        """What the overview should shout about, or nothing: alerts and dossiers from the last seven
-        days of the activity log, the audit's failing and warning checks, and the reconciliation's
-        short- and over-paid orders. Each card links where it is dealt with."""
+    LOUD_KINDS = ("alert", "dossier")
+    LOUD_DAYS = 7
+    _loud_cache: dict = {}
+
+    def loud_summary() -> dict:
+        """The alerts and failure dossiers from the last seven days of the activity log that nobody
+        has ACKNOWLEDGED, per kind: {"alert": {"count", "newest", "ats"}, "dossier": {...}}. An
+        acknowledgement is itself an activity event (kind `ack`, details {kind, through}): every
+        event of that kind up to `through` is dealt with, a newer one shows again. Cached on the log file's size
+        and mtime: every page's nav reads it."""
         from datetime import timedelta
 
-        cards: list[dict] = []
+        empty = {kind: {"count": 0, "newest": "", "ats": []} for kind in LOUD_KINDS}
         try:
-            since = (clock() - timedelta(days=7)).isoformat(timespec="seconds")
-            loud = [e for e in activity_module.read(activity_path)
-                    if e.get("kind") in ("alert", "dossier") and str(e.get("at", "")) >= since]
-            alerts = sum(1 for e in loud if e.get("kind") == "alert")
-            dossiers = sum(1 for e in loud if e.get("kind") == "dossier")
-            if alerts:
-                cards.append({"tone": "bad", "label": "Alerts", "count": alerts,
-                              "text": "sent in the last 7 days", "href": "/activity?type=alert&days=7"})
-            if dossiers:
-                cards.append({"tone": "bad", "label": "Failure dossiers", "count": dossiers,
-                              "text": "runs that recorded nothing; open one to see which selector broke",
-                              "href": "/activity?type=dossier&days=7"})
-        except Exception:  # noqa: BLE001 -- the overview must render even if the log is unreadable
-            log.exception("could not read the activity log for the overview")
+            stat = activity_path.stat()
+        except OSError:
+            return empty
+        stamp = (stat.st_mtime_ns, stat.st_size, clock().strftime("%Y-%m-%dT%H"))
+        if _loud_cache.get("stamp") == stamp:
+            return _loud_cache["value"]
+        try:
+            events = activity_module.read(activity_path)  # newest first
+        except Exception:  # noqa: BLE001 -- an unreadable log must not take the nav down
+            log.exception("could not read the activity log")
+            return empty
+        since = (clock() - timedelta(days=LOUD_DAYS)).isoformat(timespec="seconds")
+        through = {kind: "" for kind in LOUD_KINDS}
+        for e in events:
+            if e.get("kind") == "ack":
+                details = e.get("details") or {}
+                kind = str(details.get("kind", ""))
+                if kind in through:
+                    through[kind] = max(through[kind], str(details.get("through", "")))
+        out = {}
+        for kind in LOUD_KINDS:
+            ats = [str(e.get("at", "")) for e in events
+                   if e.get("kind") == kind and since <= str(e.get("at", "")) and str(e.get("at", "")) > through[kind]]
+            out[kind] = {"count": len(ats), "newest": max(ats) if ats else "", "ats": ats}
+        _loud_cache["stamp"], _loud_cache["value"] = stamp, out
+        return out
+
+    def nav_badges() -> dict:
+        """The counts on the nav's Activity, Audit and Recon links, on every page: the unacknowledged alerts plus failure dossiers of the last seven days, the
+        rows a FAILING audit check flags, the orders paid short of or over their commitment. Zero
+        is no badge. No ledger yet, or a check that blows up, leaves the badge off rather than
+        the page down."""
+        loud = loud_summary()
+        out = {"activity": sum(loud[kind]["count"] for kind in LOUD_KINDS), "audit": 0, "recon": 0}
+        try:
+            snapshot = reader.load()
+        except Exception:  # noqa: BLE001
+            return out
+        try:
+            report = audit_report(snapshot)
+            out["audit"] = sum(1 for findings in report.by_key.values()
+                               if any(f.status == "FAIL" for f in findings))
+        except Exception:  # noqa: BLE001
+            log.exception("could not audit the ledger for the nav")
+        try:
+            recon = reconcile(snapshot.rows)
+            out["recon"] = len(recon.short) + len(recon.over)
+        except Exception:  # noqa: BLE001
+            log.exception("could not reconcile the ledger for the nav")
+        return out
+
+    def needs_attention(snapshot) -> list[dict]:
+        """What the overview should shout about, or nothing: the unacknowledged alerts and dossiers from
+        the last seven days of the activity log (each with an acknowledge button), the audit's
+        failing and warning checks, and the reconciliation's short- and over-paid orders. Each
+        card links where it is dealt with."""
+        cards: list[dict] = []
+        loud = loud_summary()
+        if loud["alert"]["count"]:
+            cards.append({"tone": "bad", "label": "Alerts", "count": loud["alert"]["count"],
+                          "text": "unacknowledged, last 7 days", "href": "/activity?type=alert&days=7",
+                          "ack": {"kind": "alert", "through": loud["alert"]["newest"]}})
+        if loud["dossier"]["count"]:
+            cards.append({"tone": "bad", "label": "Failure dossiers", "count": loud["dossier"]["count"],
+                          "text": "runs that recorded nothing", "href": "/activity?type=dossier&days=7",
+                          "ack": {"kind": "dossier", "through": loud["dossier"]["newest"]}})
         try:
             report = audit_report(snapshot)
             counts = report.counts()
@@ -896,6 +954,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     from web.activity_view import ActivityFilters
 
     templates.env.globals["KINDS"] = activity_module.KINDS
+    templates.env.globals["nav_badges"] = nav_badges
     templates.env.globals["run_label"] = activity_module.run_label
     templates.env.globals["run_started_at"] = activity_module.run_started_at
 
@@ -978,6 +1037,26 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     archive.write(path, arcname=f"{dossier.name}/{path.relative_to(dossier.path).as_posix()}")
         return Response(content=buffer.getvalue(), media_type="application/zip",
                         headers={"Content-Disposition": f'attachment; filename="{dossier.name}.zip"'})
+
+    @app.post("/activity/acknowledge")
+    async def acknowledge(request: Request):
+        """Acknowledge the alerts or the failure dossiers up to `through` (the newest one the
+        overview's card showed; blank = the newest there is now): the card and the nav badge drop
+        them, the Activity log records the acknowledgement (kind `ack`) so it survives a restart
+        and is itself on the record, and a newer alert or dossier shows again."""
+        form = await request.form()
+        kind = str(form.get("kind", "")).strip()
+        if kind not in LOUD_KINDS:
+            raise HTTPException(status_code=400, detail=f"kind must be one of {', '.join(LOUD_KINDS)}")
+        loud = loud_summary()[kind]
+        through = str(form.get("through", "")).strip() or loud["newest"]
+        if through:
+            count = sum(1 for at in loud["ats"] if at <= through)
+            act("ack", f"Acknowledged {count} {activity_module.KINDS[kind].lower()}(s) through {through}",
+                {"kind": kind, "through": through, "count": count})
+        target = str(form.get("next", "/"))
+        return RedirectResponse(url=target if target.startswith("/") and not target.startswith("//") else "/",
+                                status_code=303)
 
     @app.get("/failures")
     def failures_page(request: Request):
