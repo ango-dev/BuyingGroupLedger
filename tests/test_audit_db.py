@@ -73,6 +73,10 @@ class TestAuditOverTheDatabase:
 
     def test_the_report_follows_a_write_through_the_adapter(self, client, db):
         assert "111-2" in client.get("/audit").text
+        page = client.get("/audit").text
+        assert '<body class="wide scoped">' in page  # scrolls as one page, checks panel included
+        assert '<details class="audit-results">' in page and 'class="audit-results" open' not in page  # starts closed
+        assert '<body class="wide">' in client.get("/orders").text
         ws = DbWorksheet(db)
         ws.update(range_name="A3", values=[row(
             order_date="2026-08-10", status="delivered", retailer="Amazon", item_name="Fitbit",

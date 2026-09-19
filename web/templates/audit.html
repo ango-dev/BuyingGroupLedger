@@ -8,13 +8,15 @@
 {% set counts = audit.counts() %}
 <div class="lead">
   <p class="muted small">Every check of <span class="mono">scripts.audit_ledger</span> run against the ledger this page serves. Below: every row a check named, with the finding beside it. Pick checks to narrow the rows; the filters, sort and search work as on Orders.</p>
-  <section class="tiles stats">
-    <div class="tile {{ 'warn' if counts.FAIL }}"><div class="label">Failing checks</div><div class="value">{{ counts.FAIL }}</div><div class="hint">of {{ audit.results | length }}</div></div>
-    <div class="tile"><div class="label">Warnings</div><div class="value">{{ counts.WARN }}</div><div class="hint">worth a look</div></div>
-    <div class="tile"><div class="label">Rows flagged</div><div class="value">{{ audit.by_key | length }}</div><div class="hint">{{ audit.flagged_checks | length }} check(s) name rows</div></div>
-    <div class="tile"><div class="label">Passing</div><div class="value">{{ counts.PASS }}</div><div class="hint">{{ counts.SKIP }} skipped</div></div>
+  {# FAIL, WARNING, PASS, FLAGGED -- the first three edged red, yellow and green in every theme.
+    #}
+  <section class="tiles stats audit-stats">
+    <div class="tile fail"><div class="label">Fail</div><div class="value">{{ counts.FAIL }}</div><div class="hint">of {{ audit.results | length }} checks</div></div>
+    <div class="tile warning"><div class="label">Warning</div><div class="value">{{ counts.WARN }}</div><div class="hint">worth a look</div></div>
+    <div class="tile pass"><div class="label">Pass</div><div class="value">{{ counts.PASS }}</div><div class="hint">{{ counts.SKIP }} skipped</div></div>
+    <div class="tile"><div class="label">Flagged</div><div class="value">{{ audit.by_key | length }}</div><div class="hint">row(s), by {{ audit.flagged_checks | length }} check(s)</div></div>
   </section>
-  <details class="audit-results" {{ 'open' if counts.FAIL or counts.WARN }}>
+  <details class="audit-results">{# starts closed; the tiles above say what is in it #}
     <summary>All checks — {{ counts.FAIL }} fail, {{ counts.WARN }} warn, {{ counts.PASS }} pass, {{ counts.SKIP }} skipped</summary>
     <table class="audit">
       <thead><tr><th>Check</th><th>Status</th><th>What it found</th><th class="n">Rows</th></tr></thead>

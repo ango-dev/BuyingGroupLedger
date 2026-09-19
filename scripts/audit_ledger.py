@@ -945,8 +945,12 @@ def check_column_shape(sheet: Sheet, opts: Options) -> Result:
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         for name in ("Order Link", "Tracking Link", "Receipt Link"):
             value = str(sheet.cell(sheet.grids.formatted, row_number, name)).strip()
-            if value and not value.startswith(("http://", "https://")):
-                fails.append(f"row {row_number}, {name}: {value!r} is not a URL")
+            # A Receipt Link is dashboard-relative since 2026-09-18 (`/receipts/...`, served by the
+            # dashboard wherever it is opened); the other links are absolute URLs.
+            ok = value.startswith(("http://", "https://")) or (name == "Receipt Link" and value.startswith("/receipts/"))
+            if value and not ok:
+                fails.append(f"row {row_number}, {name}: {value!r} is not a URL"
+                             + (" or a /receipts/ path" if name == "Receipt Link" else ""))
         status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
         if status and status not in STATUSES:
             fails.append(f"row {row_number}, Status: {status!r} not in {STATUSES} -- the order stays open forever")

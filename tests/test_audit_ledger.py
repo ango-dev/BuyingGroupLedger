@@ -409,6 +409,16 @@ def test_a_scrambled_column_is_caught_by_shape():
     assert result_for(sheet, "column_shape").status == "FAIL"
 
 
+def test_a_dashboard_relative_receipt_link_is_a_link_but_a_bare_path_elsewhere_is_not():
+    """Receipts are files beside the ledger since 2026-09-18, linked as /receipts/<retailer>/<month>/<file>."""
+    sheet = build(row_cells(2, **{"Receipt Link": Cell("/receipts/bestbuy/2026-09/BBY01-1.pdf")}))
+    assert result_for(sheet, "column_shape").status == "PASS"
+    sheet = build(row_cells(2, **{"Order Link": Cell("/receipts/bestbuy/2026-09/BBY01-1.pdf")}))
+    assert result_for(sheet, "column_shape").status == "FAIL"
+    sheet = build(row_cells(2, **{"Receipt Link": Cell("receipts/bestbuy/2026-09/BBY01-1.pdf")}))
+    assert result_for(sheet, "column_shape").status == "FAIL"
+
+
 def test_an_unknown_status_keeps_an_order_open_forever():
     sheet = build(row_cells(2, Status=Cell("in transit")))
     assert result_for(sheet, "column_shape").status == "FAIL"
