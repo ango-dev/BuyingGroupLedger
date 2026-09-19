@@ -1,8 +1,8 @@
 """The repair for rows left by a SUPERSEDED tracking number: mark (default), delete, restore.
 
-Only the pure planners are exercised: they decide what gets MARKED, DELETED or APPENDED on the live
-sheet, so they are the half that must be right. The fetch half is a thin CDP loop over production
-parsers, and the apply half is single-cell writes over gspread.
+Only the pure planners are exercised: they decide what gets MARKED, DELETED or APPENDED on the
+ledger, so they are the half that must be right. The fetch half is a thin CDP loop over production
+parsers, and the apply half is single-cell writes through the worksheet adapter.
 """
 
 from models.order import FIELDNAMES
@@ -86,7 +86,7 @@ class TestMarkMode:
 
         assert p["marks"] == [] and p["renumbers"] == []
 
-    def test_other_orders_on_the_sheet_are_ignored(self):
+    def test_other_orders_on_the_ledger_are_ignored(self):
         p = plan([row("ZZZ", 1, order_id="OTHER"), row("TBA-LIVE", 2)], {OID: ["TBA-LIVE"]})
 
         assert p["marks"] == []
@@ -143,7 +143,7 @@ class TestRestore:
         p = plan_restore(list(HEADER), current, self.OLD_HEADER, backup, OID)
 
         assert [t for t, _ in p["appends"]] == [DEAD]
-        assert p["skipped"] == [(LIVE, "already on the sheet")]
+        assert p["skipped"] == [(LIVE, "already on the ledger")]
         new = p["appends"][0][1]
         assert new[HEADER.index("Status")] == "superseded"
         assert new[HEADER.index("Shipment")] == 2

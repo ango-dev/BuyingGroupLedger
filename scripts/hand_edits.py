@@ -5,7 +5,7 @@
     python -m scripts.hand_edits --forget 111-9990016-9990016 --field cashback_rate
 
 Listing changes nothing. `--forget` removes the protection only -- the cell keeps its value; the
-next run may write it again. Under `ledger.backend` = `db` only: a Sheet has no such record.
+next run may write it again.
 """
 from __future__ import annotations
 

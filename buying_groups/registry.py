@@ -7,7 +7,7 @@ declaring one of them wrong and breaking whichever config disagrees, both fold t
 through `_ALIASES` — the same tolerance config/cards.py applies to retailer names.
 
 Adding a buying group means writing an adapter and adding one line here. Nothing in the planner, the
-orchestrator or the sheet needs to change.
+orchestrator or the ledger needs to change.
 """
 
 import logging

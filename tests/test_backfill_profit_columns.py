@@ -1,4 +1,4 @@
-"""The one-off backfill of Card / Cashback Rate / Total Profit onto rows already on the sheet.
+"""The one-off backfill of Card / Cashback Rate / Total Profit onto rows already on the ledger.
 
 Those columns are derived at SCRAPE time, and a delivered/cancelled row is terminal — never re-read —
 so without this they stay blank forever. The rules that matter: it must reproduce exactly what a scrape

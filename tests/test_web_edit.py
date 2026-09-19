@@ -1,4 +1,4 @@
-"""Editing on the Orders page: web/ledger_writer.py (the ONE sheet-write path) and the routes over
+"""Editing on the Orders page: web/ledger_writer.py (the ONE ledger-write path) and the routes over
 it -- one cell, the same cell across selected rows, a new row, deleted rows -- over a fake
 worksheet that records writes and refuses every other method. Plus the run-lock gate: while a
 scheduled run holds logs/.run.lock, every write is refused."""
@@ -150,7 +150,7 @@ class TestValidate:
             with pytest.raises(EditError, match="part of the row's key"):
                 validate(field, "x")
         for field in ("cogs", "total_profit"):
-            with pytest.raises(EditError, match="sheet formula"):
+            with pytest.raises(EditError, match="derived column"):
                 validate(field, "1")
         with pytest.raises(EditError, match="not editable"):
             validate("last_scraped_at", "x")
@@ -200,7 +200,7 @@ class TestLedgerCellWriter:
         assert sheet.writes == []
 
     def test_a_missing_row_is_a_conflict(self, writer, sheet):
-        with pytest.raises(ConflictError, match="no longer on the sheet"):
+        with pytest.raises(ConflictError, match="no longer on the ledger"):
             writer.write_cell({**KEY, "order_id": "nope"}, "insurance", "7")
         assert sheet.writes == []
 
@@ -243,7 +243,7 @@ class TestBulkEdit:
     def test_validation_and_emptiness(self, writer, sheet):
         with pytest.raises(EditError, match="no rows selected"):
             writer.write_cells([], "insurance", "1")
-        with pytest.raises(EditError, match="sheet formula"):
+        with pytest.raises(EditError, match="derived column"):
             writer.write_cells([KEY], "cogs", "1")
         assert sheet.batches == []
 
@@ -287,7 +287,7 @@ class TestAppendRow:
         with pytest.raises(EditError, match="Status must be one of"):
             writer.add_row({"order_id": "X", "order_date": "2026-09-17", "item_name": "T",
                                "status": "done"})
-        with pytest.raises(EditError, match="already on the sheet"):
+        with pytest.raises(EditError, match="already on the ledger"):
             writer.add_row(KEY)
         assert sheet.writes == []
 
@@ -376,7 +376,7 @@ class TestOrdersRoutes:
         assert 'action="/orders/add"' in body
         assert 'name="field"' not in body  # no field picker: a range fill sets one value on many rows
 
-    def test_an_edit_writes_the_sheet_and_returns_the_fresh_cell(self, sheet, tmp_path, logs_dir):
+    def test_an_edit_writes_the_ledger_and_returns_the_fresh_cell(self, sheet, tmp_path, logs_dir):
         client = self._client(sheet, tmp_path, logs_dir)
         response = client.post("/orders/cell", data={**KEY, "field": "insurance", "value": "9.5",
                                                       "expected": "6.4"})
@@ -426,7 +426,7 @@ class TestOrdersRoutes:
         assert "q=NEW-1" in response.headers["location"]
         assert sheet.writes[0][0] == "A4"
         page = client.get(response.headers["location"]).text
-        assert "Added NEW-1 at sheet row 4" in page and "NEW-1" in page
+        assert "Added NEW-1 at row 4" in page and "NEW-1" in page
 
     def test_add_row_errors_keep_the_form_open_with_the_values(self, sheet, tmp_path, logs_dir):
         client = self._client(sheet, tmp_path, logs_dir)
@@ -478,7 +478,7 @@ class TestOrdersRoutes:
 
 class TestTheWritePathIsSingular:
     def test_only_ledger_writer_names_the_write_scope_or_a_write_method(self):
-        """web/ may write the Sheet in exactly one file. Everything else in web/ is scanned by
+        """web/ may write the ledger in exactly one file. Everything else in web/ is scanned by
         tests/test_web.py's read-only guarantee; this pins the exemption to that one file and
         what it may do: locate, update, batch-update, delete rows -- never create a tab, never
         append_row (rows land where the upsert's own append would)."""

@@ -277,9 +277,9 @@ def object_key(retailer_key: str, order_id: str, order_date: str, ext: str) -> s
 CAPTURE_STATUSES = ("shipped", "delivered")
 
 # `paid` and `return` are the BUYING GROUP's outcomes, and no scraper can ever emit them —
-# sync_tracking writes them to the sheet AFTER a scrape, so they can never appear in the rows a live
+# sync_tracking writes them to the ledger AFTER a scrape, so they can never appear in the rows a live
 # capture sees. They exist here only for scripts/backfill_receipts.py, which reads statuses off the
-# SHEET, where a settled order genuinely is finished and genuinely may need proving later.
+# LEDGER, where a settled order genuinely is finished and genuinely may need proving later.
 SETTLED_STATUSES = ("paid", "return")
 
 

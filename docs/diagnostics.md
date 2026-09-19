@@ -4,8 +4,8 @@ _Part of the [Buying Group Ledger](../README.md) docs._
 
 Four things stand between a silent failure and a noticed one. In the order you meet them: the
 **failure dossier** a broken scrape leaves behind, **preflight** for misconfiguration that keeps
-running while doing the wrong thing, the **sheet audit** for data that is wrong on the live sheet,
-and the **offline tests** for the code.
+running while doing the wrong thing, the **ledger audit** for data that is wrong in the ledger
+itself, and the **offline tests** for the code.
 
 ## Failure dossiers
 
@@ -70,11 +70,13 @@ that overspends MaxOutDeals' daily quota. Every container start runs it and **al
 — a container that refuses to start also stops scraping; `PREFLIGHT_STRICT=true` fails fast instead.
 It cannot verify the MaxOutDeals IP allowlist from the host, so it warns about that every time.
 
-## Auditing the sheet
+## Auditing the ledger
 
-`pytest` proves the *code* is right; it can't see the live sheet. `scripts/audit_ledger.py` checks the
-sheet itself against every invariant the ledger depends on, and **writes nothing, ever** (it
-authenticates with a read-only scope, so it isn't merely well-behaved — it isn't permitted to write):
+`pytest` proves the *code* is right; it can't see the data. `scripts/audit_ledger.py` checks the
+ledger itself (`data/ledger.sqlite3`) against every invariant it depends on, and **writes nothing,
+ever** — it opens the file through `open_ledger_readonly`, a worksheet handle that refuses every
+write, so it isn't merely well-behaved: it isn't permitted to write. The dashboard's Audit page runs
+the same checks and shows the findings by row.
 
 ```bash
 .venv/bin/python -m scripts.audit_ledger                  # Windows: .venv\Scripts\python -m ...
@@ -103,31 +105,23 @@ changed.) Exit code is `0` when nothing failed, `1` on a failure (or on a warnin
 so it can gate a scheduled run.
 
 What it checks, and why each one matters: the header matches `HEADER` **exactly** (right names in the
-wrong order is the one failure that scrambles every row with no error — see the column-order warning in [Data model](data-model.md)); no duplicate upsert keys, on all four of the keys `sync_csv_to_ledger` uses (a package id under two Shipment numbers of one order is the re-tracked-shipment double-count); every row's
-`Total Profit` still holds the *live formula* rather than a number frozen from a past read, and that
-formula still points at the current columns; and that the cell **types** are intact — `Shipment` an
+wrong order is the one failure that scrambles every row with no error — see the column-order warning in [Data model](data-model.md)); no duplicate upsert keys, on all four of the keys `sync_csv_to_ledger` uses (a package id under two Shipment numbers of one order is the re-tracked-shipment double-count); the money invariants (Total Cost = Quantity × Cost Per Item, shipping and payouts cost-weighted across an order, a cancelled or superseded row carrying no money, a paid row having a payout, the return columns agreeing); the mandatory cells (a Status, an Order ID, tracking on a shipped row); and that the cell **types** are intact — `Shipment` an
 int, `Card Last 4` text with its leading zeros, the money columns numeric rather than `"$1,299.00"`
 text, and the date columns plain ISO text.
 
-That last one is the one to care about. **`Order Date` is part of the upsert key**, so if the date
-columns are ever re-formatted as real Dates, a row without a tracking number will append a duplicate
-on its next re-check. A more general check catches the same class of bug for any key column: it
-builds each row's key twice — once from the displayed text and once from the stored value — and
-fails if they differ, i.e. if a row's identity depends on how you happen to have formatted it.
-
-**`state_visibility`** runs the same classifier a scrape starts with (`ledger_sync.classify_order_state`)
-once per configured profile × retailer and reports what each run would see — terminal / open /
-needs-a-re-read counts, the last being the next run's browser bill — and then the finding no other
-check makes: rows whose Profile + Retailer match **no configured run** and so can never be re-checked
-or closed (FAIL for a retailer a scraper exists for; INFO for a hand-entered one such as Newegg).
+That last one is the one to care about. **`Order Date` is part of the upsert key**, so a date stored
+in any spelling other than `YYYY-MM-DD` is a different key, and the row appends a duplicate on its
+next re-check.
 
 It also checks the things that go wrong *around* the data rather than in it: content outside the
-28-column block (a stray note below the data misplaces the next appended row), `#REF!` errors left by
-a deleted column, a cashback rate outside 0–1, merged cells (they blank their neighbours on read), and
+schema's columns, a cashback rate outside 0–1, and
 **open orders that stopped being re-scraped** — the failure nobody notices, whether that's an order
 stuck open forever or the scheduler silently not running. Tune that last one with `--stale-days`.
 
-Two flags make it free to iterate on: `--save-snapshot FILE` dumps the raw sheet, and
+(The checks that only a Google Sheet could fail — formula coverage, stray formulas, merged cells,
+the displayed-versus-stored disagreement — went with the Sheet on 2026-09-18.)
+
+Two flags make it free to iterate on: `--save-snapshot FILE` dumps the raw grids, and
 `--from-snapshot FILE` re-audits that dump offline with no credentials and no API calls. A bare
 filename lands under `data/` (gitignored) for all three snapshot flags, because a snapshot holds
 delivery addresses and card digits; give a path with a directory to put it elsewhere. `--json`

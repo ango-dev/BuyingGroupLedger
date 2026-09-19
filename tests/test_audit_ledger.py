@@ -1,17 +1,17 @@
 """Offline tests for scripts/audit_ledger.py.
 
 THE POINT OF THE FAKE IN THIS FILE. The auditor's whole job is to notice disagreements between the
-three Google Sheets render modes, so a fake that returns the same grid for every mode would make
+three render modes of the worksheet contract, so a fake that returns the same grid for every mode would make
 every render-mode check "pass" while being structurally incapable of representing a single bug those
 checks exist to find. tests/test_ledger_sync.py's FakeWorksheet is exactly that: its `get_values`
 ignores `value_render_option` entirely. That is also the shape of a bug that already bit this project
 once — the design notes records `FakeWorksheet.get_all_values()` handing back raw Python types instead of
-gspread's always-string formatted read, which produced a false "duplicate row" signal.
+the contract's always-string formatted read, which produced a false "duplicate row" signal.
 
 So here a test never writes the three grids by hand. It declares what each cell STORES (`Cell`), and
-one renderer derives all three grids using Google's real rules. A test physically cannot claim a cell
+one renderer derives all three grids using the contract's render rules. A test physically cannot claim a cell
 is an int in the unformatted grid *and* an int in the formatted grid, because it never writes the
-formatted grid. TestTheFakeMatchesRealGspread pins the renderer itself, so when the fake drifts, that
+formatted grid. TestTheFakeMatchesTheRenderRules pins the renderer itself, so when the fake drifts, that
 class fails rather than a downstream check quietly going green.
 """
 
@@ -31,7 +31,7 @@ _SHEETS_EPOCH = date(1899, 12, 30)
 
 
 def serial(iso: str) -> int:
-    """The date serial Google Sheets stores for an ISO date (epoch 1899-12-30)."""
+    """The date serial a date-formatted cell stores for an ISO date (epoch 1899-12-30)."""
     y, m, d = (int(p) for p in iso.split("-"))
     return (date(y, m, d) - _SHEETS_EPOCH).days
 
@@ -43,7 +43,7 @@ def serial(iso: str) -> int:
 
 @dataclass(frozen=True)
 class Cell:
-    """What a sheet cell actually stores, plus how it's displayed.
+    """What a cell actually stores, plus how it's displayed.
 
     value    the stored value (for a formula cell: the formula's evaluated RESULT)
     fmt      None | "percent" | "currency" | "date" — a display format, the user's own choice
@@ -55,7 +55,7 @@ class Cell:
     formula: str | None = None
 
 
-# gspread's ValueRenderOption values, mapped to the mode names used below.
+# The ValueRenderOption values, mapped to the mode names used below.
 _MODES = {
     "FORMATTED_VALUE": "formatted",
     "UNFORMATTED_VALUE": "unformatted",
@@ -64,7 +64,7 @@ _MODES = {
 
 
 def render(cell: Cell, mode: str):
-    """Derive one render mode's value from a stored cell, following gspread/Sheets' real rules."""
+    """Derive one render mode's value from a stored cell, following the contract's render rules."""
     mode = _MODES.get(mode, mode)
     if mode == "formatted":
         # ALWAYS a string. A formula cell shows its RESULT, not its text.
@@ -105,7 +105,7 @@ class RenderedFakeWorksheet:
     def get_all_values(self):
         raise AssertionError(
             "the auditor must never use get_all_values() — it's the FORMATTED read, and the design notes "
-            "is explicit that a new sheet reader picking it reinherits the corruption bug"
+            "is explicit that a new ledger reader picking it reinherits the corruption bug"
         )
 
     def get_values(self, range_name=None, value_render_option=None, **kwargs):
@@ -193,7 +193,7 @@ def result_for(sheet: Sheet, name: str, opts: Options | None = None):
 # --------------------------------------------------------------------------------------------------
 
 
-class TestTheFakeMatchesRealGspread:
+class TestTheFakeMatchesTheRenderRules:
     """If these are wrong, every check below is testing a fiction. See the module docstring."""
 
     def test_formatted_is_always_a_string(self):
@@ -276,11 +276,11 @@ def test_the_audit_module_never_calls_a_writer():
 
 
 # --------------------------------------------------------------------------------------------------
-# A healthy sheet passes cleanly
+# A healthy ledger passes cleanly
 # --------------------------------------------------------------------------------------------------
 
 
-def test_a_healthy_sheet_has_no_failures():
+def test_a_healthy_ledger_has_no_failures():
     sheet = build(row_cells(2), row_cells(3))
     results = run_checks(sheet, Options())
     failures = [r for r in results if r.status == "FAIL"]
@@ -359,7 +359,7 @@ def test_a_newline_in_item_name_fails_but_elsewhere_only_warns():
 
 
 def test_two_rows_sharing_the_full_key_are_a_duplicate():
-    sheet = build(row_cells(2), row_cells(2))  # identical key, two sheet rows
+    sheet = build(row_cells(2), row_cells(2))  # identical key, two rows
     assert result_for(sheet, "duplicate_primary_keys").status == "FAIL"
 
 
@@ -521,7 +521,7 @@ def test_header_and_fieldnames_stay_paired():
 # The hardening pass: six more checks, each with a false-positive guard
 #
 # The guards matter more than the positive cases. A noisy auditor gets skimmed, and a check that cries
-# wolf on a legitimate sheet is worse than no check -- it trains the reader to ignore the column that
+# wolf on a legitimate ledger is worse than no check -- it trains the reader to ignore the column that
 # the real failures will one day appear in.
 # --------------------------------------------------------------------------------------------------
 
@@ -664,7 +664,7 @@ class TestReviewFindings:
 
     def test_a_multi_sku_box_is_informational_not_a_permanent_warning(self):
         """Items boxed together legitimately share a shipment number and a tracking number. Warning
-        would nag forever on a healthy sheet and make --strict exit 1 for good."""
+        would nag forever on a healthy ledger and make --strict exit 1 for good."""
         a = row_cells(2, **{"Order ID": Cell("C-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1")})
         b = row_cells(3, **{"Order ID": Cell("C-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1")})
         sheet = build(a, b)
@@ -673,7 +673,7 @@ class TestReviewFindings:
         assert [r.status for r in pair] == ["INFO", "INFO"]
         # The point of INFO: these two cannot, on their own, make --strict exit non-zero.
         # (Scoped to this pair deliberately -- the coverage checks read the real warehouses.json /
-        # cards.json, so a whole-sheet exit code would depend on the user's config, not on the code.)
+        # cards.json, so a whole-ledger exit code would depend on the user's config, not on the code.)
         assert audit_ledger.exit_code(pair, strict=True) == 0
 
     def test_one_tracking_number_under_two_orders_is_still_a_warning(self):
@@ -683,7 +683,7 @@ class TestReviewFindings:
 
     def test_expect_rows_is_not_swallowed_when_render_modes_disagree(self):
         """It used to return the height WARN before ever comparing, so --expect-rows reported success
-        on the one sheet state that most warrants a hard stop."""
+        on the one ledger state that most warrants a hard stop."""
         worksheet = RenderedFakeWorksheet([header_cells(), row_cells(2)])
         grids = audit_ledger.read_grids(worksheet)
         ragged = Grids(
@@ -752,7 +752,7 @@ class TestBuyingGroupPayouts:
 
         Blank makes Total Profit render blank; a literal 0 makes it compute `0 - Total Cost -
         Insurance`. Live BFMR reported three packages as paid while `amount_paid` was
-        still "0.00", and the sheet booked -$1,678.46 against a $1,796 order.
+        still "0.00", and the ledger booked -$1,678.46 against a $1,796 order.
         """
         sheet = build(row_cells(2, Status=Cell("paid"), **{"Actual Payout": Cell(0)}))
         result = result_for(sheet, "paid_rows_have_a_payout")
@@ -981,7 +981,7 @@ class TestImpossibleDates:
 
 
 class TestSnapshotPath:
-    """A snapshot is the whole sheet, PII included, so a bare name must not land in the CWD."""
+    """A snapshot is the whole ledger, PII included, so a bare name must not land in the CWD."""
 
     def test_a_bare_filename_lands_under_data(self):
         assert audit_ledger._snapshot_path("before.json") == audit_ledger.SNAPSHOT_DIR / "before.json"

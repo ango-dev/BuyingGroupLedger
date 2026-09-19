@@ -7,8 +7,9 @@ with the few differences called out inline.
 The README explains how the system works. This explains how to make it *keep* running somewhere you
 aren't watching.
 
-Two paths are supported, and you can switch between them freely because neither owns any state — the
-Google Sheet is the source of truth and the browser profiles live in Browser-Use Cloud.
+Two paths are supported, and you can switch between them freely because both run off the same files
+— `config.json` and the `data/` directory that holds the ledger (`data/ledger.sqlite3`) and the
+receipts — and the browser profiles live in Browser-Use Cloud.
 
 | | **Docker** (recommended) | **venv + cron** |
 |---|---|---|
@@ -26,7 +27,7 @@ Worth being clear about, because it sets the hardware bar very low: **no browser
 machine.** Chromium runs in Browser-Use Cloud, and `scrapers/cdp.py` connects to it over the network
 — Playwright is used purely as a CDP *client*. Costco doesn't even do that; it's plain HTTPS.
 
-So the host does HTTP requests, HTML parsing and Sheets writes. **1 vCPU and 1–2 GB RAM is ample**,
+So the host does HTTP requests, HTML parsing and SQLite writes. **1 vCPU and 1–2 GB RAM is ample**,
 and a run is I/O-bound on the network rather than CPU-bound. Disk is a few GB for the image plus
 logs.
 
@@ -74,22 +75,28 @@ git clone http://<gitea-host>:3000/pi/BuyingGroupLedger.git ~/BuyingGroupLedger
 cd ~/BuyingGroupLedger
 ```
 
-From the machine that currently runs it, copy these two files across. They hold live credentials —
-use `scp`/`rsync` over SSH, not email or a cloud drive:
+From the machine that currently runs it, copy these across. They hold live credentials and the
+ledger itself — use `scp`/`rsync` over SSH, not email or a cloud drive:
 
 | Path | Contains | Required? |
 |---|---|---|
-| `config.json` | everything: API keys, passwords, profiles, warehouse jigs, cards, and the inlined Google service-account key | **yes** |
+| `config.json` | everything: API keys, passwords, profiles, warehouse jigs, cards | **yes** |
 | `.state.json` | Costco's rotating refresh token | if you use Costco |
+| `data/` | the ledger (`ledger.sqlite3`), the receipts, the CSV safety copies | if you are moving an existing ledger — a fresh host starts an empty one |
+
+The one-zip way is `python -m scripts.backup` on the old machine and `python -m scripts.backup
+--restore <zip>` on the new one: it carries all three (plus `.env`), is standard library only, so it
+runs with the system Python before the venv or the image exists, and keeps existing files unless
+`--force`. By hand:
 
 ```powershell
 # from the project dir on Windows
-scp config.json .state.json you@ledger-vm:~/BuyingGroupLedger/
+scp -r config.json .state.json data you@ledger-vm:~/BuyingGroupLedger/
 ```
 
 `.env` is OPTIONAL — it is purely the override layer now, and NOTHING is environment-only. Copy it
 only if this host needs a value to differ from the shared config (a different `RUN_INTERVAL_HOURS`,
-say, or a scratch `GOOGLE_SHEET_ID` on a staging box). Anything set there wins over `config.json`.
+say, or a scratch `LEDGER_DB_PATH` on a staging box). Anything set there wins over `config.json`.
 
 Then lock them down — `config.json` holds every password in plaintext:
 
@@ -165,7 +172,7 @@ docker compose run --rm --entrypoint python ledger -m scripts.preflight
 
 Or natively, if you've built the venv: `.venv/bin/python -m scripts.preflight`.
 
-It's offline and free — no Browser-Use run, no Sheets call, no network at all. It exists because the
+It's offline and free — no Browser-Use run, no network at all. It exists because the
 failures that matter on an unattended host are the ones that **keep working while doing the wrong
 thing**, and so never raise:
 
@@ -330,7 +337,8 @@ cat logs/.last_run
 ```
 
 **The audit checks the data.** This is the only one that looks at the ledger itself, and it writes
-nothing ever — it authenticates read-only:
+nothing ever — it opens the file through a read-only handle that refuses every write (the
+dashboard's Audit page shows the same findings by row):
 
 ```bash
 docker compose run --rm --entrypoint python ledger -m scripts.audit_ledger
@@ -419,7 +427,6 @@ cat > ~/BuyingGroupLedger/.claude/settings.local.json <<'JSON'
       "Bash(python main.py:*)",
       "Bash(python -m sync_tracking:*)",
       "Bash(python -m scripts.sort_ledger:*)",
-      "Bash(python -m scripts.reorder_sheet:*)",
       "Bash(python -m scripts.backfill_profit_columns:*)"
     ]
   }
@@ -437,9 +444,10 @@ gap is where surprises live:
 
 - **It does contain** filesystem and process blast radius. A bad command wrecks a VM you can rebuild,
   not your daily driver, and rolling back is a snapshot restore.
-- **It does not contain the credentials.** This VM holds `config.json` — live keys to your Google
-  Sheet, both buying-group accounts, Browser-Use, the proxies and every retailer login, in plaintext.
-  Anything running here can spend money and write to the ledger regardless of the VM boundary.
+- **It does not contain the credentials, or the ledger.** This VM holds `config.json` — live keys to
+  both buying-group accounts, Browser-Use, the proxies and every retailer login, in plaintext — and
+  `data/ledger.sqlite3`, the ledger itself. Anything running here can spend money and write to the
+  ledger regardless of the VM boundary.
 - **It does not contain the network.** By default the VM reaches your LAN (including the Gitea host)
   and the internet. Restrict egress at the hypervisor or with `ufw` if you want that narrowed.
 
@@ -468,20 +476,23 @@ instead of a browser.
 
 ## 7. Cutting over from the old machine
 
-Do these in order, or you'll get two schedulers writing the same sheet:
+Do these in order, or you'll get two schedulers submitting to the same buying-group accounts from
+two ledgers that then disagree:
 
 1. **Stop any scheduler on the old machine first.** On Windows, check with
    `Get-ScheduledTask -TaskName BuyingGroupLedger`; if it exists, `Disable-ScheduledTask -TaskName
    BuyingGroupLedger`. Likewise stop any local container: `docker compose down`. The run lock is a
-   file in `logs/`, so it is per-machine and will **not** stop two hosts scraping the same sheet.
-2. Snapshot the sheet so you can prove the first run behaved:
+   file in `logs/`, so it is per-machine and will **not** stop two hosts running at once — and the
+   ledger you copy across is only current if nothing writes the old one after you copy it.
+2. Carry the ledger across (step 1 above: `python -m scripts.backup` there, `--restore` here), then
+   snapshot it so you can prove the first run behaved:
    `python -m scripts.audit_ledger --save-snapshot before.json`
 3. Bring the server up and force one run.
 4. `python -m scripts.audit_ledger --compare before.json` — a healthy cutover updates rows and appends
    only genuinely new orders. Duplicates would show as added rows with keys you recognise.
 
-Nothing needs re-authorising: profiles, proxies and the sheet are all cloud-side. The only host-bound
-things are the MOD IP allowlist (step 2) and the scheduler itself.
+Nothing needs re-authorising: profiles and proxies are cloud-side, and the ledger travels in the
+backup. The only host-bound things are the MOD IP allowlist (step 2) and the scheduler itself.
 
 ---
 

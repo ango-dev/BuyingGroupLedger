@@ -2,8 +2,8 @@
 
 _get_worksheet() is the single seam where this module opens the ledger, so patching it is enough
 to test everything else offline. FakeWorksheet is the CONTRACT the SQLite adapter
-(ledger_db/worksheet.py) is pinned against in tests/test_db_worksheet.py: it models what the
-Google Sheet used to hand back, down to the empty string.
+(ledger_db/worksheet.py) is pinned against in tests/test_db_worksheet.py: it models the worksheet
+contract every writer was built on, down to the empty string.
 """
 
 import csv
@@ -23,8 +23,8 @@ from ledger.sync import (
 
 
 def _as_sheet_text(value) -> str:
-    """How Google Sheets renders a stored value in a FORMATTED read: always text, and a whole number
-    without a trailing ".0" (the cell holds 1, the API hands back "1")."""
+    """How a FORMATTED read renders a stored value (the worksheet contract): always text, and a whole
+    number without a trailing ".0" (the cell holds 1, the read hands back "1")."""
     if isinstance(value, bool):
         return str(value)
     if isinstance(value, float) and value.is_integer():
@@ -33,17 +33,17 @@ def _as_sheet_text(value) -> str:
 
 
 class FakeWorksheet:
-    """Minimal stand-in for gspread.Worksheet covering only what ledger_sync calls."""
+    """Minimal stand-in for the worksheet contract, covering only what ledger_sync calls."""
 
     def __init__(self, rows=None):
         self.rows = [list(r) for r in (rows or [])]
         self.update_calls = 0
-        # A real sheet has a FIXED grid and rejects a write past it with a 400 — which is exactly how
+        # The worksheet contract has a FIXED grid and rejects a write past it — which is exactly how
         # an append died live on 2026-08-15. Modelling the grid is what lets a test prove the code
-        # grows the sheet first instead of discovering the limit through a failed sync.
+        # grows the grid first instead of discovering the limit through a failed sync.
         self.row_count = 1000
         self.added_rows = 0
-        # The grid is fixed on the COLUMN side too (writing AC1 on a 28-col sheet 400'd live on
+        # The grid is fixed on the COLUMN side too (writing AC1 on a 28-col grid failed live on
         # 2026-08-30) — modelled so a test can prove sync grows the grid before the header write.
         self.col_count = len(ledger_sync.HEADER)
         self.added_cols = 0
@@ -56,10 +56,10 @@ class FakeWorksheet:
         self.sort_calls: list[dict] = []
 
     def get_all_values(self):
-        # Real gspread ALWAYS returns strings here — it's a FORMATTED read, so a numeric cell comes
-        # back as "1", not 1. Mirroring that matters: a sheet can legitimately hold Shipment or
-        # Quantity as a number (the column migration wrote some that way), and a fake that handed back
-        # a raw int would make a test "fail" on a mismatch that cannot happen against the real API.
+        # A formatted read ALWAYS returns strings here (the contract the adapter keeps), so a numeric
+        # cell comes back as "1", not 1. Mirroring that matters: a ledger can legitimately hold
+        # Shipment or Quantity as a number (the column migration wrote some that way), and a fake that
+        # handed back a raw int would make a test "fail" on a mismatch that cannot happen for real.
         return [[_as_sheet_text(c) for c in r] for r in self.rows]
 
     def get_values(self, range_name=None, value_render_option=None, **kwargs):
@@ -75,7 +75,7 @@ class FakeWorksheet:
         self.added_cols += count
 
     def update(self, range_name, values, value_input_option=None):
-        # Real gspread writes the whole 2D `values` block starting at the range's top-left cell, so a
+        # `update` writes the whole 2D `values` block starting at the range's top-left cell, so a
         # multi-row block lands on consecutive rows (that's how ledger_sync now appends).
         #
         # A None cell means SKIP, NOT CLEAR — verified against the live API 2026-08-14: a seeded value
@@ -85,8 +85,7 @@ class FakeWorksheet:
         # would hide the one way that argument can break.
         start = int(range_name.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
         if start + len(values) - 1 > self.row_count:
-            # Mirrors the real API's refusal, verbatim in spirit:
-            #   APIError: [400]: Range (Sheet1!A992) exceeds grid limits. Max rows: 991
+            # Mirrors the contract's refusal (a write past the grid fails outright):
             raise AssertionError(
                 f"Range (A{start}) exceeds grid limits. Max rows: {self.row_count}"
             )
@@ -102,7 +101,7 @@ class FakeWorksheet:
         self.update_calls += 1
 
     def batch_update(self, data, value_input_option=None):
-        # Real gspread writes each {"range", "values"} entry independently. ledger_sync only ever
+        # `batch_update` writes each {"range", "values"} entry independently. ledger_sync only ever
         # sends single-cell ranges here (the Total Profit formula), so mirror that narrowly and
         # record the value_input_option — USER_ENTERED is what makes a formula a formula.
         self.batch_input_options.append(value_input_option)
@@ -138,19 +137,19 @@ class FakeWorksheet:
         """{row_number: formula} for every Total Profit cell written this sync."""
         return self._batched_formulas("total_profit")
 
-    def sort(self, *specs, range=None):  # noqa: A002 -- gspread's own parameter name
-        """Model gspread's sortRange: reorder rows within `range` by 1-based column specs.
+    def sort(self, *specs, range=None):  # noqa: A002 -- the contract's own parameter name
+        """Model the grid sort: reorder rows within `range` by 1-based column specs.
 
         Faithful in the two ways that matter here. (1) It sorts a SLICE — production always passes an
-        explicit `A2:Y{last}` range, and an unranged sort in real gspread would drag the sheet's
+        explicit `A2:Y{last}` range, and an unranged sort would drag the grid's
         trailing blank rows through the data. (2) Ties fall through to the next spec, which is what
         keeps a multi-shipment order's rows together.
 
-        Numbers sort before strings, matching Sheets' own type ordering — and, more importantly,
+        Numbers sort before strings, matching the grid sort's own type ordering — and, more importantly,
         keeping this from raising TypeError on a mixed-type column the way a bare Python sort would.
 
-        (3) EMPTY cells go last in BOTH directions, which is Sheets' rule and not Python's — a plain
-        reverse sort would float them to the top of a descending column. It matters because the sheet
+        (3) EMPTY cells go last in BOTH directions, which is the grid sort's rule and not Python's — a plain
+        reverse sort would float them to the top of a descending column. It matters because the ledger
         can hold rows that are blank in one sort column but not another (a hand-typed row missing its
         Order ID still has an Order Date), and where those land decides which rows the post-sort
         formula re-stamp has to cover.
@@ -201,7 +200,7 @@ def sheet(monkeypatch):
 
 
 def row(**values):
-    """Build a full-width sheet row from snake_case field names."""
+    """Build a full-width row from snake_case field names."""
     return [str(values.get(f, "")) for f in FIELDNAMES]
 
 
@@ -287,7 +286,7 @@ class TestSyncUpsert:
         updated = sheet.data_rows()[0]
         assert updated[FIELDNAMES.index("status")] == "shipped"
         assert updated[FIELDNAMES.index("tracking_number")] == "1Z999"
-        # Preserved and re-coerced back to a number (not the string "189.99"), so Sheets stores it
+        # Preserved and re-coerced back to a number (not the string "189.99"), so the ledger stores it
         # numerically rather than as apostrophe-prefixed text.
         assert updated[FIELDNAMES.index("cost_per_item")] == 189.99
         assert updated[FIELDNAMES.index("delivery_address")] == "123 Main St"
@@ -487,7 +486,7 @@ class TestSyncUpsert:
 
         assert len(sheet.data_rows()) == 3, "two incoming for one tracking must not reconcile"
 
-    def test_header_written_into_empty_sheet(self, sheet, tmp_path):
+    def test_header_written_into_empty_ledger(self, sheet, tmp_path):
         sheet.rows = []
         path = write_csv_file(
             tmp_path, dict(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1")
@@ -503,7 +502,7 @@ class TestSyncUpsert:
         deliberately only accepts a PREFIX.
 
         Truncated at the TIGHTEST viable point: the shortest prefix that still contains all four
-        upsert-key columns. Anything shorter and the sheet has no key to match on at all, so this is
+        upsert-key columns. Anything shorter and the ledger has no key to match on at all, so this is
         the boundary the migration has to survive.
 
         The truncation point is DERIVED, not named. This test used to truncate at "Shipment", which
@@ -530,7 +529,7 @@ class TestSyncUpsert:
         assert len(sheet.data_rows()) == 1, "legacy row should match, not duplicate"
 
     def test_a_narrow_grid_is_grown_before_the_header_is_widened(self, sheet, tmp_path):
-        """A real sheet's grid is FIXED at its column count, and writing a 32-cell header into a
+        """A real ledger's grid is FIXED at its column count, and writing a 32-cell header into a
         30-column grid 400s ("exceeds grid limits") before the migration ever helps. The first sync
         after a column append must grow the grid first — the column-side twin of _ensure_grid_rows.
         """
@@ -549,8 +548,8 @@ class TestSyncUpsert:
         assert sheet.added_cols == len(HEADER) - len(legacy_header)
         assert sheet.rows[0] == HEADER
 
-    def test_sheet_without_buying_group_column_is_migrated(self, sheet, tmp_path):
-        # A sheet that already has Shipment but predates Buying Group: the column is appended, so the
+    def test_ledger_without_buying_group_column_is_migrated(self, sheet, tmp_path):
+        # A ledger that already has Shipment but predates Buying Group: the column is appended, so the
         # existing row keeps its position and gains trailing empty cells (same as the Shipment migration).
         legacy_header = list(HEADER[: HEADER.index("Buying Group")])
         legacy_row = [""] * len(legacy_header)
@@ -782,13 +781,13 @@ class TestUndisclosedSplit:
         assert alerts == []
 
 
-class TestStatusOnlyMovesForwardOnTheSheet:
+class TestStatusOnlyMovesForwardOnTheLedger:
     """A row's lifecycle is monotonic, so a scrape reporting an EARLIER status is a mis-read.
 
     OBSERVED LIVE. A forced agent run couldn't see the second box's tracking number,
     concluded the shipment hadn't shipped, and wrote `shipped` -> `ordered` over a row that had
     already been DELIVERED. `_collapse_records` had always applied this rule to two incoming records;
-    it was never applied against the sheet, which is where it matters more — the sheet is the
+    it was never applied against the ledger, which is where it matters more — the ledger is the
     accumulated truth of every previous run, and a scraper sees only one moment.
     """
 
@@ -903,7 +902,7 @@ class TestRepeatedTrackingNumberIsAMisRead:
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
         assert len(sheet.data_rows()) == 2, "no phantom third box"
         assert rows[1][FIELDNAMES.index("tracking_number")] == "...348"
-        assert rows[2][FIELDNAMES.index("tracking_number")] == "...357", "the sheet's number wins"
+        assert rows[2][FIELDNAMES.index("tracking_number")] == "...357", "the ledger's number wins"
         # Only the TRACKING is in doubt. Refusing the corrected costs too would throw away the good
         # data with the bad — and the cost correction is usually why the run happened at all.
         assert rows[1][FIELDNAMES.index("total_cost")] == 999.99
@@ -1022,7 +1021,7 @@ class TestLoadOrderState:
 
     def test_a_terminal_status_survives_the_rollup_unchanged(self, sheet):
         """A uniform terminal status reports ITSELF. If the rollup downgraded "paid" to "ordered" the
-        order would silently re-open — the status would look right on the sheet while the re-check
+        order would silently re-open — the status would look right on the ledger while the re-check
         list disagreed."""
         assert ledger_sync._rollup_status(["paid"]) == "paid"
         assert ledger_sync._rollup_status(["return"]) == "return"
@@ -1191,11 +1190,11 @@ class TestLoadOrderState:
 
     def test_read_failure_fails_soft(self, monkeypatch):
         def boom():
-            raise RuntimeError("sheets is down")
+            raise RuntimeError("the ledger is down")
 
         monkeypatch.setattr(ledger_sync, "_get_worksheet", boom)
 
-        # Must not raise: a transient Sheets outage should degrade to "treat everything as new",
+        # Must not raise: a transient read failure should degrade to "treat everything as new",
         # not abort the run.
         assert load_order_state("p1") == {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
 
@@ -1273,8 +1272,8 @@ class TestCancelledOrders:
 class TestNumericCoercionOnMerge:
     def test_preserved_quantity_is_written_back_as_a_number(self, sheet, tmp_path):
         """The '1-as-text bug: a re-check leaves quantity blank, so _merge_row preserves the value
-        read from the sheet (a string). It must be re-coerced to a number before writing, or Sheets
-        stores it as text and shows a leading apostrophe."""
+        read from the ledger (a string). It must be re-coerced to a number before writing, or the ledger
+        stores it as text."""
         sheet.rows = [
             list(HEADER),
             row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
@@ -1297,7 +1296,7 @@ class TestNumericCoercionOnMerge:
 
 class TestPlanBuyingGroupRetag:
     """plan_buying_group_retag is READ-ONLY (the caller script decides whether/how to apply it), so
-    these tests work off raw header/rows, never a sheet write."""
+    these tests work off raw header/rows, never a ledger write."""
 
     warehouses = [
         Warehouse(buying_group="BFMR", jigs=[Jig(zip="10001")]),
@@ -1371,7 +1370,7 @@ class TestPlanBuyingGroupRetag:
         # Just "Buying Group" removed, NOT a prefix truncation: plan_buying_group_retag reads columns
         # by NAME and doesn't write positionally, so it only cares that the column is absent. (A prefix
         # cut would also drop Delivery Address, which this planner needs and which really did predate
-        # Buying Group on the sheet.)
+        # Buying Group on the ledger.)
         legacy_header = [h for h in HEADER if h != "Buying Group"]
         rows = [[""] * len(legacy_header)]
 
@@ -1388,15 +1387,14 @@ class TestPlanBuyingGroupRetag:
 
         plan = plan_buying_group_retag(HEADER, rows, self.warehouses)
 
-        assert plan["updates"][0][0] == 3, "second data row is sheet row 3 (row 1 is the header)"
+        assert plan["updates"][0][0] == 3, "second data row is row 3 (row 1 is the header)"
 
 
 class TestNumericCellsInTextColumns:
-    """A sheet can legitimately hold Shipment / Order ID as NUMBERS rather than text — the column
+    """A ledger can legitimately hold Shipment / Order ID as NUMBERS rather than text — the column
     migration wrote some rows that way, and a numeric-looking value typed by hand lands the same. The
     upsert key compares strings, and a FORMATTED read hands back "1" either way, so both must match.
-    (This is also why some cells show a leading apostrophe in the formula bar: that's Sheets marking a
-    number-looking value stored as text. It's a storage difference, not a data one.)"""
+    (A number-looking value stored as text is a storage difference, not a data one.)"""
 
     def test_a_numeric_shipment_cell_still_matches(self, sheet, tmp_path):
         seeded = row(order_id="A1", order_date="2026-08-06", item_name="W", status="ordered")
@@ -1431,7 +1429,7 @@ class TestNumericCellsInTextColumns:
 
 class TestShipmentStoredAsANumber:
     """Shipment is a plain 1-based index ("1", "2", ...), so it's coerced to an int on write — no
-    leading apostrophe in the sheet. This is the opposite call from Card Last 4, which stays TEXT
+    leading apostrophe in the ledger. This is the opposite call from Card Last 4, which stays TEXT
     because a leading zero there ("0315") is real data that int() would destroy."""
 
     def test_a_new_row_stores_shipment_as_an_int(self, sheet, tmp_path):
@@ -1446,10 +1444,10 @@ class TestShipmentStoredAsANumber:
 
         value = sheet.data_rows()[0][FIELDNAMES.index("shipment")]
         assert value == 1
-        assert isinstance(value, int), "must not carry a leading apostrophe in the sheet"
+        assert isinstance(value, int), "must not carry a leading apostrophe in the ledger"
 
     def test_an_updated_row_re_coerces_shipment_to_an_int(self, sheet, tmp_path):
-        # Simulates a sheet row that was hand-typed or otherwise landed as text; the next update must
+        # Simulates a row that was hand-typed or otherwise landed as text; the next update must
         # normalize it, matching how _merge_row already re-coerces cost/quantity on every write.
         sheet.rows = [
             list(HEADER),
@@ -1538,7 +1536,7 @@ class TestShipmentStoredAsANumber:
 class TestBlankCellsDoNotStripNumberFormatting:
     """Writing "" with RAW CLEARS a cell's number format; writing None preserves it.
 
-    Measured against the live sheet 2026-08-14:
+    Measured against the worksheet contract (live, 2026-08-14), which the adapter keeps:
         RAW ""  -> format cleared      RAW None -> format preserved
 
     That is why Insurance / Actual Payout / Total Profit kept reverting to raw floats while Total Cost
@@ -1583,13 +1581,12 @@ class TestBlankCellsDoNotStripNumberFormatting:
 
 
 class TestAppendAnchorAndGridLimits:
-    """An append died live on 2026-08-15 with:
-
-        APIError: [400]: Range (Sheet1!A992) exceeds grid limits. Max rows: 991
+    """An append died live on 2026-08-15 with a write past the grid's last row ("exceeds grid
+    limits").
 
     `Tracking Submitted` carries checkbox data validation, and an EMPTY cell under a checkbox
     materialises as a real `False`. So get_all_values() reported every grid row as non-empty,
-    `len(existing) + 1` anchored the append one row past the end of the sheet, and the whole Amazon
+    `len(existing) + 1` anchored the append one row past the end of the ledger, and the whole Amazon
     Business sync failed -- 4 scraped rows lost for that run. Only Amazon Business was hit because it
     was the only retailer APPENDING; an update writes to a row number it already knows.
     """
@@ -1618,7 +1615,7 @@ class TestAppendAnchorAndGridLimits:
         existing = [list(HEADER), row(order_id="A1"), list(ticked)]
         assert ledger_sync._last_occupied_row(existing) == 3
 
-    def test_the_sheet_is_grown_before_an_append_would_run_off_the_end(self, sheet, tmp_path):
+    def test_the_grid_is_grown_before_an_append_would_run_off_the_end(self, sheet, tmp_path):
         checkbox = FIELDNAMES.index("tracking_submitted")
         sheet.rows = [list(HEADER), row(order_id="A1", order_date="2026-08-10")]
         # A full grid, exactly as live: every remaining row carries a materialised False.
@@ -1646,7 +1643,7 @@ class TestAppendAnchorAndGridLimits:
 
         sync_csv_to_ledger(path)
 
-        assert sheet.added_rows > 0, "the sheet must be grown before writing past its last row"
+        assert sheet.added_rows > 0, "the ledger must be grown before writing past its last row"
 
 
 class TestCancelledRowsCarryNoMoney:
@@ -1677,7 +1674,7 @@ class TestCancelledRowsCarryNoMoney:
             assert str(written[FIELDNAMES.index(field)]).strip(), f"{field} must survive for bookkeeping"
 
     def test_an_order_cancelled_on_a_re_check_has_its_recorded_money_cleared(self, sheet, tmp_path):
-        """The dangerous direction: the cost is ALREADY on the sheet from when the order looked real.
+        """The dangerous direction: the cost is ALREADY on the ledger from when the order looked real.
 
         _merge_row's blank-never-overwrites rule would otherwise preserve it forever — cancelled is
         terminal, so nothing would ever come back to clear it.
@@ -2007,7 +2004,7 @@ class TestGiftCardTagIsSticky:
 
     A gift card shipped to the user's own address would classify Personal and be planned for DELETION;
     one shipped to a jig would be retagged into a buying group it was never part of. Neither is
-    recoverable from the sheet afterwards, so the tag has to win over the address.
+    recoverable from the ledger afterwards, so the tag has to win over the address.
     """
 
     warehouses = [
@@ -2047,7 +2044,7 @@ class TestGiftCardTagIsSticky:
 class TestClassifyOrderStateIsPure:
     """The classifier is the loop load_order_state used to run inline; it must answer offline."""
 
-    def test_it_takes_a_grid_and_needs_no_sheet(self):
+    def test_it_takes_a_grid_and_needs_no_ledger(self):
         from ledger.sync import classify_order_state
         grid = [
             list(HEADER),
@@ -2612,11 +2609,11 @@ class TestCostcoRenamesLinesWhenAnOrderIsCancelled:
 # The 2026-08-12 column reorder: the guard that stops a mis-ordered grid being scrambled, and the
 # Shipment relabelling. Rows are written POSITIONALLY from column A, so a grid whose columns are in
 # a different order than FIELDNAMES would be overwritten with values in the wrong cells -- no
-# exception, no log, just silently wrong money. (Moved here when the Sheet migration script and
-# its tests went, 2026-09-18.)
+# exception, no log, just silently wrong money. (Moved here when the column-reorder migration script
+# and its tests went, 2026-09-18.)
 # --------------------------------------------------------------------------------------------------
 
-# The pre-reorder column order, as the live sheet actually held it before 2026-08-12.
+# The pre-reorder column order, as the ledger actually held it before 2026-08-12.
 OLD_HEADER = [
     "Retailer", "Profile", "Order ID", "Order Date", "Status", "Order Link", "Tracking Number",
     "Tracking Link", "Delivery Date", "Delivery Address", "Item Name", "Quantity", "Cost Per Item",
@@ -2655,7 +2652,7 @@ class TestShipmentLabel:
 
 
 class TestOrderMismatchGuard:
-    def test_sheet_in_the_old_order_is_refused_not_scrambled(self, sheet, tmp_path):
+    def test_a_ledger_in_the_old_order_is_refused_not_scrambled(self, sheet, tmp_path):
         sheet.rows = [
             list(OLD_HEADER),
             old_row(**{"Order ID": "A1", "Order Date": "2026-08-08", "Item Name": "Widget",
@@ -2673,7 +2670,7 @@ class TestOrderMismatchGuard:
         # The point of raising: the existing row is untouched, not overwritten with shuffled values.
         assert sheet.data_rows()[0][OLD_HEADER.index("Total Cost")] == "199.99"
 
-    def test_correctly_ordered_sheet_still_syncs(self, sheet, tmp_path):
+    def test_correctly_ordered_ledger_still_syncs(self, sheet, tmp_path):
         sheet.rows = [list(HEADER)]
         path = write_csv_file(
             tmp_path,

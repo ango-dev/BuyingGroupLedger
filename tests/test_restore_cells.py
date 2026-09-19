@@ -4,7 +4,7 @@ Found live while backfilling Package ID: `_typed` turned every plan value that l
 a number into one, so a Costco carton id "00009999990181363453" would have been written as the int
 9999990181363452 -- leading zeros gone AND the last digit wrong, because a 20-digit integer does not
 survive the float round trip. The same path would strip "0315" from Card Last 4. Coercion is now
-limited to the columns that are numbers or checkboxes on the sheet.
+limited to the columns that are numbers or checkboxes on the ledger.
 """
 
 from scripts.restore_cells import _typed

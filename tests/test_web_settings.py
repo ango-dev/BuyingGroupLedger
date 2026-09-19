@@ -201,7 +201,7 @@ class TestSettingsPage:
         response = client.get("/settings")
         assert response.status_code == 200
         body = response.text
-        assert settings_form.hidden_envs() == set()  # nothing is Sheet-only any more
+        assert settings_form.hidden_envs() == set()  # nothing is hidden any more
         for env in ENV_TO_CONFIG:
             assert f'name="{env}"' in body, f"{env} is not on the Settings page"
         for secret in ("hunter2", '"K"', '"S"'):

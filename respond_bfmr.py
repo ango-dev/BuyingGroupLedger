@@ -21,7 +21,7 @@ reply from the phone also sets — exactly the right skip. `.state.json` keeps a
 per Message-ID for the one bad ordering (sent, then the flag write failed): that message is
 skipped with an alert instead of being answered twice.
 
-DRY RUN BY DEFAULT — reads the live inbox/sheet, prints the reply it would send, sends nothing,
+DRY RUN BY DEFAULT — reads the live inbox and the ledger, prints the reply it would send, sends nothing,
 flags nothing, writes nothing, and does NOT open a browser (the serial fetch spends a CDP fee,
 so it runs only on --apply; pass --serials to preview the full body):
     python -m respond_bfmr
@@ -33,7 +33,7 @@ Apply for real:
                                                              # unless exactly ONE order matches
 
 `run()` is also called from main.py (behind BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED, default off) so a
-scheduled run answers inside the same run lock, after the scrape has refreshed the sheet.
+scheduled run answers inside the same run lock, after the scrape has refreshed the ledger.
 """
 
 import argparse
@@ -126,7 +126,7 @@ def run(apply: bool = False, limit: int | None = None, tracking: str | None = No
 
     `mailbox`, `fetch_pdf`, `fetch_serials` and `sheet_values` are injection points for tests;
     production uses the real IMAP mailbox, the object-store URL fetch, the live Best Buy serial
-    fetch, and a live sheet read.
+    fetch, and a ledger read.
     """
     outcome: dict[str, list] = {"replied": [], "skipped": [], "needs_manual": [], "failed": []}
     fetch_pdf = fetch_pdf or _fetch_pdf
@@ -307,13 +307,13 @@ def _try_mark_answered(mailbox, request, label: str) -> None:
 
 
 def _sheet(sheet_values: list[list] | None) -> tuple[list[str], list[list]]:
-    """Header + data rows, from the injected grid or the live sheet. Same header guard as
-    sync_tracking: a drifted sheet must never be read positionally."""
+    """Header + data rows, from the injected grid or the ledger. Same header guard as
+    sync_tracking: a drifted header must never be read positionally."""
     if sheet_values is None:
         worksheet = _get_worksheet()
         sheet_values = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
     if not sheet_values:
-        raise SystemExit("Sheet is empty — nothing to resolve against.")
+        raise SystemExit("Ledger is empty — nothing to resolve against.")
     header = [str(c) for c in sheet_values[0]]
     if header != list(HEADER):
         raise SystemExit(

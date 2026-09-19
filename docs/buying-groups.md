@@ -90,13 +90,13 @@ group already holds without submitting anything — the mode to use when the led
 buying-group accounts other than the connected ones.
 
 **Routing is the Buying Group column**, which is already derived from the delivery address (see
-"Warehouse / jig config"). A row goes to exactly one group. `Personal` orders never reach the sheet,
+"Warehouse / jig config"). A row goes to exactly one group. `Personal` orders never reach the ledger,
 and `Unclassified` rows are **skipped and counted** rather than posted to a guess — an unconfigured
 warehouse is a real warehouse, and sending someone else's package to the wrong group is worse than
 leaving it visible.
 
 **There's no "posted at" column, deliberately.** Whether a number has been submitted is something the
-group knows and the sheet doesn't: MOD ignores duplicates by contract, and BFMR has a status
+group knows and the ledger doesn't: MOD ignores duplicates by contract, and BFMR has a status
 endpoint, so each run asks rather than keeping a local copy that drifts the moment a write fails or
 you paste something into their dashboard by hand.
 
@@ -110,7 +110,7 @@ about, so the buying group is the authority on them:
 - **BFMR reports both directly** — its tracker carries `paid` and `returned` per package.
 - **MaxOutDeals confirms payment by listing a package in its received-items report**; there is no
   finer signal. ⚠️ **MOD gives no return signal at all**, so a returned MOD package will keep reading
-  `paid` until you set its Status to `return` on the sheet **by hand**. That correction is safe: a
+  `paid` until you set its Status to `return` **by hand** (a cell edit on the dashboard). That correction is safe: a
   status only ever moves forward, so later runs won't undo it.
 - Everything earlier in the journey (`shipped`, `delivered`) stays the retailer's to report — if both
   sources wrote it, they'd overwrite each other every run.
@@ -132,9 +132,9 @@ Expected Payout stays blank and MOD is never reconciled; a `0` is still never wr
 unpriced purchase leaves the cell alone.
 
 **`Tracking Submitted`** is a checkbox: ticked when the buying group holds that package's tracking
-number. Format the column as a checkbox in Sheets and it renders as a tick — the values are real
-booleans. It's for reading, not for deciding: what's already been submitted is still re-derived from
-the group on every run, so a failed sheet write can't strand a package. An unticked box next to a
+number. The values are real booleans; the dashboard renders them as a tick. It's for reading, not
+for deciding: what's already been submitted is still re-derived from
+the group on every run, so a failed ledger write can't strand a package. An unticked box next to a
 shipped row is the thing worth noticing. Boxes are never cleared automatically.
 
 **Insurance** is filled from the group's own premium line. A package that's been paid out and shows
@@ -158,7 +158,7 @@ rows record a real `0`.
 > purchase. The tool won't do any of them for you — until the tracking exists, BFMR has no shipment
 > to insure, and an automatic filing would post against nothing while reporting success.
 >
-> There's nothing to edit on the sheet. The next run finds whichever letter you used, ticks
+> There's nothing to edit in the ledger. The next run finds whichever letter you used, ticks
 > Tracking Submitted, and fills in the payout, premium and status as they arrive.
 
 Once you've done a dry run and a one-package live test, set `BUYING_GROUP_SYNC_ENABLED=true` to let the

@@ -2,7 +2,7 @@
 
 `attach_receipts(items, profile, retailer_key)` is the whole public surface. It runs once per
 profile x retailer inside main.run_scrape, between card tagging and the CSV write, so the link lands
-in the SAME sheet sync as the rows it belongs to.
+in the SAME ledger sync as the rows it belongs to.
 
 WHY THIS LIVES OUTSIDE THE SCRAPERS. One implementation covers all four retailers and the agent
 fallback alike, and it cannot regress a deterministic client because it never runs inside one. Best
@@ -18,7 +18,7 @@ orders, and then one browser covers all of them.
 
 FAILURE IS ALWAYS PARTIAL, NEVER FATAL. A missing receipt is an inconvenience; a missing order is
 lost reimbursement money. One order failing to render does not stop the others, and the caller wraps
-the whole call so nothing here can cost a row on the sheet.
+the whole call so nothing here can cost a row on the ledger.
 """
 
 from __future__ import annotations

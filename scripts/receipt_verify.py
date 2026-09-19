@@ -79,7 +79,7 @@ def _problems(key: str, order_id: str, retailer_key: str, body: bytes) -> list[s
 
 
 def _rows_by_order(grid) -> dict:
-    """{order_id: [sheet row numbers]} for rows that currently carry a Receipt Link."""
+    """{order_id: [row numbers]} for rows that currently carry a Receipt Link."""
     h = grid[0]
     oid_i, link_i = h.index("Order ID"), h.index("Receipt Link")
     out: dict[str, list[int]] = {}

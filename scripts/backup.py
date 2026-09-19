@@ -14,7 +14,7 @@ WHAT IS IN IT: everything a `git clone` does not give you --
     config.json          every credential and profile (the one file you author)
     .state.json          Costco's rotating refresh token (the one file the app rewrites)
     .env                 host overrides, if present
-    data/**              the SQLite copy of the ledger, the CSV sheet backups, audit snapshots
+    data/**              the SQLite ledger, the CSV ledger backups, audit snapshots
     backup_manifest.json when, from which commit, and the file list
 
 NOT in it: `logs/` (run logs and failure dossiers -- host-local, and the dossiers hold captured
@@ -156,7 +156,7 @@ def _is_sqlite(path: Path) -> bool:
 
 
 def _write_member(archive: zipfile.ZipFile, path: Path, arcname: str) -> None:
-    """Add one file. A SQLite database (the ledger under `ledger.backend` = `db`) goes in as a
+    """Add one file. A SQLite database (the ledger) goes in as a
     copy made by SQLite's online backup API, opened read-only: a scheduled backup may land while a
     run is writing the ledger, and a byte copy of a file mid-transaction is not a database."""
     if not _is_sqlite(path):

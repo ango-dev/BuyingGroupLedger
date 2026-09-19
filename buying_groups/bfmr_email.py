@@ -8,7 +8,7 @@ document-upload endpoint (spec re-checked 2026-09-11), which is why this exists 
 rather than another client call.
 
 Everything here is PURE — bytes/rows in, dataclasses/MIME out — so the whole flow is offline-
-testable. respond_bfmr.py owns the IMAP/SMTP/sheet edges. NOTHING from any real BFMR email is
+testable. respond_bfmr.py owns the IMAP/SMTP/ledger edges. NOTHING from any real BFMR email is
 hardcoded here: recognition is the sender domain plus a generic
 combined-package pattern, and the tracking number is read out of whatever email arrives.
 """
@@ -66,7 +66,7 @@ class OrderInBox:
     # The LEDGER's bare tracking number for this order's rows in the box — the key the fetched
     # per-package serials are looked up under (Best Buy's site shows the bare number too).
     tracking_number: str = ""
-    # The order's OTHER tracking numbers on the sheet (a 2+1 split has one). Empty means the
+    # The order's OTHER tracking numbers on the ledger (a 2+1 split has one). Empty means the
     # whole order is this one package, which is when unattributed serials are safe to use.
     other_tracking: set = field(default_factory=set)
     rows: list[int] = field(default_factory=list)
@@ -240,7 +240,7 @@ def resolve_box(request: CombinedPackageRequest, header: list[str],
     if not resolution.orders:
         resolution.missing.append(
             f"no ledger row carries tracking {email_number} under any BFMR spelling — "
-            f"is the box on the sheet?")
+            f"is the box on the ledger?")
 
     # Second pass: each matched order's OTHER live tracking numbers (a 2+1 split has one).
     # attribute_serials needs this to know whether unattributed serials could belong elsewhere.
@@ -284,7 +284,7 @@ def attribute_serials(box: BoxResolution,
       1. Serials ATTRIBUTED to the box's own tracking number are used — count must equal the
          box's units for that order.
       2. UNATTRIBUTED serials are used only when the order has NO other tracking number on the
-         sheet (the whole order is this package) and the count matches.
+         ledger (the whole order is this package) and the count matches.
       3. Anything else — wrong count, or loose serials on a multi-package order — blocks with
          a gap naming exactly what was found. Never a guess.
     """

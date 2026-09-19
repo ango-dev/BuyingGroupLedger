@@ -65,7 +65,7 @@
         </span>
         {% if editable %}
         <form class="card-delete" hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"
-              hx-confirm="Delete order {{ c.order_id }} — all {{ c.rows }} of its row(s) — from the sheet? This cannot be undone here.">
+              hx-confirm="Delete order {{ c.order_id }} — all {{ c.rows }} of its row(s) — from the ledger? This cannot be undone here.">
           {% for k in c['keys'] %}<input type="hidden" name="sel" value="{{ k | tojson | forceescape }}">{% endfor %}
           <button type="submit" class="danger small" title="delete every row of this order">✕ Delete order</button>
         </form>

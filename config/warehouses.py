@@ -17,7 +17,7 @@ __all__ = [
 UNCLASSIFIED = "Unclassified"
 
 # The reserved group name for the user's own (consumer/reship) addresses. Rows classified as Personal are
-# DROPPED before the ledger is written — the user doesn't want personal orders on the sheet at all. Only
+# DROPPED before the ledger is written — the user doesn't want personal orders on the ledger at all. Only
 # EXPLICIT matches are dropped; Unclassified (unknown) rows are kept so a not-yet-configured warehouse
 # stays visible rather than silently disappearing.
 PERSONAL = "Personal"
@@ -90,7 +90,7 @@ def tag_and_filter_personal(items, warehouses) -> tuple[list, int, int]:
 
     Mutates each item's `buying_group` in place, then returns `(kept, dropped_personal, unclassified)`:
     rows classified Personal are excluded from `kept` (the user doesn't want personal orders on the
-    sheet); Unclassified rows are kept (and counted) so an unrecognized-but-real warehouse stays visible.
+    ledger); Unclassified rows are kept (and counted) so an unrecognized-but-real warehouse stays visible.
     Rows with a blank address (partial re-checks) classify to "" — kept, and _merge_row later preserves
     whatever tag was recorded on the first full extraction.
     """

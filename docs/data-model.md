@@ -1,4 +1,4 @@
-# Data model — the sheet as a wire format
+# Data model — the ledger as a wire format
 
 _Part of the [Buying Group Ledger](../README.md) docs._
 
@@ -10,7 +10,7 @@ One row per line item (its real quantity preserved — a qty-3 line is one row, 
 **Order ID + Order Date + Item Name + Shipment** (safe upsert — re-checks update
 status/tracking/date/last-scraped **without clobbering** the item name, cost, address, etc.):
 
-Columns follow the order events happen to an order, so the sheet reads forward as a timeline —
+Columns follow the order events happen to an order, so the ledger reads forward as a timeline —
 what it is → what happened to it → what it cost → what came back → profit, with the
 rarely-scanned reference/audit columns parked at the end:
 
@@ -51,58 +51,48 @@ straddle line (`cogs_inputs_complete`) counts a dated-or-`paid` payout as settle
 open rows' commitments into the new column once, and a ledger still holding that shape reads
 correctly on the dashboard in the meantime.*
 
-> **Changing the column order is a MIGRATION, not an edit.** Under `ledger.backend` = `db` the
-> SQLite store does it itself on the next start — the table is rebuilt in the new order with every
-> value carried across by name (never dropped) — so a reorder or a rename in `FIELDNAMES` / `HEADER`
-> costs nothing on the host. The deprecated Sheet is the case that takes two steps.
-> `python -m scripts.reorder_sheet --apply` moves the row *values*; `python -m
-> scripts.apply_sheet_formats --apply` then puts the presentation back. Both are dry-run by default.
+> **Changing the column order is a MIGRATION, not an edit.** The ledger file does it itself the
+> next time it is opened: `ledger_db/store.py` rebuilds the `ledger_rows` table in the new
+> `FIELDNAMES` order with every value carried across **by column name** (never dropped), so a
+> reorder or a rename in `FIELDNAMES` / `HEADER` costs nothing on the host. A populated table
+> holding a column the schema no longer names is **refused loudly** rather than dropped — restore a
+> backup or migrate by hand. New columns are appended **last**, to both lists;
+> `tests/test_schema.py` pins the pairing. (The Google Sheet, retired 2026-09-18, was the case that
+> took two scripts and a format pass; that story is in `the design notes`.)
 >
-> The second step is not optional, and the reason is easy to miss: **this sheet is a Google Sheets
-> Table, and a table column's TYPE overrides the cell number format.** Set a cell to PERCENT under a
-> CURRENCY column and nothing happens — silently, with the API returning success. Types and formats
-> are both bound to a column *position*, so a reorder strands every one of them on its old letter. A
-> real instance: a $631 payout rendering as `63100%`, and the checkbox moving off Tracking Submitted
-> onto Delivery Address. `apply_sheet_formats` fixes both, derived from `HEADER` by name so it stays
-> correct after any future reorder.
->
-> **Status is pinned at column B.** The sheet's status colour rules are `=$B2="delivered"` and
-> friends, and `reorder_sheet` rewrites values *without moving columns* — so moving Status would
-> leave all six rules colouring every row by whatever landed in B. Insert new columns after it.
->
-> The date columns are deliberately left **untyped**: `Order Date` is in the upsert key and must stay
-> plain ISO text, or Sheets stores a serial and the next re-check duplicates the row.
+> The date columns are plain ISO text (`YYYY-MM-DD`): `Order Date` is in the upsert key, so a date
+> in any other spelling is a different row.
 
-**Receipt Link** points at the order's captured receipt in object storage — see [Receipt capture](receipts.md). It's per *order*, so every row of a multi-item order carries the same link.
+**Receipt Link** points at the order's captured receipt file, served by the dashboard at `/receipts/...` — see [Receipt capture](receipts.md). It's per *order*, so every row of a multi-item order carries the same link.
 
-> **Column order is part of the wire format.** Rows are written to the sheet *positionally* from column
-> A, so `FIELDNAMES` (models/order.py) and `HEADER` (ledger/sync.py) define where every value
-> lands. Reordering them without rewriting the rows already on the sheet would silently scramble every
-> one of them, so `sync_csv_to_ledger` **refuses to write** to a sheet whose header order doesn't match,
-> and `python -m scripts.reorder_sheet --apply` is what conforms an existing sheet to a new order.
-> **Adding** a column is the cheap case: append it to both lists and existing rows just gain a trailing
-> blank — no migration needed.
+> **Column order is part of the wire format.** Rows are written *positionally* from column A, so
+> `FIELDNAMES` (models/order.py) and `HEADER` (ledger/sync.py) define where every value lands.
+> Reordering one without the other would silently scramble every row, so `tests/test_schema.py`
+> pins the pairing, `sync_csv_to_ledger` **refuses to write** to a grid whose header order doesn't
+> match, and the ledger file's own migration (above) is what conforms an existing table to a new
+> order. **Adding** a column is the cheap case: append it last to both lists and existing rows just
+> gain a trailing blank.
 
 **Rows are kept newest-first** (Order Date descending, then Order ID, then Shipment ascending — so a
 multi-shipment order's rows stay adjacent and in shipment order). New rows are still *written* at the
-bottom and the sheet is re-sorted afterwards, which is deliberate: the sync caches each matched row's
+bottom and the ledger is re-sorted afterwards, which is deliberate: the sync caches each matched row's
 number from its pre-sync snapshot and writes updates to that row, so moving rows mid-sync would put
 every update on the wrong one. Sorting only runs when a sync actually **appended** — an update rewrites
 a row where it already sits and can't change the order — so a routine re-check run skips it. Use
 `python -m scripts.sort_ledger` (dry run, then `--apply`) to sort by hand if the order ever drifts.
 
-**Adding a row by hand** works, with two rules. Give it a real **Order ID** — the sort covers the whole
-block from row 2 to the last row that has one, and a row without one is invisible to the upsert forever
-(every future re-check appends beside it rather than updating it). And enter **Order Date as text** —
-typing `2026-08-12` makes Sheets store a real Date, which changes the upsert key and duplicates the row
-on its next re-check; type `'2026-08-12`, or format the column as plain text first. Get both right and
-the row is indistinguishable from a scraped one: it sorts into place and gets its Total Profit formula
-on the next append-triggered sort (`scripts/sort_ledger.py --apply` if you don't want to wait). Don't
-hand-write **Total Profit** — it's position-bound and re-stamped on every sort. **Insurance** is yours
-to fill in and is never overwritten by anything. **Actual Payout** and **Payout Date** are hand-entered
-too, but the buying-group sync fills them in once the group pays (it never blanks a cell it has no
-figure for, so a value you typed only changes if the group reports a different one). A note or spacer row belongs *below* the last order, where the sort leaves it alone; put one
-inside the block and it gets shuffled in among the orders. `scripts/audit_ledger.py` flags all of this.
+**Adding a row by hand** is the dashboard's *Add a row* (Orders page; see [Operations](operations.md)),
+with two rules. Give it a real **Order ID** — a row without one is not a ledger row and is never
+stored, and a key that already exists is refused. And enter **Order Date** as `YYYY-MM-DD` — it is
+part of the upsert key, so any other spelling is a different row and the next re-check appends a
+duplicate beside it. Get both right and the row is indistinguishable from a scraped one: it sorts
+into place on the next append-triggered sort (`scripts/sort_ledger.py --apply` if you don't want to
+wait). Don't hand-write **Total Profit** or **COGS** — they are computed from the row on every read,
+and a write into them is ignored. **Insurance** is yours to fill in and is never overwritten by
+anything. **Actual Payout** and **Payout Date** are hand-entered too, but the buying-group sync fills
+them in once the group pays (it never blanks a cell it has no figure for, so a value you typed only
+changes if the group reports a different one — and a cell typed on the dashboard is protected from
+the run outright until you clear or release it). `scripts/audit_ledger.py` flags all of this.
 
 **Status** is one of `ordered`, `shipped`, `delivered`, `cancelled`, `paid`, `return`, `superseded`. The first two are
 the live lifecycle the scrapers maintain; the other five are **terminal** — the order drops out of
@@ -161,8 +151,8 @@ etc.) — they're never resold, so they never hit the ledger.
   total, like Shipping) and the COGS formula subtracts it — the cost basis and the cashback it
   drives reflect card spend only, which raises reported profit by the gift-card amount. Total Cost
   stays the gross number the order page shows. (Until 2026-08-30 the mappings instead scaled the
-  cost down invisibly; the formula computes the identical number, with the amount now on the
-  sheet.) `AMAZON_GIFT_CARD_NETTING_ENABLED=false` leaves the Gift Card cell blank, so COGS uses
+  cost down invisibly; the formula computes the identical number, with the amount now in the
+  ledger.) `AMAZON_GIFT_CARD_NETTING_ENABLED=false` leaves the Gift Card cell blank, so COGS uses
   the full sticker cost.
 
   **Amazon rewards spent on an order are NOT gift cards** — they get their own **Rewards Used**
@@ -179,7 +169,7 @@ etc.) — they're never resold, so they never hit the ledger.
 
   **Why a separate column, and the year-end rule it encodes (owner, 2026-09-08).** The owner nets
   **every** Amazon reward — Prime for Young Adults cash back **and** Business Prime Rewards — out
-  of COGS at year end, from Amazon's own rewards history, outside this sheet. So the sheet must
+  of COGS at year end, from Amazon's own rewards history, outside this ledger. So the ledger must
   record an order paid with rewards at its **full cost**, exactly as if the card had paid all of
   it; netting the redemption here as well would count the same dollars twice (an all-points order
   would show a $0 cost *and* a year-end rewards deduction). What Rewards Used changes is only the
@@ -218,7 +208,9 @@ etc.) — they're never resold, so they never hit the ledger.
   isn't classified `Personal` and deleted. Hand-entered gift-card rows should carry the same tag.
 - **Insurance**, **Payout Date** and **Actual Payout** are filled by the buying-group sync (see [Buying groups](buying-groups.md)) — or by hand until you enable it. The scrapers always write them blank, and
   the upsert's blank-never-overwrites rule is what stops a re-scrape from wiping what you typed.
-- **COGS** and **Total Profit** are **live Google Sheets formulas**, not scraped numbers:
+- **COGS** and **Total Profit** are **computed, never stored** — the ledger derives them from the
+  row on every read (`web.ledger_reader.cogs_of` / `profit_of`, the Python form of what were the
+  Sheet's two formulas), so they are not scraped numbers:
 
   ```
   COGS         = (Total Cost − Return Qty × Cost Per Item − Gift Card + Shipping + Sales Tax
@@ -238,7 +230,7 @@ etc.) — they're never resold, so they never hit the ledger.
   Unlike Total Profit, **COGS does not blank on an unpaid row**: the cost was incurred whether or not
   the group has paid yet, and the year-end cost side has to count it.
 
-  It's a formula so it recalculates the instant you type an Insurance or Actual Payout — a value
+  It is computed on read so it changes the instant you type an Insurance or Actual Payout — a value
   computed at scrape time would go stale immediately, and a `delivered` row is terminal and never
   re-scraped, so it would stay stale forever. The cell reads blank (not `0`) until Actual Payout is
   filled, so un-paid-out rows don't drag a column sum down with fake losses.
@@ -257,7 +249,7 @@ python -m scripts.tax_report 2026 --no-rows
 python -m scripts.tax_report 2026 --from-snapshot before.json   # offline, from an audit snapshot
 ```
 
-Read-only (it goes through the audit's read-only scope). **Two dates drive the year, on a cash
+Read-only (it opens the ledger through the audit's read-only handle, `open_ledger_readonly`). **Two dates drive the year, on a cash
 basis:** receipts are Actual Payouts whose *Payout Date* falls in the year; COGS and insurance are
 taken from rows whose *Order Date* does, cancelled rows excluded. A December order paid in January is
 therefore a cost in one year and income in the next, and the report's "straddling" block says how
@@ -295,7 +287,7 @@ sync posts it), keeps its cost, and the old number is kept as a `superseded` row
 shipped to, or `Unclassified` when the address matches no configured warehouse. It's derived at run time
 from the `warehouses` section of `config.json` (see [Warehouse and jig config](configuration.md#warehouse-and-jig-config)), so it also sets up the later
 buying-group tracking-post step. **Personal orders are dropped entirely** — an address matched to a group
-named `Personal` (your own reship/consumer addresses) never reaches the sheet. `Unclassified` is
+named `Personal` (your own reship/consumer addresses) never reaches the ledger. `Unclassified` is
 deliberately *not* treated as personal: a real warehouse you simply haven't configured yet is kept and
 counted (in the run log) rather than silently disappearing. A blank address on a partial re-check leaves
 the tag untouched.

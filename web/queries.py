@@ -9,8 +9,8 @@ from models.order import FIELDNAMES
 
 from web.ledger_reader import FIELD_TO_HEADER, LedgerRow
 
-#: The columns the ledger table shows: EVERY column, in the Sheet's own order. Each is sortable. The heading is HEADER's own name
-#: for the column so the page and the sheet never disagree on a label.
+#: The columns the ledger table shows: EVERY column, in the ledger's own order. Each is sortable. The heading is HEADER's own name
+#: for the column so the page and the ledger never disagree on a label.
 TABLE_COLUMNS = tuple(FIELDNAMES)
 
 #: Rendered as anchors rather than text.
@@ -44,7 +44,7 @@ ORDER_COLUMNS = ("item_name", "status", "quantity", "cost_per_item", "total_cost
 SORT_CHOICES = tuple((f, FIELD_TO_HEADER[f]) for f in (
     "order_date", "order_id", "status", "retailer", "buying_group", "item_name", "delivery_date",
     "total_cost", "expected_payout", "payout_amount", "payout_date", "total_profit", "last_scraped_at"))
-#: The two ways the Orders page shows the ledger: the sheet-like table, or one card per ORDER.
+#: The two ways the Orders page shows the ledger: the spreadsheet-like table, or one card per ORDER.
 VIEWS = ("table", "cards")
 PER_PAGE_CHOICES = (12, 24, 48, 96)
 DEFAULT_PER_PAGE = 24
@@ -214,7 +214,7 @@ def _in_state(row: LedgerRow, state: str) -> bool:
 
 
 def sort_rows(rows: list[LedgerRow], filters: Filters) -> list[LedgerRow]:
-    """Blanks always sort LAST, in either direction (Sheets' rule, and the sort_ledger one).
+    """Blanks always sort LAST, in either direction (the sort_ledger rule).
     Ties fall through to Order ID then Shipment so an order's rows stay together."""
     numeric = filters.sort in NUMERIC_SORT
 

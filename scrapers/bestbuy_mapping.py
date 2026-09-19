@@ -108,7 +108,7 @@ def _gift_card_total(payments: list) -> float | None:
 
     A tender list WITHOUT a gift tender is a real 0.0 — every order carries its tenders, so their presence without a
     gift one IS the detection. None only when the payments list itself is missing/empty (a shape
-    we've never seen; a blank never overwrites the sheet).
+    we've never seen; a blank never overwrites the ledger).
     """
     if not payments:
         return None
@@ -214,7 +214,7 @@ def _build_one_order(payload: dict, profile_label: str, known_open_ids) -> list[
     shipping_total = _num((order.get("price") or {}).get("shippingTotal"))
     # Both ORDER-LEVEL like shipping: repeated on every row, prorated at sync, netted by the COGS
     # formula (gift card subtracted, tax added). `totalSalesTax` sits beside shippingTotal in
-    # `order.price` on every capture; absent (None) leaves the sheet cell alone, 0.0 is a real zero.
+    # `order.price` on every capture; absent (None) leaves the cell alone, 0.0 is a real zero.
     sales_tax_total = _num((order.get("price") or {}).get("totalSalesTax"))
     gift_card_total = _gift_card_total(order.get("payments"))
     addr_by_id = _addresses_by_id(order)

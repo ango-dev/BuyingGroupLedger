@@ -1,5 +1,5 @@
 {
-  "//": "Copy to config.json and fill in. ENVIRONMENT VARIABLES OVERRIDE EVERY VALUE HERE — the name in each `// <KEY>` note below is the variable that wins over it, from .env or the shell. That is what makes a one-off possible without editing this file: BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking. README.md lists all of them in one table. Booleans are true/false in BOTH places; 1/yes/on still parse, but anything unrecognised is false, so a money switch fails closed on a typo.",
+  "//": "Copy to config.json and fill in. ENVIRONMENT VARIABLES OVERRIDE EVERY VALUE HERE — the name in each `// <KEY>` note below is the variable that wins over it, from .env or the shell. That is what makes a one-off possible without editing this file: BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking. docs/configuration.md lists all of them in one table. Booleans are true/false in BOTH places; 1/yes/on still parse, but anything unrecognised is false, so a money switch fails closed on a typo.",
   "//2": "EVERY setting lives here — nothing is environment-only any more, including the container schedule. .env is purely the OVERRIDE layer, and is where dev/one-off values belong: a temporary LOOKBACK_DAYS, or a host-specific RUN_INTERVAL_HOURS, without touching the config everything else shares.",
 
   "browser_use": {
@@ -77,7 +77,7 @@
     "timezone": "UTC"
   },
 
-  "// web": "The READ-ONLY web dashboard (`python -m web` on a desktop; in Docker it runs inside the one container beside the scheduler). See docs/operations.md, 'The web dashboard'.",
+  "// web": "The web dashboard (`python -m web` on a desktop; in Docker it runs inside the one container beside the scheduler). See docs/operations.md, 'The web dashboard'.",
   "web": {
     "// enabled": "WEB_ENABLED — in the container, start the dashboard beside the scheduler (and probe it in the healthcheck). false = a pure scheduler container, as before.",
     "enabled": true,
@@ -85,7 +85,7 @@
     "ledger_source": "db",
     "// snapshot_path": "WEB_SNAPSHOT_PATH — a specific CSV for the snapshot backend. Blank = the newest data/ledger_backup_*.csv.",
     "snapshot_path": "",
-    "// ledger_cache_ttl_seconds": "WEB_LEDGER_CACHE_TTL_SECONDS — the dashboard's ledger read cache interval, in seconds (reported by /health; the name is the Sheet era's).",
+    "// ledger_cache_ttl_seconds": "WEB_LEDGER_CACHE_TTL_SECONDS — how long the dashboard keeps a read of the ledger file before re-reading it, in seconds (reported by /health; ?refresh=1 on any page re-reads now).",
     "ledger_cache_ttl_seconds": 300,
     "// bind_host": "WEB_BIND_HOST — loopback by default; there is no authentication, so bind wider (0.0.0.0 behind Tailscale) deliberately. The compose service publishes on 127.0.0.1 unless WEB_PUBLISH_HOST says otherwise.",
     "bind_host": "127.0.0.1",
@@ -147,7 +147,7 @@
     }
   ],
 
-  "// warehouses": "Which buying group an order belongs to, matched on its DELIVERY ADDRESS. A jig is a deliberately misspelled variant the group hands out ('THIRTEEN SAMMPLE DR1VE') so each order routes distinctly — it is a routing token, never a postal address, and nothing ever files it as one. Name a group literally `Personal` to have those rows dropped before the sheet is written.",
+  "// warehouses": "Which buying group an order belongs to, matched on its DELIVERY ADDRESS. A jig is a deliberately misspelled variant the group hands out ('THIRTEEN SAMMPLE DR1VE') so each order routes distinctly — it is a routing token, never a postal address, and nothing ever files it as one. Name a group literally `Personal` to have those rows dropped before the ledger is written.",
   "warehouses": [
     {
       "buying_group": "BFMR",

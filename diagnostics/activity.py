@@ -1,6 +1,6 @@
 """The activity log: one line per thing the app DID -- a run's scrapes and ledger writes, what the
 buying-group sync submitted, insured and read back, the emails the auto-reply sent, every alert,
-every failure dossier, the end-of-run mirror, and every change made from the dashboard (cell edits,
+every failure dossier, and every change made from the dashboard (cell edits,
 added / deleted rows, receipts, backups, settings). The dashboard's Activity page is a filterable
 table over it.
 

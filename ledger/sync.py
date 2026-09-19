@@ -3,8 +3,8 @@
 Every writer here addresses the ledger as a positional grid through the worksheet face
 ledger_db/worksheet.py puts on data/ledger.sqlite3 (`_get_worksheet` opens it; the buying-group
 sync, the BFMR auto-reply and the repair scripts open it through the same function). The
-Google Sheet the grid vocabulary came from was deleted 2026-09-18; the adapter's contract is
-what the sheet's was, down to the empty string.
+adapter keeps the worksheet contract every writer here was written against, down to the empty
+string (a formatted read hands back text, a blank is "").
 """
 
 import csv
@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 # A Shipment cell in either spelling: the current bare "2" or the pre-2026-08-12 "Shipment 2".
 _SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)
 
-# Display names for the sheet's header row, positionally 1:1 with models.order.FIELDNAMES — rows are
+# Display names for the ledger's header row, positionally 1:1 with models.order.FIELDNAMES — rows are
 # written positionally from column A, so the two lists must stay the same length and order.
 # tests/test_schema.py pins both lists in full, so any reorder fails loudly and forces the author to
 # think about the ledger file's column migration (ledger_db/store.py copies by NAME on open) rather
@@ -32,8 +32,8 @@ _SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)
 HEADER = [
     # --- what it is ---
     "Order Date",
-    "Status",  # PINNED AT COLUMN B (a Sheet-era rule the dashboard's row colours no longer need;
-               # kept because nothing is gained by moving it and the formula letters are pinned)
+    "Status",  # PINNED AT COLUMN B (nothing needs it there any more; kept because nothing is
+               # gained by moving it and the formula letters are pinned)
     "Retailer",
     "Item Name",
     "Shipment",  # bare number ("1", "2"), not "Shipment 1" — the column heading already says it
@@ -59,7 +59,7 @@ HEADER = [
                      # tender the card never spent. See models/order.py.
     "Card",  # derived from Card Last 4 (config.cards.resolve_card)
     "Cashback Rate",  # decimal fraction (0.02) — format the column as a percentage to taste
-    "COGS",  # a live sheet formula, written by _cogs_formula: cost + shipping, net of cashback
+    "COGS",  # DERIVED: the adapter computes it per row (_cogs_formula is the definition): cost + shipping, net of cashback
     # --- what came back ---
     "Insurance",  # a buying-group premium — an EXPENSE, deliberately not part of COGS
     "Expected Payout",  # the group's COMMITTED payout (sync_tracking), kept apart from the paid one
@@ -69,7 +69,7 @@ HEADER = [
     # stay GROSS and the COGS formula nets Return Qty x Cost Per Item out (see models/order.py).
     "Return Qty",   # units netted OUT of this row
     "Return Date",
-    "Total Profit",  # a live sheet formula, written by _profit_formula: Payout - COGS - Insurance
+    "Total Profit",  # DERIVED: the adapter computes it per row (_profit_formula is the definition): Payout - COGS - Insurance
     # --- reference / audit ---
     "Profile",  # which browser profile scraped it — never read while reconciling
     "Order Link",
@@ -83,8 +83,8 @@ HEADER = [
     "Last Scraped At",
 ]
 
-# Numeric columns get coerced to numbers so the sheet supports sum()/formulas. total_profit is
-# deliberately absent: it's written as a formula string, never as a number.
+# Numeric columns get coerced to numbers so the ledger holds real numbers, not text. total_profit is
+# deliberately absent: it is a derived column, never written as a number.
 #
 # "shipment" is here for a different reason than the rest: it's not summed, it's a plain 1-based index
 # ("1", "2", ...) that should just look like the number it is, with no leading apostrophe. Unlike
@@ -102,7 +102,7 @@ _NUMERIC_FIELDS = {
 # "2", not "2.0"). Every other numeric field is a currency/rate amount, where a float is correct.
 _INT_FIELDS = {"quantity", "shipment", "return_quantity"}
 
-# Fields stored as a real BOOLEAN, so a Google Sheets checkbox actually ticks.
+# Fields stored as a real BOOLEAN, so the checkbox column actually ticks.
 #
 # This needs its own coercion because the round trip would otherwise destroy it. Rows are read
 # FORMATTED, where a boolean cell comes back as the STRING "TRUE"; _merge_row carries that string
@@ -133,7 +133,7 @@ _COL = {field: _col_letter(i) for i, field in enumerate(FIELDNAMES)}
 
 
 def _cogs_formula(row_number: int) -> str:
-    """The live COGS (Cost of Goods Sold) formula for one sheet row.
+    """The live COGS (Cost of Goods Sold) formula for one row.
 
         COGS = (Total Cost - Return Qty x Cost Per Item - Gift Card + Shipping + Sales Tax
                 - Rewards Used) * (1 - Cashback Rate) + Rewards Used
@@ -141,7 +141,7 @@ def _cogs_formula(row_number: int) -> str:
     REWARDS USED STAY IN THE COST. Amazon rewards spent on an order — a
     Prime cash-back balance or Amazon points — are taken OUT of the parenthesis and ADDED BACK
     outside it: the order still costs its full sticker (the reward is netted from COGS at year end,
-    outside this sheet, so netting it here too would count it twice — an all-points order would
+    outside this ledger, so netting it here too would count it twice — an all-points order would
     show a $0 cost AND a year-end rewards deduction), while the card earns no cashback on dollars
     it never paid. A blank cell is 0, so every pre-existing row computes the identical number.
 
@@ -205,7 +205,7 @@ def _cogs_formula(row_number: int) -> str:
 
 
 def _profit_formula(row_number: int) -> str:
-    """The live Total Profit formula for one sheet row.
+    """The live Total Profit formula for one row.
 
         Total Profit = Actual Payout - COGS - Insurance
 
@@ -380,7 +380,7 @@ def _get_worksheet():
 
 
 def _parse_display_number(value: str):
-    """Parse a number that may be wearing the sheet's DISPLAY formatting. None if it isn't a number.
+    """Parse a number that may be wearing the ledger's DISPLAY formatting. None if it isn't a number.
 
     This matters because of a round trip that is easy to miss: `get_all_values()` returns FORMATTED
     text, `_merge_row` PRESERVES an existing cell whenever the incoming value is blank (which is the
@@ -450,10 +450,10 @@ def _coerce(field: str, value: str):
 
 def _next_shipment_number(order_id, existing, oid_hdr_idx, shipment_hdr_idx,
                           appends, oid_field_idx, shipment_field_idx) -> int:
-    """Highest shipment number seen for this order (across existing sheet rows AND rows already queued
+    """Highest shipment number seen for this order (across existing rows AND rows already queued
     to append this sync) + 1 — a unique, stable label for a newly-detected split box.
 
-    Accepts BOTH the current bare "2" and the pre-2026-08-12 "Shipment 2" wording, so a sheet that
+    Accepts BOTH the current bare "2" and the pre-2026-08-12 "Shipment 2" wording, so a ledger that
     still holds old-style labels (or a row an agent wrote in the labelled form) can't make this
     restart at 2 and collide with an existing box."""
     nums = [1]  # so the first extra box becomes at least "2" even if labels don't parse
@@ -480,9 +480,9 @@ def _package_id_of(row: list, package_hdr_idx: int | None) -> str:
 def _ensure_grid_cols(worksheet) -> None:
     """Grow the grid to len(HEADER) columns before anything writes a full-width row.
 
-    A real sheet has a FIXED grid, and a write past it 400s ("exceeds grid limits") — the column
-    twin of the append failure _ensure_grid_rows exists for, and exactly what the first sync after
-    a column append (grid 30 -> 32, 2026-08-30) would hit on an older sheet. Growing is safe and
+    The worksheet contract has a FIXED grid, and a write past it fails — the column twin of the
+    append failure _ensure_grid_rows exists for, and exactly what the first sync after a column
+    append (grid 30 -> 32, 2026-08-30) would hit on an older grid. Growing is safe and
     idempotent: new columns arrive empty, existing cells don't move.
     """
     current = getattr(worksheet, "col_count", None)
@@ -491,7 +491,7 @@ def _ensure_grid_cols(worksheet) -> None:
 
 
 def _protected_cells(worksheet) -> dict:
-    """{row key: fields} the user typed by hand (ledger_db/hand_edits); {} for a Sheet or a fake."""
+    """{row key: fields} the user typed by hand (ledger_db/hand_edits); {} for a fake worksheet."""
     from ledger_db.hand_edits import protected_fields
 
     return protected_fields(worksheet)
@@ -517,8 +517,8 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
         existing = [HEADER]
 
     header = existing[0]
-    # Migrate an older sheet whose header is a PREFIX of the current HEADER. Columns are only ever
-    # APPENDED (Shipment, then Buying Group), so a pre-migration sheet's header is HEADER truncated at
+    # Migrate an older ledger whose header is a PREFIX of the current HEADER. Columns are only ever
+    # APPENDED (Shipment, then Buying Group), so a pre-migration ledger's header is HEADER truncated at
     # the right — its leading columns are byte-identical to ours. Rewriting row 1 to the full HEADER is
     # then safe: existing data rows keep their positions and simply gain trailing (empty) cells. A
     # header that is NOT a prefix (garbage, reordered, or renamed) is deliberately left alone so the
@@ -535,10 +535,10 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
     if missing:
         raise RuntimeError(
             f"Worksheet '{getattr(worksheet, "title", "ledger")}' first row is not a recognized "
-            f"header (missing {missing}). Clear the sheet, or set its header row to: {HEADER}"
+            f"header (missing {missing}). Clear the ledger, or set its header row to: {HEADER}"
         )
     # THE ORDER MUST MATCH EXACTLY, not merely contain the right names. Rows are written positionally
-    # from column A, so a sheet holding the right columns in a DIFFERENT order (e.g. one written before
+    # from column A, so a ledger holding the right columns in a DIFFERENT order (e.g. one written before
     # the 2026-08-12 reorder) would read fine by name here and then be overwritten with values in the
     # new order — silently scrambling every field of every row it touched. That is the single worst
     # failure this module can have, and no runtime error would announce it. Refuse instead, and point
@@ -744,7 +744,7 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
         # re-syncing an older CSV written before a column was added — the missing value arrives
         # blank, which _merge_row then refuses to write over existing data.
         sheet_row = [_coerce(field, record.get(field, "")) for field in FIELDNAMES]
-        # A mis-read order keeps whatever tracking the sheet already holds: blanking the incoming
+        # A mis-read order keeps whatever tracking the ledger already holds: blanking the incoming
         # value hands the decision to _merge_row's blank-never-overwrites rule, which is exactly the
         # right default here. Every other field still updates — only the tracking is in doubt, and a
         # run that also refused the corrected costs would throw away good data with the bad.
@@ -983,7 +983,7 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
                             protected=protected.get(_row_key(existing_row), ()))
         # Preserved cells come back as strings from get_all_values(); re-coerce so a kept numeric
         # (e.g. a quantity carried over from a prior run) is written as a number, not text —
-        # otherwise Sheets stores it as text and shows a leading-apostrophe '1.
+        # otherwise the ledger stores it as text.
         merged = [_coerce(field, val) for field, val in zip(FIELDNAMES, merged)]
         merged = _blank_money_for_status(merged)
         merged_status = str(merged[_STATUS_FIELD_IDX] or "").strip().lower()
@@ -995,9 +995,9 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
         updates += 1
 
     if appends:
-        # Write at an explicit column-A range rather than worksheet.append_rows(): append_rows lets
-        # the Sheets API auto-detect the "table" to append after, which on some sheets anchors to the
-        # wrong column (observed shifting rows 10 columns right into K:AB). Positioning from column A
+        # Write at an explicit column-A range rather than worksheet.append_rows(): an append that
+        # auto-detects the "table" to append after once anchored to the wrong column (observed
+        # shifting rows 10 columns right into K:AB). Positioning from column A
         # of the first empty row keeps every row aligned to the header. `existing` was read before any
         # updates and updates never add rows, so len(existing)+1 is the first free row.
         # NOT len(existing): a checkbox column materialises a real False in every empty row it covers,
@@ -1060,14 +1060,14 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
             "impossible: a carrier issues one number per package. That means the scrape MIS-READ the "
             "tracking (the Costco agent fallback has done this, repeating box 1's number for box 2 "
             "and dropping box 2's).\n\n"
-            "The tracking numbers already on the sheet were LEFT ALONE for these orders, and no rows "
+            "The tracking numbers already on the ledger were LEFT ALONE for these orders, and no rows "
             "were added. Everything else on those rows — cost, status, delivery date — did update.\n\n"
-            "Nothing to do if the sheet's numbers are right. If they aren't, re-run the retailer on "
+            "Nothing to do if the ledger's numbers are right. If they aren't, re-run the retailer on "
             "its API path (not the agent) and it will correct them:\n\n" + "\n".join(lines),
         )
 
     log.info(
-        "Sheet sync: %d row(s) updated, %d row(s) appended%s%s%s.",
+        "Ledger sync: %d row(s) updated, %d row(s) appended%s%s%s.",
         updates,
         len(appends),
         f", {len(split_events)} split-box row(s) added" if split_events else "",
@@ -1089,8 +1089,8 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
 
 # Sort order for the ledger: newest orders at the top, and an order's rows kept together beneath it.
 # Order ID + Shipment are tie-breakers, not preferences — without them a multi-shipment order's rows
-# can be scattered among other orders placed the same day. gspread spells descending "des" (not
-# "desc") and raises ValueError on anything else.
+# can be scattered among other orders placed the same day. the worksheet contract spells descending "des" (not
+# "desc"); the adapter's sort reads it the same way.
 _SORT_SPEC = (("Order Date", "des"), ("Order ID", "asc"), ("Shipment", "asc"))
 
 
@@ -1119,12 +1119,12 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
     worksheet = worksheet or _get_worksheet()
     existing = worksheet.get_all_values()
     if not existing or not any(str(cell).strip() for cell in existing[0]):
-        log.info("Ledger sort: sheet is empty, nothing to sort.")
+        log.info("Ledger sort: the ledger is empty, nothing to sort.")
         return {"sorted_rows": 0, "already_sorted": True}
 
     header = [str(c) for c in existing[0]]
     # Same exact-order requirement as sync_csv_to_ledger: sorting addresses columns by position, so a
-    # sheet whose columns are in a different order would be sorted on the wrong ones.
+    # grid whose columns are in a different order would be sorted on the wrong ones.
     if header != list(HEADER):
         raise RuntimeError(
             f"Worksheet '{getattr(worksheet, "title", "ledger")}' has the ledger's columns in a "
@@ -1149,24 +1149,24 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
         return {"sorted_rows": len(row_numbers), "already_sorted": True}
 
     # The range ends at the POSITION of the last ledger row, not at the ledger row COUNT. Those agree
-    # only when every row in the block carries an Order ID, and a hand-added sheet doesn't have to:
+    # only when every row in the block carries an Order ID, and a hand-added row doesn't have to:
     # a spacer, a note, a half-typed row all count as neither. Each one made the old count-derived
     # bound fall a row short, leaving that many rows off the bottom of the range — excluded from this
     # sort and every future one, silently, since being out of order is only a WARN in audit_ledger and
     # drift between appends is expected anyway. Locating the last row also keeps a note BELOW the
     # block outside the range, which simply using len(existing) would sweep into the middle of it.
     last_row = row_numbers[-1]
-    # An EXPLICIT range matters for the same family of reasons: gspread's unranged sort spans the
-    # sheet's full row_count, which drags the trailing empty rows through the data block and would
+    # An EXPLICIT range matters for the same family of reasons: an unranged sort spans the
+    # grid's full row_count, which drags the trailing empty rows through the data block and would
     # leave blank rows interleaved (which audit_ledger's check_content_outside_the_schema then flags).
     cell_range = f"A2:{_col_letter(len(HEADER) - 1)}{last_row}"
     specs = tuple((header.index(name) + 1, direction) for name, direction in _SORT_SPEC)
 
     worksheet.sort(*specs, range=cell_range)
     # Re-read instead of reusing row_numbers: the sort just moved the rows those numbers described.
-    # Non-ledger rows inside the block move too, and not always to the bottom — Sheets orders EMPTY
+    # Non-ledger rows inside the block move too, and not always to the bottom — the sort orders EMPTY
     # cells last, but a row blank only in Order ID still sorts on its Order Date and can land
-    # mid-block. So which rows are ledger rows now is a fact about the sheet AFTER the sort, and
+    # mid-block. So which rows are ledger rows now is a fact about the ledger AFTER the sort, and
     # stamping a position-bound formula anywhere else is exactly what audit_ledger's
     # check_no_stray_formulas fails on. One extra read buys correctness in every arrangement.
     _write_profit_formulas(worksheet, ledger_row_numbers(worksheet.get_all_values()))
@@ -1277,7 +1277,7 @@ def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
     pointing at a frozen number.
 
     Why a SEPARATE write instead of putting the formula in the main row block: the row block is sent
-    RAW so the sheet stores values exactly as scraped, which a formula string would land as literal
+    RAW so the ledger stores values exactly as scraped, which a formula string would land as literal
     text. This call is the only one using USER_ENTERED, and it's scoped to a single column — keeping
     USER_ENTERED away from the data columns, where it would reinterpret long numeric tracking numbers
     as numbers and render them in scientific notation.
@@ -1287,7 +1287,7 @@ def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
     frozen value. Re-stamping the formula last restores it.
 
     Note this does NOT need to run again after _reprorate_order_level changes a sibling row's Shipping
-    value: _profit_formula reads that cell by reference (same-row, no SUMIF), so Sheets recalculates
+    value: _profit_formula reads that cell by reference (same-row, no SUMIF), so the adapter recomputes
     Total Profit live the moment Shipping changes — no re-stamp required for rows this call doesn't
     otherwise touch.
 
@@ -1311,7 +1311,7 @@ def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:
 
 
 # The ORDER-LEVEL amounts every mapping emits identically on all of an order's rows, in the field
-# order they were added. Each one's sheet cell holds that row's cost-weighted SHARE of the order
+# order they were added. Each one's cell holds that row's cost-weighted SHARE of the order
 # total, written by _reprorate_order_level below.
 _ORDER_LEVEL_FIELDS = ("shipping", "gift_card", "sales_tax", "rewards_used")
 
@@ -1321,19 +1321,19 @@ def _reprorate_order_level(worksheet, order_ids: set, raw_totals: dict) -> None:
     that row's cost-weighted SHARE of the order-level total (weighted by Total Cost), replacing the raw order-level value every scraper/agent emits.
     `raw_totals` is {field: {order_id: total}} over _ORDER_LEVEL_FIELDS.
 
-    Why this is Python at sync time, not a live sheet formula: the only place the true order-level
+    Why this is Python at sync time, not a derived column: the only place the true order-level
     total is ever known is the freshly-scraped record itself — every row of an order carries the SAME
     number (see OrderItem.shipping). Once this function overwrites a row's cell with its share, that
-    raw total is gone from the sheet; a live formula would need it to live SOMEWHERE else to divide
+    raw total is gone from the ledger; a live formula would need it to live SOMEWHERE else to divide
     from (that's what a short-lived separate "Prorated Shipping" column existed for, added then
     reverted the same day — the user wants the split to just BE the column, not a second one). So
     it's computed once, here, from the total this sync just read off the CSV, and applied to EVERY
-    row of the order currently on the sheet — not only the rows this sync happened to touch — so a
+    row of the order currently on the ledger — not only the rows this sync happened to touch — so a
     shipment discovered LATER (the order grows a new box on a re-check) re-derives the whole order's
     split fresh rather than leaving its older siblings stale.
 
-    The formulas read all three columns directly (same-row references, no SUMIF), and Sheets
-    recalculates a formula the instant a cell it references changes — so COGS and Total Profit
+    The formulas read all three columns directly (same-row references, no SUMIF), and the adapter
+    recomputes them on every read — so COGS and Total Profit
     update for every affected sibling row with no extra re-stamp needed here.
 
     Runs AFTER every update/append this sync has already written, so the fresh read below sees final
@@ -1420,7 +1420,7 @@ def _last_occupied_row(existing: list[list], checkbox_index: int | None = None) 
     # FIELDNAMES is right whenever the grid matches the current schema, but a grid still in an OLD
     # column order has FIELDNAMES pointing at the wrong column, so the
     # materialised FALSEs are not recognised as checkbox padding, and every grid row counts as
-    # occupied. That made the reorder rewrite 983 rows on a 42-row ledger. Callers holding the sheet's
+    # occupied. That made the reorder rewrite 983 rows on a 42-row ledger. Callers holding the ledger's
     # own header pass the index from THAT.
     checkbox = FIELDNAMES.index("tracking_submitted") if checkbox_index is None else checkbox_index
     for number in range(len(existing), 0, -1):
@@ -1435,24 +1435,24 @@ def _last_occupied_row(existing: list[list], checkbox_index: int | None = None) 
 
 
 def _ensure_grid_rows(worksheet, needed: int) -> None:
-    """Grow the sheet if an append would land past the last row that exists.
+    """Grow the grid if an append would land past the last row that exists.
 
-    Sheets rejects a write beyond the grid outright (HTTP 400), and the rows are lost for that run —
-    so capacity is checked BEFORE writing rather than discovered by a failed sync. Extra headroom is
+    The worksheet contract rejects a write beyond the grid outright, and the rows are lost for that
+    run — so capacity is checked BEFORE writing rather than discovered by a failed sync. Extra headroom is
     added so this is not paid once per append as the ledger fills up.
     """
     have = worksheet.row_count
     if needed <= have:
         return
     grow_by = needed - have + 200
-    log.info("Ledger: growing the sheet by %d row(s) to fit an append at row %d.", grow_by, needed)
+    log.info("Ledger: growing the grid by %d row(s) to fit an append at row %d.", grow_by, needed)
     worksheet.add_rows(grow_by)
 
 
 def _blank_to_none(row: list) -> list:
     """Send empty cells as None rather than "" — otherwise the write STRIPS their number format.
 
-    Measured against the live sheet 2026-08-14:
+    Measured against the worksheet contract (live, 2026-08-14), which the adapter keeps:
 
         RAW ""            -> number format cleared
         RAW None          -> number format preserved
@@ -1477,13 +1477,13 @@ def _blank_to_none(row: list) -> list:
 
 
 def _read_unformatted(worksheet) -> list[list]:
-    """The sheet's stored VALUES (real types), or [] if that read is unavailable."""
+    """The ledger's stored VALUES (real types), or [] if that read is unavailable."""
     from ledger_db.worksheet import ValueRenderOption
 
     try:
         return worksheet.get_values(value_render_option=ValueRenderOption.unformatted) or []
     except Exception:  # noqa: BLE001 -- never let a second read stop the sync
-        log.warning("Could not read the sheet unformatted; preserved cells will use display text.",
+        log.warning("Could not read the ledger unformatted; preserved cells will use display text.",
                     exc_info=True)
         return []
 
@@ -1525,8 +1525,8 @@ def _merge_row(existing_row: list, new_row: list, protected=()) -> list:
     OBSERVED LIVE: a forced agent run couldn't see the second box's tracking number,
     concluded the shipment hadn't shipped, and wrote `shipped` -> `ordered` over a row that had
     already been delivered. `_collapse_records` has always applied this rule when merging two
-    INCOMING records against each other; it was never applied against what the sheet already holds,
-    which is where it matters more — the sheet is the accumulated truth of every prior run.
+    INCOMING records against each other; it was never applied against what the ledger already holds,
+    which is where it matters more — the ledger is the accumulated truth of every prior run.
 
     It also protects the hand-typed values (section 12b): `return` and `paid` outrank everything a
     scraper reports, so a MOD return typed in by hand survives a scrape that still sees `delivered`.
@@ -1551,7 +1551,7 @@ def _merge_row(existing_row: list, new_row: list, protected=()) -> list:
 def _rank_of(status) -> int:
     """How far through the lifecycle a status is; unknown/blank ranks lowest (-1).
 
-    Blank ranking below `ordered` is what keeps the guard from firing on a row the sheet has no
+    Blank ranking below `ordered` is what keeps the guard from firing on a row the ledger has no
     status for yet — there is nothing to move backwards from.
     """
     return _STATUS_RANK.get(str(status or "").strip().lower(), -1)
@@ -1579,14 +1579,14 @@ def _rollup_status(statuses: list[str]) -> str:
 
 def plan_buying_group_retag(header: list[str], data_rows: list[list[str]], warehouses) -> dict:
     """Read-only: work out what a retroactive Buying Group classification pass would do to rows
-    ALREADY on the sheet, without writing anything. `apply_buying_group_retag` (or a caller script)
+    ALREADY on the ledger, without writing anything. `apply_buying_group_retag` (or a caller script)
     turns this plan into real writes/deletes.
 
     This exists because the classifier only tags NEW/re-checked rows at scrape time (main.run_scrape) —
     rows recorded before the Buying Group column existed, or before warehouses.json had an entry that
     now matches them, are never revisited automatically. This is the one-off backfill.
 
-    `header` is the sheet's CURRENT header row (may predate the Buying Group column — that's reported
+    `header` is the ledger's CURRENT header row (may predate the Buying Group column — that's reported
     via `needs_header_migration`, not assumed). `data_rows` is `existing[1:]` (no header). Rows with a
     blank Order ID are skipped, same rule as sync_csv_to_ledger.
 
@@ -1621,7 +1621,7 @@ def plan_buying_group_retag(header: list[str], data_rows: list[list[str]], wareh
         # A DELIBERATELY UNROUTED tag is sticky. A gift card row is hand-entered bookkeeping, and
         # classify_address knows nothing about it: shipped to the user's own address it would classify
         # Personal and be DELETED, and shipped to a jig it would be retagged into a buying group it
-        # was never part of. Neither is recoverable from the sheet afterwards, so the tag wins.
+        # was never part of. Neither is recoverable from the ledger afterwards, so the tag wins.
         if is_deliberately_unrouted(old_tag):
             group_counts[old_tag] = group_counts.get(old_tag, 0) + 1
             unchanged += 1
@@ -1651,7 +1651,7 @@ def plan_buying_group_retag(header: list[str], data_rows: list[list[str]], wareh
 
 def load_order_state(profile_label: str | None = None, since: str | None = None,
                      retailer: str | None = None) -> dict:
-    """Read the sheet and return, for this profile:
+    """Read the ledger and return, for this profile:
 
         {
           "delivered_ids": [order_id, ...],    # all shipments delivered — terminal, skip
@@ -1671,7 +1671,7 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
           ],
         }
 
-    Each sheet row IS one (shipment x item), so shipments are recovered by grouping an order's
+    Each row IS one (shipment x item), so shipments are recovered by grouping an order's
     rows on the Shipment column. Keeping them separate is what lets the caller re-check each
     shipment's own tracking page — an order with several shipments has several tracking links,
     and collapsing them to one would silently drop all but the first.
@@ -1688,7 +1688,7 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
     orders under the wrong retailer, corrupting the ledger (and, because the upsert key has no retailer
     field, overwriting the real rows). Omitted (single-retailer profiles) = no filtering, as before.
 
-    Fails soft (empty state) if the sheet isn't configured/readable → treat all as new.
+    Fails soft (empty state) if the ledger isn't configured/readable → treat all as new.
     """
     empty: dict = {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
     try:
@@ -1704,7 +1704,7 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
         # "0 discovered + 1 open -> 1 order(s) to fetch".
         who = " / ".join(x for x in (profile_label, retailer) if x) or "all profiles"
         log.warning(
-            "Could not read order state from the sheet (%s); OPEN-ORDER RE-CHECKS ARE SKIPPED this "
+            "Could not read order state from the ledger (%s); OPEN-ORDER RE-CHECKS ARE SKIPPED this "
             "run — only brand-new orders in the date window will be fetched.", who, exc_info=True,
         )
         # Alerted because this degrades collection SILENTLY. A logged-out session shouts; this used to
@@ -1712,7 +1712,7 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
         # ranks worst ("silently records nothing"). The run still continues — that part is correct.
         alert(
             f"Ledger: order state unreadable ({who}) — re-checks skipped this run",
-            "The scrape could not read the sheet, so it did not re-check any already-recorded open "
+            "The scrape could not read the ledger, so it did not re-check any already-recorded open "
             "order; it only looked for brand-new orders in the lookback window. Any status or "
             "tracking-number change on an open order was missed for this cycle and will be picked up "
             "on the next successful run. Check logs/run.log.",
@@ -1724,7 +1724,7 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
 
 def classify_order_state(existing: list[list], profile_label: str | None = None,
                          since: str | None = None, retailer: str | None = None) -> dict:
-    """The PURE half of load_order_state: sheet grid (header row first) -> order state.
+    """The PURE half of load_order_state: ledger grid (header row first) -> order state.
 
     Split out so it can be asked questions offline -- by tests, and by scripts/audit_ledger's
     `state_visibility` check, which runs it for every configured profile x retailer and reports
@@ -1743,7 +1743,7 @@ def classify_order_state(existing: list[list], profile_label: str | None = None,
     if any(c not in header for c in needed):
         return empty
     idx = {c: header.index(c) for c in needed}
-    # Optional: sheets written before the Shipment column exist. Those rows group under "",
+    # Optional: ledgers written before the Shipment column exist. Those rows group under "",
     # which behaves like any other single shipment.
     shipment_idx = header.index("Shipment") if "Shipment" in header else None
     # Retailer scoping (multi-retailer profiles): filter to this retailer's rows only.

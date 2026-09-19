@@ -70,7 +70,7 @@ RETIRED_STATUSES = ("superseded",)
 # not, because Quantity is the multiplier that double-counted the re-labelled package).
 MONEY_FREE_STATUSES = ("cancelled", "superseded")
 
-# CSV/Sheet column order — keep in sync with output/csv_writer.py and ledger/sync.py HEADER,
+# CSV/ledger column order — keep in sync with output/csv_writer.py and ledger/sync.py HEADER,
 # which is this same list in display-name form, positionally 1:1. tests/test_schema.py pins BOTH.
 #
 # ORDER IS READING ORDER, chosen by the user (2026-08-12): identity first (when/what/where), then the
@@ -103,12 +103,12 @@ FIELDNAMES = [
     "order_id",
     "tracking_number",
     # Has this row's tracking number been accepted by its buying group? A real BOOLEAN, so the
-    # column works as a Google Sheets checkbox.
+    # column works as a checkbox.
     #
     # A DELIBERATE EXCEPTION to this project's "derive, don't store" rule. Whether a number has been
     # submitted is something the group knows and is re-derived every run, which is why
     # sync_tracking.py does NOT consult this column to decide what to send — a local mirror of remote
-    # state drifts the moment a post succeeds and the sheet write doesn't. It exists to be SEEN: an
+    # state drifts the moment a post succeeds and the ledger write doesn't. It exists to be SEEN: an
     # unticked box next to a shipped package is the thing worth noticing. It is a display of state,
     # not a source of truth. Blank on every scraper path, so _merge_row preserves it.
     "tracking_submitted",
@@ -123,7 +123,7 @@ FIELDNAMES = [
     "total_cost",
     # Every scraper emits the ORDER-LEVEL shipping total, repeated on every shipment row (see
     # OrderItem.shipping below) — ledger.sync.sync_csv_to_ledger is what turns that into each
-    # row's actual cost-weighted SHARE before it lands on the sheet, so this field's value in a CSV
+    # row's actual cost-weighted SHARE before it lands on the ledger, so this field's value in a CSV
     # and its value in the ledger are deliberately NOT the same number.
     "shipping",
     # Both are the ORDER-LEVEL total repeated on every row by the mappings (the same contract as
@@ -137,8 +137,8 @@ FIELDNAMES = [
     "gift_card",
     # Amazon rewards SPENT on the order — a Prime cash-back balance or Amazon points — as an
     # order-level total like `gift_card` above, and placed beside it for that reason. Deliberately
-    # NOT a gift card: the user nets every Amazon reward out of COGS at year end, outside the sheet,
-    # so the sheet must keep the order's FULL cost (as if the card paid it all) or the reward is
+    # NOT a gift card: the user nets every Amazon reward out of COGS at year end, outside the ledger,
+    # so the ledger must keep the order's FULL cost (as if the card paid it all) or the reward is
     # counted twice. What this column changes is only the cashback basis: the card earns nothing on
     # dollars it never paid.
     "rewards_used",
@@ -147,7 +147,7 @@ FIELDNAMES = [
     # (a partial re-check), so _merge_row preserves what the first full extraction recorded.
     "card_name",
     "cashback_rate",
-    # DERIVED IN THE SHEET like total_profit below, and for the same reason. Cost of Goods Sold for
+    # DERIVED IN THE LEDGER like total_profit below, and for the same reason. Cost of Goods Sold for
     # this row, net of the card rebate:
     #
     #     COGS = (total_cost + this row's SHARE of shipping) * (1 - cashback_rate)
@@ -163,7 +163,7 @@ FIELDNAMES = [
     "cogs",
     # Filled by the buying-group sync (sync_tracking.py), or by hand. The scrapers always emit these
     # blank, and _merge_row's blank-never-overwrites rule is what keeps a re-scrape from wiping
-    # numbers typed into the sheet by hand.
+    # numbers typed into the ledger by hand.
     # `insurance` is filled for BFMR from the negative FEE row on its tracker (its two documented
     # insurance-READ endpoints are documented but NOT DEPLOYED), and written as 0 for MOD, which
     # never charges a premium.
@@ -184,10 +184,10 @@ FIELDNAMES = [
     # two-row bookkeeping did. A fully-returned order keeps status `return`.
     "return_quantity",
     "return_date",
-    # DERIVED IN THE SHEET, not here: ledger.sync writes a live formula into this cell so the
-    # number updates the moment insurance/payout are typed in — a Python-computed value would go
+    # DERIVED IN THE LEDGER, not here: the adapter computes this cell from the row on every read, so
+    # the number is current the moment insurance/payout are typed in — a scrape-time value would go
     # stale, and a delivered row is never re-scraped to refresh it. Kept in FIELDNAMES (emitted blank)
-    # so the column still exists positionally in the CSV and the sheet row.
+    # so the column still exists positionally in the CSV and the row.
     "total_profit",
     # --- reference / audit: rarely scanned, so parked at the end ---
     # Which browser profile scraped the row. A scraper detail, never read while reconciling, so it
@@ -201,7 +201,7 @@ FIELDNAMES = [
     # happen to be looking at.
     #
     # Filled by receipts.capture.attach_receipts during the scrape and blank when receipt capture is
-    # unconfigured, so _merge_row's blank-never-overwrites rule keeps a link already on the sheet.
+    # unconfigured, so _merge_row's blank-never-overwrites rule keeps a link already on the ledger.
     "receipt_url",
     # The raw address buying_group was classified from — kept back here with the other reference data
     # rather than beside its tag, since it's long, wraps badly, and is only consulted when a
@@ -235,10 +235,10 @@ class OrderItem(BaseModel):
     delivery_address: str = ""
     item_name: str
     # Numeric fields are optional/None so an omitted value (e.g. on a tracking-only re-check)
-    # serializes blank in the CSV and never clobbers an already-recorded number in the sheet.
+    # serializes blank in the CSV and never clobbers an already-recorded number in the ledger.
     quantity: int | None = None
     cost_per_item: float | None = None
-    shipping: float | None = None  # ORDER-LEVEL total as emitted; ledger_sync reprorates it for the sheet
+    shipping: float | None = None  # ORDER-LEVEL total as emitted; ledger_sync reprorates it for the ledger
     total_cost: float | None = None  # computed = quantity * cost_per_item (this row/shipment line)
     card_last4: str = ""
     shipment: str = ""  # bare number: "1" / "2" / ...; "" only on pre-Shipment-column rows
@@ -253,8 +253,8 @@ class OrderItem(BaseModel):
     payout_amount: float | None = None
     # The group's committed payout (see FIELDNAMES). Filled by sync_tracking, never by a scraper.
     expected_payout: float | None = None
-    # Always blank from here; ledger.sync writes a live formula into the cell instead.
-    # Both are DERIVED IN THE SHEET (live formulas) and always emitted blank from here — they
+    # Always blank from here; the adapter derives the cell instead.
+    # Both are DERIVED IN THE LEDGER (computed columns) and always emitted blank from here — they
     # exist on the model only so FIELDNAMES can name real fields and the columns hold their
     # position in the CSV. See ledger.sync._cogs_formula / _profit_formula.
     cogs: float | None = None
@@ -275,7 +275,7 @@ class OrderItem(BaseModel):
     sales_tax: float | None = None
     # ORDER-LEVEL like the two above; Amazon only (cash-back balance + points). See FIELDNAMES.
     # DEFAULTS TO A REAL 0: a row that never named rewards spent none, and the
-    # sheet should read 0 rather than blank. Every scraper still sets it explicitly; only the Amazon
+    # ledger should read 0 rather than blank. Every scraper still sets it explicitly; only the Amazon
     # mappings ever emit None, and only when the amount could not be read (a blank never
     # overwrites, so the cell stays whatever it was until a run can price it).
     rewards_used: float | None = 0.0
@@ -313,7 +313,7 @@ class OrderItem(BaseModel):
 
         The deterministic parsers already comma-join the address block, but the AGENT copies the page
         text verbatim, so an agent-written row could land with real newlines inside the cell — which
-        makes the sheet row tall and ragged. Normalizing here rather than in each prompt keeps the two
+        makes the row tall and ragged. Normalizing here rather than in each prompt keeps the two
         paths writing the same shape, and can't drift the way prompt wording does.
 
         Classification is unaffected either way (config.warehouses.normalize_address already reduces

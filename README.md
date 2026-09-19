@@ -1,8 +1,8 @@
 # Buying Group Ledger
 
 Automated order tracking, reconciliation and payout settlement for buying-group reselling. It reads
-order history from four retailer accounts (Amazon, Amazon Business, Best Buy, Costco), keeps a Google
-Sheet ledger current as a live P&L, posts shipped tracking numbers to two buying-group APIs, files
+order history from four retailer accounts (Amazon, Amazon Business, Best Buy, Costco), keeps a ledger
+(a SQLite file with a web dashboard over it) current as a live P&L, posts shipped tracking numbers to two buying-group APIs, files
 shipment insurance, and reads payouts back — unattended, on a schedule.
 
 **The design problem is cost against reliability.** A browser-driving LLM agent can read any retailer's
@@ -33,14 +33,14 @@ This page is the overview. Each topic has its own page under [`docs/`](docs/):
 |---|---|
 | [Architecture](docs/architecture.md) | The run loop, the four deterministic paths, the cost model, a shipment's lifecycle |
 | [Retailers](docs/retailers.md) | Running a scrape; how each retailer's path works; Costco token setup |
-| [Data model](docs/data-model.md) | The 34 columns, the upsert key, column order as a migration, profit accounting (COGS, cashback, gift cards, pro-rata shipping), the year-end tax report |
+| [Data model](docs/data-model.md) | The 35 columns, the upsert key, column order as a migration, profit accounting (COGS, cashback, gift cards, pro-rata shipping), the year-end tax report |
 | [Configuration](docs/configuration.md) | `config.json`, the environment override layer and every variable, warehouse jigs, card cashback rates |
 | [Profiles and sign-in](docs/profiles-and-auth.md) | Creating a cloud-browser profile, auto-auth with an authenticator app, where secrets go |
 | [Buying groups](docs/buying-groups.md) | Posting tracking to BFMR and MaxOutDeals, insurance filing, payouts and `paid`/`return` |
 | [Receipt capture](docs/receipts.md) | Proof of purchase rendered to PDF, kept beside the ledger |
-| [Diagnostics](docs/diagnostics.md) | Failure dossiers, preflight, the read-only sheet audit, the offline tests |
+| [Diagnostics](docs/diagnostics.md) | Failure dossiers, preflight, the read-only ledger audit, the offline tests |
 | [Importing history](docs/importing-history.md) | `import_history.py` (reconciles the source's profit column before writing), and pasting by hand |
-| [Operations](docs/operations.md) | Cron / Task Scheduler, Docker, moving hosts — with [DEPLOY.md](DEPLOY.md) as the server runbook |
+| [Operations](docs/operations.md) | Cron / Task Scheduler, Docker, moving hosts, the web dashboard, the ledger file, backups — with [DEPLOY.md](DEPLOY.md) as the server runbook |
 | [Roadmap](docs/roadmap.md) | What's next, what's built but still accumulating evidence |
 
 ---
@@ -54,10 +54,12 @@ The parts worth reading if you're here to look at the engineering rather than to
 | Deterministic primary, loud failure | `scrapers/<retailer>{,_api,_mapping}.py` | Cost is a per-run tax; silent data loss is unbounded. A normal run spends nothing, and a failure records nothing rather than something wrong — and says so. |
 | The failure dossier is the failure path | `diagnostics/dossier.py`, `CdpBrowser.__exit__` | A paid agent run hid *what* broke. The dossier captures the page at the failure and audits every declared selector against it, so the fix is a code change made from evidence, not a retry that costs money. The agent fallback has been removed entirely. |
 | The schema is a wire format | `models/order.py` `FIELDNAMES`, `ledger/sync.py` `HEADER` | Rows are written *positionally*. Reordering columns without migrating scrambles every historical row with no error, so a test pins the pairing and the sync refuses to write a mismatched header. |
-| Idempotent upsert, blanks never overwrite | `ledger_sync.py` `_merge_row`, `_collapse_records` | Re-checks return partial data. A blank field must never erase a known-good value, and two paths reporting the same row in one sync must collapse rather than clobber. |
-| Reconcile on tracking number first | `ledger_sync.py` `sync_csv_to_ledger` | Different writers (scrapers, imports, hand edits) can legitimately disagree about shipment *numbering*. Tracking number is an identity both read identically, so it beats the synthetic key. |
-| Undisclosed-split safety net | `ledger_sync.py` | A retailer API that exposes one tracking number per line and rotates it will silently lose a box. An update that changes a non-blank tracking number to a *different* one appends instead of overwriting, and alerts. |
-| Audit the live data, not just the code | `scripts/audit_ledger.py` | Tests prove the code; they can't see the sheet. 40+ invariant checks, authenticated **read-only** so it cannot write even by accident. |
+| Idempotent upsert, blanks never overwrite | `ledger/sync.py` `_merge_row`, `_collapse_records` | Re-checks return partial data. A blank field must never erase a known-good value, and two paths reporting the same row in one sync must collapse rather than clobber. |
+| Reconcile on tracking number first | `ledger/sync.py` `sync_csv_to_ledger` | Different writers (scrapers, imports, hand edits) can legitimately disagree about shipment *numbering*. Tracking number is an identity both read identically, so it beats the synthetic key. |
+| Undisclosed-split safety net | `ledger/sync.py` | A retailer API that exposes one tracking number per line and rotates it will silently lose a box. An update that changes a non-blank tracking number to a *different* one appends instead of overwriting, and alerts. |
+| The ledger is a file behind a worksheet face | `ledger_db/worksheet.py`, `ledger_db/store.py` | Every writer addresses the ledger as a positional grid through a handful of worksheet methods, so the SQLite file implements that surface and the money-path code runs unchanged. The file migrates its own table by column *name* on open, and refuses loudly rather than drop a column it does not recognise. |
+| A hand-typed cell is protected | `web/ledger_writer.py`, `ledger_db/hand_edits.py` | The dashboard records every cell it writes; the upsert, the reproration and the buying-group sync leave those cells alone until the cell is cleared or released. |
+| Audit the live data, not just the code | `scripts/audit_ledger.py` | Tests prove the code; they can't see the data. 34 invariant checks, through a **read-only** handle on the ledger so it cannot write even by accident. |
 | Ask storage before opening a browser | `receipts/capture.py` | Receipt capture runs every scrape, but the existence check comes first — so the common re-check run creates no cloud browser at all, and a browser is only ever paid for by a genuinely new order. |
 | Refuse to store a sign-in page | `receipts/sources.py` `looks_logged_out` | A login wall renders and uploads perfectly. Storing one would mark the order as having a receipt *forever*, because the object exists and no later run retries. |
 | Catch silent misconfiguration at boot | `scripts/preflight.py`, `docker/healthcheck.sh` | A missing dependency fails three retailers without raising; a dead scheduler produces no signal at all. Both now announce themselves. |
@@ -74,7 +76,7 @@ The parts worth reading if you're here to look at the engineering rather than to
 
 ## How it works
 
-Each run, for every configured profile × retailer: read the Sheet to decide what's new versus what
+Each run, for every configured profile × retailer: read the ledger to decide what's new versus what
 needs re-checking, fetch through that retailer's **deterministic path**, upsert the results back, then
 post tracking numbers to the buying groups and read payouts back. **No browser runs locally** —
 Playwright is only a CDP *client* to a cloud browser, which is why this runs happily on a Raspberry Pi.
@@ -114,9 +116,10 @@ cp config.example.json config.json
 .venv/bin/python main.py                 # or: main.py amazon | amazon-business | bestbuy | costco
 ```
 
-`config.json` holds everything — credentials, profiles, warehouse jigs, card rates, the Google
-service-account key — and is gitignored; environment variables only *override* it
-([Configuration](docs/configuration.md)). Costco needs a one-time refresh token
+`config.json` holds everything — credentials, profiles, warehouse jigs, card rates, where the ledger
+file lives — and is gitignored; environment variables only *override* it
+([Configuration](docs/configuration.md)). The ledger is `data/ledger.sqlite3`, created on first use;
+`python -m web` is the dashboard over it ([Operations](docs/operations.md)). Costco needs a one-time refresh token
 ([Retailers → Costco](docs/retailers.md#costco)). The buying-group sync is **off by default** because
 it spends real money unattended; turn it on after a dry run and a one-package live test
 ([Buying groups](docs/buying-groups.md)). Schedule it with cron, Task Scheduler or the self-scheduling
@@ -127,7 +130,7 @@ Free things worth running often:
 ```bash
 .venv/bin/python -m pytest                          # offline tests, no credentials
 .venv/bin/python -m scripts.preflight               # offline config check
-.venv/bin/python -m scripts.audit_ledger             # read-only audit of the live sheet
+.venv/bin/python -m scripts.audit_ledger            # read-only audit of the ledger
 .venv/bin/python -m sync_tracking                   # DRY RUN of the buying-group sync
 .venv/bin/python -m scripts.tax_report 2026         # read-only cash-basis year report
 ```
@@ -140,7 +143,7 @@ Free things worth running often:
 main.py                 orchestration + run lock
 config/settings.py      config.json-backed settings, env-overridable
 config/loader.py        config.json + .state.json access (one file each way)
-config/profiles.py      profiles section loader + Sheet order-state reader
+config/profiles.py      profiles section loader + ledger order-state reader
 config/warehouses.py    warehouses section + address -> buying-group/jig classifier
 config/cards.py         cards section + card last-4 -> card name/cashback-rate resolver
 models/                 OrderItem + ProfileConfig + Warehouse/Jig + Card schemas
@@ -151,20 +154,24 @@ scrapers/<retailer>_mapping.py   pure payload -> OrderItem rows (offline-tested)
 scrapers/<retailer>_signin.py    deterministic sign-in for the retailers that need one
 scrapers/cdp.py         Playwright-over-CDP browser helper; snapshots the page into a dossier on failure
 diagnostics/dossier.py  the failure dossier: page + screenshot + selector audit -> logs/failures/
-ledger/sync.py   Google Sheet upsert (safe partial refresh), sort, formulas, order-state loader
+ledger/sync.py          the ledger upsert (safe partial refresh), sort, order-state loader
+ledger_db/              the ledger file: store.py (SQLite, self-migrating by column name), worksheet.py (the
+                        worksheet-faced adapter every writer and reader goes through), hand_edits.py
+web/                    the dashboard: Orders (edit cells, add/delete rows), Audit, Recon, Taxes, Tools, Settings
 output/csv_writer.py    per-run CSV
 alerts/notifier.py      email + Discord alerts
 sync_tracking.py        post tracking numbers to buying groups + pull payouts back (dry-run default)
 buying_groups/          provider contract + BFMR + MaxOutDeals adapters + Buying Group -> provider registry
 receipts/               receipt URL/key rules, the file store, capture orchestration
 scripts/preflight.py    offline check for silent misconfiguration
-scripts/audit_ledger.py  read-only audit of the live sheet's invariants (writes nothing)
+scripts/audit_ledger.py  read-only audit of the ledger's invariants (writes nothing)
 scripts/tax_report.py   read-only cash-basis tax report for one year (two dates: payout vs order)
 scripts/import_history.py  import a foreign spreadsheet of finished orders; reconciles its profit column (dry-run default)
 scripts/backfill_tracking.py  fill blank tracking numbers from BFMR by order number (dry-run default)
 scripts/restore_cells.py   put specific cells back from a plan file, guarded by the expected current value
-scripts/                create_profile, costco_token, sort_ledger, reorder_sheet, apply_sheet_formats,
-                        backfill_receipts, receipt_verify, receipt_probe, bg_probe, install_cron, ...
+scripts/backup.py       zip config.json / .state.json / .env / data/ into backups/ (stdlib only; --restore, --scheduled)
+scripts/                create_profile, costco_token, sort_ledger, hand_edits, backfill_receipts,
+                        receipt_verify, receipt_probe, bg_probe, install_cron, ...
 tests/                  offline pytest suite (no credentials/network needed)
 run.sh / run.ps1        scheduler entry points
 Dockerfile / docker-compose.yml / docker/   containerized, self-scheduling, with preflight + healthcheck
@@ -194,7 +201,7 @@ The full text is in [LICENSE](LICENSE).
 > distributed derivative must ship its source under the same license. It does not restrict running the
 > software, and it places no obligation on you for changes you keep to yourself.
 
-**Nothing in this repository is a credential.** No API key, token, service-account file, session
-cookie or account password is committed, and none ever has been — every one of them is gitignored and
-injected at runtime. Running this requires your own accounts and your own config files, none of which
-are included; see [Quickstart](#quickstart).
+**Nothing in this repository is a credential.** No API key, token, session cookie or account
+password is committed, and none ever has been — every one of them is gitignored and injected at
+runtime. Running this requires your own accounts and your own config files, none of which are
+included; see [Quickstart](#quickstart).

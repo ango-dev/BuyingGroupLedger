@@ -61,11 +61,11 @@ class LedgerRow:
     """One ledger row, cells keyed by FIELDNAMES, values as the display text they were read as."""
 
     cells: dict[str, str]
-    #: 1-based sheet row number (the header is row 1), for cross-referencing audit output.
+    #: 1-based row number (the header is row 1), for cross-referencing audit output.
     row_number: int
     #: The STORED value of each numeric cell (an UNFORMATTED read), when the source has one. A
     #: formatted read shows "$1,299.99" rounded to the cent while the cell may hold 1299.9875;
-    #: summing displayed cents drifts from the sheet's own SUM by a few cents, which is exactly
+    #: summing displayed cents drifts from the ledger's own SUM by a few cents, which is exactly
     #: the kind of number a user compares. A CSV backup has no such grid: the text is parsed.
     numbers: dict[str, float | None] = field(default_factory=dict)
     #: Fields the user typed by hand on the dashboard (ledger_db/hand_edits): a run keeps them.
@@ -169,10 +169,10 @@ class LedgerRow:
     @property
     def is_settled(self) -> bool:
         """The group's outcome is IN: a Actual Payout cell (any amount, $0.00 included -- a return
-        or clawback that paid nothing is a settled LOSS, and the sheet's Total Profit shows it)
+        or clawback that paid nothing is a settled LOSS, and the ledger's Total Profit shows it)
         together with its date, or a paid/return status (MOD's paid rows carry no date). See
         SETTLED_STATUSES. Found live: four $0.00 settlements (-822.39 of real losses)
-        were being left out of realized profit, so the dashboard disagreed with the sheet's SUM."""
+        were being left out of realized profit, so the dashboard disagreed with the ledger's SUM."""
         return self.payout_amount is not None and (
             bool(self.payout_date) or self.status in SETTLED_STATUSES
         )
@@ -180,8 +180,8 @@ class LedgerRow:
     @property
     def is_committed(self) -> bool:
         """A projected payout: the group has committed to an amount (Expected Payout, since
-        2026-09-18) and has not paid yet. A ledger from before the column -- a CSV backup, a Sheet
-        not yet migrated -- carried the commitment IN Actual Payout with a blank date, and that
+        2026-09-18) and has not paid yet. A ledger from before the column (a CSV backup)
+        carried the commitment IN Actual Payout with a blank date, and that
         legacy shape still reads as committed here. A zero is never a commitment (the allocator
         never writes one)."""
         if self.is_money_free or self.is_settled:
@@ -283,8 +283,8 @@ class Snapshot:
 
     rows: list[LedgerRow]
     header: list[str]
-    backend: str  # "snapshot" | "sheet"
-    source: str  # the file path, or "<spreadsheet> / <worksheet>"
+    backend: str  # "snapshot" | "db"
+    source: str  # the file path
     loaded_at: datetime
     #: Data rows skipped because their Order ID was blank -- note/spacer rows below the block, which
     #: the upsert ignores too (docs/data-model.md, "Adding a row by hand").

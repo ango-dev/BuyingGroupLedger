@@ -12,7 +12,7 @@ be worth more than its subtotal). This script repairs rows written before that g
 behind by a re-label the guard could not see (the dead card had already left the page).
 
 HOW IT DECIDES: it re-reads the order's page and its tracking pages, which together are the only
-authority on what packages actually exist, and matches sheet rows on the PACKAGE ID when the row has
+authority on what packages actually exist, and matches rows on the PACKAGE ID when the row has
 one (Amazon's shipmentId / Best Buy's groupId — column 33 since 2026-09-10, beside Card Last 4), then on TRACKING NUMBER
 (the Shipment number is a DOM ordinal that is recomputed every scrape). A row whose tracking number no
 longer appears on the order AND whose package id (if any) is not on the page either is superseded.
@@ -44,13 +44,13 @@ WHAT HAPPENS TO THE DEAD ROW:
 Costs a small Browser-Use browser fee (one CDP session, one page load per order plus one per shipment)
 and spends no LLM tokens; `--restore-from` costs nothing.
 
-DRY RUN BY DEFAULT — reads the live sheet and the order pages, and writes NOTHING:
+DRY RUN BY DEFAULT — reads the ledger and the order pages, and writes NOTHING:
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021 --delete
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021 \\
         --restore-from data/ledger_backup_20260822T200318Z.csv
 
-Apply for real (backs the sheet up to data/ledger_backup_<timestamp>.csv FIRST):
+Apply for real (backs the ledger up to data/ledger_backup_<timestamp>.csv FIRST):
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021 --apply
 """
 
@@ -100,7 +100,7 @@ SUPERSEDED = "superseded"
 _MARKABLE_STATUSES = ("ordered", "shipped", "delivered")
 #: Money from a BUYING GROUP on the dead number. Blanking it would erase a real settlement.
 _SETTLED_COLUMNS = ("Actual Payout", "Payout Date", "Insurance")
-#: The money cells a marked / restored row loses, by sheet header name.
+#: The money cells a marked / restored row loses, by ledger header name.
 _BLANKED_COLUMNS = tuple(HEADER[FIELDNAMES.index(f)] for f in _SUPERSEDED_BLANK_FIELDS)
 _SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)
 
@@ -187,7 +187,7 @@ def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: 
         live = live_entries[order_id]
         live_numbers = [e["tracking"] for e in live]
         live_ids = [e["package_id"] for e in live]
-        row_number = offset + 2  # +1 header, +1 for 1-based sheet rows
+        row_number = offset + 2  # +1 header, +1 for 1-based rows
         tracking = cell(row, "Tracking Number")
         package_id = cell(row, "Package ID")
         shipment = cell(row, "Shipment")
@@ -235,8 +235,8 @@ def plan_supersede_fix(header: list[str], data_rows: list[list], live_by_order: 
 
 def plan_restore(header: list[str], data_rows: list[list], backup_header: list[str],
                  backup_rows: list[list], order_id: str) -> dict:
-    """Read-only: the backup rows of `order_id` whose tracking number is no longer on the sheet,
-    rebuilt as superseded rows in today's column order. Pure — no network, no sheet.
+    """Read-only: the backup rows of `order_id` whose tracking number is no longer on the ledger,
+    rebuilt as superseded rows in today's column order. Pure — no network, no ledger.
 
     Remapped by column NAME, so a backup taken before a column was appended still restores (the
     missing cells come back blank). Money cells are blanked and the Shipment is numbered after
@@ -258,7 +258,7 @@ def plan_restore(header: list[str], data_rows: list[list], backup_header: list[s
             skipped.append((tracking, "no tracking number in the backup row"))
             continue
         if tracking in present:
-            skipped.append((tracking, "already on the sheet"))
+            skipped.append((tracking, "already on the ledger"))
             continue
         if tracking not in assigned:
             highest += 1
@@ -389,14 +389,14 @@ def _backup(existing: list[list]) -> Path:
     backup_path = backup_dir / f"ledger_backup_{stamp}.csv"
     with backup_path.open("w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows(existing)
-    print(f"\nBacked the whole sheet up -> {backup_path}")
+    print(f"\nBacked the whole ledger up -> {backup_path}")
     return backup_path
 
 
 def _read_sheet(worksheet) -> tuple[list[str], list[list]]:
     existing = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
     if not existing or not any(str(c).strip() for c in existing[0]):
-        raise SystemExit("Sheet is empty — nothing to fix.")
+        raise SystemExit("Ledger is empty — nothing to fix.")
     header = [str(c) for c in existing[0]]
     if header != list(HEADER):
         raise SystemExit(
@@ -481,7 +481,7 @@ def main() -> None:
     parser.add_argument("--order", action="append", required=True,
                         help="Order id to reconcile (repeatable)")
     parser.add_argument("--apply", action="store_true",
-                        help="Actually write on the live sheet (default: dry run, read-only)")
+                        help="Actually write on the ledger (default: dry run, read-only)")
     parser.add_argument("--delete", action="store_true",
                         help="Delete the dead row instead of marking it superseded (the old repair)")
     parser.add_argument("--restore-from", metavar="BACKUP_CSV",
@@ -504,7 +504,7 @@ def main() -> None:
         if get("Order ID") in wanted and get("Retailer") in RETAILERS:
             groups.setdefault((get("Retailer"), get("Profile")), set()).add(get("Order ID"))
     if not groups:
-        raise SystemExit(f"None of {sorted(wanted)} are Amazon / Amazon Business / Best Buy rows on the sheet.")
+        raise SystemExit(f"None of {sorted(wanted)} are Amazon / Amazon Business / Best Buy rows on the ledger.")
 
     live_by_order: dict = {}
     for (retailer, profile_label), ids in sorted(groups.items()):

@@ -2,7 +2,7 @@
 
 This is the step that turns the ledger from a tracker into a P&L. The scrapers fill everything up to
 `Total Cost`; `Insurance`, `Actual Payout` and `Payout Date` have been hand-entered until now, and
-`Total Profit` (a live sheet formula) reads BLANK until `Actual Payout` is filled — so the profit
+`Total Profit` (a derived column) reads BLANK until `Actual Payout` is filled — so the profit
 column is inert for any row nobody has typed into. This module fills those three cells from the
 buying group that actually paid.
 
@@ -15,12 +15,12 @@ new. Settlement always wins — the real amount, date and status overwrite the c
 before — and a settlement that arrives at a different figure than the commitment is alerted once.
 
 ROUTING IS THE `Buying Group` COLUMN, which config/warehouses.py already derives from the delivery
-address. A row goes to exactly one group; `Personal` rows never reach the sheet at all, and
+address. A row goes to exactly one group; `Personal` rows never reach the ledger at all, and
 `Unclassified` is skipped and COUNTED rather than guessed at — an unconfigured warehouse is a real
 warehouse, and posting it to whichever group sorted first would be far worse than leaving it visible.
 
 WHAT TO SEND IS DERIVED, NOT STORED. The authoritative answer to "have I submitted this?" lives at
-the group, and a local mirror drifts both ways — a post that succeeds while the sheet write fails
+the group, and a local mirror drifts both ways — a post that succeeds while the ledger write fails
 would re-post forever, and a number pasted into their dashboard by hand would read as unposted. Both
 providers answer it themselves (MOD ignores duplicates by contract; BFMR's tracker lists them), so
 each run asks. `Tracking Submitted` is a CHECKBOX written for the reader's benefit only and never
@@ -42,7 +42,7 @@ is the one way to never see it. Both providers' reads are bulk, so keeping them 
 STATUS ONLY MOVES FORWARD. The groups own the two outcomes a retailer scrape can never see — `paid`
 and `return` — but their reports are snapshots, so a write that would walk a row BACKWARDS is
 dropped. That guard is load-bearing for MOD returns specifically: MOD publishes no return signal at
-all, so a return is typed onto the sheet by hand, while MOD goes on reporting that package as
+all, so a return is typed onto the ledger by hand, while MOD goes on reporting that package as
 received (= paid) forever. Without the guard every run would silently undo the correction.
 
 PAYOUTS ARE ALLOCATED PRO-RATA, for the same reason shipping is in `ledger_sync._profit_formula`. A
@@ -94,7 +94,7 @@ INSURANCE_COL = "Insurance"
 PAYOUT_AMOUNT_COL = "Actual Payout"
 #: The group's COMMITTED payout (2026-09-18): its own column, so the settlement never overwrites
 #: it and the dashboard's Reconciliation page can compare the two. Optional in a header (an older
-#: Sheet); read through optional_cell, and only ever written when HEADER carries it.
+#: ledger); read through optional_cell, and only ever written when HEADER carries it.
 EXPECTED_PAYOUT_COL = "Expected Payout"
 PAYOUT_DATE_COL = "Payout Date"
 STATUS_COL = "Status"
@@ -103,8 +103,8 @@ SUBMITTED_COL = "Tracking Submitted"
 #: Statuses that can never be submitted. A cancelled order was never shipped to anyone.
 _UNPOSTABLE_STATUSES = {"cancelled"}
 
-#: A Tracking Number cell Google Sheets float-ified: a long all-digit number typed without a leading
-#: apostrophe is stored as a double and rendered like '9.339589752066617e+21' — with its trailing
+#: A Tracking Number cell float-ified by a hand edit in the grid's past: a long all-digit number typed
+#: without a leading apostrophe was stored as a double and rendered like '9.339589752066617e+21' — with its trailing
 #: digits already lost. See the guard in plan_tracking_submissions.
 _FLOAT_CORRUPTED_TRACKING = re.compile(r"\d+(\.\d+)?[eE][+-]?\d+")
 
@@ -114,7 +114,7 @@ _UNRESOLVED_QUANTITY = "*"
 
 
 # --- the pure planner ---------------------------------------------------------------------------
-# Kept here rather than in ledger/sync.py on purpose: `sheets` is a lower layer than
+# Kept here rather than in ledger/sync.py on purpose: `ledger` is a lower layer than
 # `buying_groups`, and having it import a provider registry would invert the dependency — the same
 # reason config/cards.py hand-copies KNOWN_RETAILERS instead of importing main. scripts/
 # backfill_profit_columns.py:plan_profit_backfill sets the precedent for a pure planner living
@@ -124,7 +124,7 @@ _UNRESOLVED_QUANTITY = "*"
 def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     """Read-only: which rows would be posted where, and what would be skipped. Writes nothing.
 
-    Pure `f(header, rows)` so the whole eligibility policy is testable offline, with no sheet and no
+    Pure `f(header, rows)` so the whole eligibility policy is testable offline, with no ledger and no
     network. `data_rows` is `existing[1:]` (no header row).
 
     Returns:
@@ -161,9 +161,9 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "Shipment", "Status", "Total Cost", "Buying Group", SUBMITTED_COL, INSURANCE_COL,
         PAYOUT_AMOUNT_COL, PAYOUT_DATE_COL,
     )}
-    # Columns a sheet may predate, resolved only if present. They still have to be IN `idx` —
+    # Columns a ledger may predate, resolved only if present. They still have to be IN `idx` —
     # `optional_cell` looks them up there, so a name missing from this map reads as "" on every row
-    # rather than as "absent from this sheet". That silently emptied `Retailer` for every submission,
+    # rather than as "absent from this ledger". That silently emptied `Retailer` for every submission,
     # which switched the Best Buy suffix retry off entirely: `_is_bestbuy("")` is False, so no carton
     # ever reached it. The feature was dead in production while its own unit tests passed, because
     # they build a TrackingSubmission directly and never cross this seam.
@@ -202,7 +202,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
             return str(row[i]).strip() if i < len(row) else ""
 
         def optional_cell(name: str) -> str:
-            """A column the ledger may predate. Absent -> "", never a KeyError, because a sheet
+            """A column the ledger may predate. Absent -> "", never a KeyError, because a ledger
             missing a newer column must still sync every other field on the row."""
             i = idx.get(name)
             return str(row[i]).strip() if i is not None and i < len(row) else ""
@@ -233,9 +233,9 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
 
         tracking = cell("Tracking Number")
         if _FLOAT_CORRUPTED_TRACKING.fullmatch(tracking):
-            # Google Sheets stored a long all-digit tracking number as a NUMBER and rendered it in
+            # A long all-digit tracking number typed as a NUMBER was stored as a double and rendered in
             # scientific notation — the trailing digits are gone from the stored double, so the real
-            # number is UNRECOVERABLE from the sheet. Submitting the mangled form would post garbage
+            # number is UNRECOVERABLE from the ledger. Submitting the mangled form would post garbage
             # to a group (not undoable at MOD), so the row is withheld and alerted instead: the fix
             # is re-typing the number as text (leading apostrophe). 
             # '9.339589752066617e+21' on an Amazon Business row very nearly went to MOD.
@@ -397,7 +397,7 @@ def allocate_payouts(
     lands in a per-order sub-bucket allocated only to that order's rows. Records without an order id
     (every MOD record; BFMR's insurance FEE rows) stay tracking-level: MOD's report has no order
     column, and insurance is a per-package charge shared by every row of the package. An order the
-    sheet does not know under this tracking number folds back into the tracking-level remainder
+    ledger does not know under this tracking number folds back into the tracking-level remainder
     rather than being dropped.
 
     AND ONE ORDER CAN HOLD TWO DEALS WITH DIFFERENT OUTCOMES IN ONE BOX. Live on
@@ -609,7 +609,7 @@ def allocate_expected_payouts(
     multi-deal order's rows are partitioned by `_split_rows_by_deal` (falling back to one order-
     level bucket when the partition isn't clean), and each bucket's total prorates by the rows'
     share of Total Cost — the standing rule for every order-level amount. `rows_by_order` is ONE
-    group's index from the plan, so a record about an order the sheet doesn't know yet (purchase
+    group's index from the plan, so a record about an order the ledger doesn't know yet (purchase
     typed before the first scrape) simply finds no rows and waits for the next run.
 
     THREE KINDS OF ROW ARE NEVER TOUCHED, because on them the amount is (or is becoming) real
@@ -702,7 +702,7 @@ def _expected_payment_mismatches(records: list[PayoutRecord], plan: dict) -> lis
     The second half of the price watch: the first (allocate_expected_payouts) catches a commitment
     that moves before payment; this catches a settlement that lands at a different figure than the
     commitment on the same tracker row — a silent short-pay, or a clawback folded into the amount.
-    The paid figure still lands on the sheet exactly as always; this only decides whether a human
+    The paid figure still lands on the ledger exactly as always; this only decides whether a human
     hears about the difference.
 
     ALERTED EXACTLY ONCE: only while some row of the package still has a BLANK Payout Date — the
@@ -748,7 +748,7 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
     # UNFORMATTED, so a currency-formatted Total Cost comes back as 3402.0 rather than "$3,402.00".
     existing = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
     if not existing or not any(str(c).strip() for c in existing[0]):
-        log.info("Sheet is empty — nothing to submit.")
+        log.info("Ledger is empty — nothing to submit.")
         return {}
 
     header = [str(c) for c in existing[0]]
@@ -885,7 +885,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
     # A SETTLED package is not re-submitted: the group paid for it, which is proof it holds the
     # number. This is the ledger answering a question MOD cannot — its `already_submitted` is empty
     # by design, so without this every run re-posted every number ever recorded, in a batch that
-    # grows with the sheet forever.
+    # grows with the ledger forever.
     settled = plan.get("settled_keys") or set()
     fresh = [] if payouts_only else [
         r for r in rows
@@ -946,7 +946,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
 
         # BFMR's DONATION program: a 1-cent deal is submitted like any other
         # package but is never insured — the client skips its filing with DONATION_SKIP_REASON, and
-        # a real $0.00 lands in the row's Insurance cell so the sheet reads "no premium, by design"
+        # a real $0.00 lands in the row's Insurance cell so the ledger reads "no premium, by design"
         # rather than "still waiting". Blank cells only; a typed figure always wins.
         from buying_groups.bfmr import DONATION_SKIP_REASON  # local: MOD has no insurance at all
         donation_rows = sorted({
@@ -988,7 +988,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
             f"ACTION NEEDED — {group_key}: {len(mismatches)} payout(s) disagree with the "
             "committed price",
             f"{group_key} settled these packages at a different amount than the payout price it "
-            "committed to. The PAID amount is what landed on the sheet — check the deal terms in "
+            "committed to. The PAID amount is what landed on the ledger — check the deal terms in "
             "My Tracker and raise it with them if the shortfall is real:\n"
             + "\n".join(mismatches),
         )
@@ -1221,7 +1221,7 @@ def _alert_on_unresolved_splits(plan: dict, apply: bool) -> None:
 
 
 def _alert_on_corrupted_tracking(plan: dict, apply: bool) -> None:
-    """A Tracking Number cell Sheets float-ified is garbage with the real digits already lost.
+    """A float-ified Tracking Number cell is garbage with the real digits already lost.
 
     Alerted rather than logged for the same reason as unresolved splits: the row looks ordinary
     while its package can never be submitted — and the mangled number is one --apply away from
@@ -1235,9 +1235,9 @@ def _alert_on_corrupted_tracking(plan: dict, apply: bool) -> None:
     log.warning("%d row(s) have a float-corrupted tracking number and cannot be submitted", len(rows))
     _alert(
         apply,
-        f"{len(rows)} tracking number(s) were mangled by Sheets and need re-typing",
-        "These Tracking Number cells were stored as NUMBERS, so Sheets rendered them in scientific "
-        "notation and the trailing digits are permanently gone from the sheet. The rows are "
+        f"{len(rows)} tracking number(s) were stored as numbers and need re-typing",
+        "These Tracking Number cells were stored as NUMBERS and rendered in scientific "
+        "notation and the trailing digits are permanently gone from the ledger. The rows are "
         "withheld from every submission until fixed. Re-type each number from the carrier "
         "email/page AS TEXT — start the cell with an apostrophe ('):\n" + detail,
     )

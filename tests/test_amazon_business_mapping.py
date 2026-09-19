@@ -385,7 +385,7 @@ def test_abbreviated_month_estimate_parsed():
 def test_moved_up_delivery_ignores_the_previously_expected_date():
     """A moved-up delivery renders the STALE estimate under the live one -- "Now arriving Monday" in
     the h4, "Previously expected October 19" in a second row. The explicit-date scan used to prefer October 19 over the bare weekday,
-    so the sheet kept October while Amazon said next week. 2026-09-08 is a Tuesday."""
+    so the ledger kept October while Amazon said next week. 2026-09-08 is a Tuesday."""
     oid = "111-9990012-9990012"
     card = ('<h4 class="a-color-base od-status-message"><span>Now arriving Monday</span></h4>'
             '<div class="a-row od-status-message"><span>Previously expected October 19</span></div>')
@@ -529,7 +529,7 @@ def test_a_genuine_split_is_left_alone():
 
 
 # --- digital lines must never reach the ledger ----------------------------------------------------
-# An Amazon Gift Card Balance Reload reached the sheet on 2026-08-24 and booked $40.35 of cost against
+# An Amazon Gift Card Balance Reload reached the ledger on 2026-08-24 and booked $40.35 of cost against
 # an order that can never ship. Its status card reads "Applied Gift Card balance is added to your
 # account." — captured live — which none of the original markers matched.
 DIG = "114-9990031-9990031"
@@ -719,7 +719,7 @@ def test_a_kept_gift_card_is_paid_with_a_zero_payout_dated_on_the_order():
 # --- split-quantity lines (twin of test_amazon_mapping's; this retailer is where it hit live) ---
 def test_a_quantity_split_across_blocks_in_one_shipment_sums_into_one_row():
     """113-9990028-9990028 live: 4 Apple Watches rendered in one shipment card as a
-    qty-3 block plus a badgeless (qty-1) block; the sheet recorded 3 and dropped the +1."""
+    qty-3 block plus a badgeless (qty-1) block; the ledger recorded 3 and dropped the +1."""
     html = _details(
         "113-9990028-9990028", "July 22, 2026",
         [_shipment("113-9990028-9990028", 0, "Delivered July 27",
@@ -939,7 +939,7 @@ def test_a_card_with_no_links_has_a_blank_package_id():
 
 def test_two_identical_cards_sharing_a_shipment_id_collapse_to_the_tracked_one(monkeypatch):
     """The 2026-08-22 double render on THIS retailer (111-9990021-9990021): both duplicate rows on
-    the sheet carried NxWmqLBj2. The card whose pt page gave a number survives as Shipment 1."""
+    the ledger carried NxWmqLBj2. The card whose pt page gave a number survives as Shipment 1."""
     calls = _no_alerts(monkeypatch)
     html = _details(
         PKG_OID, "August 12, 2026",
@@ -997,7 +997,7 @@ def test_same_id_cards_with_different_contents_are_left_alone(monkeypatch):
 # --- the rebuilt payment widget ------
 # Amazon replaced the pmts-* payment-method list with a server-rendered Next.js "ViewPurchase"
 # widget: the card renders as three spans (name / mask dots / last 4) and the words "ending in"
-# are gone from the page, so _ENDING_IN_RE alone left Card Last 4 blank on the sheet. Twin of the
+# are gone from the page, so _ENDING_IN_RE alone left Card Last 4 blank on the ledger. Twin of the
 # consumer test; the widget was captured on this Business order.
 def _widget(*rows: str) -> str:
     return (

@@ -1,5 +1,5 @@
-"""The SQLite ledger behind a worksheet face (ledger_db/worksheet.py), and the `ledger.backend`
-flag that routes every writer to it -- the database cutover's second stage.
+"""The SQLite ledger behind a worksheet face (ledger_db/worksheet.py), and the opener that routes
+every writer to it.
 
 Offline: the adapter is exercised directly, then the REAL upsert (ledger.sync
 .sync_csv_to_ledger), the sort, the dashboard's cell writer and the tracking sync's read all run
@@ -122,7 +122,7 @@ class TestTheGrid:
         assert stored[OID] == "X1" and formatted[FIELDNAMES.index("payout_amount")] == ""
 
     def test_a_blank_cell_reads_as_an_empty_string_in_every_render(self, ws):
-        """gspread hands back "" for a blank cell whatever the render option; the readers do
+        """A blank cell reads as "" whatever the render option (the worksheet contract); the readers do
         str(cell).strip(). The first run after the cutover (2026-09-18) read None here, turned it
         into the text "None", and handed six tracking-less rows to BFMR as the package "None"."""
         from ledger_db.worksheet import ValueRenderOption
@@ -142,7 +142,7 @@ class TestTheGrid:
         plan = plan_tracking_submissions(stored[0], stored[1:])
         assert plan["skipped_no_tracking"] == 1 and plan["rows_by_tracking"] == {}
 
-    def test_sort_is_sheets_sort_with_blanks_last(self, ws):
+    def test_sort_is_the_grid_sort_with_blanks_last(self, ws):
         ws.update(range_name="A2", values=[
             row(order_id="B", order_date="2026-08-01", item_name="b", shipment="1", status="paid"),
             row(order_id="A", order_date="2026-09-01", item_name="a", shipment="2", status="paid"),
@@ -266,9 +266,9 @@ class TestTheWritersRunOnIt:
 
 
 class TestTheFlag:
-    """Every opener hands out the adapter over `database.path` (the Sheet is gone, 2026-09-18)."""
+    """Every opener hands out the adapter over `database.path` (the only backend since 2026-09-18)."""
 
-    def test_get_worksheet_hands_out_the_adapter_under_db(self, tmp_path, monkeypatch):
+    def test_get_worksheet_hands_out_the_adapter(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ledger_sync, "settings", dataclasses.replace(
             ledger_sync.settings, ledger_db_path=str(tmp_path / "l.sqlite3")))
         ws = ledger_sync._get_worksheet()

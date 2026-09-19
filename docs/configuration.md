@@ -6,9 +6,9 @@ One authored file, an optional override layer, and the two sections (warehouses,
 
 ## `config.json` and the environment
 
-**`config.json` is the whole setup**: credentials, profiles, warehouse jigs and card cashback rates,
-plus the Google service-account key inlined. It is gitignored. The example file documents every key
-next to it, so this is the only thing to read.
+**`config.json` is the whole setup**: credentials, profiles, warehouse jigs, card cashback rates,
+and where the ledger file lives. It is gitignored. The example file documents every key next to it,
+so this is the only thing to read.
 
 > **Environment variables override every value in it**, from `.env` or the shell — the name is in
 > each key's `// note`. **Nothing is environment-only**, so `.env` is entirely optional; it exists
@@ -20,7 +20,7 @@ next to it, so this is the only thing to read.
 > ```
 >
 > Put something in the `.env` FILE when it should differ on *this machine* — a dev box pointed at a
-> scratch `GOOGLE_SHEET_ID`, or a host that runs on its own `RUN_INTERVAL_HOURS`. A blank value
+> scratch `LEDGER_DB_PATH`, or a host that runs on its own `RUN_INTERVAL_HOURS`. A blank value
 > (`FOO=`) does **not** override; it falls through to `config.json`, so commenting a line out works
 > the way you would expect.
 >
@@ -31,7 +31,7 @@ next to it, so this is the only thing to read.
 > exported variable win.
 
 <details>
-<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (46 of them)</summary>
+<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (43 of them)</summary>
 
 The list is generated from `ENV_TO_CONFIG` in [config/settings.py](../config/settings.py), which is the
 single place a name is mapped, and `tests/test_config_loader.py` fails if this table drifts from it.
@@ -42,9 +42,6 @@ fails closed on a typo rather than turning itself on.
 | Variable | `config.json` key |
 |---|---|
 | `BROWSER_USE_API_KEY` | `browser_use.api_key` |
-| `GOOGLE_SERVICE_ACCOUNT_FILE` | `google.service_account_file` |
-| `GOOGLE_SHEET_ID` | `google.sheet_id` |
-| `GOOGLE_SHEET_WORKSHEET_NAME` | `google.worksheet_name` |
 | `DISCORD_WEBHOOK_URL` | `alerts.discord_webhook_url` |
 | `ALERT_EMAIL_TO` | `alerts.email_to` |
 | `GMAIL_ADDRESS` | `alerts.gmail_address` |
@@ -81,9 +78,7 @@ fails closed on a typo rather than turning itself on.
 | `WEB_PORT` | `web.port` |
 | `WEB_TOOL_SESSION_MINUTES` | `web.tool_session_minutes` |
 | `WEB_PUBLIC_URL` | `web.public_url` |
-| `LEDGER_BACKEND` | `ledger.backend` |
 | `LEDGER_DB_PATH` | `database.path` |
-| `LEDGER_DB_MIRROR_AFTER_RUN` † | `database.mirror_after_run` |
 | `BACKUP_ENABLED` † | `backups.enabled` |
 | `BACKUP_FREQUENCY` | `backups.frequency` |
 | `BACKUP_TIME` | `backups.time` |
@@ -98,10 +93,12 @@ then `--apply`. It folds `.env`, `profiles.json`, `warehouses.json`, `cards.json
 originals — so it is reversible by deleting `config.json`. Delete them yourself once a run has proven
 the new file works; preflight warns while they linger, because nothing reads them any more.
 
-**Google Sheet** — create a Google Cloud service account, paste its whole JSON key into
-`google.service_account`, and **share the sheet** with that key's `…@…iam.gserviceaccount.com` email
-as Editor. Put the sheet ID (from its URL) in `google.sheet_id`. (`GOOGLE_SERVICE_ACCOUNT_FILE` still
-points at a standalone file instead, and wins when set.)
+**The ledger** is `data/ledger.sqlite3` (`database.path` / `LEDGER_DB_PATH`, relative to the repo
+root; in Docker it sits on the mounted `data/` volume). There is nothing to create or share: the
+file is made on first use, and every writer and reader goes through it. The Google Sheet it
+replaced was retired on 2026-09-18 (the `google.*` and `ledger.backend` keys are gone — a
+`config.json` still carrying them is not an error, they are simply ignored); its story is in
+`the design notes`.
 
 **`.state.json`** is the app's own file — currently just Costco's rotating refresh token. You never
 edit it, and deleting it only costs a re-run of `scripts.costco_token`. It is separate from
@@ -137,7 +134,7 @@ extra spaces removed — so "c/o" vs "c o" and "Ste." vs "Ste" don't matter). Th
 file order) wins and its `buying_group` is written to the row.
 
 - List your own reship address under a group literally named **`Personal`** — those orders are **dropped
-  from the sheet entirely** (never recorded). List every personal address you use, or the order will fall
+  from the ledger entirely** (never recorded). List every personal address you use, or the order will fall
   through to `Unclassified` and still show.
 - An address matching **no** jig is tagged **`Unclassified`** (kept, not dropped), and the run logs how
   many — a real warehouse you forgot to add stands out instead of silently vanishing. A jig with no match

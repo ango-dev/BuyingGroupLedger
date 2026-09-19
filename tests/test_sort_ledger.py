@@ -28,7 +28,7 @@ def seeded(**values):
     base = dict(retailer="Best Buy", item_name="Widget", shipment=1, status="ordered")
     base.update(values)
     out = row(**{k: v for k, v in base.items() if k != "shipment"})
-    out[FIELDNAMES.index("shipment")] = base["shipment"]  # int, as the sheet stores it
+    out[FIELDNAMES.index("shipment")] = base["shipment"]  # int, as the ledger stores it
     return out
 
 
@@ -108,7 +108,7 @@ class TestOrdering:
             (HEADER.index("Order ID") + 1, "asc"),
             (HEADER.index("Shipment") + 1, "asc"),
         )
-        # An EXPLICIT range, ending at the last DATA row — an unranged sort would drag the sheet's
+        # An EXPLICIT range, ending at the last DATA row — an unranged sort would drag the ledger's
         # trailing blank rows through the data block.
         assert call["range"] == f"A2:{ledger_sync._col_letter(len(HEADER) - 1)}3"
 
@@ -146,7 +146,7 @@ class TestFormulasFollowTheRows:
 
 class TestGuardsAndNoOps:
     def test_a_misordered_header_is_refused(self, sheet):
-        # Sorting addresses columns positionally, so a differently-ordered sheet would sort the wrong
+        # Sorting addresses columns positionally, so a differently-ordered grid would sort the wrong
         # ones. Same posture as sync_csv_to_ledger's guard: refuse rather than corrupt.
         sheet.rows = [list(reversed(HEADER)), seeded(order_id="A", order_date="2026-08-02")]
 
@@ -155,7 +155,7 @@ class TestGuardsAndNoOps:
 
         assert sheet.sort_calls == []
 
-    def test_empty_sheet_is_a_no_op(self, sheet):
+    def test_empty_ledger_is_a_no_op(self, sheet):
         sheet.rows = [list(HEADER)]
 
         result = sort_ledger_by_date_desc(sheet)
@@ -188,7 +188,7 @@ class TestGuardsAndNoOps:
 
 
 class TestRowsAddedByHand:
-    """A row typed straight into the sheet is a first-class citizen — the sort covers the whole block,
+    """A row typed straight into the ledger is a first-class citizen — the sort covers the whole block,
     not just rows a scrape wrote — but only if it carries an Order ID.
 
     A row WITHOUT one is where this used to go wrong. The sort range was derived from the ledger row
@@ -352,7 +352,7 @@ class TestDryRunPreviewMatchesReality:
 
         assert identity(preview) == identity(sheet.data_rows())
 
-    def test_preview_flags_an_already_sorted_sheet(self, sheet):
+    def test_preview_flags_an_already_sorted_ledger(self, sheet):
         from scripts.sort_ledger import plan_sort
 
         rows = self._rows()
@@ -368,19 +368,19 @@ class TestDryRunPreviewMatchesReality:
         assert len(plan["ordered"]) == 4
         assert plan["non_ledger_rows"] == 1
 
-    def test_preview_prints_real_row_numbers_on_a_clean_sheet(self, capsys):
+    def test_preview_prints_real_row_numbers_on_a_clean_ledger(self, capsys):
         from scripts.sort_ledger import _print_plan, plan_sort
 
         _print_plan(plan_sort(list(HEADER), self._rows()), list(HEADER), apply=False)
 
         out = capsys.readouterr().out
-        assert "NOT the sheet row number" not in out
-        # The newest order is listed first, so it lands on sheet row 2 (row 1 is the header).
+        assert "NOT the row number" not in out
+        # The newest order is listed first, so it lands on row 2 (row 1 is the header).
         newest = next(ln for ln in out.splitlines() if "ZZZ-1" in ln)
         assert newest.split()[0] == "2"
 
     def test_preview_stops_claiming_row_numbers_it_cannot_know(self, capsys):
-        # With a non-ledger row in the block, sheet positions depend on where that row sorts, which
+        # With a non-ledger row in the block, row positions depend on where that row sorts, which
         # this read-only preview can't determine. Say so rather than print a number that's off by one.
         from scripts.sort_ledger import _print_plan, plan_sort
 
@@ -388,7 +388,7 @@ class TestDryRunPreviewMatchesReality:
         _print_plan(plan_sort(list(HEADER), rows), list(HEADER), apply=False)
 
         out = capsys.readouterr().out
-        assert "NOT the sheet row number" in out
+        assert "NOT the row number" in out
         assert "1 row(s) with a blank Order ID" in out
 
 
@@ -405,7 +405,7 @@ class TestRunScrapeTriggersTheSort:
         def fake_sort():
             calls["sorted"] += 1
             if sort_raises:
-                raise RuntimeError("sheets API exploded")
+                raise RuntimeError("the sort exploded")
 
         monkeypatch.setattr(main, "sync_csv_to_ledger", lambda path: sync_result)
         monkeypatch.setattr(main, "sort_ledger_by_date_desc", fake_sort)

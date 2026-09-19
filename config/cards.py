@@ -86,7 +86,7 @@ def resolve_card(
       every re-check.
     - A configured card -> its name, and its rate by the tiers above.
     - A REAL but unconfigured card (digits present, no entry) -> `("", default_rate)`. The name stays
-      blank so the gap is visible on the sheet (and so a hand-typed name survives), while the default
+      blank so the gap is visible on the ledger (and so a hand-typed name survives), while the default
       rate keeps Total Profit computable — this is exactly what the default rate is for.
 
     When several entries share a last4, the most specific scope wins (see Card.specificity), then
@@ -130,7 +130,7 @@ def tag_cards(items, cards: list[Card], default_rate: float | None = None,
 
     `apply_promo` (AMAZON_PROMO_CASHBACK_ENABLED) ADDS any per-order promo the scraper parsed off the
     order page — Amazon advertises "... plus an extra 1% back ..." under the payment method — on top of
-    the card's configured rate, so the sheet's single Cashback Rate column carries the true total. Only
+    the card's configured rate, so the ledger's single Cashback Rate column carries the true total. Only
     the Amazon mapping sets it, so every other retailer is unaffected. A row with no resolvable rate
     (blank card_last4 -> None) is left alone: writing a promo-only rate there would defeat the blank
     that lets ledger_sync._merge_row preserve what an earlier full extraction recorded.

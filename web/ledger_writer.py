@@ -14,7 +14,7 @@ stamp). Status must be one of the ledger's vocabulary; the date columns must be 
 (a real Date in the cell would change a key and duplicate the row -- docs/data-model.md).
 
 HOW A CELL IS WRITTEN, mirroring ledger/sync: the row is located BY KEY on a fresh read (the
-sheet may have been re-sorted since the page loaded), the current display text must equal what the
+ledger may have been re-sorted since the page loaded), the current display text must equal what the
 page showed (`expected`) or the edit is refused as a conflict, a value goes RAW through the upsert's
 own `_coerce` (a number stays a number, a checkbox a boolean, a date plain text), and a blank goes
 USER_ENTERED "" -- the one combination that clears the value while keeping the cell's number format.
@@ -25,7 +25,7 @@ column formats survive, and the two formula cells stamped afterwards -- the same
 sync uses. The sort moves it into date order on the next append-triggered sort, as with any hand
 row. A DELETE is a structural change: rows are removed bottom-up so the located numbers stay valid.
 
-WHILE A SCHEDULED RUN HOLDS THE RUN LOCK, EVERY WRITE IS REFUSED (423). The sync caches sheet row
+WHILE A SCHEDULED RUN HOLDS THE RUN LOCK, EVERY WRITE IS REFUSED (423). The sync caches row
 numbers from its pre-sync snapshot and writes to them; a row deleted or appended underneath it would
 put its updates on the wrong rows, and an edit could be overwritten by its merge. main.py's lock
 (logs/.run.lock, stale after 3h) is the signal; the page says "try again in a few minutes".
@@ -116,7 +116,7 @@ def validate(field: str, value: str):
     if field not in EDITABLE_FIELDS:
         raise EditError(f"{field} is not editable"
                         + (" (part of the row's key)" if field in KEY_FIELDS else
-                           " (a sheet formula)" if field in FORMULA_FIELDS else ""))
+                           " (a derived column)" if field in FORMULA_FIELDS else ""))
     text = (value or "").strip()
     if text == "":
         return ""
@@ -156,14 +156,14 @@ def key_label(key: dict) -> str:
 
 
 class _Grid:
-    """One fresh formatted read of the sheet, with key lookup."""
+    """One fresh formatted read of the ledger, with key lookup."""
 
     def __init__(self, worksheet):
         from ledger_db.worksheet import ValueRenderOption
 
         self.rows = worksheet.get_values(value_render_option=ValueRenderOption.formatted)
         if not self.rows or [str(c).strip() for c in self.rows[0]] != list(HEADER):
-            raise EditError("the sheet's header is not the ledger's column order; refusing to write")
+            raise EditError("the header row is not the ledger's column order; refusing to write")
         self.positions = {f: i for i, f in enumerate(FIELDNAMES)}
 
     def cell(self, row_number: int, name: str) -> str:
@@ -172,7 +172,7 @@ class _Grid:
         return str(row[i]).strip() if i < len(row) else ""
 
     def locate(self, key: dict) -> int:
-        """The ONE sheet row carrying this key, or a ConflictError / EditError."""
+        """The ONE row carrying this key, or a ConflictError / EditError."""
         wanted = normalize_key(key)
         matches = [
             n for n in range(2, len(self.rows) + 1)
@@ -182,11 +182,11 @@ class _Grid:
             and normalize_shipment(self.cell(n, "shipment")) == wanted["shipment"]
         ]
         if not matches:
-            raise ConflictError(f"{key_label(key)}: no longer on the sheet (re-keyed or deleted); "
+            raise ConflictError(f"{key_label(key)}: no longer on the ledger (re-keyed or deleted); "
                                 "reload")
         if len(matches) > 1:
             raise EditError(f"{key_label(key)}: {len(matches)} rows share that key; the audit's "
-                            "duplicate_primary_keys check names them -- fix the sheet first")
+                            "duplicate_primary_keys check names them -- fix the ledger first")
         return matches[0]
 
 
@@ -238,7 +238,7 @@ class LedgerCellWriter:
 
     def _guard(self) -> None:
         if run_in_progress(self._logs_dir):
-            raise RunInProgress("a scheduled run is in progress (logs/.run.lock); the sheet's row "
+            raise RunInProgress("a scheduled run is in progress (logs/.run.lock); the ledger's row "
                                 "numbers are in use -- try again in a few minutes")
 
     # --- one cell -------------------------------------------------------------------------------
@@ -319,9 +319,9 @@ class LedgerCellWriter:
         try:
             grid.locate(key)
         except ConflictError:
-            pass  # not on the sheet: good
+            pass  # not on the ledger: good
         else:
-            raise EditError(f"{key_label(key)} is already on the sheet")
+            raise EditError(f"{key_label(key)} is already on the ledger")
         row_number = _last_occupied_row(grid.rows) + 1
         if row_number < 2:
             row_number = 2

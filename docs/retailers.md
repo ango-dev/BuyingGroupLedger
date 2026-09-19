@@ -20,7 +20,7 @@ is only a CDP *client* to a Browser-Use cloud browser.
 .venv/bin/python main.py costco
 ```
 
-Profiles with a blank `profile_id` are skipped. Output goes to `data/orders_*.csv` and the Sheet;
+Profiles with a blank `profile_id` are skipped. Output goes to `data/orders_*.csv` and the ledger (`data/ledger.sqlite3`);
 logs to `logs/run.log`. A lock (`logs/.run.lock`, auto-expires after 3h) prevents overlapping runs.
 
 > **A run is not just a scrape.** With `BUYING_GROUP_SYNC_ENABLED=true` it ends by posting tracking

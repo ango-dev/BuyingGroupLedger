@@ -19,7 +19,7 @@ than no auditor at all:
   2. The checks never receive a worksheet -- only the frozen `Grids` value read once up front. No
      check *can* call a mutator because no check holds anything mutable.
 
-ON READING FORMATTED VALUES: the adapter renders the grid the way the Sheet used to (formatted
+ON READING FORMATTED VALUES: the adapter renders the grid three ways (formatted
 text, the stored values, and the formula view), and the checks read all of them -- the upsert
 builds its key from the formatted read, so to answer "will the next run duplicate a row?" the audit
 has to see exactly the strings the writer will see.
@@ -49,7 +49,7 @@ from ledger.sync import (
     _parse_display_number,
 )
 
-# Sheets' date epoch, for reporting what day a stray date serial actually means.
+# The date-serial epoch (1899-12-30), for reporting what day a stray date serial actually means.
 _SHEETS_EPOCH = date(1899, 12, 30)
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -64,7 +64,7 @@ def _is_real_date(text: str) -> bool:
     return True
 
 
-# Where a bare `--save-snapshot NAME` lands. A snapshot is the whole sheet -- delivery addresses and
+# Where a bare `--save-snapshot NAME` lands. A snapshot is the whole ledger -- delivery addresses and
 # card last-4s included -- so it must not default to the CWD, where it is one `git add .` away from
 # a commit. `data/` is gitignored. An explicit directory in the argument is always honoured.
 SNAPSHOT_DIR = Path("data")
@@ -82,7 +82,7 @@ def _snapshot_path(arg: str) -> Path:
 # the primary upsert key AND the name-agnostic fallback key (ledger_sync.py:273, :297).
 _DATE_COLUMNS = ("Order Date", "Delivery Date", "Payout Date", "Return Date")
 
-# Sheets' error values, matched as a WHOLE cell. Never as a "starts with #" prefix: costco_mapping
+# Formula error values (#REF! and friends), matched as a WHOLE cell. Never as a "starts with #" prefix: costco_mapping
 # appends "(Item #1847785)" to item names to disambiguate Costco's truncated descriptions, so a prefix
 # rule would flag real data on every Costco row.
 _SHEET_ERRORS = {
@@ -100,7 +100,7 @@ _HEADER_FOR_FIELD = dict(zip(FIELDNAMES, HEADER))
 
 @dataclass(frozen=True)
 class Grids:
-    """The same sheet read three ways. The disagreements between them are the point.
+    """The same ledger read three ways. The disagreements between them are the point.
 
     formatted   FORMATTED_VALUE   -- always str. "4%", "$1,299.00"; a formula cell shows its RESULT.
                                     This is what sync_csv_to_ledger sees and keys rows on.
@@ -166,7 +166,7 @@ def read_grids(worksheet, spreadsheet_title: str = "") -> Grids:
 
 
 # --------------------------------------------------------------------------------------------------
-# The in-memory sheet the checks operate on
+# The in-memory grid the checks operate on
 # --------------------------------------------------------------------------------------------------
 
 
@@ -174,7 +174,7 @@ def _is_effectively_blank(sheet, grid, row_number: int) -> bool:
     """Is this row empty in every way that matters?
 
     A row whose ONLY content is an unticked `Tracking Submitted` checkbox is EMPTY. That column
-    carries checkbox validation, so Sheets materialises a real `False` into every row the validation
+    carried checkbox validation, which materialised a real `False` into every row the validation
     covers -- which is most of the grid, not just the data. Counting those as content would make
     `blank_order_id_rows` report hundreds of "orphans" and `content_outside_the_schema` warn about
     empty space, i.e. exactly the noise that gets an auditor ignored.
@@ -233,7 +233,7 @@ class Sheet:
         return row[index] if index < len(row) else ""
 
     def rows(self, grid: list[list]) -> Iterator[tuple[int, list]]:
-        """(row_number, row) for every data row, row_number being the 1-based sheet row."""
+        """(row_number, row) for every data row, row_number being the 1-based row."""
         for row_number, row in enumerate(grid[1:], start=2):
             yield row_number, row
 
@@ -352,7 +352,7 @@ def check_row_count(sheet: Sheet, opts: Options) -> Result:
 
     # --expect-rows is evaluated FIRST and unconditionally. An earlier version returned the
     # height-disagreement WARN before ever comparing, so `--expect-rows N` reported success on the one
-    # sheet state that most warrants a hard stop.
+    # ledger state that most warrants a hard stop.
     if opts.expect_rows is not None and total != opts.expect_rows:
         return Result("row_count", "FAIL", f"{summary} -- expected {opts.expect_rows}")
     if len(heights) > 1:
@@ -405,7 +405,7 @@ def check_duplicate_shipment_lines(sheet: Sheet, opts: Options) -> Result:
         return Result("duplicate_shipment_lines", "PASS", "every shipment line holds exactly one item")
     details = [f"rows {v}: order {k[0]} shipment {k[2]!r}" for k, v in multi.items()]
     # INFO, not WARN: a box holding several SKUs is NORMAL and permanent ("items boxed together share
-    # a number"). Warning about it would nag forever on a healthy sheet and make --strict exit 1 for
+    # a number"). Warning about it would nag forever on a healthy ledger and make --strict exit 1 for
     # good -- which would foreclose ever using this as a pre-flight gate. A noisy check gets skimmed.
     return Result(
         "duplicate_shipment_lines", "INFO",
@@ -511,7 +511,7 @@ def check_blank_order_id_rows(sheet: Sheet, opts: Options) -> Result:
     It has a SECOND consequence that's easy to miss, so it's reported here too: the newest-first sort
     covers the whole block from row 2 down to the last row that HAS an Order ID, so an orphan sitting
     inside that span gets shuffled around by every sort. It won't necessarily sink to the bottom
-    either -- Sheets orders empty cells last, but a row blank only in Order ID still sorts on its
+    either -- the sort orders empty cells last, but a row blank only in Order ID still sorts on its
     Order Date and can land back in the middle of the orders. A note row below the last order is left
     alone, which is where one belongs.
     """
@@ -596,7 +596,7 @@ def check_shipment_is_int(sheet: Sheet, opts: Options) -> Result:
 def check_shipment_numbers_contiguous(sheet: Sheet, opts: Options) -> Result:
     """Every producer numbers an order's boxes 1..N, so a gap means a row went missing or an order was
     renumbered (the Costco unshipped-then-split caveat, the design notes). Neither breaks the upsert key,
-    so this is WARN -- something to look at, not a corrupted sheet. Non-numeric labels and blank
+    so this is WARN -- something to look at, not a corrupted ledger. Non-numeric labels and blank
     cells are legal (see shipment_is_int) and are left out of the arithmetic.
     """
     by_order: dict[tuple, set[int]] = {}
@@ -688,7 +688,7 @@ def check_order_level_cells_agree(sheet: Sheet, opts: Options) -> Result:
         for f in fields:
             if f == "Order Date" and status == "return":
                 # A return is its own event on the same order; the ledger has no return-date column,
-                # so a return row carries the date it happened in Order Date (the hand-kept sheets
+                # so a return row carries the date it happened in Order Date (the hand-kept ledgers
                 # always did). Retailer and Profile must still agree.
                 continue
             value = str(sheet.cell(sheet.grids.formatted, row_number, f)).strip()
@@ -809,7 +809,7 @@ def check_dates_are_iso_text(sheet: Sheet, opts: Options) -> Result:
 
     Order Date is in the primary upsert key and in the name-agnostic fallback key, so if these columns
     are ever formatted as real Dates again, a row without a tracking number appends a duplicate on its
-    next re-check. That was already true on the live sheet once (§8). Nothing in the codebase defends
+    next re-check. That was already true on the ledger once (§8). Nothing in the codebase defends
     against it any more -- this check is the defence.
     """
     offenders, warnings, checked = [], [], 0
@@ -850,7 +850,7 @@ def check_rows_are_date_descending(sheet: Sheet, opts: Options) -> Result:
     WARN, not FAIL: being out of order is a readability problem, never a data-integrity one -- the
     upsert matches on key, not position. Drift is expected and self-healing, because main.run_scrape
     only re-sorts when a sync APPENDED rows (an update rewrites a row in place and can't reorder
-    anything). So a sheet that has only taken updates since its last append is legitimately stale here.
+    anything). So a ledger that has only taken updates since its last append is legitimately stale here.
 
     Worth checking anyway because the two ways it goes wrong are silent: scripts/retag_buying_groups.py
     deletes rows without re-sorting, and a hand-edited Order Date moves a row's rightful position
@@ -1096,7 +1096,7 @@ def check_card_and_rate_coverage(sheet: Sheet, opts: Options) -> Result:
 def check_legacy_blank_shipment(sheet: Sheet, opts: Options) -> Result:
     """A row with an Order ID but no Shipment number — written before that column existed.
 
-    the design notes has carried "check the live sheet once for this" as an open item. It matters because
+    the design notes has carried "check the ledger once for this" as an open item. It matters because
     such a row ORPHANS if its order later splits: the scraper emits Shipment 1..N, none of which match
     the blank, so the blank row goes stale and stays perpetually open while a duplicate is appended
     alongside it.
@@ -1119,7 +1119,7 @@ def check_legacy_blank_shipment(sheet: Sheet, opts: Options) -> Result:
 def check_content_outside_the_schema(sheet: Sheet, opts: Options) -> Result:
     """Anything living outside the 25-column x N-row data block.
 
-    Two real hazards, not tidiness. (1) `append_rows` once auto-detected the "table" on the real sheet
+    Two real hazards, not tidiness. (1) `append_rows` once auto-detected the "table" on the live grid
     and anchored appends TEN COLUMNS RIGHT, landing rows in K:AB — content past column Y is that
     signature. (2) The append anchor is `len(existing) + 1`, so a stray note UNDER the data makes the
     next appended row land past it, leaving a gap and (worse) writing where nothing expects it.
@@ -1417,7 +1417,7 @@ def check_superseded_rows_carry_no_money(sheet: Sheet, opts: Options) -> Result:
 def check_cashback_rate_sane(sheet: Sheet, opts: Options) -> Result:
     """A rate must be a fraction in [0, 1].
 
-    models/card.py enforces this on the CONFIG side, but nothing enforces it on the sheet, and the
+    models/card.py enforces this on the CONFIG side, but nothing enforces it on the ledger, and the
     profit formula multiplies by it directly — a 4 meaning "4%" overstates that row by 100x while
     still looking like a plausible number. There is deliberately NO "suspiciously high" warning band:
     a real 13% Costco rate is configured and confirmed, so such a band would be permanent noise.
@@ -1504,7 +1504,7 @@ _DIFF_IGNORED_COLUMNS = ("Last Scraped At",)
 
 
 def diff_snapshots(before: Grids, after: Grids, ignore=_DIFF_IGNORED_COLUMNS) -> dict:
-    """What changed between two reads of the sheet, keyed by the primary upsert key.
+    """What changed between two reads of the ledger, keyed by the primary upsert key.
 
     This is REPORTED, never asserted: a diff has no correct answer (a new order legitimately appends),
     and `duplicate_primary_keys` already owns the actual failure condition. Its job is to answer the
@@ -1559,7 +1559,7 @@ def diff_snapshots(before: Grids, after: Grids, ignore=_DIFF_IGNORED_COLUMNS) ->
                 records["changed"].append((record(new, new_row_number, key), column, str(was), str(now), status_was))
         # STATUS MUST ONLY MOVE FORWARD. sync_tracking drops any write that would walk a row
         # backwards, and calls that guard load-bearing for MOD returns specifically: MOD publishes no
-        # return signal, so a return is typed onto the sheet BY HAND while MOD keeps reporting that
+        # return signal, so a return is typed onto the ledger BY HAND while MOD keeps reporting that
         # package as received (= paid) forever. A regression here means the guard let one through and
         # a human correction was silently undone -- which no single-snapshot check can ever see.
         before = str(old.cell(old.grids.formatted, old_row_number, "Status")).strip().lower()
@@ -1594,7 +1594,7 @@ def classify_diff(diff: dict, opts: Options) -> list[Result]:
 
     A diff has no single right answer -- a new order legitimately appends -- but each KIND of change
     does: nothing in the system deletes rows, the upsert never rewrites its own key, and a new key
-    that reuses a tracking number already on the sheet is the split-order duplicate the whole upsert
+    that reuses a tracking number already on the ledger is the split-order duplicate the whole upsert
     design exists to prevent. Before this, all of that printed as prose that gated nothing.
     """
     rec = diff.get("_records") or {}
@@ -1651,7 +1651,7 @@ def classify_diff(diff: dict, opts: Options) -> list[Result]:
     for r in real_added:
         if r["tracking"] and (r["order_id"], r["tracking"]) in existing_tracking:
             duplicates.append(f"row {r['row']}: {r['order_id']} ship {r['shipment']} {r['item'][:35]!r} reuses "
-                              f"tracking {r['tracking']} already on the sheet -- a re-keyed duplicate")
+                              f"tracking {r['tracking']} already on the ledger -- a re-keyed duplicate")
         else:
             fresh.append(r)
     if duplicates:
@@ -1772,7 +1772,7 @@ def main() -> None:
     )
     parser.add_argument("--json", action="store_true", help="machine-readable output (for before/after diffs)")
     parser.add_argument("--strict", action="store_true", help="treat warnings as failures in the exit code")
-    parser.add_argument("--expect-rows", type=int, default=None, help="fail unless the sheet has exactly N data rows")
+    parser.add_argument("--expect-rows", type=int, default=None, help="fail unless the ledger has exactly N data rows")
     parser.add_argument("-v", "--verbose", action="store_true", help="show detail lines for passing checks too")
     parser.add_argument("--save-snapshot", metavar="PATH", help="also write the raw grids to a local JSON file (a bare name lands under data/, which is gitignored)")
     parser.add_argument("--from-snapshot", metavar="PATH", help="audit a saved snapshot offline (bare names resolve under data/)")

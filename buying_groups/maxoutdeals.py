@@ -51,7 +51,7 @@ no payment flag and every live row reads `STATUS=RECEIVING`.
 
 **RETURNS ARE MANUAL FOR MOD.** MOD gives no return/rejection signal in either endpoint, and there
 are no data points to reverse-engineer one from, so a returned MOD package will keep reading `paid`
-until someone sets its Status to `return` on the sheet by hand. That hand-typed value is safe:
+until someone sets its Status to `return` on the ledger by hand. That hand-typed value is safe:
 `return` outranks `paid` in `ledger_sync._STATUS_RANK`, so a later sync will not undo it. BFMR has no
 such gap — it reports `returned` directly.
 

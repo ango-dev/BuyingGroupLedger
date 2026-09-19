@@ -1,10 +1,10 @@
 """
-One-off: sort the Google Sheet ledger newest-first (Order Date descending).
+One-off: sort the Ledger newest-first (Order Date descending).
 
 Why this exists separately from the automatic sort: `main.run_scrape` only re-sorts when a sync
 actually APPENDED rows, since an update rewrites a row where it already sits and can't change the
 order. That keeps the common re-check run (typically "N updated, 0 appended") from paying a full
-formula re-stamp every time — but it also means rows already on the sheet when this feature landed
+formula re-stamp every time — but it also means rows already on the ledger when this feature landed
 would never get sorted on their own. This script is that first sort, and the manual fix if the order
 ever drifts (e.g. after `scripts/retag_buying_groups.py --apply` deletes rows).
 
@@ -16,10 +16,10 @@ Re-stamps every Total Profit formula afterwards, which is mandatory rather than 
 uses same-row relative references, so a row that moves needs the formula for its NEW position.
 `scripts/audit_ledger.py`'s check_profit_formula_literal is the tripwire for getting that wrong.
 
-DRY RUN BY DEFAULT — reads the live sheet and writes NOTHING, showing the order it would produce:
+DRY RUN BY DEFAULT — reads the ledger and writes NOTHING, showing the order it would produce:
     python -m scripts.sort_ledger
 
-Apply for real (backs the sheet up to data/ledger_backup_<timestamp>.csv FIRST):
+Apply for real (backs the ledger up to data/ledger_backup_<timestamp>.csv FIRST):
     python -m scripts.sort_ledger --apply
 """
 
@@ -48,7 +48,7 @@ def plan_sort(header: list[str], data_rows: list[list]) -> dict:
 
     def ship_key(row):
         shipment = cell(row, ship_idx)
-        # Numbers before text, matching Sheets' own type ordering (and tolerating a stray text cell
+        # Numbers before text, matching the grid sort's own type ordering (and tolerating a stray text cell
         # without raising the way a bare mixed-type sort would).
         if isinstance(shipment, (int, float)) and not isinstance(shipment, bool):
             return (0, shipment)
@@ -79,7 +79,7 @@ def _print_plan(plan: dict, header: list[str], apply: bool) -> None:
 
     date_i, oid_i, ship_i, item_i = (header.index(c) for c in
                                      ("Order Date", "Order ID", "Shipment", "Item Name"))
-    # Sheet row numbers are only predictable when every row in the block is a ledger row. A row with
+    # Row numbers are only predictable when every row in the block is a ledger row. A row with
     # no Order ID still sorts on whatever it DOES hold — a stray Order Date lands it mid-block rather
     # than at the bottom — which shifts every row beneath it. Fall back to a position index rather
     # than print a row number that would turn out to be wrong; a preview that lies about where rows
@@ -87,7 +87,7 @@ def _print_plan(plan: dict, header: list[str], apply: bool) -> None:
     exact_rows = plan["non_ledger_rows"] == 0
     print(f"\n  Resulting order (first 15 of {len(plan['ordered'])}):")
     if not exact_rows:
-        print("    (position within the sorted ledger, NOT the sheet row number — the blank-Order-ID "
+        print("    (position within the sorted ledger, NOT the row number — the blank-Order-ID "
               "row(s)\n     noted above sort in among these and shift the rows below them)")
     print(f"    {'row' if exact_rows else '#':>4}  {'Order Date':<12}{'Order ID':<22}{'Ship':>5}  Item")
     print("    " + "-" * 76)
@@ -105,13 +105,13 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--apply", action="store_true",
-                        help="Actually sort the live sheet (default: dry run, read-only)")
+                        help="Actually sort the ledger (default: dry run, read-only)")
     args = parser.parse_args()
 
     worksheet = _get_worksheet()
     existing = worksheet.get_all_values()
     if not existing or not any(str(c).strip() for c in existing[0]):
-        raise SystemExit("Sheet is empty — nothing to sort.")
+        raise SystemExit("Ledger is empty — nothing to sort.")
 
     header = [str(c) for c in existing[0]]
     if header != list(HEADER):
@@ -134,7 +134,7 @@ def main() -> None:
     backup_path = backup_dir / f"ledger_backup_{stamp}.csv"
     with backup_path.open("w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows(existing)
-    print(f"\nBacked the whole sheet up -> {backup_path}")
+    print(f"\nBacked the whole ledger up -> {backup_path}")
 
     result = sort_ledger_by_date_desc(worksheet)
     print(f"Sorted {result['sorted_rows']} row(s) and re-stamped their Total Profit formulas.")

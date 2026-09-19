@@ -22,7 +22,7 @@ class TestYearOf:
     def test_iso_text_and_serials_and_blanks(self):
         assert _year_of("2026-08-12") == 2026
         assert _year_of("2026-08-12T06:00:00Z") == 2026
-        assert _year_of(46246) == 2026          # a Sheets serial for 2026-08-12
+        assert _year_of(46246) == 2026          # a date serial for 2026-08-12
         assert _year_of("") is None and _year_of(None) is None and _year_of("soon") is None
 
 
@@ -84,8 +84,8 @@ class TestTheTwoDates:
                                      "Cashback Rate": Cell(0.1, fmt="percent")}))
         assert build_report(sheet, 2026)["totals"]["cogs"] == 99.0
 
-    def test_the_recomputation_mirrors_the_full_sheet_formula(self):
-        """The Python fallback must net returns, gift cards and tax exactly as the sheet's COGS
+    def test_the_recomputation_matches_the_full_cogs_formula(self):
+        """The Python fallback must net returns, gift cards and tax exactly as the ledger's COGS
         formula does — it predated all three and silently overstated cost on such rows. A returned
         + gift-carded + taxed row with a blank COGS cell: (100 − 1×25 − 30 + 10 + 5) × 0.9 = 54."""
         sheet = build(row_cells(2, **{
@@ -104,7 +104,7 @@ class TestTheTwoDates:
 
     def test_rewards_used_stay_in_cost_and_leave_the_cashback_basis(self):
         """Rewards spent (2026-09-08): (100 − 20) × 0.9 + 20 = 92, cashback 8 — the cost stays the
-        full 100 because the user nets the reward from COGS at year end, outside the sheet."""
+        full 100 because the user nets the reward from COGS at year end, outside the ledger."""
         sheet = build(row_cells(2, **{"Order Date": Cell("2026-05-05"), "COGS": Cell(""),
                                      "Total Cost": Cell(100.0), "Rewards Used": Cell(20.0),
                                      "Cashback Rate": Cell(0.1, fmt="percent")}))
@@ -132,7 +132,7 @@ class TestRendering:
         from tests.test_audit_ledger import grids_for
         snap = tmp_path / "s.json"
         snap.write_text(json.dumps(grids_for(_row(2, order_date="2026-03-01")).to_snapshot(), default=str))
-        monkeypatch.setattr(tax_report, "open_ledger_readonly", lambda: (_ for _ in ()).throw(AssertionError("must not open the live sheet")))
+        monkeypatch.setattr(tax_report, "open_ledger_readonly", lambda: (_ for _ in ()).throw(AssertionError("must not open the ledger")))
         tax_report.main(["2026", "--from-snapshot", str(snap), "--json"])
         out = json.loads(capsys.readouterr().out)
         assert out["year"] == 2026 and out["totals"]["cogs"] == 798.0

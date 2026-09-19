@@ -5,7 +5,7 @@ each segment is an <a href="/orders?...">: clicking a slice applies that filter 
 Arcs are stroked circles with a dash array, which keeps the geometry trivial and the segments
 separated by a real gap of surface colour (the 2px spacer the data-viz method asks for).
 
-COLOUR RULES (the data-viz method): the STATUS donut wears the Sheet's own status hues, stepped
+COLOUR RULES (the data-viz method): the STATUS donut wears the ledger's own status hues, stepped
 stronger so they read on a thin ring but recognisably the row colours; the retailer and buying-group
 donuts wear the categorical palette in FIXED slot order (a name keeps its colour whatever else is
 present, never re-cycled), and past the eighth distinct name the rest fold into "Other". Text is
@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 
 from models.order import STATUSES
 
-#: The Sheet's status colours, stepped for a ring (row backgrounds are the pastel originals).
+#: The status colours (the Orders page's row colours), stepped for a ring (row backgrounds are the pastel originals).
 STATUS_COLORS = {
     "ordered": "#cc4b4b", "shipped": "#e0731f", "delivered": "#c9a800", "paid": "#4f9d3a",
     "return": "#b8472f", "cancelled": "#9a9a9a", "superseded": "#4d4d4d",
@@ -105,7 +105,7 @@ def donut(title: str, counts: list[tuple[str, int]], *, param: str,
 
 
 def status_donut(status_counts: list[tuple[str, int]]) -> Donut:
-    """Rows by status, in the ledger's lifecycle order, in the Sheet's colours."""
+    """Rows by status, in the ledger's lifecycle order, in the status colours."""
     order = {s: i for i, s in enumerate(STATUSES)}
     ordered = sorted(status_counts, key=lambda item: order.get(item[0], len(order)))
     return donut("Rows by Status", ordered, param="status", colors=STATUS_COLORS)

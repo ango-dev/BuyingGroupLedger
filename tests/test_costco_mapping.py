@@ -252,7 +252,7 @@ def test_every_row_has_the_costco_shipment_label_populated(details):
 # Costco can re-issue a NEW tracking number for the SAME physical carton when a package is delayed
 # (Amazon does this too — the design notes). Shipment is part of the upsert key, so keying on the carrier
 # label would both append a phantom row AND, because the numbering is a sort, renumber packages
-# already written to the sheet. `packageNumber` is the carton's own id, so it survives the re-label.
+# already written to the ledger. `packageNumber` is the carton's own id, so it survives the re-label.
 
 _SPLIT_ORDER = "1399000004"          # one SKU, two UPS boxes, same shippedDate
 _PKG_A = "00009999990181363460"      # tracking ...047 -> Shipment 1
@@ -295,7 +295,7 @@ def test_a_re_issued_tracking_number_on_the_same_package_is_not_a_second_shipmen
 def test_a_re_issued_label_does_not_renumber_the_other_packages(details):
     """The regression with the big blast radius: the old key sorted by tracking STRING, so a re-issued
     number that sorts earlier stole Shipment 1 and pushed the untouched carton to Shipment 2 — mis-keying
-    rows already on the sheet. Numbering by packageNumber pins each carton where it was."""
+    rows already on the ledger. Numbering by packageNumber pins each carton where it was."""
     copied, line = _split_order_line(details)
     # A re-label on carton B whose tracking sorts BEFORE carton A's ...047.
     _package(line, _PKG_B)["trackingNumber"] = "1A000000000000000000"

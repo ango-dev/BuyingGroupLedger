@@ -8,7 +8,7 @@ Two holes existed. `run_scrape` guarded `scraper.scrape()` but NOT the steps aft
 cards, write the CSV), so a bad `warehouses.json` entry or a disk error there escaped. And the loop
 itself had no handler at all, so anything raised outside `run_scrape`'s own guards — the scraper's
 constructor, for instance — ended the run. The buying-group sync runs after the loop, so either hole
-also silently skipped submitting tracking numbers that were already sitting on the sheet.
+also silently skipped submitting tracking numbers that were already sitting on the ledger.
 """
 
 import pytest
@@ -64,7 +64,7 @@ class TestReceiptCaptureCannotCostARow:
     A missing receipt is an inconvenience — the next run retries it. A missing ORDER is missed
     reimbursement money. So `_capture_receipts` sits between tagging and write_csv and must swallow
     everything: a storage outage, an expired browser session or a changed page cannot be allowed to
-    skip the CSV write and the sheet sync three lines later.
+    skip the CSV write and the ledger sync three lines later.
     """
 
     def test_a_capture_failure_still_writes_and_syncs_the_rows(self, monkeypatch, profile):
@@ -82,7 +82,7 @@ class TestReceiptCaptureCannotCostARow:
         main.run_scrape(_Scraper(profile))
 
         assert written, "the rows must still be written when only the receipt failed"
-        assert synced, "the rows must still reach the sheet when only the receipt failed"
+        assert synced, "the rows must still reach the ledger when only the receipt failed"
         assert any("receipt" in s.lower() for s in fired), "the failure must still be reported"
 
     def test_capture_runs_before_the_csv_is_written(self, monkeypatch, profile):
@@ -127,7 +127,7 @@ class TestTheLoopIsolatesEachRetailer:
         assert ran == ["Costco"], "the retailer after the failure must still run"
         assert synced, (
             "the buying-group sync must still run — it submits tracking for rows already on the "
-            "sheet, so it has work to do even when every scrape fails"
+            "ledger, so it has work to do even when every scrape fails"
         )
 
     def test_the_failure_is_alerted_not_silently_swallowed(self, monkeypatch, profile):
@@ -154,14 +154,14 @@ def profile():
     return ProfileConfig(label="p", profile_id="pid", retailers=["bestbuy"])
 
 
-class TestSheetFailuresAreLoudNotSilent:
-    """Sheet-side failures degrade collection SILENTLY, which CLAUDE.md ranks as the worst mode:
+class TestLedgerFailuresAreLoudNotSilent:
+    """Ledger-side failures degrade collection SILENTLY, which CLAUDE.md ranks as the worst mode:
     "silently records nothing". Two were observed live on 2026-08-15 -- an append that dropped 4
     scraped rows, and a transient 503 on the order-state read that skipped every re-check. Both
     logged and carried on. Continuing the run is CORRECT; doing it quietly is not.
     """
 
-    def test_a_failed_sheet_sync_alerts_and_says_how_many_rows_were_lost(self, monkeypatch, profile):
+    def test_a_failed_ledger_sync_alerts_and_says_how_many_rows_were_lost(self, monkeypatch, profile):
         monkeypatch.setattr(main, "_classify_and_drop_personal", lambda items, label: items)
         monkeypatch.setattr(main, "_tag_cards", lambda items, label: None)
         monkeypatch.setattr(main, "write_csv", lambda items: __import__("pathlib").Path("x.csv"))
@@ -189,7 +189,7 @@ class TestSheetFailuresAreLoudNotSilent:
         state = ledger_sync.load_order_state("profile-alpha", retailer="Amazon")
 
         assert state["open_orders"] == [], "must still fail soft and let the run continue"
-        assert fired, "an unreadable sheet must alert"
+        assert fired, "an unreadable ledger must alert"
         assert "re-checks skipped" in fired[0].lower()
 
     def test_the_warning_no_longer_claims_it_treats_everything_as_new(self, monkeypatch, caplog):

@@ -267,7 +267,7 @@ def test_moved_up_delivery_ignores_the_previously_expected_date():
     """A moved-up delivery renders the STALE estimate under the live one -- "Now arriving Monday" in
     the h4, "Previously expected September 15" in a second row (live capture 2026-09-11, order
     111-9990013-9990013 on profile-charlie; the Business twin's case is 111-9990012-9990012). The
-    explicit-date scan used to prefer the stale date over the bare weekday, so the sheet kept the
+    explicit-date scan used to prefer the stale date over the bare weekday, so the ledger kept the
     old estimate while Amazon said next Monday. 2026-09-11 is a Friday."""
     oid = "111-9990013-9990013"
     card = ('<h4 class="a-color-base od-status-message"><span>Now arriving Monday</span></h4>'
@@ -361,7 +361,7 @@ def test_promo_outside_order_details_is_ignored():
 
 # --- gift card + sales tax ----------------------------------------------------------------------
 # A gift card earns 0% cashback. The mapping used to scale the cost basis down to card spend and
-# throw the amount away; the netting now lives in the sheet's COGS formula, so
+# throw the amount away; the netting now lives in the ledger's COGS formula, so
 # the mapping emits the GROSS cost plus the order-level Gift Card / Sales Tax amounts on every row
 # (prorated cost-weighted at sync, exactly like shipping). test_profit_formula proves the algebra
 # matches the old scaling to the cent.
@@ -400,7 +400,7 @@ def test_gift_card_and_tax_are_order_level_on_every_row():
 def test_a_parsed_summary_without_the_lines_is_a_real_zero():
     """A detected 0 is a VALUE: a summary we parsed that shows no tax line and
     no gift-card line fills both cells with 0.00 -- "checked, none", not "unknown". Only a missing
-    summary altogether stays None so a blank never overwrites the sheet."""
+    summary altogether stays None so a blank never overwrites the ledger."""
     from scrapers.amazon_mapping import _gift_card_amount, _sales_tax_amount
 
     rows = build_order_items(_one_item_order(tax=""))
@@ -517,7 +517,7 @@ def test_gift_card_rides_the_collapsed_row_with_its_gross_cost():
 
 
 # --- digital lines must never reach the ledger ----------------------------------------------------
-# An Amazon Gift Card Balance Reload reached the sheet on 2026-08-24 and booked $40.35 of cost against
+# An Amazon Gift Card Balance Reload reached the ledger on 2026-08-24 and booked $40.35 of cost against
 # an order that can never ship. Its status card reads "Applied Gift Card balance is added to your
 # account." — captured live — which none of the original markers matched.
 DIG = "114-9990031-9990031"
@@ -1126,7 +1126,7 @@ def test_collapse_renumbers_by_card_so_a_multi_sku_card_keeps_one_number(monkeyp
 # --- the rebuilt payment widget ---------------------
 # Amazon replaced the pmts-* payment-method list with a server-rendered Next.js "ViewPurchase"
 # widget: the card renders as three spans (name / mask dots / last 4) and the words "ending in"
-# are gone from the page, so _ENDING_IN_RE alone left Card Last 4 blank on the sheet.
+# are gone from the page, so _ENDING_IN_RE alone left Card Last 4 blank on the ledger.
 def _widget(*rows: str) -> str:
     return (
         '<div data-component="viewPaymentPlanSummaryWidget"><div id="__next">'

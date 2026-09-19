@@ -44,7 +44,7 @@ NOW = datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc)
 
 
 def row(**values) -> list[str]:
-    """Build a full-width sheet row from snake_case field names -- test_ledger_sync's helper."""
+    """Build a full-width row from snake_case field names -- test_ledger_sync's helper."""
     return [str(values.get(f, "")) for f in FIELDNAMES]
 
 
@@ -62,7 +62,7 @@ def _formula_cells(row_number: int) -> dict:
 
 
 LEDGER_ROWS = [
-    # sheet row 2: OPEN, ordered, no tracking, no payout -- a plain open BFMR row
+    # row 2: OPEN, ordered, no tracking, no payout -- a plain open BFMR row
     row(order_date="2026-09-09", status="ordered", retailer="Amazon Business",
         item_name="MacBook Air 13 M5", shipment="1", quantity="1", order_id="111-0000001-0000001",
         buying_group="BFMR", cost_per_item="1259.99", total_cost="1259.99", shipping="0",
@@ -71,7 +71,7 @@ LEDGER_ROWS = [
         order_url="https://www.amazon.com/gp/css/order-details?orderID=111-0000001-0000001",
         delivery_address="BuyForMeRetail B999999, Testville, NH 03050", card_last4="0315",
         last_scraped_at="2026-09-10T10:48:26+00:00", **_formula_cells(2)),
-    # sheet row 3: OPEN, shipped, COMMITTED payout (Expected Payout, nothing paid) -> PROJECTED profit
+    # row 3: OPEN, shipped, COMMITTED payout (Expected Payout, nothing paid) -> PROJECTED profit
     row(order_date="2026-09-08", status="shipped", retailer="Best Buy",
         item_name="MacBook Air 15 M5 Midnight", shipment="1", quantity="1",
         order_id="BBY01-800000000001", tracking_number="529900000012", tracking_submitted="True",
@@ -83,7 +83,7 @@ LEDGER_ROWS = [
         receipt_url="https://objectstorage.example/o/receipts/bestbuy/BBY01-800000000001.pdf",
         delivery_address="BFMR B999999, Testville, NH 03050", card_last4="4331", package_id="1",
         **_formula_cells(3)),
-    # sheet row 4: the SAME order, shipment 2, still ordered -- a split order stays together
+    # row 4: the SAME order, shipment 2, still ordered -- a split order stays together
     row(order_date="2026-09-08", status="ordered", retailer="Best Buy",
         item_name="MacBook Air 15 M5 Midnight", shipment="2", quantity="2",
         order_id="BBY01-800000000001", buying_group="BFMR", cost_per_item="1000", total_cost="2000",
@@ -93,7 +93,7 @@ LEDGER_ROWS = [
         receipt_url="https://objectstorage.example/o/receipts/bestbuy/BBY01-800000000001.pdf",
         delivery_address="BFMR B999999, Testville, NH 03050", card_last4="4331", package_id="2",
         **_formula_cells(4)),
-    # sheet row 5: SETTLED -- paid, dated payout -> REALIZED profit; paid $20 LESS than committed
+    # row 5: SETTLED -- paid, dated payout -> REALIZED profit; paid $20 LESS than committed
     row(order_date="2026-08-20", status="paid", retailer="Costco",
         item_name="iPad Air 11 M4 (Item #2042809)", shipment="1", quantity="2",
         order_id="1399000017", tracking_number="1Z999AA10000000001", tracking_submitted="True",
@@ -103,27 +103,27 @@ LEDGER_ROWS = [
         expected_payout="520",
         profile_label="profile-bravo", tracking_url="https://www.ups.com/track?tracknum=1Z999AA10000000001",
         delivery_address="MOD warehouse", card_last4="4351", **_formula_cells(5)),
-    # sheet row 6: SETTLED by STATUS alone -- MOD's dateless paid row
+    # row 6: SETTLED by STATUS alone -- MOD's dateless paid row
     row(order_date="2026-08-18", status="paid", retailer="Costco", item_name="Dyson V15 (Item #1)",
         shipment="1", quantity="1", order_id="1399000018", tracking_number="1Z999AA10000000002",
         buying_group="MOD", cost_per_item="300", total_cost="300", shipping="0", cashback_rate="0.09",
         payout_amount="330", profile_label="profile-bravo", card_last4="4351", **_formula_cells(6)),
-    # sheet row 7: CANCELLED -- money-free, never counted anywhere
+    # row 7: CANCELLED -- money-free, never counted anywhere
     row(order_date="2026-08-15", status="cancelled", retailer="Costco",
         item_name="IPAD AIR 11 M4 256GB PURP (Item #2042809)", shipment="1", quantity="2",
         order_id="1399000019", buying_group="BFMR", profile_label="profile-bravo", card_last4="4351",
         **_formula_cells(7)),
-    # sheet row 8: DELIVERED with a blank card and a blank rate -- the COGS input gap
+    # row 8: DELIVERED with a blank card and a blank rate -- the COGS input gap
     row(order_date="2026-08-10", status="delivered", retailer="Amazon", item_name="Fitbit Charge 6",
         shipment="1", quantity="1", order_id="111-0000002-0000002", tracking_number="TBA000000000001",
         delivery_date="2026-08-13", buying_group="BFMR", cost_per_item="100", total_cost="100",
         shipping="0", profile_label="profile-charlie", **_formula_cells(8)),
-    # sheet row 9: a GIFT CARD row -- kept, routed nowhere
+    # row 9: a GIFT CARD row -- kept, routed nowhere
     row(order_date="2026-08-09", status="delivered", retailer="Amazon", item_name="Amazon Gift Card",
         shipment="1", quantity="1", order_id="111-0000003-0000003", buying_group="Gift Card",
         cost_per_item="40", total_cost="40", cashback_rate="0.05", profile_label="profile-charlie",
         card_last4="0315", **_formula_cells(9)),
-    # sheet row 10: SUPERSEDED -- money-free, quantity blank too
+    # row 10: SUPERSEDED -- money-free, quantity blank too
     row(order_date="2026-08-05", status="superseded", retailer="Amazon", item_name="iPad Pro",
         shipment="3", order_id="111-0000004-0000004", tracking_number="TBA000000000009",
         buying_group="BFMR", profile_label="profile-charlie", **_formula_cells(10)),
@@ -182,7 +182,7 @@ class TestSnapshotReader:
         assert len(snapshot.rows) == len(LEDGER_ROWS)
         assert snapshot.skipped_rows == 1
         assert snapshot.rows[0].order_id == "111-0000001-0000001"
-        assert snapshot.rows[0].row_number == 2  # the header is row 1, as on the sheet
+        assert snapshot.rows[0].row_number == 2  # the header is row 1, as on the ledger
 
     def test_an_older_column_order_still_reads_correctly(self, tmp_path):
         """The 2026-09-10 move of Package ID: a backup written before it has the column last.
@@ -259,7 +259,7 @@ class TestReadOnlyGuarantee:
     FORBIDDEN_IMPORTS = ("scrapers", "buying_groups", "sync_tracking", "respond_bfmr", "receipts",
                          "main")
 
-    #: The ONE file that may write the Sheet: a cell you edit by hand on the Orders page.
+    #: The ONE file that may write the ledger: a cell you edit by hand on the Orders page.
     #: tests/test_web_edit.py pins what it may and may not do; everything else stays read-only.
     WRITE_FILE = "ledger_writer.py"
 
@@ -335,7 +335,7 @@ class TestPayoutSemantics:
 
     @pytest.mark.parametrize("status", ["ordered", "shipped", "delivered"])
     def test_a_legacy_undated_payout_amount_still_reads_as_a_commitment(self, status):
-        """A CSV backup or a Sheet from before Expected Payout (2026-09-18) carried the
+        """A CSV backup or a ledger from before Expected Payout (2026-09-18) carried the
         commitment in Actual Payout with a blank date; it still shows as projected."""
         r = _row(status=status, payout_amount="1230")
         assert r.is_committed and not r.is_settled and r.payout_state == "committed"
@@ -352,7 +352,7 @@ class TestPayoutSemantics:
 
     def test_a_zero_payout_with_a_date_or_outcome_is_a_settled_loss(self):
         """four $0.00 settlements (a return, three clawbacks) carried real
-        losses in Total Profit and the sheet's SUM counted them; the dashboard must too."""
+        losses in Total Profit and the ledger's SUM counted them; the dashboard must too."""
         dated = _row(status="return", total_cost="100", payout_amount="$0.00",
                      payout_date="2026-09-03")
         assert dated.is_settled and dated.payout_state == "settled" and dated.profit == -100.0
@@ -385,7 +385,7 @@ class TestFormulasInPython:
         letters = {v: k for k, v in _COL.items()}
         return {letters[m] for m in re.findall(r"\b([A-Z]{1,2})2\b", formula)}
 
-    def test_cogs_of_reads_exactly_the_cells_the_sheet_formula_reads(self):
+    def test_cogs_of_reads_exactly_the_cells_the_cogs_formula_reads(self):
         """If _cogs_formula ever reads a new cell, this fails until cogs_of reads it too."""
         assert self._fields_read_by(_cogs_formula(2)) == {
             "status", "total_cost", "return_quantity", "cost_per_item", "gift_card", "shipping",
@@ -422,7 +422,7 @@ class TestFormulasInPython:
         assert r.cogs == 95.0
 
     def test_a_numeric_cell_wins_over_recomputation(self):
-        """A live formatted read hands back the sheet's own result; that is the value shown."""
+        """A live formatted read hands back the ledger's own result; that is the value shown."""
         r = _row(status="delivered", total_cost="100", cashback_rate="0.05", cogs="$96.00")
         assert r.cogs == 96.0
 
@@ -1245,7 +1245,7 @@ class TestBackupPage:
 
     def test_the_backup_panel_works_without_any_ledger_source(self, repo, logs_dir, failures_dir,
                                                               tmp_path):
-        """A fresh clone has no snapshot, no config and no sheet -- the Settings page a restore
+        """A fresh clone has no snapshot, no config and no ledger -- the Settings page a restore
         starts from must still render."""
         app = create_app(SnapshotReader(data_dir=tmp_path / "empty"), logs_dir=logs_dir,
                          failures_dir=failures_dir, backup_dir=repo / "backups",

@@ -5,7 +5,7 @@ Run it before trusting an unattended deployment:
     python -m scripts.preflight            # human-readable report; exit 1 if anything FAILED
     python -m scripts.preflight --alert     # also fire the email/Discord alert on failure
 
-It is completely offline and free: no network, no Browser-Use run, no Sheets call. It only imports
+It is completely offline and free: no network, no Browser-Use run, no ledger read. It only imports
 modules, stats files, and reads env vars. That is deliberate — it has to be cheap enough to run on
 every container start.
 
@@ -123,7 +123,7 @@ def check_config_files(root: Path = ROOT) -> list[Result]:
         # Docker creates an empty DIRECTORY when a bind-mounted host file is missing. Reporting it
         # as "missing" sends someone hunting for the wrong problem.
         return [_check_path(config, required=True, parses_json=True,
-                            what="nothing can be loaded: no profiles, no sheet, no credentials.")]
+                            what="nothing can be loaded: no profiles, no ledger, no credentials.")]
 
     if not config.is_file():
         if legacy:
@@ -136,12 +136,12 @@ def check_config_files(root: Path = ROOT) -> list[Result]:
             )]
         return [Result(
             FAIL, "config.json",
-            "is missing — there is no configuration at all, so no profile, sheet or credential is "
+            "is missing — there is no configuration at all, so no profile or credential is "
             "available. Copy config.example.json to config.json and fill it in.",
         )]
 
     out = [_check_path(config, required=True, parses_json=True,
-                       what="nothing can be loaded: no profiles, no sheet, no credentials.")]
+                       what="nothing can be loaded: no profiles, no ledger, no credentials.")]
     if legacy:
         out.append(Result(
             WARN, "legacy config",
@@ -272,7 +272,7 @@ def check_env() -> list[Result]:
     ]
 
     # Alerts are how an unattended host tells you anything at all. Neither channel configured means
-    # a silent failure stays silent until you happen to look at the sheet.
+    # a silent failure stays silent until you happen to look at the ledger.
     email = _get_str("GMAIL_ADDRESS").strip() and _get_str("GMAIL_APP_PASSWORD").strip()
     discord = _get_str("DISCORD_WEBHOOK_URL").strip()
     if email or discord:

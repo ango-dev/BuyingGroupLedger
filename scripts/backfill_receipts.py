@@ -1,4 +1,4 @@
-"""Capture receipts for orders ALREADY on the sheet. One-off, dry-run by default.
+"""Capture receipts for orders ALREADY on the ledger. One-off, dry-run by default.
 
     python -m scripts.backfill_receipts                              # dry run, everything
     python -m scripts.backfill_receipts --retailer bestbuy           # dry run, one retailer
@@ -12,7 +12,7 @@ ledger making every run slower and more expensive. So a row that was already ter
 capture shipped is unreachable by any normal run, FOREVER: the retailer's page still exists, but
 nothing will ever go and fetch it. 33 of the first 40 rows were in exactly that state.
 
-This is that one-off. It reads the sheet, finds rows whose Receipt Link is blank, captures one
+This is that one-off. It reads the ledger, finds rows whose Receipt Link is blank, captures one
 receipt per ORDER (not per row — one order is one document, however many line items it became), and
 writes the link back to every row of that order.
 
@@ -41,7 +41,7 @@ from ledger.sync import HEADER, _col_letter, _get_worksheet
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("backfill_receipts")
 
-# The sheet stores the DISPLAY name; every other part of the system keys off the retailer_key.
+# The ledger stores the DISPLAY name; every other part of the system keys off the retailer_key.
 RETAILER_KEYS = {
     "Amazon": "amazon",
     "Amazon Business": "amazon-business",
@@ -61,7 +61,7 @@ class Order:
     order_id: str
     order_date: str
     receipt_url: str = ""
-    rows: list = field(default_factory=list)  # sheet row numbers sharing this order
+    rows: list = field(default_factory=list)  # row numbers sharing this order
     statuses: list = field(default_factory=list)  # one per row; attach_receipts gates on these
 
     @property
@@ -173,7 +173,7 @@ def run(apply=False, only_retailer=None, limit=None):
     worksheet = _get_worksheet()
     grid = worksheet.get_all_values()
     if grid[0] != list(HEADER):
-        print("The sheet header does not match the schema; refusing to write. Run a normal sync "
+        print("The ledger header does not match the schema; refusing to write. Run a normal sync "
               "first, which migrates an appended column.")
         return 1
 
@@ -207,7 +207,7 @@ def run(apply=False, only_retailer=None, limit=None):
         # attach_receipts does the rest: it skips anything already in the bucket WITHOUT opening a
         # browser, opens ONE browser for the remainder, and never raises for a single bad order.
         try:
-            # include_settled: the sheet's `paid`/`return` rows are genuinely finished
+            # include_settled: the ledger's `paid`/`return` rows are genuinely finished
             # purchases that a live scrape can never see (no scraper emits those), and
             # they are exactly the ones you may later have to prove.
             attach_receipts(selected, profile, retailer_key, include_settled=True)
@@ -222,7 +222,7 @@ def run(apply=False, only_retailer=None, limit=None):
 
     if apply:
         print(f"\nWrote {total_written} Receipt Link cell(s). "
-              f"Now run `python -m scripts.audit_ledger` to confirm the sheet is still sound.")
+              f"Now run `python -m scripts.audit_ledger` to confirm the ledger is still sound.")
     else:
         print("\nDry run — nothing was captured and nothing was written. Re-run with --apply.")
     return 0

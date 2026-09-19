@@ -5,7 +5,7 @@
     python -m scripts.import_history old.csv --map "Net=Total Profit" --map "Store=Retailer"
     python -m scripts.import_history old.csv --apply
 
-WHY THIS EXISTS. Pasting rows straight into the sheet is fine for a handful, but a real export has
+WHY THIS EXISTS. Pasting rows straight into the ledger is fine for a handful, but a real export has
 the errors the audit is BLIND to: a rate column that means 1% where you meant 13.5%, an Insurance
 column with the sign flipped, a date column whose 3/11 might be March or November, three tracking
 numbers in one cell. `audit_ledger` checks shapes; this checks the MONEY. The feature that justifies
@@ -25,12 +25,12 @@ WHAT IT DOES, IN ORDER (every step prints what it did):
   4. Reconcile against the source's profit column (auto-detected, or `--source-profit`).
   5. Refuse rows that are not terminal (ordered / shipped) -- the scrapers own open orders, and an
      imported open row becomes a duplicate on the next re-check. `--allow-open` overrides, loudly.
-  6. Preview against the LIVE sheet, read-only: which rows would UPDATE an existing row, which
+  6. Preview against the ledger, read-only: which rows would UPDATE an existing row, which
      would APPEND, which belong to an order the scrapers already recorded under different item
      names (skipped -- the scraped rows are authoritative -- unless `--allow-existing-orders`), and
-     which reuse a tracking number already on the sheet under another order.
+     which reuse a tracking number already on the ledger under another order.
   7. Write a normalised CSV to data/import_<ts>.csv. With `--apply`, sync it through the SAME
-     upsert every scrape uses (ledger.sync.sync_csv_to_ledger) and re-sort the sheet.
+     upsert every scrape uses (ledger.sync.sync_csv_to_ledger) and re-sort the ledger.
 
 Rows with NO tracking number are accepted and WARNED about (a delivered order from before the
 ledger often has none; the buying-group sync can never match such a row to a payout). Rows with no
@@ -85,7 +85,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "tracking_url": ("trackingurl", "trackinglink"),
     "receipt_url": ("receipturl", "receiptlink", "receipt"),
     "profile_label": ("profile", "profilelabel", "account"),
-    # reconcile-only: not a ledger column the import writes (it is a live formula on the sheet)
+    # reconcile-only: not a ledger column the import writes (it is a live formula on the ledger)
     "source_profit": ("totalprofit", "profit", "net", "netprofit", "margin"),
 }
 _DISPLAY_TO_FIELD = {h.lower().replace(" ", ""): f for f, h in zip(FIELDNAMES, HEADER)}
@@ -396,7 +396,7 @@ def explode(rows: list[Row]) -> list[OrderItem]:
 
 
 def preview_against_sheet(items: list[OrderItem], grid: list[list]) -> dict:
-    """Classify each ledger row against the live sheet's FORMATTED grid (what the upsert keys on)."""
+    """Classify each ledger row against the ledger's FORMATTED grid (what the upsert keys on)."""
     header = grid[0]
     idx = {h: i for i, h in enumerate(header)}
     key_cols = ("Order ID", "Order Date", "Item Name", "Shipment")
@@ -437,7 +437,7 @@ def write_normalised(items: list[OrderItem], out_path: Path) -> Path:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Import finished orders from a foreign CSV. Dry run by default.")
     ap.add_argument("csv", type=Path)
-    ap.add_argument("--apply", action="store_true", help="write to the sheet (default: preview only)")
+    ap.add_argument("--apply", action="store_true", help="write to the ledger (default: preview only)")
     ap.add_argument("--profile", default="", help="Profile label to stamp when the source has none")
     ap.add_argument("--map", action="append", default=[], metavar="SRC=TARGET",
                     help="map a source column onto a ledger column (repeatable)")
@@ -449,8 +449,8 @@ def main(argv=None) -> int:
     ap.add_argument("--keep-no-cost", action="store_true",
                     help="import rows that have no Total Cost (default: skip them so a later scrape can fill the order)")
     ap.add_argument("--allow-existing-orders", action="store_true",
-                    help="import rows for orders the sheet already holds under other item names")
-    ap.add_argument("--no-sheet", action="store_true", help="skip the live-sheet preview (offline)")
+                    help="import rows for orders the ledger already holds under other item names")
+    ap.add_argument("--no-sheet", action="store_true", help="skip the ledger preview (offline)")
     ap.add_argument("--out", type=Path, help="where to write the normalised CSV (default data/import_<ts>.csv)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING)
@@ -496,7 +496,7 @@ def main(argv=None) -> int:
     rows, refusals, counts = normalise(raw_rows, mapping, date_order=order, rate_adds=rate_adds,
                                        profile=args.profile, allow_open=args.allow_open)
     if not args.keep_no_cost:
-        # A placeholder row for a REAL order is worse than no row: once its order id is on the sheet
+        # A placeholder row for a REAL order is worse than no row: once its order id is on the ledger
         # as terminal, no scrape will ever fetch that order again, so the placeholder blocks the very
         # sweep that could fill it in. Skip such rows; a bonus/credit with a genuine $0 cost is kept.
         no_cost = [r for r in rows if r["total_cost"] is None]
@@ -537,7 +537,7 @@ def main(argv=None) -> int:
     items = explode(rows)
     print(f"\nLedger rows: {len(items)} (from {len(rows)} source rows)")
 
-    # preview against the live sheet
+    # preview against the ledger
     to_write = items
     if not args.no_sheet:
         try:
@@ -545,22 +545,22 @@ def main(argv=None) -> int:
             ws, title = open_ledger_readonly()
             grid = read_grids(ws, title).formatted
         except Exception as exc:  # noqa: BLE001
-            print(f"\nLive-sheet preview skipped ({type(exc).__name__}: {exc}); pass --no-sheet to silence.")
+            print(f"\nLedger preview skipped ({type(exc).__name__}: {exc}); pass --no-sheet to silence.")
             grid = None
         if grid:
             pv = preview_against_sheet(items, grid)
-            print(f"\nAgainst the live sheet ({len(grid) - 1} data rows):")
+            print(f"\nAgainst the ledger ({len(grid) - 1} data rows):")
             print(f"  {len(pv['update'])} would UPDATE an existing row (same upsert key)")
             print(f"  {len(pv['append'])} would APPEND")
             if pv["existing_order"]:
                 verb = "imported anyway (--allow-existing-orders)" if args.allow_existing_orders else "SKIPPED -- the scraped rows are authoritative"
-                print(f"  {len(pv['existing_order'])} belong to orders ALREADY on the sheet under other item names: {verb}")
+                print(f"  {len(pv['existing_order'])} belong to orders ALREADY on the ledger under other item names: {verb}")
                 for it in pv["existing_order"][:20]:
                     print(f"      {it.retailer} {it.order_id} ship {it.shipment} {it.item_name[:45]!r}")
             if pv["tracking_collision"]:
-                print(f"  {len(pv['tracking_collision'])} reuse a tracking number the sheet holds under ANOTHER order (imported; check them):")
+                print(f"  {len(pv['tracking_collision'])} reuse a tracking number the ledger holds under ANOTHER order (imported; check them):")
                 for it, owner in pv["tracking_collision"][:20]:
-                    print(f"      {it.order_id} {it.tracking_number} -- sheet has it under {owner}")
+                    print(f"      {it.order_id} {it.tracking_number} -- the ledger has it under {owner}")
             if not args.allow_existing_orders:
                 skip = {id(it) for it in pv["existing_order"]}
                 to_write = [it for it in items if id(it) not in skip]
@@ -570,7 +570,7 @@ def main(argv=None) -> int:
     print(f"\nNormalised CSV: {out_path} ({len(to_write)} row(s))")
 
     if not args.apply:
-        print("\nDRY RUN -- nothing written to the sheet. Re-run with --apply to import.")
+        print("\nDRY RUN -- nothing written to the ledger. Re-run with --apply to import.")
         return 0
     from ledger.sync import sort_ledger_by_date_desc, sync_csv_to_ledger
     sync_csv_to_ledger(out_path)

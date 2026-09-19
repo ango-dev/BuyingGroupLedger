@@ -28,7 +28,7 @@ after anyone is watching — and always record how a run *ended*, including its 
 stamp `logs/.last_run`, the same heartbeat the container healthcheck uses: if that file is stale, the
 scheduler has stopped firing, which is otherwise a completely silent failure. Check it with
 `cat logs/.last_run`, and cross-check the data side with
-`python -m scripts.audit_ledger --stale-days 2` (see [Auditing the sheet](diagnostics.md#auditing-the-sheet)).
+`python -m scripts.audit_ledger --stale-days 2` (see [Auditing the ledger](diagnostics.md#auditing-the-ledger)).
 
 **Before trusting either scheduler on a new machine, run `python -m scripts.preflight`** — it's
 offline and free, and it catches the misconfigurations that keep working while doing the wrong thing
@@ -101,11 +101,14 @@ fills a small disk months later.
 
 ## Moving to another machine
 
-Everything except the local environment is cloud-side (profiles, sheet, proxies), so migration is just:
-copy the project **except** `.venv/`, `__pycache__/`, `data/`, `logs/`; be sure to bring the two
-gitignored files — `config.json` and, if you use Costco, `.state.json`. `config.json` holds every live
-credential in plaintext, so move it securely; then recreate the venv (`python -m venv .venv && …/pip install -r requirements.txt`) and
-re-install the scheduler on the new host. No re-login or re-sharing needed.
+Profiles and proxies are cloud-side; the ledger is not — it is `data/ledger.sqlite3`, beside the
+receipts under `data/`. So migration is: `python -m scripts.backup` on the old machine, copy the
+zip, `python -m scripts.backup --restore <zip>` on the new one (`config.json`, `.state.json`, `.env`
+and `data/` in one; standard library only, so the system Python does it before the venv exists) —
+or copy the project **except** `.venv/`, `__pycache__/`, `logs/`, making sure `data/` and the two
+gitignored files (`config.json` and, if you use Costco, `.state.json`) come with it. `config.json`
+holds every live credential in plaintext, so move it securely; then recreate the venv (`python -m venv .venv && …/pip install -r requirements.txt`) and
+re-install the scheduler on the new host. No re-login needed.
 
 **Two things do not travel with the files:**
 
@@ -114,14 +117,15 @@ re-install the scheduler on the new host. No re-login or re-sharing needed.
   (`curl -s https://api.ipify.org` tells you what to add). BFMR has no allowlist, and Costco egresses
   through the profile's own static ISP proxy, so neither is affected.
 - **Stop the old scheduler before starting the new one.** The overlap lock is a file in `logs/`, so it
-  is per-machine and will not stop two hosts scraping the same sheet at once.
+  is per-machine and will not stop two hosts running at once — each would submit tracking and file
+  insurance against the same buying-group accounts, into two ledgers that then disagree.
 
 Then run `python -m scripts.preflight` on the new host before trusting it. Moving to a dedicated
 Linux host has its own runbook: **[DEPLOY.md](../DEPLOY.md)**.
 
-## The web dashboard (read-only)
+## The web dashboard
 
-A local web page over the ledger, in `web/`: an overview (open rows by status and buying group,
+The ledger's UI: a local web page over `data/ledger.sqlite3`, in `web/`: an overview (open rows by status and buying group,
 projected versus realized profit, the COGS input gaps, the scheduler heartbeat), a filterable and
 sortable ledger table, one page per order, an Activity page (what every run
 and every dashboard change did, with the failure dossiers' reports rendered in place), an **Audit**
@@ -133,20 +137,20 @@ healthcheck. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
 the header (remembered per browser; follows the system until you choose). The dependencies are
 `requirements-web.txt`, an optional install on a desktop and part of the one Docker image.
 
-**No automatic writes.** Every *read* of the Sheet goes through
-`scripts.audit_ledger.open_ledger_readonly`, the `spreadsheets.readonly` scope, so nothing that
-merely displays the ledger can write it. The dashboard never calls a retailer or a buying-group
-API, never runs a scrape, and never changes the ledger schema (`FIELDNAMES` / `HEADER` are frozen;
-`tests/test_schema.py` enforces them). **The one Sheet write is a cell you edit by hand on the
-Orders page**, through `web/ledger_writer.py` and nothing else: `tests/test_web.py` scans every
-other file in `web/` for the write scope and the worksheet's write methods, and
-`tests/test_web_edit.py` pins what that one file may do. The other `POST`s (Backup, Settings) write
-local files only.
+**No automatic writes.** Every *read* of the ledger goes through `web/ledger_reader.py`, which has
+no write path, so nothing that merely displays the ledger can write it. The dashboard never calls
+a retailer or a buying-group API on its own, never runs a scrape on its own (Tools → *Run once* is
+you pressing the button), and never changes the ledger schema (`FIELDNAMES` / `HEADER` are frozen;
+`tests/test_schema.py` enforces them). **The ledger writes are the ones you make by hand on the
+Orders page** — a cell edited, a row added, rows deleted — through `web/ledger_writer.py`
+(`LedgerCellWriter`) and nothing else: `tests/test_web.py` scans every other file in `web/` for
+the worksheet's write methods, and `tests/test_web_edit.py` pins what that one file may do. The
+other `POST`s (Backup, Settings, receipts, tax inputs) write local files only.
 
-**Editing on the Orders page.** The table is the Sheet: every column in the Sheet's order, rows
-coloured by the Sheet's own status rules (read from its conditional formats: ordered red, shipped
-orange, delivered yellow, paid green, return terracotta, cancelled grey and superseded dark grey
-with strikethrough), a frozen header, full page width. It edits like a spreadsheet: click a
+**Editing on the Orders page.** The table is the ledger: every column in `HEADER` order, rows
+coloured by status (ordered red, shipped orange, delivered yellow, paid green, return terracotta,
+cancelled grey and superseded dark grey with strikethrough), a frozen header, full page width. It
+edits like a spreadsheet: click a
 cell to select it, Ctrl-click to add one to the selection (or take a selected one out), shift-click
 or drag for a range; double-click, Enter or just start typing to
 edit (the keystroke replaces the value); Enter saves, and fills every cell of a selected range;
@@ -164,15 +168,15 @@ when you want the run to take over again. The repair scripts (backfills, retag, 
 refresh) are your own explicit rewrites and are not gated. A cell that shows a link (Order Link, Tracking Link, Receipt
 Link, a tracking number with its carrier link) cannot be double-clicked into — the click follows
 the link — so it carries a ✎ pencil that opens the editor, and a blank link cell shows *add ↗* on
-hover and edits on a single click. An edit lands on the Sheet exactly as if typed there: the row is
-found **by its key** on a fresh read (the sheet may have re-sorted), the cell must still show what
-the page showed or the edit is refused as a conflict, a value goes through the upsert's own
-coercion (numbers stay numbers, checkboxes booleans, dates plain text), and a blank clears the cell
-while keeping its number format. Not editable: the four key columns (Order ID, Order Date, Item
-Name, Shipment: changing one duplicates the row on the next re-check), the two formulas (COGS,
-Total Profit) and Last Scraped At. Status must be one of the ledger's words; dates must be
-`YYYY-MM-DD`. The snapshot backend is view-only (a CSV has nothing to write to); the `db` backend
-writes the Sheet and re-mirrors, so the copy follows.
+hover and edits on a single click. An edit lands in the ledger as one key-located, conflict-checked
+cell write: the row is found **by its key** on a fresh read (the ledger may have re-sorted), the
+cell must still hold what the page showed or the edit is refused as a conflict, a value goes
+through the upsert's own coercion (numbers stay numbers, checkboxes booleans, dates plain text),
+and a blank clears the cell. Not editable: the four key columns (Order ID, Order Date, Item Name,
+Shipment: changing one duplicates the row on the next re-check), the two computed columns (COGS,
+Total Profit — derived from the row on every read) and Last Scraped At. Status must be one of the
+ledger's words; dates must be `YYYY-MM-DD`. The snapshot backend is view-only (a CSV has nothing
+to write to).
 
 **Rows: select, add, delete.** Selection is Sheets-style: click a row number to select that row
 and nothing else (it tints blue; a plain click on a cell likewise drops the row selection), Ctrl-click
@@ -183,16 +187,15 @@ removed bottom-up so the located numbers stay valid; all-or-nothing); there is n
 fill: select the cells, type the value, Enter — the field/value bar that did this is gone
 (2026-09-18).
 *Add a row* takes the key columns (Order Date, Order ID, Item Name, Shipment) plus the common ones;
-it lands where the sync's own append would (after the last occupied row, blanks sent as `None` so
-the column formats survive, the two formula cells stamped), Total Cost is computed from Quantity ×
-Cost Per Item, and the row sorts into date order on the next sync. A key that already exists is
-refused.
+it lands where the sync's own append would (after the last occupied row), Total Cost is computed
+from Quantity × Cost Per Item, and the row sorts into date order on the next sync. A key that
+already exists is refused.
 
 **Filters select all that apply.** Retailer, Profile, Status and Buying group are checkbox
 dropdowns: tick any combination; *All* clears the others (and re-ticks itself when the last value
 is unticked). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
 
-**Two views.** The *View* control in the filter bar switches between the sheet-like table and
+**Two views.** The *View* control in the filter bar switches between the spreadsheet-like table and
 **cards**: one card per order under the same filters and search, sorted by the *Sort by* / *Order*
 controls that appear in the cards view, paginated with a *Per page* choice of 12 / 24 / 48 / 96.
 A card shows the order's items one line each (numbered when there are several, with the quantity
@@ -211,7 +214,7 @@ Needs receipt capture on; otherwise the page says so and nothing is stored. Acce
 jpg, webp, up to 25 MB.
 
 **While a scheduled run is in progress every write is refused** (the page says so and nothing is
-written). The sync caches sheet row numbers from its pre-sync snapshot; a row deleted or appended
+written). The sync caches ledger row numbers from its pre-sync snapshot; a row deleted or appended
 underneath it would put its updates on the wrong rows. The signal is the run lock the scheduler
 already keeps (`logs/.run.lock`, stale after three hours, the same rule as `main.py`), so the
 refusal lasts as long as the run does.
@@ -222,8 +225,9 @@ once** (`python -m main [retailer]` — a real run exactly as the schedule does 
 and the buying-group sync that submits tracking and files insurance; confirmed in-page, refused
 while a run holds the lock, holding that lock itself so no scheduled run overlaps it, and stamping
 the heartbeat when it ends exactly as the cron wrapper does), the preflight check, the tax report, the buying-group probe, the receipt checks, the Costco token
-tool, the backfills and ledger fixes, the Sheet mirror, and the Sheet audit while the ledger is
-the Sheet. A tool that writes the ledger asks in-page first, runs dry by default where the script
+tool, the backfills and ledger fixes (sort, retag, superseded shipments, hand-edited cells, the
+one-off migrations), and the ledger audit — grouped as *Run*, *Accounts*, *Checks* and *Ledger
+Fixes*. A tool that writes the ledger asks in-page first, runs dry by default where the script
 has a dry run, and is refused while a scheduled run holds the run lock; one that spends (a cloud
 browser session, a buying-group call) says so on its card. Output streams into the card; every run
 is an Activity event. **Log a profile in** (under *Accounts* in the Tools menu) is the interactive one: it opens a live Browser-Use
@@ -236,8 +240,8 @@ the page and the session stays open; it is closed for you after `web.tool_sessio
 **The Activity page** is the app's own account of what it did, newest first: for every scheduled
 run, what each retailer's scrape found and what the ledger write updated or added (split boxes,
 ignored tracking numbers, key conflicts named), what the buying-group sync submitted, insured and
-read back and how many rows it updated, the emails the BFMR auto-reply sent, the end-of-run
-mirror; every alert (with its message) and every failure dossier — the Failures page lives here now:
+read back and how many rows it updated, the emails the BFMR auto-reply sent; every alert (with
+its message) and every failure dossier — the Failures page lives here now:
 a dossier row opens its report and files in place, and dossiers written before the
 log existed are listed from disk (`/failures` redirects to the dossier rows);
 and every change made from the dashboard — cell edits (with the before and after), rows added or
@@ -272,46 +276,45 @@ realized profit are the settled rows among them, whenever the payout landed. The
 report. Every tile is a link that opens the Orders page filtered the same way the
 number was counted, and the Orders filter bar shows those filters as editable controls: *Placed in*
 and *Paid in* (a month) and *Payout* (any / open / projected / settled / unpaid), so a click-through can be
-widened or narrowed without going back. The reconciliation line under Lifetime is what SUM() over
-the sheet's Total Profit column gives, so the page can be checked against the sheet at a glance.
+widened or narrowed without going back. The reconciliation line under Lifetime is the plain sum of
+the ledger's Total Profit column, so the page can be checked against the column at a glance.
 
-**Three backends, one adapter** (`web/ledger_reader.py`), chosen in `config.json`'s `web` section or
-by `WEB_LEDGER_SOURCE=snapshot|sheet|db` (the variable table in [configuration.md](configuration.md)
+**Two backends, one adapter** (`web/ledger_reader.py`), chosen in `config.json`'s `web` section or
+by `WEB_LEDGER_SOURCE=db|snapshot` (the variable table in [configuration.md](configuration.md)
 lists every `WEB_*` setting):
 
 | Backend | Reads | For |
 |---|---|---|
-| `db` | `data/ledger.sqlite3` (see below), refreshed from the read-only Sheet every `web.ledger_cache_ttl_seconds` (300 s), or from `web.snapshot_path` when one is set | the host: instant pages, one Sheet read per interval, the copy survives restarts |
-| `sheet` | the live worksheet, read-only scope, cached in memory for the same interval | a desktop look at the live ledger |
-| `snapshot` (default) | the newest `data/ledger_backup_*.csv` (every `--apply` script writes one), or `web.snapshot_path` | development, tests, no credentials |
+| `db` (default) | `data/ledger.sqlite3`, the ledger (see below), re-read every `web.ledger_cache_ttl_seconds` (300 s); `?refresh=1` re-reads now | the host, and any desktop that has the file |
+| `snapshot` | the newest `data/ledger_backup_*.csv` (every `--apply` script writes one), or `web.snapshot_path` | offline work and tests; view-only |
 
 Cells are read **by column name**, so a backup written before a column moved still reads correctly;
 `/health` reports `schema_matches: false` (with the missing and extra columns) when a source's header
-is not the current order. A CSV backup stores `COGS` and `Total Profit` as formula text, so for those
-two columns the page computes the same arithmetic as the sheet formula (`web.ledger_reader.cogs_of`,
-pinned against `ledger.sync._cogs_formula`'s own cell references by a test).
+is not the current order. `COGS` and `Total Profit` are never stored — `web.ledger_reader.cogs_of`
+/ `profit_of` compute them from the row (the ledger's own worksheet adapter uses the same two
+functions, pinned against `ledger.sync._cogs_formula`'s cell references by a test), so an old CSV
+backup that still holds them as formula text reads the same.
 
 **Projected versus realized.** Since 2026-09-11 a Actual Payout with a blank Payout Date on an open
 row is BFMR's *committed* price, not money received ([data model](data-model.md)). The dashboard
 reads the `(Payout Date, Status)` pair exactly as the audit does: a payout cell is **settled** when
 its date is set or the status is `paid` / `return` (MOD's paid rows carry no date) — a `$0.00`
-settlement included, since a return or clawback that paid nothing is a real loss the sheet's Total
+settlement included, since a return or clawback that paid nothing is a real loss the ledger's Total
 Profit shows — and a non-zero amount with neither is **committed**. Projected profit sums the
 committed rows, realized profit the settled ones, and a committed cell is tagged `proj.` in every
-table. The **Total Profit column sum** tile is what `SUM()` over the sheet's column gives (realized
-+ projected, plus anything with a payout cell in neither state), so the page reconciles with the
-sheet at a glance; numbers come from the sheet's stored values, not the displayed cents, so the
-sums agree to the cent. There is no `Expected Payout` column (parked in
-`the design notes`); this is a view over the existing cell.
+table. The **Total Profit column sum** tile is the plain sum of the column (realized + projected,
+plus anything with a payout cell in neither state), so the page reconciles with the ledger at a
+glance; numbers come from the stored values, not the displayed cents, so the sums agree to the
+cent. Since 2026-09-18 the commitment has its own `Expected Payout` column ([data
+model](data-model.md)); the projected figure is a view over it.
 
-**Running it locally** (main PC, against a snapshot; nothing to configure):
+**Running it locally** (main PC; nothing to configure):
 
 ```bash
 .venv/Scripts/pip install -r requirements-web.txt      # once (Linux: .venv/bin/pip)
-python -m web                                          # http://127.0.0.1:8765/ over the newest backup
+python -m web                                          # http://127.0.0.1:8765/ over data/ledger.sqlite3
+python -m web --source snapshot                        # the newest data/ledger_backup_*.csv, view-only
 python -m web --snapshot data/ledger_backup_20260910T105451Z.csv
-python -m web --source sheet                           # the live Sheet, read-only
-python -m web --source db                              # the SQLite copy, refreshed from the Sheet
 ```
 
 Flags win over `config.json` and the environment. It binds to loopback unless `--host` (or
@@ -331,36 +334,36 @@ docker compose up -d                          # re-create so the new port bindin
 curl -s http://127.0.0.1:8765/health          # on the host: "ok": true, "backend": "db"
 ```
 
-Set `web.ledger_source` to `db` in the host's `config.json` (the example does). `WEB_ENABLED=false`
-(or `web.enabled: false`) makes the container a pure scheduler again.
+`web.ledger_source` is `db` unless you say otherwise. `WEB_ENABLED=false` (or `web.enabled:
+false`) makes the container a pure scheduler again.
 
-### The SQLite copy of the ledger (`ledger_db/`)
+### The ledger file (`ledger_db/`)
 
-`data/ledger.sqlite3` is a **mirror** of the Sheet: one `ledger_rows` table whose columns are
-`FIELDNAMES` in order, typed from `ledger/sync.py`'s own field sets, keyed on the upsert key,
-plus a `mirror_runs` log. Every mirror replaces the table in one transaction, so the copy is always
-"the Sheet as of that read". Two things write it, and both only *read* the Sheet:
+`data/ledger.sqlite3` (`database.path` / `LEDGER_DB_PATH`) **is** the ledger: one `ledger_rows`
+table whose columns are `FIELDNAMES` in order, typed from `ledger/sync.py`'s own field sets, keyed
+on the upsert key, plus the `hand_edits` table that records the cells the dashboard protected.
+Every writer — the scrapers' upsert, the sort, the buying-group sync (payouts, insurance, the
+submitted tick), the BFMR auto-reply, the dashboard's editor, the repair scripts — and every reader
+(`load_order_state`, the sync, the audit, the tax report, the dashboard) goes through
+`ledger_db/worksheet.py:DbWorksheet`, a worksheet-faced adapter (`get_all_values` / `get_values` /
+`update` / `batch_update` / `sort` / `delete_rows`) that `ledger.sync._get_worksheet()` hands out.
+The money-path code addresses the ledger as a positional grid through those few methods, so it
+runs unchanged over the file and the tests that pin its behaviour run against the adapter. The
+audit and the tax report open it through `scripts.audit_ledger.open_ledger_readonly`, a handle
+that refuses every write.
 
-```bash
-python -m scripts.mirror_sheet_to_db                                   # live Sheet -> DB (read-only scope)
-python -m scripts.mirror_sheet_to_db --from-snapshot data/ledger_backup_20260910T105451Z.csv
-```
-
-the dashboard's `db` backend, which runs the same mirror on its cache interval, and **the scheduled
-run itself, as its last step** (`main.run_db_mirror`, on by default via `database.mirror_after_run`):
-after the scrapes, the buying-group sync and the auto-reply, the run reads the Sheet back once and
-replaces the copy, so the file always holds what this run wrote. A failure there alerts and never
-fails the run. **Nothing on a money path reads the file**: every writer still targets the Sheet
-exactly as before, every reader (`load_order_state`, the sync, the audit, the tax report) still
-reads the Sheet, and a host running an older version is unaffected by the file's existence. That is
-deliberate: this is step one of moving off the Sheet as the database. The cutover (writers and
-readers target SQLite, the Sheet becomes an exported view, then goes away) is a separate decision,
-tracked in `the design notes`.
+COGS and Total Profit are never stored: the two columns are computed from the row on every read
+(`web.ledger_reader.cogs_of` / `profit_of`), and a write into them is ignored. A row with no
+Order ID is not a ledger row and is never stored. The file **migrates its own table on open**:
+when `FIELDNAMES` changes, `ledger_db/store.py` rebuilds `ledger_rows` in the new order with every
+value carried across by column *name*, and refuses loudly — restore a backup or migrate by hand —
+if a populated table holds a column the schema no longer knows, rather than drop it. The Google
+Sheet the file replaced was retired on 2026-09-18; its story is in `the design notes`.
 
 ### Backup and restore
 
 One zip of everything a `git clone` does not give you — `config.json`, `.state.json`, `.env` and the
-whole `data/` directory (the SQLite copy, the CSV sheet backups, the audit snapshots), with a
+whole `data/` directory (the ledger, the receipts, the CSV safety copies, the audit snapshots), with a
 manifest naming the commit it came from. Logs and failure dossiers are not included. **The archive
 holds every live credential**: keep it private (`backups/` is gitignored and never enters an image).
 
@@ -379,7 +382,7 @@ page; `0` keeps all) — all on the Settings page under *Backups*, taking effect
 container start (the page prompts for the restart). `docker/entrypoint.sh` asks `python -m
 scripts.backup --print-cron` for the line and appends it to the crontab; `backup_once.sh` runs
 `python -m scripts.backup --scheduled`, which records the backup in the Activity log and ALERTS if
-it fails. A SQLite ledger goes into the zip through SQLite's own backup API (opened read-only), so
+it fails. The ledger goes into the zip through SQLite's own backup API (opened read-only), so
 a backup that lands during a run is still a consistent database. On a native install put the
 same line in your crontab: `$(python -m scripts.backup --print-cron) cd /path/to/repo && .venv/bin/python -m scripts.backup --scheduled`.
 The zips stay on the same machine — copy `backups/` somewhere else (rsync over your WireGuard link,
@@ -398,52 +401,6 @@ so restoring from it is only as safe as the network the dashboard is on — keep
 your own network. Each backup's manifest names the commit it was made from; inside the image that
 comes from `.git/HEAD` and its ref, which `.dockerignore` lets in for exactly this.
 
-### Moving off the Sheet (`ledger.backend`)
-
-The Google Sheet is **deprecated** as the ledger's home. `ledger.backend` (`LEDGER_BACKEND`) says
-where the ledger lives:
-
-| Value | What runs where |
-|---|---|
-| `db` (the default) | `data/ledger.sqlite3` **is** the ledger. The scrapers' upsert, the sort, the buying-group sync (payouts, insurance, the submitted tick), the BFMR auto-reply, the dashboard's editor and the scripts all read and write it, and **nothing touches the Sheet**. |
-| `sheet` (deprecated) | As before: every writer targets the Sheet, `data/ledger.sqlite3` is a mirror refreshed at the end of each run. The Settings page shows the Google Sheet settings only in this mode, tagged deprecated. |
-
-How it works: every writer addresses the ledger as a positional grid through a handful of
-`gspread.Worksheet` methods, so `ledger_db/worksheet.py` implements that surface over the SQLite
-file and `ledger.sync._get_worksheet()` hands it out instead of a Google worksheet — the
-money-path code runs unchanged, and the tests that pin its behaviour run against the adapter too.
-COGS and Total Profit are never stored as formula text: the two columns are computed from the row
-on every read (the same Python mirrors of the formulas the dashboard already used), so the numbers
-are the sheet's numbers, live, for every row. A row with no Order ID is not a ledger row and is
-never stored.
-
-**A host coming from `sheet`** starts on `db` at its next start (the default) and needs its file
-current first. The end-of-run mirror keeps `data/ledger.sqlite3` at the last run's state, so
-between runs it already is; to be sure, or if the last run's mirror failed, take the last copy by
-hand before restarting:
-
-```bash
-python -m scripts.mirror_sheet_to_db      # only runs while ledger.backend is still `sheet`
-docker compose restart                    # or python -m web again on a desktop
-```
-
-To stay on the Sheet for now, set `"ledger": {"backend": "sheet"}` in `config.json` (or
-`LEDGER_BACKEND=sheet`).
-
-Under `db`: `python -m scripts.mirror_sheet_to_db` and the end-of-run mirror refuse to run (a
-mirror from the stale Sheet would overwrite the ledger), the dashboard serves the file directly
-whatever `web.ledger_source` says (an explicit `--source` still wins for development), `/health`
-reports `ledger_backend`, and `python -m scripts.audit_ledger` runs its DATA checks against the
-database through the worksheet adapter (keys, money invariants, missing mandatory cells,
-staleness) while the Sheet-only checks — formulas, formats, merged cells, the formatted/stored
-disagreement — report SKIP (`--from-snapshot` still audits a saved Sheet snapshot in full). The
-same findings, by row, are the dashboard's Audit page.
-The Sheet-only maintenance scripts (`reorder_sheet`, `apply_sheet_formats`, the format-related
-backfills) are not meant for the database and say so if they hit a method the adapter does not
-have. **Nothing of the Sheet code is deleted**: switching back is setting the flag to `sheet`
-(the Sheet then lags by whatever was written meanwhile). Deleting the Sheet paths is the user's
-call, tracked in the design notes.
-
 ### The Audit and Reconciliation pages
 
 Both are the **Orders view** — the same filter bar, table or cards, sort, search and cell editing
@@ -451,12 +408,12 @@ Both are the **Orders view** — the same filter bar, table or cards, sort, sear
 Neither writes anything.
 
 - **Audit** (`/audit`, `web/audit_view.py`): every check of `scripts.audit_ledger` run against the
-  ledger the dashboard serves (under `db`, through the worksheet adapter — the CLI's own path; the
-  Sheet-only checks skip), then every row a check named, mapped to its order. The lead shows the
+  ledger the dashboard serves (through the worksheet adapter — the CLI's own read-only path), then
+  every row a check named, mapped to its order. The lead shows the
   checks with their status and how many rows each flagged; the **Check** dropdown narrows the rows
   to the checks you pick. A detail line that names no row (a count, advice to run a backfill) is
   shown under its check in the summary. The report is rebuilt whenever the rows change (a cell
-  edit, a sync, a mirror) and shared between a page load and its htmx swaps.
+  edit, a sync) and shared between a page load and its htmx swaps.
 - **Reconciliation** (`/recon`, `web/recon_view.py`): every order the buying group paid **more or
   less** than it committed to — Actual Payout against Expected Payout, compared as order totals
   over the same settled rows (two cents of tolerance plus a cent per row for proration drift), the
@@ -523,8 +480,7 @@ name, last 4, rate, profile scope and per-retailer rates. *Save* on a card rewri
 not show survive — validated by the section's model before anything is written; *✕ Remove* asks
 in-page and deletes it; the dashed *+ Add* card appends one. Passwords and TOTP seeds are never
 rendered: blank keeps them. *Edit … as JSON* under each section is the whole list as text, for
-anything the cards do not cover. The service account stays a JSON paste, with the `client_email`
-to share the sheet with shown above it. Your `//` comment keys survive, because the write goes
+anything the cards do not cover. Your `//` comment keys survive, because the write goes
 through the same `config.loader.save_config` that `scripts/create_profile.py` uses. A setting
 whose variable is exported in the environment is marked *env override*: the file is saved, but
 the environment still wins for the running process, as everywhere else.
@@ -554,6 +510,7 @@ as stored, never lost, but not editable until the form shows it).
 **No login.** Whoever can open the page can read and change every credential. Keep the dashboard on
 loopback or your own network; the LAN publish is opt-in for that reason.
 
-**What the dashboard cannot do, by design:** write the Sheet, edit a row, submit tracking, file
-insurance, run a scrape, or add the `Expected Payout` column. For those, the commands in
+**What the dashboard cannot do, by design:** change the ledger's columns, or submit tracking, file
+insurance or scrape *on its own* — those happen in a run (the schedule's, or Tools → *Run once*,
+which is you pressing the button and confirming in-page). For anything else, the commands in
 [CLAUDE.md](../CLAUDE.md)'s cost table remain the way.

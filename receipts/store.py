@@ -6,7 +6,7 @@
     path_for(key) -> the file on disk
 
 WHY A DIRECTORY, NOT OBJECT STORAGE. The bucket existed because the Pi
-was not reachable and the Sheet could not hold files. Now the dashboard serves files, the user
+was not reachable and the ledger could not hold files. Now the dashboard serves files, the user
 reaches it over WireGuard, and `data/` is in every backup -- so receipts sit under
 `receipts.dir` (default data/receipts) as `<retailer>/<YYYY-MM>/<order id>.<ext>` and the link
 the ledger carries is RELATIVE, `/receipts/<retailer>/<YYYY-MM>/<order id>.<ext>`: the dashboard

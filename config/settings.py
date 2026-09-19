@@ -92,7 +92,7 @@ ENV_TO_CONFIG = {
     # Where the receipt files live (receipts/store.py): a directory beside the ledger, inside every
     # backup, served by the dashboard at /receipts/. OCI Object Storage was removed 2026-09-18.
     "RECEIPTS_DIR": "receipts.dir",
-    # The read-only web dashboard (web/). None of these is read by the scheduler; see
+    # The web dashboard (web/). None of these is read by the scheduler; see
     # docs/operations.md, "The web dashboard".
     "WEB_ENABLED": "web.enabled",
     "WEB_LEDGER_SOURCE": "web.ledger_source",
@@ -174,7 +174,7 @@ def _get_rate(name: str, default: float) -> float:
     """Read a rate that may be written either as a decimal fraction (0.02) or a percentage ("2%").
 
     Both spellings are natural to write, and getting it wrong by 100x would misstate every profit
-    number on the sheet, so the "%" suffix is honoured explicitly rather than guessed at. A bare
+    number on the ledger, so the "%" suffix is honoured explicitly rather than guessed at. A bare
     value > 1 is rejected for the same reason models.card.Card rejects it: "2" is equally readable
     as 2% or 200%.
     """
@@ -366,7 +366,7 @@ class Settings:
     # the mounted data/ volume, so the file survives a rebuild.
     ledger_db_path: str = _get_str("LEDGER_DB_PATH", "data/ledger.sqlite3")
     # How long the dashboard serves a ledger read from memory before the next request re-reads
-    # the file (a cheap local read; the name is a leftover of the Sheet era).
+    # the file (a cheap local read; the name dates from when the read was remote).
     web_ledger_cache_ttl_seconds: int = _get_int("WEB_LEDGER_CACHE_TTL_SECONDS", 300)
     # Loopback by default: phase 1 has no authentication, so reaching it from another machine is
     # a deliberate choice (0.0.0.0 behind Tailscale, or the compose service's published port).

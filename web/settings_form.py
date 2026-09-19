@@ -450,8 +450,8 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
 
 
 def hidden_envs() -> set[str]:
-    """The settings the page does not render (and a save must leave alone). Nothing, since the
-    Sheet-only settings went with the Sheet (2026-09-18); kept as the one place to hide a
+    """The settings the page does not render (and a save must leave alone). Nothing, since
+    2026-09-18; kept as the one place to hide a
     setting from the page should one need it."""
     return set()
 

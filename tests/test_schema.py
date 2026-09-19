@@ -1,6 +1,6 @@
 """Guards against column drift between the three places that describe the ledger's shape.
 
-Rows are written to the sheet POSITIONALLY from column A. If FIELDNAMES, HEADER, and the CSV writer
+Rows are written to the ledger POSITIONALLY from column A. If FIELDNAMES, HEADER, and the CSV writer
 ever disagree on length or order, every row silently lands in the wrong columns — the worst failure
 this codebase can have, and one no runtime error would announce. These tests are the tripwire.
 """
@@ -22,8 +22,8 @@ def test_header_and_fieldnames_have_matching_length():
 def test_column_order_is_pinned():
     """The exact column order, pinned in full — changing it is a MIGRATION, not an edit.
 
-    Rows are written to the sheet positionally from column A, so reordering FIELDNAMES/HEADER without
-    rewriting the rows already on the sheet silently scrambles every one of them, and moves the cells
+    Rows are written to the ledger positionally from column A, so reordering FIELDNAMES/HEADER without
+    rewriting the rows already on the ledger silently scrambles every one of them, and moves the cells
     the Total Profit formula points at. This test is the tripwire: if you meant to reorder, update the
     lists here too, re-pin the formula letters in tests/test_profit_formula.py, and know that the
     ledger file migrates its table by column NAME on open (ledger_db/store.py).
@@ -133,8 +133,8 @@ def test_rewards_used_defaults_to_a_real_zero():
 
 def test_package_id_defaults_blank_and_stays_text():
     """Package ID (2026-09-09; beside Card Last 4 since 2026-09-10): blank means unknown and never blocks a match, and the value is TEXT —
-    a Costco packageNumber keeps its leading zeros through the model and through the sheet
-    coercion, or the id on the sheet would no longer equal what the mapping emits."""
+    a Costco packageNumber keeps its leading zeros through the model and through the ledger
+    coercion, or the id on the ledger would no longer equal what the mapping emits."""
     from ledger.sync import _coerce
 
     item = OrderItem(retailer="Costco", order_id="1", order_date="2026-09-09", item_name="Thing")

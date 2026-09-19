@@ -1,11 +1,11 @@
-"""Sheet DISPLAY formatting must never corrupt the value underneath.
+"""Cell DISPLAY formatting must never corrupt the value underneath.
 
 The round trip that makes this a real bug rather than a theoretical one:
 `get_all_values()` returns FORMATTED text -> `_merge_row` preserves an existing cell whenever the
 incoming value is blank (exactly what a partial re-check sends) -> the preserved value is written
 straight back. So a percent-formatted Cashback Rate read as "4%" used to be rewritten as literal TEXT,
 which breaks the Total Profit formula's arithmetic; a currency-formatted Total Cost as "$3,402.00"
-would stop the column summing. Formatting a column is a readability choice a user makes in the sheet,
+would stop the column summing. Formatting a column is a readability choice a user makes in the ledger,
 and it must survive a re-check untouched.
 
 Scope note: this covers the NUMERIC columns only. Date columns are deliberately NOT handled — they are
@@ -60,8 +60,8 @@ class TestParseDisplayNumber:
         assert isinstance(_coerce("quantity", "3"), int)
 
 
-class TestFormattedSheetSurvivesARecheck:
-    """The end-to-end case: a percent/currency-formatted sheet, then a partial re-check that sends
+class TestFormattedLedgerSurvivesARecheck:
+    """The end-to-end case: a percent/currency-formatted ledger, then a partial re-check that sends
     blanks for those columns."""
 
     def _recheck(self, tmp_path, **existing):
@@ -126,7 +126,7 @@ class TestFormattedSheetSurvivesARecheck:
 
 class TestAddressIsOneLine:
     """An agent copies the address block off the page verbatim, so it can arrive with real newlines
-    in it — which makes the sheet row tall and ragged. The deterministic parsers already comma-join,
+    in it — which makes the row tall and ragged. The deterministic parsers already comma-join,
     so normalizing in the model keeps both paths writing the same shape."""
 
     def _address(self, raw):

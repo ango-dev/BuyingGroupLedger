@@ -6,8 +6,8 @@
 The plan is a JSON list of entries `[row_number, column_name, value, current_value, note...]` --
 an entry whose column is `__delete_row__` DELETES that row instead (value is ignored; the guard is
 that the row's Order ID still equals `current_value`); deletions run LAST, bottom-up, so the cell
-writes and the other row numbers in the plan stay valid. Sheets shifts the rows below up and
-re-anchors the relative formulas itself. --
+writes and the other row numbers in the plan stay valid. A deletion shifts the rows below up
+and the derived columns follow. --
 the shape `audit_ledger`'s before/after comparison can produce (row, column, the value from the
 BEFORE snapshot, the value there now). Each write is a single cell by A1 address, RAW (no formula
 parsing, no locale interpretation), and only happens if the cell STILL holds `current_value`: a cell
@@ -40,7 +40,7 @@ def _same(a, b) -> bool:
 
 
 def _typed(value, column: str | None = None):
-    """A plan value as the type the sheet should store: int for a whole number, float otherwise --
+    """A plan value as the type the ledger should store: int for a whole number, float otherwise --
     but ONLY for a numeric or checkbox column. A TEXT column keeps its text verbatim: "0315" (Card
     Last 4) and "00009999990206101794" (a Costco carton id in Package ID) are digit strings whose
     leading zeros are the data, and a 20-digit id does not even survive the float round trip.
@@ -60,7 +60,7 @@ def _typed(value, column: str | None = None):
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Restore specific sheet cells from a plan file. Dry run by default.")
+    ap = argparse.ArgumentParser(description="Restore specific ledger cells from a plan file. Dry run by default.")
     ap.add_argument("plan", type=Path)
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args(argv)
@@ -107,7 +107,7 @@ def main(argv=None) -> int:
     if not args.apply:
         print("DRY RUN -- nothing written. Re-run with --apply.")
         return 0
-    # A real sheet has a FIXED grid and a write past it 400s ("exceeds grid limits") -- grow it
+    # The worksheet contract has a FIXED grid and refuses a write past it -- grow it
     # first when the plan touches an appended column the grid does not have yet.
     widest = max((HEADER.index(column) + 1 for _r, column, _v, _l, _n in todo), default=0)
     current_cols = getattr(worksheet, "col_count", widest)

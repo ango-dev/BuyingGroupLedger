@@ -73,7 +73,7 @@ echo "[entrypoint] timezone: $(date +%Z) ($(date -u +%FT%TZ) UTC)"
 echo "[entrypoint] scheduled every ${HOURS}h -> $(cat /app/crontab)"
 
 # --- the web dashboard ----------------------------------------------------------------------
-# Read-only over the ledger (web/), served from THIS container beside the scheduler. It never writes the Sheet and never touches a scrape: it is
+# Read-only over the ledger (web/), served from THIS container beside the scheduler. It never writes the ledger and never touches a scrape: it is
 # a separate process that shares the image, the config and the mounted data/ + logs/. Restarted in
 # a loop if it ever exits, so a crash costs seconds, not a container restart; healthcheck.sh probes
 # it. WEB_ENABLED=false (config web.enabled) keeps this container a pure scheduler.

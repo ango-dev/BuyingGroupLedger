@@ -37,7 +37,7 @@ def _email(from_addr="BFMR Support <support@buyformeretail.com>",
 
 
 def _row(**cells) -> list:
-    """A sheet row by display column name; everything else blank."""
+    """A row by display column name; everything else blank."""
     row = [""] * len(HEADER)
     for name, value in cells.items():
         row[HEADER.index(name)] = value
@@ -264,7 +264,7 @@ def test_unattributed_serials_are_refused_on_a_split_order():
 
 
 def test_unattributed_serials_are_accepted_when_the_order_is_one_package():
-    """No other tracking number on the sheet = the whole order is this box, so page-scanned
+    """No other tracking number on the ledger = the whole order is this box, so page-scanned
     serials with the right count are safe."""
     box = resolve_box(_request(), HEADER, _grid())
     fetched = {"BBY01-1": {"": ["A1", "B2"]}, "BBY01-2": {"": ["C3"]}}

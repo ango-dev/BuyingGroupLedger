@@ -1,6 +1,6 @@
 """The orchestrator half of the BFMR combined-package auto-reply: dry-run discipline (no send,
 no flag, NO browser fee), the live serial fetch on --apply, idempotency (the \\Answered flag
-plus the .state.json backstop), and loud needs_manual paths. IMAP/SMTP/sheet/serials are all
+plus the .state.json backstop), and loud needs_manual paths. IMAP/SMTP/ledger/serials are all
 injected or patched — nothing here touches a network."""
 
 import pytest

@@ -77,7 +77,7 @@ class TestBooleansFailClosed:
 
 
 class TestRates:
-    """Getting a rate wrong by 100x misstates every profit number on the sheet."""
+    """Getting a rate wrong by 100x misstates every profit number on the ledger."""
 
     @pytest.mark.parametrize("written, expected", [(0.02, 0.02), ("2%", 0.02), ("0.02", 0.02)])
     def test_both_spellings_resolve_from_the_config_file(
@@ -330,16 +330,12 @@ class TestTheReadmeTableStaysHonest:
 
         return set(BOOLEAN_SETTINGS)
 
-    @pytest.mark.xfail(strict=True, reason="README.md's variable table still lists the Google Sheet "
-                       "settings deleted 2026-09-18; the docs pass removes them -- then drop this marker")
     def test_every_variable_is_documented_against_the_right_key(self):
         import re
 
         row = re.compile(r"^\| `([A-Z0-9_]+)`(?: †)? \| `([a-z0-9_.]+)` \|$", re.M)
         assert dict(row.findall(self._readme())) == dict(ENV_TO_CONFIG)
 
-    @pytest.mark.xfail(strict=True, reason="README.md's variable table still lists the Google Sheet "
-                       "settings deleted 2026-09-18; the docs pass removes them -- then drop this marker")
     def test_every_boolean_is_marked(self):
         """The dagger is what tells a reader to write `true`, not 1. An unmarked boolean is worse
         than an undocumented one: it reads as a free-text setting and invites `FOO=0`, which the

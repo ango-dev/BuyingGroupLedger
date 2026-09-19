@@ -78,7 +78,7 @@ class TestTheRecord:
         assert hand_edits.key_of_row(row(order_id="X1", order_date="2026-09-01", item_name="Thing",
                                          shipment=1)) == KEYT
         assert hand_edits.protected_fields(DbWorksheet(db)) == {KEYT: {"insurance"}}
-        assert hand_edits.protected_fields(object()) == {}  # a Sheet, a fake: nothing recorded
+        assert hand_edits.protected_fields(object()) == {}  # a fake worksheet: nothing recorded
 
     def test_forget_by_order(self, db):
         hand_edits.record(db, KEY, "cashback_rate", 0.06)

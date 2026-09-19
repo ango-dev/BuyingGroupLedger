@@ -16,7 +16,7 @@ def normalize_retailer(text: str) -> str:
 def parse_rate(value):
     """Accept a rate as either a decimal fraction (0.02) or a percentage string ("2%") -> 0.02.
 
-    Public because the sheet side needs the same rule: a percent-FORMATTED cell reads back as the text
+    Public because the ledger side needs the same rule: a percent-FORMATTED cell reads back as the text
     "4%", and comparing that against 0.04 must not look like a disagreement.
     """
     if isinstance(value, str):
@@ -51,10 +51,10 @@ def normalize_last4(text: str) -> str:
 class Card(BaseModel):
     """One credit card, matched to a ledger row by the last 4 digits the scraper already captures.
 
-    Rates are stored as DECIMAL fractions (0.02 = 2%) because that's what the sheet's Total Profit
+    Rates are stored as DECIMAL fractions (0.02 = 2%) because that's what the ledger's Total Profit
     formula multiplies by. The config may write either form — `0.02` or `"2%"` — and the validator
     normalizes. A bare `2` is REJECTED rather than guessed at: "2" is equally readable as 200% or 2%,
-    and silently picking wrong would misstate every profit number on the sheet by 100x.
+    and silently picking wrong would misstate every profit number on the ledger by 100x.
 
     TWO TIERS OF RATE, because a card's earn rate is category-dependent in real life:
 

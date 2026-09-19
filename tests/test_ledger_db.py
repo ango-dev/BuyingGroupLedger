@@ -164,7 +164,7 @@ class TestStore:
             seeded.replace_rows(bad, backend="test", source="test")
         assert seeded.row_count() == 3
 
-    def test_fetch_returns_typed_values_in_sheet_order(self, seeded):
+    def test_fetch_returns_typed_values_in_grid_order(self, seeded):
         rows = seeded.fetch_rows()
         assert [r["sheet_row"] for r in rows] == [2, 3, 4]
         assert rows[0]["total_cost"] == 1000.0 and rows[0]["tracking_submitted"] == 1

@@ -79,7 +79,7 @@ def actual_return(rows: list[LedgerRow]) -> tuple[float | None, int]:
 
     over the SETTLED rows (the payout is in; a committed one is a promise). Cost-weighted by
     construction: dollars over dollars, so a $2,000 order pulls harder than a $300 one. COGS is
-    the sheet's own formula, so the cashback on shipping and tax, the gift card and rewards
+    the ledger's own formula, so the cashback on shipping and tax, the gift card and rewards
     netting and a return's share are all already in it; insurance is the BFMR premium; the payout
     is what the group paid after its commission. Returns (rate as a fraction or None, rows)."""
     counted = [r for r in rows if r.is_settled and r.total_cost and r.profit is not None]
@@ -206,9 +206,9 @@ def overview(snapshot: Snapshot, month: str = "", today: date | None = None) -> 
     # ($0.00 settlements included: a return that paid nothing is a real loss).
     projected = _projected_block([r for r in rows if r.is_committed])
     realized = _money_block([r for r in rows if r.is_settled])
-    # What SUM() over the sheet's Total Profit column gives: every row whose formula shows a
+    # What SUM() over the ledger's Total Profit column gives: every row whose formula shows a
     # number -- realized + projected + anything else with a payout cell. Shown so the page can be
-    # reconciled against the sheet at a glance.
+    # reconciled against the ledger at a glance.
     column = [r for r in rows if r.profit is not None]
     column_sum = {"rows": len(column), "profit": round(sum(r.profit for r in column), 2),
                   "other": round(sum(r.profit for r in column if not r.is_settled

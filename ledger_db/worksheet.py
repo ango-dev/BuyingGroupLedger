@@ -1,30 +1,30 @@
-"""The SQLite ledger wearing a gspread.Worksheet face -- how the app runs off the database.
+"""The SQLite ledger wearing a worksheet face -- how the app runs off the database.
 
-THE CUTOVER, STAGE TWO. Every writer in this codebase -- the scrapers'
-upsert (ledger/sync.sync_csv_to_ledger), the sort, the buying-group sync (payouts, insurance,
-the submitted tick), the BFMR auto-reply's read, the dashboard's cell editor, the backfill scripts --
-addresses the ledger as a POSITIONAL GRID through a handful of gspread.Worksheet methods:
+Every writer in this codebase -- the scrapers' upsert (ledger/sync.sync_csv_to_ledger), the sort,
+the buying-group sync (payouts, insurance, the submitted tick), the BFMR auto-reply's read, the
+dashboard's cell editor, the backfill scripts -- addresses the ledger as a POSITIONAL GRID through
+a handful of worksheet methods (the contract inherited from the spreadsheet this file replaced,
+2026-09-18):
 
     get_all_values() / get_values(value_render_option=...)   the grid, formatted or stored values
     update(range, values, value_input_option=...)            a block from an A1 anchor
     batch_update([{"range", "values"}], value_input_option)  single cells
-    sort(*(column, direction), range=...)                    the ledger block, Sheets' blank-last rule
+    sort(*(column, direction), range=...)                    the ledger block, blanks last
     delete_rows(n) / append_row / add_rows / add_cols / row_count / col_count / title
 
 So rather than rewrite 3,000 lines of money-path code, THIS class implements that surface over the
 SQLite file: the grid is HEADER at row 1 and one ledger row per `sheet_row` beneath it, every write
 lands in the file at once (the whole table, one transaction -- the ledger is a few hundred rows),
-and `ledger.sync._get_worksheet()` hands it out instead of a Google worksheet whenever
-`ledger.backend` is `db`. The writers do not know the difference, and the tests that pin their
-behaviour against the fake worksheet pin it against this one too.
+and `ledger.sync._get_worksheet()` hands it out. The writers do not know the difference, and the
+tests that pin their behaviour against the fake worksheet pin it against this one too.
 
-WHAT SHEETS DID THAT THIS MUST DO ITSELF:
+WHAT THE CONTRACT ASKS OF IT:
 
   * FORMULAS. The sync stamps `=IF(...)` into COGS and Total Profit and reads their RESULTS back.
-    Here the two columns are never stored as text: a write of formula text (or anything) into them
+    The two columns are never stored as text: a write of formula text (or anything) into them
     is ignored, and every read computes them from the row with web.ledger_reader.cogs_of /
     profit_of -- the Python mirrors of the two formulas, pinned by test against the formulas' own
-    cell references. So the number is the sheet's number, live, for every row, always.
+    cell references. So the number is the ledger's number, live, for every row, always.
   * RENDERING. A FORMATTED read returns strings (a bool as TRUE / FALSE, a number as its shortest
     text, blank as ""); an UNFORMATTED read returns the stored types -- and a blank cell is ""
     there too, never None, because every reader does str(cell).strip(). The sync's own parser
@@ -85,7 +85,7 @@ def parse_a1(range_name: str) -> tuple[int, int]:
 
 
 def _formatted(value: Any) -> str:
-    """What gspread's formatted read hands back for a stored value."""
+    """What a formatted read hands back for a stored value: text, as the contract always had it."""
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -96,7 +96,7 @@ def _formatted(value: Any) -> str:
 
 
 def _typed(field: str, value: Any) -> Any:
-    """Store a cell the way the mirror does: blanks as None, a bool column as bool, numbers as
+    """Store a cell typed: blanks as None, a bool column as bool, numbers as
     numbers; anything else as its text."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
@@ -138,8 +138,8 @@ class DbWorksheet:
     def _load(self) -> None:
         self._rows = [list(HEADER)]
         for record in self.db.fetch_rows():
-            # SQLite holds a bool column as 0 / 1; the grid holds bools, as the Sheet's stored
-            # values do (the sync's _parse_checkbox and the tracking sync's tick check read them).
+            # SQLite holds a bool column as 0 / 1; the grid holds bools, as the grid's stored
+            # values always have (the sync's _parse_checkbox and the tracking sync's tick check read them).
             self._rows.append([
                 (bool(record.get(f)) if f in _BOOL_FIELDS and record.get(f) is not None
                  else record.get(f))
@@ -202,7 +202,7 @@ class DbWorksheet:
 
     def get_values(self, range_name: str | None = None, value_render_option=None, **_kwargs):
         """The grid. UNFORMATTED keeps the stored types (a number, a bool) but a BLANK cell is ""
-        in every render, exactly as gspread hands it back: the readers do `str(cell).strip()`, and
+        in every render, as the worksheet contract has it: the readers do `str(cell).strip()`, and
         a None here became the text "None" -- six blank tracking numbers went to BFMR as the
         package "None" on the first run after the cutover (2026-09-18)."""
         option = str(getattr(value_render_option, "value", value_render_option) or "").upper()
@@ -290,7 +290,7 @@ class DbWorksheet:
         return {}
 
     def sort(self, *specs, range: str | None = None, **_kwargs) -> dict:
-        """Sheets' sort: `specs` are (column number, "asc" | "des"); blanks last either way."""
+        """The grid sort: `specs` are (column number, "asc" | "des"); blanks last either way."""
         self._guard()
         first, last = 2, len(self._rows)
         if range:

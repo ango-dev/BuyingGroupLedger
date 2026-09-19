@@ -25,7 +25,7 @@ Row model (matches how Amazon/Best Buy rows are keyed — Order ID + Order Date 
 - THE PACKAGE KEY IS `packageNumber`, NOT the tracking number (`_package_key`). A delayed package can
   be re-labelled with a NEW tracking number for the SAME physical box; keying on the label would make
   that box a second Shipment N, and — because the numbering is a sort — could RENUMBER packages already
-  written to the sheet, mis-keying several rows of one order at once (Shipment is part of the upsert
+  written to the ledger, mis-keying several rows of one order at once (Shipment is part of the upsert
   key). `packageNumber` is the carton's own id and survives a re-label. Verified live across
   8 orders / 19 packages: present and unique on every package, and 1:1 with the tracking number, so
   this keying is INERT on healthy orders. Two carrier families (13 of 19 packages were UPS with an
@@ -40,7 +40,7 @@ Row model (matches how Amazon/Best Buy rows are keyed — Order ID + Order Date 
   divide (gross total - discount total) back out over quantity to get the true per-unit cost.
 
 `build_order_items` is the entry point. `known_open_ids` are order numbers already recorded and still
-open in the sheet; a brand-new fully-cancelled order (not in that set) is ignored at discovery, while
+open in the ledger; a brand-new fully-cancelled order (not in that set) is ignored at discovery, while
 a recorded order that has since been cancelled is emitted as `cancelled` so its rows go terminal.
 """
 
@@ -164,7 +164,7 @@ def _gift_card_total(payments: list) -> float | None:
     so Costco charged no tax on the probed order and the API simply doesn't expose a tax field.
 
     A tender list WITHOUT a shop-card tender is a real 0.0. None only when the payments list itself is missing —
-    a shape we've never seen, and a blank never overwrites the sheet.
+    a shape we've never seen, and a blank never overwrites the ledger.
     """
     if not payments:
         return None

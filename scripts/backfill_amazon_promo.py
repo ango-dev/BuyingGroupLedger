@@ -1,6 +1,6 @@
 """
 One-off: backfill the Amazon order-page PROMO cashback and GIFT-CARD netting onto rows already on
-the sheet.
+the ledger.
 
 Both values are read off the order-details page at scrape time (see scrapers/amazon_mapping.py): the
 payment block's "... plus an extra 1% back ..." is added to the card's cards.json rate, and a "Gift
@@ -18,12 +18,12 @@ LLM tokens.
 The rebuilt values come from the SAME production functions the scrapers use (`build_order_items` ->
 `config.cards.tag_cards`), so this can never drift from what a fresh scrape would have written.
 
-DRY RUN BY DEFAULT — reads the live sheet, loads the order pages, and writes NOTHING:
+DRY RUN BY DEFAULT — reads the ledger, loads the order pages, and writes NOTHING:
     python -m scripts.backfill_amazon_promo
     python -m scripts.backfill_amazon_promo --limit 3          # only the 3 most recent orders
     python -m scripts.backfill_amazon_promo --order 111-9990017-9990017
 
-Apply for real (backs the sheet up to data/ledger_backup_<timestamp>.csv FIRST):
+Apply for real (backs the ledger up to data/ledger_backup_<timestamp>.csv FIRST):
     python -m scripts.backfill_amazon_promo --apply
 """
 
@@ -61,7 +61,7 @@ RETAILERS = {
 
 
 def _money(value):
-    """Sheet cell -> float, or None when blank/unparseable. Unformatted reads give real numbers, but
+    """Cell -> float, or None when blank/unparseable. Unformatted reads give real numbers, but
     a hand-formatted cell can still arrive as "$449.00"."""
     if value is None:
         return None
@@ -93,7 +93,7 @@ def _cell_number(field: str, value):
 def _key(order_id, order_date, item_name, shipment) -> tuple:
     """The ledger's upsert key (ledger/sync.py: Order ID + Order Date + Item Name + Shipment).
 
-    Shipment is normalized through int() where possible because the sheet stores it as a NUMBER, so
+    Shipment is normalized through int() where possible because the ledger stores it as a NUMBER, so
     an unformatted read can hand back 1 or 1.0 while the model holds "1" — three spellings of one
     shipment, and a mismatch here would silently match nothing and report "no changes".
     """
@@ -106,7 +106,7 @@ def _key(order_id, order_date, item_name, shipment) -> tuple:
 
 
 def plan_amazon_backfill(header: list[str], data_rows: list[list], rebuilt: dict) -> dict:
-    """Read-only: which cells would change. Pure — no network, no sheet access, so it is unit-testable.
+    """Read-only: which cells would change. Pure — no network, no ledger access, so it is unit-testable.
 
     `rebuilt` maps the upsert key to the OrderItem a fresh scrape would produce today (already
     promo-tagged and gift-card netted). Returns
@@ -134,7 +134,7 @@ def plan_amazon_backfill(header: list[str], data_rows: list[list], rebuilt: dict
         item = rebuilt.get(key)
         if item is None:
             continue
-        row_number = offset + 2  # +1 for the header row, +1 because sheets are 1-based
+        row_number = offset + 2  # +1 for the header row, +1 because rows are 1-based
         for field in TARGET_FIELDS:
             new = getattr(item, field, None)
             if new is None:
@@ -208,7 +208,7 @@ def _print_plan(plan: dict, apply: bool) -> None:
             shown_old = "(blank)" if old is None else f"{old:g}"
             print(f"  row {row_number:>4}  {column:<16} {shown_old:>10}  ->  {new:g}")
     for key in plan["unmatched"]:
-        print(f"  NOTE: rebuilt row not found on the sheet: {key}")
+        print(f"  NOTE: rebuilt row not found on the ledger: {key}")
     if not apply:
         print("\nDry run only — nothing written. Re-run with --apply to make these changes.")
 
@@ -230,7 +230,7 @@ def main() -> None:
     worksheet = _get_worksheet()
     existing = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
     if not existing or not any(str(c).strip() for c in existing[0]):
-        raise SystemExit("Sheet is empty — nothing to backfill.")
+        raise SystemExit("Ledger is empty — nothing to backfill.")
     header = [str(c) for c in existing[0]]
     if header != list(HEADER):
         raise SystemExit(
@@ -283,7 +283,7 @@ def main() -> None:
     backup_path = backup_dir / f"ledger_backup_{stamp}.csv"
     with backup_path.open("w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows(existing)
-    print(f"\nBacked the whole sheet up -> {backup_path}")
+    print(f"\nBacked the whole ledger up -> {backup_path}")
 
     data = [{"range": f"{_col_letter(header.index(column))}{row_number}", "values": [[new]]}
             for row_number, column, _old, new in plan["changes"]]

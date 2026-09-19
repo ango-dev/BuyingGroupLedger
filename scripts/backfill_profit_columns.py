@@ -6,7 +6,7 @@ tag_cards, and ledger.sync stamps the profit formula on the rows it touches). A 
 already `delivered` or `cancelled` when the columns were introduced is TERMINAL — no future run ever
 re-reads it — so it would keep blank cells forever. This is the backfill.
 
-It reproduces exactly what a scrape would have written, from data the sheet already holds:
+It reproduces exactly what a scrape would have written, from data the ledger already holds:
 
   - Card + Cashback Rate  <- resolved from that row's recorded Card Last 4, scoped by its Profile and
                              Retailer, through the same config.cards.resolve_card the scrapers use.
@@ -17,7 +17,7 @@ SAFE BY DEFAULT: only fills cells that are currently BLANK, so a card name you t
 overwritten. Pass --refresh to also correct non-blank cells that disagree with cards.json (use that
 after editing a rate).
 
-DRY RUN BY DEFAULT — reads the live sheet, writes nothing:
+DRY RUN BY DEFAULT — reads the ledger, writes nothing:
     python -m scripts.backfill_profit_columns
 
 Apply for real:
@@ -50,7 +50,7 @@ MAX_PROMO_RATE = 0.10
 
 
 def _same_rate(sheet_value, resolved) -> bool:
-    """Is the sheet's Cashback Rate cell consistent with the resolved rate?
+    """Is the ledger's Cashback Rate cell consistent with the resolved rate?
 
     Compared through parse_rate so a cell that reads back as "4%" counts as equal to 0.04. That
     happens for real: the column is usually percent-FORMATTED, and a formatted read returns the
@@ -161,7 +161,7 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--apply", action="store_true",
-                        help="Actually write to the live sheet (default: dry run, read-only)")
+                        help="Actually write to the ledger (default: dry run, read-only)")
     parser.add_argument("--refresh", action="store_true",
                         help="Also correct non-blank cells that disagree with config.json `cards`")
     parser.add_argument("--formulas-only", action="store_true",
@@ -178,7 +178,7 @@ def main() -> None:
     # UNFORMATTED so a percent-formatted Cashback Rate comes back as 0.04, not the display text "4%".
     existing = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
     if not existing or not any(str(c).strip() for c in existing[0]):
-        raise SystemExit("Sheet is empty — nothing to backfill.")
+        raise SystemExit("Ledger is empty — nothing to backfill.")
 
     header = [str(c) for c in existing[0]]
     if header != list(HEADER):

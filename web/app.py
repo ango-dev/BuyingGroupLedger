@@ -1,7 +1,7 @@
 """The FastAPI application: five GET routes over one read-only reader, plus the Backup page.
 
 The ledger routes are GET-only. The two POSTs on /backup write LOCAL files only (a zip under
-backups/, or a restore into a fresh clone); nothing here can write the Sheet or call a third party.
+backups/, or a restore into a fresh clone); nothing here can write the ledger or call a third party.
 
 `create_app()` is a factory so tests can hand it a SnapshotReader over a temporary CSV, a temporary
 logs/ and failures/ directory, and a fixed clock. The module-level `app` is what `uvicorn web.app:app`
@@ -49,7 +49,7 @@ ROUTES = ("/", "/orders", "/orders/{order_id}", "/audit", "/recon", "/taxes", "/
 
 
 def money(value) -> str:
-    """$1,234.56; negatives as -$12.00; blank for None / non-numbers. The sheet's own formatting,
+    """$1,234.56; negatives as -$12.00; blank for None / non-numbers. The ledger's own formatting,
     so a number reads the same on the page as in the ledger."""
     if value is None or value == "":
         return ""
@@ -127,7 +127,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                container_restarter: Callable[[], None] | None = None,
                in_container: bool | None = None,
                writer=None) -> FastAPI:
-    """`writer` is the ONE sheet-write path (web/ledger_writer.LedgerCellWriter): cell edits on
+    """`writer` is the ONE ledger-write path (web/ledger_writer.LedgerCellWriter): cell edits on
     the Orders page. None = the page is view-only (the snapshot backend, or a test).
     `container_restarter` / `in_container` are injection points for the container-restart
     button (the defaults signal PID 1, and detect Docker by /.dockerenv)."""
@@ -214,7 +214,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return page(request, "overview.html", snapshot=snapshot,
                     summary=overview(snapshot, month=month, today=clock().date()))
 
-    # The sheet writer: cell edits on the Orders page. The snapshot backend is a CSV, so there is
+    # The ledger writer: cell edits on the Orders page. The snapshot backend is a CSV, so there is
     # nothing to write to and the page stays view-only there.
     if writer is None and reader.backend != "snapshot":
         from web.ledger_writer import LedgerCellWriter
@@ -590,7 +590,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except EditError as exc:
             return refused(str(exc), exc.status)
         reader.load(force=True)
-        notice = f"Added {result['key']['order_id']} at sheet row {result['row_number']}"
+        notice = f"Added {result['key']['order_id']} at row {result['row_number']}"
         act("edit", f"Added a row for {result['key']['order_id']} ({fields.get('item_name', '')})",
             {"order_id": result["key"]["order_id"], "row_number": result["row_number"],
              "fields": {k: v for k, v in fields.items() if v}})
@@ -885,7 +885,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         dossier rows, all of them."""
         return RedirectResponse(url="/activity?type=dossier&days=0", status_code=303)
 
-    # --- backup / restore (local files only; the Sheet is never touched) -------------------------
+    # --- backup / restore (local files only; the ledger is never touched) -------------------------
     backups_dir = Path(backup_dir) if backup_dir else backup_module.BACKUPS_DIR
     repo_root = Path(repo_root_dir) if repo_root_dir else backup_module.ROOT
 
@@ -979,7 +979,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             url += "&restart=container"  # the run and the dashboard read config.json at start
         return RedirectResponse(url=url + "#s-backup", status_code=303)
 
-    # --- settings (edits config.json in place; never the Sheet) ---------------------------------
+    # --- settings (edits config.json in place; never the ledger) ---------------------------------
     from web import settings_form
 
     def settings_page(request: Request, *, message: str = "", errors: list[str] | None = None,
@@ -1141,7 +1141,7 @@ def _default_app() -> FastAPI:
 
 class _LazyApp:
     """`uvicorn web.app:app` without building the reader at import time (importing this module in
-    a test must not resolve a snapshot or open a sheet)."""
+    a test must not resolve a snapshot or open a ledger)."""
 
     _app: FastAPI | None = None
 

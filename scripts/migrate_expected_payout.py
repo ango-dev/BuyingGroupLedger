@@ -5,20 +5,19 @@
 
 WHY. From 2026-09-11 to 2026-09-18 the buying-group sync recorded BFMR's COMMITTED payout price
 in Actual Payout itself, with a blank Payout Date marking it as a promise rather than money (the
-user's ruling at the time: no second column on the Sheet). The Sheet is deprecated now and the
+user's ruling at the time: no second column). The
 dashboard's Reconciliation page needs the promise kept beside the payment, so the commitment has
 its own column, `Expected Payout` (beside Actual Payout), and the sync writes there from now on. Rows that
 were open at the changeover still carry their commitment in Actual Payout -- this script moves
 them: Expected Payout takes the figure, Actual Payout is cleared, the profit formula is re-stamped
-(on a Sheet; the database computes it). Run once, after deploying the column; running it again
+(the adapter computes it). Run once, after deploying the column; running it again
 finds nothing to move.
 
 WHAT MOVES, EXACTLY. A ledger row (has an Order ID) with a non-zero Actual Payout and NO Payout
 Date whose Status is not `paid` / `return` (a buying-group outcome settles a dateless payout: MOD
 pays without a date) and not money-free (cancelled / superseded rows are blanked by rule). A row
 that already carries a DIFFERENT Expected Payout is reported and left alone -- two figures need a
-human. Every write goes through ledger.sync._get_worksheet, so under `ledger.backend` = `db`
-this edits data/ledger.sqlite3 and under `sheet` the (deprecated) Google Sheet.
+human. Every write goes through ledger.sync._get_worksheet, so this edits data/ledger.sqlite3.
 """
 from __future__ import annotations
 

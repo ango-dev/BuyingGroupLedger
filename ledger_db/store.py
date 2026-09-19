@@ -3,16 +3,16 @@
 Two tables:
 
     ledger_rows   one row per ledger row, columns = FIELDNAMES in order (typed), plus `sheet_row`
-                  (the 1-based sheet row it was read from) and `mirrored_at`. PRIMARY KEY is the
-                  upsert key. `cogs` / `total_profit` hold NUMBERS (the formula's result), never the
-                  formula text.
-    mirror_runs   one row per mirror: when, from what, how many rows. The newest is what /health
-                  reports as the copy's age.
+                  (the row's 1-based position in the grid) and `mirrored_at` (when it was last
+                  written). PRIMARY KEY is the upsert key. `cogs` / `total_profit` hold NUMBERS
+                  (the derived result), never formula text.
+    mirror_runs   one row per logged whole-table write: when, from what, how many rows. The newest
+                  is what /health reports as the file's age.
 
-A mirror REPLACES the table in one transaction: the copy is the Sheet as of that read, nothing
-older survives, and a reader never sees a half-written state. The sheet is ~160 rows; there is no
-performance reason for anything cleverer, and "the DB is exactly what the Sheet said at time T" is
-the property that makes the copy trustworthy.
+A write REPLACES the table in one transaction: the file holds the grid as of that write, nothing
+older survives, and a reader never sees a half-written state. The ledger is a few hundred rows;
+there is no performance reason for anything cleverer, and "the file is exactly what the grid was
+at time T" is the property that makes it trustworthy.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ DEFAULT_PATH = ROOT / "data" / "ledger.sqlite3"
 #: The ledger's upsert key (ledger/sync._record_key): Order ID + Order Date + Item Name +
 #: Shipment.
 KEY_FIELDS = ("order_id", "order_date", "item_name", "shipment")
-#: Sheet formulas whose RESULT is stored here as a number.
+#: Derived columns whose RESULT is stored here as a number (the adapter computes them).
 FORMULA_FIELDS = ("cogs", "total_profit")
 #: Bookkeeping columns beyond FIELDNAMES.
 EXTRA_COLUMNS = (("sheet_row", "INTEGER"), ("mirrored_at", "TEXT"))
@@ -72,8 +72,8 @@ def _now() -> str:
 
 
 class LedgerDb:
-    """One SQLite file. Every method opens its own short-lived connection: the web process and the
-    mirror script may touch the same file, and SQLite's own locking handles that better than a
+    """One SQLite file. Every method opens its own short-lived connection: the web process and a
+    scheduled run may touch the same file, and SQLite's own locking handles that better than a
     shared handle would."""
 
     def __init__(self, path: Path | str | None = None):
@@ -92,7 +92,7 @@ class LedgerDb:
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         """Create the tables, or MIGRATE ledger_rows when its columns are not FIELDNAMES in order.
 
-        Under `ledger.backend` = `db` this file IS the ledger, so a schema change must carry every
+        This file IS the ledger, so a schema change must carry every
         row across: when the table merely lacks columns (the schema rule is "append last", so a
         new column is the only legal change) it is rebuilt in the current column order with the
         rows copied over and the new cells NULL -- one transaction, nothing dropped. A table
@@ -133,11 +133,11 @@ class LedgerDb:
             conn.execute("ROLLBACK")
             raise
 
-    # --- writes (the mirror is the only writer) --------------------------------------------------
+    # --- writes (the worksheet adapter is the only writer) --------------------------------------------------
     def replace_rows(self, records: list[dict], *, backend: str, source: str, skipped: int = 0,
                      header_ok: bool = True, duration_ms: int = 0, log_run: bool = True) -> int:
         """Replace every ledger row with `records` (dicts keyed by FIELDNAMES + `sheet_row`), in one
-        transaction, and log the mirror run (unless `log_run` is False: the worksheet adapter
+        transaction, and log the run in mirror_runs (unless `log_run` is False: the worksheet adapter
         writes the table on every cell write and a log line per write would be noise). Returns
         the number of rows written."""
         names = [name for name, _ in columns()]
@@ -167,7 +167,7 @@ class LedgerDb:
 
     # --- reads ----------------------------------------------------------------------------------
     def fetch_rows(self) -> list[dict]:
-        """Every ledger row as {field: typed value, "sheet_row": int}, in sheet-row order."""
+        """Every ledger row as {field: typed value, "sheet_row": int}, in grid order."""
         with self.connect() as conn:
             cursor = conn.execute('SELECT * FROM "ledger_rows" ORDER BY "sheet_row"')
             return [dict(r) for r in cursor.fetchall()]
@@ -192,8 +192,8 @@ class LedgerDb:
 
 
 def _storable(value):
-    """SQLite accepts None/int/float/str; a bool becomes 0/1 and "" becomes NULL (blank on the
-    sheet, blank here -- so a numeric column never holds an empty string)."""
+    """SQLite accepts None/int/float/str; a bool becomes 0/1 and "" becomes NULL (blank in the
+    grid, blank here -- so a numeric column never holds an empty string)."""
     if value is None or value == "":
         return None
     if isinstance(value, bool):

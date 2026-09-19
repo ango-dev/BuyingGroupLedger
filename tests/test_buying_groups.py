@@ -286,7 +286,7 @@ class TestBfmrSubmission:
 class TestMultiplePurchasesPerOrder:
     """One retailer order carrying SEVERAL BFMR purchases. The old per-row planner sent the
     number to the single indexed purchase, the confirm read keyed on order+tracking reported
-    everything submitted, and every sheet row ticked — while two reservations sat empty at BFMR
+    everything submitted, and every row ticked — while two reservations sat empty at BFMR
     until their deadline. Submission is now planned per purchase."""
 
     def _three_reservations(self, first_shipped=True):
@@ -1255,7 +1255,7 @@ class TestBestBuyDuplicateTrackingSuffix:
         assert held == {("O1", "T123")}
 
     def test_a_ledger_row_recorded_with_the_suffix_keeps_its_own_identity(self, bfmr, transport):
-        """If someone records the suffixed number on the sheet, both rows exist as distinct tracking
+        """If someone records the suffixed number on the ledger, both rows exist as distinct tracking
         numbers. Exact matches are claimed FIRST so the bare number's variants can't swallow the
         suffixed row and attribute its payout to the wrong order."""
         transport.responses = [tracker(
@@ -1306,7 +1306,7 @@ class TestSilentlyDroppedSubmission:
         assert "25 suffixed spelling(s)" in message, "B..Z, so the reader knows nothing is left"
         assert "NEITHER SUBMITTED NOR INSURED" in message, "state the exposure plainly"
         assert "support.bfmr.com/hc/en-us/articles/50968170907547" in message
-        assert "NOTHING TO EDIT ON THE SHEET" in message
+        assert "NOTHING TO EDIT ON THE LEDGER" in message
         # The promise that BFMR finishes the job is exactly what stopped being true.
         assert "RESOLVES ITSELF" not in message
 
@@ -1358,7 +1358,7 @@ class TestSilentlyDroppedSubmission:
     def test_a_manual_fix_is_picked_up_on_the_next_run(self, bfmr, transport):
         """THE ROUND TRIP. Once the package exists in My Tracker under any letter, the next run must
         recognise it, stop trying to submit it, leave its insurance alone, and carry the payout back
-        — with no edit to the sheet. Without this the alert would repeat every six hours forever."""
+        — with no edit to the ledger. Without this the alert would repeat every six hours forever."""
         after_manual_fix = tracker({
             "reserve_id": "R1", "purchase_id": "P1", "shipment_id": "S1", "order_id": "O1",
             "tracking_number": "529900000009B", "qty": 4, "deal_title": "Samsung SSD",
@@ -1534,7 +1534,7 @@ class TestBfmrPayoutsAndStatus:
         """
         transport.responses = [self._payout_row(amount_paid="0.00")]
         record = bfmr.fetch_payouts(["TBA1"])[0]
-        assert record.payout_amount is None, "a zero must not reach the sheet as a payout"
+        assert record.payout_amount is None, "a zero must not reach the ledger as a payout"
         assert record.status != "paid", "'paid' is terminal -- don't close a row that wasn't paid"
 
     def test_a_real_payout_is_still_recorded_normally(self, bfmr, transport):
@@ -1640,7 +1640,7 @@ class TestBfmrPayoutsAndStatus:
     def test_the_fee_row_becomes_insurance_and_the_deal_row_stays_gross(self, bfmr, transport):
         """Each package has TWO tracker rows: the deal, and a negative FEE row (no order_id, no
         deal_title) which is the insurance premium. Summing them nets to the right bottom line but
-        makes a real cost invisible — the sheet would show $2,199.80 with no hint that $10.20 of
+        makes a real cost invisible — the ledger would show $2,199.80 with no hint that $10.20 of
         insurance came out of a $2,210 payout. Total Profit subtracts Insurance, so splitting keeps
         the arithmetic identical while making the deduction legible."""
         transport.responses = [tracker(
@@ -1937,7 +1937,7 @@ class TestBfmrExpectedPayouts:
 
     The tracker carries `payout_price`/`total_payout` from the moment a purchase exists (live
     capture: a `status: "purchased"` row with no tracking number and `amount_paid: null` already
-    reads `payout_price: 1230`), which is what lets the sheet record the commitment at purchase
+    reads `payout_price: 1230`), which is what lets the ledger record the commitment at purchase
     link and alert when it later changes — see sync_tracking.allocate_expected_payouts.
     """
 

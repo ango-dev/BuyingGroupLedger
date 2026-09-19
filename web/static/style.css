@@ -151,11 +151,11 @@ table.ledger td.item > span { display: block; max-width: 380px; overflow: hidden
 table.ledger td { white-space: nowrap; }
 .scroll { overflow-x: auto; }
 
-/* --- The Orders page as a sheet ---------------------------------------------------------------
+/* --- The Orders page as a spreadsheet ---------------------------------------------------------------
    Full-bleed (body.wide drops main's max-width), a frozen header row, thin grid lines, and the
-   Sheet's OWN conditional-format colours, read from its rules on 2026-09-17: whole-row background
-   by Status (=$B2="delivered" and friends), strikethrough on cancelled / superseded. Colours are
-   the sheet's exact RGB; the text stays dark on them in both themes, as on the sheet. */
+   status colours: whole-row background by Status, strikethrough on cancelled / superseded, in the
+   exact RGB the old conditional formats used (read 2026-09-17); the text stays dark on them in
+   both themes. */
 /* ONE scroll region, like Sheets -- and it is the TABLE. body.wide is the viewport, nothing on
    the page itself scrolls; <main> is a column, the filter bar / add-row / bulk bar / banners /
    count are static above, and .sheet (the table's wrapper) is the single element that scrolls, in
@@ -173,7 +173,7 @@ body.wide #orders-table { display: flex; flex-direction: column; flex: 1 1 auto;
 body.wide .count { margin: 4px 8px; flex: 0 0 auto; }
 body.wide .sheet { overflow: auto; flex: 1 1 auto; min-height: 0; background: var(--card); border-top: 1px solid var(--line); }
 table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: collapse; }
-/* Grid lines are TRANSLUCENT so they take the row's own colour, as the sheet's do over a coloured
+/* Grid lines are TRANSLUCENT so they take the row's own colour, as a spreadsheet's do over a coloured
    row -- an opaque grey line reads as a gap between rows. */
 table.sheetlike th, table.sheetlike td { border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); border-bottom: 1px solid rgba(0, 0, 0, 0.12); padding: 3px 6px; }
 table.sheetlike th { position: sticky; top: 0; z-index: 2; background: var(--bg); box-shadow: 0 1px 0 var(--line); }

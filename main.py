@@ -184,7 +184,7 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
         # After the personal-address drop, so no work is spent resolving cards for rows we discard.
         _tag_cards(items, label)
 
-        # Before write_csv, so the Receipt Link lands in the SAME sheet sync as the rows it belongs
+        # Before write_csv, so the Receipt Link lands in the SAME ledger sync as the rows it belongs
         # to. _capture_receipts never raises — see its docstring.
         _capture_receipts(items, scraper, label)
 
@@ -198,16 +198,16 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
 
     try:
         result = sync_csv_to_ledger(csv_path)
-        log.info("Synced %s into the Google Sheet ledger.", csv_path.name)
+        log.info("Synced %s into the ledger.", csv_path.name)
     except Exception:
         # This alert has always existed, but it never said what was LOST. A sync failure discards
         # every row that run scraped — live it silently dropped 4 Amazon Business rows
         # twice — so the count and the retailer are the facts worth putting in front of someone.
-        log.exception("Sheet sync failed for %s (%d row(s) NOT recorded)", csv_path, len(items))
+        log.exception("Ledger sync failed for %s (%d row(s) NOT recorded)", csv_path, len(items))
         alert(
-            f"{label}: sheet sync FAILED — {len(items)} row(s) not recorded",
-            f"{len(items)} scraped row(s) could not be written to the ledger and are not on the "
-            f"sheet. The CSV is kept at {csv_path} if they are needed. Open orders will be "
+            f"{label}: ledger sync FAILED — {len(items)} row(s) not recorded",
+            f"{len(items)} scraped row(s) could not be written to the ledger and are not "
+            f"recorded. The CSV is kept at {csv_path} if they are needed. Open orders will be "
             "re-scraped next run; a newly-discovered order is only re-found while it stays in the "
             "lookback window. Check logs/run.log.",
         )
@@ -229,7 +229,7 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
             log.exception("Ledger sort failed after syncing %s", csv_path)
             alert(
                 "Ledger sort failed",
-                f"Rows from {csv_path.name} were written to the sheet, but the newest-first re-sort "
+                f"Rows from {csv_path.name} were written to the ledger, but the newest-first re-sort "
                 "afterwards failed, so the ledger may be out of order. The data itself is intact. "
                 "Run `python -m scripts.sort_ledger --apply` to fix. Check logs/run.log.",
             )
@@ -293,10 +293,10 @@ def main(retailers: list[str]) -> None:
 def run_buying_group_sync() -> None:
     """Post newly-shipped tracking numbers to the buying groups and read their payouts back.
 
-    Runs AFTER every scraper, inside the same run lock, because it reads the sheet the scrapers have
+    Runs AFTER every scraper, inside the same run lock, because it reads the ledger the scrapers have
     just finished writing — a tracking number discovered this run is submitted in the same run.
 
-    Failures here never fail the run: the scraped orders are already safely on the sheet, and the
+    Failures here never fail the run: the scraped orders are already safely on the ledger, and the
     submission is retried on the next pass. Same isolation rule as run_scrape.
 
     OFF BY DEFAULT, behind BUYING_GROUP_SYNC_ENABLED. This path submits to third parties and files

@@ -6,7 +6,7 @@ How a run is shaped, why each retailer's path looks the way it does, and where t
 
 ## The run loop
 
-Each run, for every configured profile × retailer: read the Sheet to decide what's new versus what
+Each run, for every configured profile × retailer: read the ledger to decide what's new versus what
 needs re-checking, fetch through that retailer's **deterministic path**, and upsert the results back.
 A failure writes a dossier and records nothing; there is no LLM fallback.
 
@@ -15,14 +15,14 @@ flowchart TD
     A[Scheduler: cron / Task Scheduler / container] --> B[main.py]
     B --> C{for each profile x retailer}
     C -->|profile_id blank| C0[skip - not set up]
-    C -->|configured| D[load order state from Sheet]
+    C -->|configured| D[load order state from the ledger]
     D --> E[open orders = recorded and NOT delivered]
     D --> F[delivered ids = terminal, skipped]
     E --> G[deterministic path: discovery + order details]
     F --> G
     G -->|success| K[write CSV]
     G -->|ANY failure| Z[failure dossier + alert; nothing recorded this run]
-    K --> L[Upsert into Google Sheet]
+    K --> L[Upsert into the ledger, data/ledger.sqlite3]
     L --> M[post tracking to buying groups, read payouts back]
 ```
 
@@ -97,6 +97,8 @@ fill. Its only real edge, real-time webhooks, doesn't matter against a multi-hou
 
 - **Profile** = a Browser-Use cloud browser identity (a `config.json` `profiles` entry) with its own **static ISP
   proxy** and the set of **retailers** it's logged into. One profile can cover several retailers.
-- **Sheet** = the source of truth. Each run reads it to decide what's new vs. what needs a re-check,
-  and writes results back.
+- **Ledger** = `data/ledger.sqlite3`, the source of truth. Each run reads it to decide what's new
+  vs. what needs a re-check, and writes results back — every writer and reader goes through the
+  worksheet-faced adapter in `ledger_db/`, and the dashboard (`web/`) is its UI. (The Google Sheet
+  it replaced was retired 2026-09-18; its story is in `the design notes`.)
 - **Alerts** = email (Gmail SMTP) + Discord webhook, fired on logged-out sessions and run failures.

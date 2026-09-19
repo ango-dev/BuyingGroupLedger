@@ -19,9 +19,9 @@ ledger/sync.py, and translated by each adapter into whatever its API wants. `Pay
 is the return trip: what a group paid, keyed by tracking number, which is the one identifier both
 sides always agree on.
 
-WHY THERE IS NO "already posted" COLUMN ON THE SHEET: the authoritative answer to "have I submitted
+WHY THERE IS NO "already posted" COLUMN ON THE LEDGER: the authoritative answer to "have I submitted
 this?" lives at the group, not in our ledger, and a local mirror drifts both ways (a post that
-succeeds while the sheet write fails re-posts forever; a number pasted into their web UI by hand
+succeeds while the ledger write fails re-posts forever; a number pasted into their web UI by hand
 reads as unposted). Both providers can answer it themselves — MOD ignores duplicates outright, BFMR
 has a status endpoint — so `already_submitted()` derives it per run instead.
 """
@@ -94,7 +94,7 @@ def normalize_group(name: str) -> str:
 class TrackingSubmission:
     """One eligible ledger row, in provider-neutral terms.
 
-    `row_number` is the 1-based sheet row, carried so a per-row failure can name the row the user has
+    `row_number` is the 1-based row, carried so a per-row failure can name the row the user has
     to look at, and so a payout written back later lands on the right line.
     """
 
@@ -160,7 +160,7 @@ class SubmissionResult:
 
     submitted: list[str] = field(default_factory=list)
     #: The same successes as `(order_id, tracking_number)` pairs. A combined box puts several ORDERS
-    #: under one number (Amazon: "2 orders in this package"), and the sheet's
+    #: under one number (Amazon: "2 orders in this package"), and the ledger's
     #: Tracking Submitted tick is per ROW — keyed on the bare number it ticked the second order's
     #: rows when only the first order's submission had landed.
     submitted_for: list[tuple[str, str]] = field(default_factory=list)
@@ -334,7 +334,7 @@ class BuyingGroupClient(Protocol):
     """What sync_tracking.py needs from a provider, and nothing more.
 
     A new buying group becomes supported by implementing this and registering an alias — no change
-    to the planner, the orchestrator, or the sheet.
+    to the planner, the orchestrator, or the ledger.
     """
 
     group_key: str

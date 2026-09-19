@@ -1,7 +1,7 @@
-"""Offline tests for the eligibility policy and the payout allocation. No sheet, no network.
+"""Offline tests for the eligibility policy and the payout allocation. No ledger, no network.
 
 `plan_tracking_submissions` is a pure f(header, rows), so the whole "what gets posted where, and
-what deliberately doesn't" policy is testable without touching Google Sheets — the same shape as
+what deliberately doesn't" policy is testable without touching the ledger — the same shape as
 scripts/backfill_profit_columns.py:plan_profit_backfill.
 """
 
@@ -32,7 +32,7 @@ HEADER_LIST = list(HEADER)
 
 
 def row(**values) -> list:
-    """Build a full-width sheet row, positionally, from column names."""
+    """Build a full-width row, positionally, from column names."""
     cells = [""] * len(HEADER_LIST)
     for name, value in values.items():
         cells[HEADER_LIST.index(name)] = value
@@ -104,8 +104,8 @@ class TestRetailerReachesTheClient:
 
     `_is_bestbuy` gates BFMR's duplicate-carton suffix retry, so a blank retailer switches the whole
     feature off silently. It WAS blank for every row: `optional_cell` resolves a column through
-    `idx`, and "Retailer" had never been added to that map, so it read "" on every sheet rather than
-    only on a sheet that lacks the column.
+    `idx`, and "Retailer" had never been added to that map, so it read "" on every ledger rather than
+    only on a ledger that lacks the column.
 
     Nothing caught it because the client-side tests build a TrackingSubmission directly with
     retailer="Best Buy" — they prove the retry works, given a retailer, and never ask whether one
@@ -135,8 +135,8 @@ class TestRetailerReachesTheClient:
             HEADER_LIST, [shipped("111-2", "TBA1", **{"Retailer": "Amazon"})])
         assert not _is_bestbuy(plan["by_group"]["BFMR"][0].retailer)
 
-    def test_a_sheet_predating_the_column_still_syncs_the_row(self):
-        """The point of `optional_cell`: an older sheet loses the suffix retry, not the whole row."""
+    def test_a_ledger_predating_the_column_still_syncs_the_row(self):
+        """The point of `optional_cell`: an older ledger loses the suffix retry, not the whole row."""
         header = [c for c in HEADER_LIST if c != "Retailer"]
         row_cells = self._bestbuy_row()
         del row_cells[HEADER_LIST.index("Retailer")]
@@ -164,7 +164,7 @@ class TestUnresolvedSplitQuantity:
 
     def test_a_float_corrupted_tracking_number_is_withheld_and_reported(self):
         """a 22-digit tracking number typed without a leading apostrophe was
-        stored by Sheets as a double and read back as '9.339589752066617e+21' — its trailing digits
+        stored as a double and read back as '9.339589752066617e+21' — its trailing digits
         already gone. Submitting that posts garbage to a group (not undoable at MOD), so the row is
         withheld and surfaced for a human to re-type the number as text."""
         plan = plan_tracking_submissions(
@@ -320,7 +320,7 @@ class TestPayoutAllocation:
         )
         assert writes[2][INSURANCE_COL] == 0.0
 
-    def test_a_payout_for_a_tracking_number_not_on_the_sheet_is_dropped(self):
+    def test_a_payout_for_a_tracking_number_not_on_the_ledger_is_dropped(self):
         """The group may hold packages we never recorded (bought outside this ledger). Writing them
         somewhere would be worse than ignoring them."""
         plan = self._plan()
@@ -350,7 +350,7 @@ class TestStatusOnlyMovesForward:
         assert writes[2][STATUS_COL] == "paid"
 
     def test_a_hand_typed_mod_return_survives_every_later_run(self):
-        """MOD publishes no return signal, so a return is typed on the sheet by hand — while MOD
+        """MOD publishes no return signal, so a return is typed on the ledger by hand — while MOD
         goes on reporting that package as received (= paid) forever. Without this guard every run
         would silently undo the correction."""
         plan = self._plan("return")
@@ -424,7 +424,7 @@ class TestTrackingSubmittedCheckbox:
         assert _tick_submitted({2}, self._plan(), apply=False) == {}
 
     def test_an_accepted_row_writes_a_real_boolean(self):
-        """A real bool, not the string "TRUE" — a Google Sheets checkbox only ticks for a boolean,
+        """A real bool, not the string "TRUE" — the checkbox column only ticks for a boolean,
         and the RAW write that carries it stores a string as a string."""
         assert _tick_submitted({2}, self._plan(), apply=True)[2][SUBMITTED_COL] is True
 
@@ -636,7 +636,7 @@ class TestCancelledPurchaseAlert:
 class TestColumnsExist:
     def test_the_columns_this_module_writes_are_real_schema_columns(self):
         """These are looked up by name against HEADER at write time; a rename would otherwise fail
-        only at runtime, against the live sheet."""
+        only at runtime, against the ledger."""
         for column in (INSURANCE_COL, PAYOUT_AMOUNT_COL, PAYOUT_DATE_COL,
                        STATUS_COL, SUBMITTED_COL):
             assert column in HEADER_LIST
@@ -830,7 +830,7 @@ class TestDonationShipments:
     """BFMR's donation program: a 1-cent deal is reserved and submitted like any
     package, but BFMR refuses its insurance filing with a 400. The client skips those with
     DONATION_SKIP_REASON; the sync's job is to turn that skip into a real $0.00 in the Insurance
-    cell (blank cells only) so the sheet reads "no premium, by design" — and to ALERT on any
+    cell (blank cells only) so the ledger reads "no premium, by design" — and to ALERT on any
     filing failure the donation skip does not explain, because those used to abort the whole run
     and now merely land in `failed`."""
 
@@ -1055,7 +1055,7 @@ class TestExpectedPayoutPlanning:
         assert plan["date_by_row"][3] == "2026-09-01", "a dated payout is settled money"
         assert plan["expected_by_row"][3] == 100.0 and plan["payout_by_row"][3] == 97.0
 
-    def test_a_sheet_from_before_the_column_reads_no_commitment_and_still_syncs(self):
+    def test_a_ledger_from_before_the_column_reads_no_commitment_and_still_syncs(self):
         header = [h for h in HEADER_LIST if h != EXPECTED_PAYOUT_COL]
         rows = [shipped("O1", "T1")[: len(header)]]
         plan = plan_tracking_submissions(header, rows)
@@ -1203,7 +1203,7 @@ class TestExpectedPayoutAllocation:
         assert writes == {2: {self.COL: 90.0}, 3: {self.COL: 90.0}}, (
             "who-gets-what is unknowable, but the order's TOTAL commitment still is not")
 
-    def test_an_order_the_sheet_does_not_know_waits_for_the_next_run(self):
+    def test_an_order_the_ledger_does_not_know_waits_for_the_next_run(self):
         writes, changes = self._alloc(
             [{"tracking_number": "", "order_id": "NOT-SCRAPED-YET", "expected_amount": 500.0}],
             {"O1": [2]}, {2: 100.0},
@@ -1250,7 +1250,7 @@ class TestExpectedPaymentMismatch:
         assert self._lines({"payout_amount": 900.0, "expected_amount": 905.0},
                            date_by_row={2: "2026-09-10"}) == []
 
-    def test_a_package_the_sheet_does_not_know_is_silent(self):
+    def test_a_package_the_ledger_does_not_know_is_silent(self):
         assert self._lines({"payout_amount": 900.0, "expected_amount": 905.0}, rows=()) == []
 
     def test_a_record_with_no_commitment_is_silent(self):

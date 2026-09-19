@@ -1,7 +1,7 @@
 """Cells the user typed by hand, which no run may overwrite.
 
 HOW A CELL BECOMES PROTECTED. The dashboard's editor (web/ledger_writer.py) is the one place a
-hand edit happens under `ledger.backend` = `db`, so every cell it writes -- a cell edit, a bulk
+hand edit happens, so every cell it writes -- a cell edit, a bulk
 edit, the fields of a hand-added row -- is recorded here, in a `hand_edits` table inside the
 ledger database itself, keyed by the row's upsert key and the field. Nothing guesses: a value that
 merely differs from what a scraper would write is not a hand edit, the record is.
@@ -120,7 +120,7 @@ def protected(db) -> dict[RowKey, set[str]]:
 
 def ledger_db_of(worksheet):
     """The LedgerDb behind a worksheet when it is the SQLite adapter, else None. By TYPE, never by
-    attribute: a gspread worksheet (and the tests' Sheet fakes) must not be probed."""
+    attribute: the tests' fake worksheets must not be probed."""
     from ledger_db.worksheet import DbWorksheet
 
     if isinstance(worksheet, DbWorksheet):
@@ -130,7 +130,7 @@ def ledger_db_of(worksheet):
 
 def protected_fields(worksheet) -> dict[RowKey, set[str]]:
     """The protection map for whatever worksheet a writer holds: the SQLite ledger behind the
-    adapter (ledger_db/worksheet.py) has one; a Google Sheet or a test fake has none."""
+    adapter (ledger_db/worksheet.py) has one; a test fake has none."""
     db = ledger_db_of(worksheet)
     if db is None:
         return {}

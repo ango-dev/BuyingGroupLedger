@@ -2,7 +2,7 @@
 
     python -m web                                   # config.json's `web` section (default: newest snapshot)
     python -m web --source snapshot --snapshot data/ledger_backup_20260910T105451Z.csv
-    python -m web --source sheet                    # the live Sheet, read-only scope, 300 s cache
+    python -m web --source db                       # the ledger file, re-read every 300 s
     python -m web --host 0.0.0.0 --port 8765        # e.g. to reach it over Tailscale
 
 Flags win over config.json and the environment, the same way a command-line value should. Binds to
@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Serving the snapshot {reader.resolve()} on http://{args.host}:{args.port}/",
               file=sys.stderr)
     else:
-        print(f"Serving the live Sheet (read-only scope, {reader.ttl_seconds:g}s cache) on "
+        print(f"Serving the ledger ({reader.ttl_seconds:g}s cache) on "
               f"http://{args.host}:{args.port}/", file=sys.stderr)
     if args.reload:
         uvicorn.run("web.app:app", host=args.host, port=args.port, reload=True)

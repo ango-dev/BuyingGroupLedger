@@ -1,4 +1,4 @@
-"""Backfill the Gift Card (+ Sales Tax) cells for Amazon orders already on the sheet. Dry run by default.
+"""Backfill the Gift Card (+ Sales Tax) cells for Amazon orders already on the ledger. Dry run by default.
 
     python -m scripts.backfill_gift_cards                          # fetch + report, write nothing
     python -m scripts.backfill_gift_cards --apply                  # write it
@@ -23,7 +23,7 @@ its Cost Per Item / Total Cost RESTORED TO GROSS in the same write batch that fi
 cell, so COGS — a live formula reading both — lands on the identical net number with the gift card
 now visible. The conversion refuses two shapes rather than guessing: a legacy row carrying nonzero
 Shipping (the old scaling shrank that too, and re-deriving it needs the page's shipping line — none
-exist on the live sheet today), and a sheet cost matching neither form (a partial order or a hand
+exist on the ledger today), and a ledger cost matching neither form (a partial order or a hand
 edit).
 
 REWARDS USED (2026-09-08) rides along: a spent Prime cash-back balance ("Prime for Young Adults
@@ -31,7 +31,7 @@ cash back: -$15.98", a summary line) and Amazon points (the Prime Business card'
 the order page never prices — Business reads the rewards ledger once, the related-transactions
 page is the fallback) land in their own column, filled here into BLANK cells like the other two.
 They are NOT gift cards: the cost stays full and only the cashback basis shrinks, because the user
-nets every Amazon reward from COGS at year end outside the sheet.
+nets every Amazon reward from COGS at year end outside the ledger.
 
 COST. One cloud CDP page-load per candidate order, per owning profile — no discovery pass, no
 tracking pages, no agent. Orders whose profile is not in config.json are reported and skipped.
@@ -54,7 +54,7 @@ import config.settings  # noqa: F401  -- loads config.json so the cloud-browser 
 from models.order import MONEY_FREE_STATUSES
 from ledger.sync import HEADER, _col_letter, _get_worksheet, _parse_display_number
 
-#: retailer display name on the sheet -> (retailer_key, mapping module name, api module name)
+#: retailer display name on the ledger -> (retailer_key, mapping module name, api module name)
 _RETAILERS = {
     "Amazon": ("amazon", "scrapers.amazon_mapping", "scrapers.amazon_api"),
     "Amazon Business": ("amazon-business", "scrapers.amazon_business_mapping",
@@ -154,7 +154,7 @@ def plan_order_writes(rows: list[dict], gift_card: float | None, sales_tax: floa
 
     legacy = subtotal is not None and abs(cost_sum - (subtotal - gift_card)) <= 0.02
     if subtotal is not None and not legacy and abs(cost_sum - subtotal) > 0.02:
-        return [], (f"?? sheet cost {cost_sum:.2f} matches neither the subtotal {subtotal:.2f} nor "
+        return [], (f"?? ledger cost {cost_sum:.2f} matches neither the subtotal {subtotal:.2f} nor "
                     f"its netted form -- resolve by hand")
 
     writes: list[dict] = []
@@ -252,7 +252,7 @@ def fetch_summaries(retailer: str, profile, order_ids: list[str]) -> dict[str, t
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="Backfill Gift Card (+ Sales Tax) for Amazon orders already on the sheet. Dry run by default.")
+        description="Backfill Gift Card (+ Sales Tax) for Amazon orders already on the ledger. Dry run by default.")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--retailer", choices=["amazon", "amazon-business"],
                     help="limit to one Amazon side")

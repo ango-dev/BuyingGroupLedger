@@ -1,5 +1,5 @@
 import re
-"""The Total Profit cell is a LIVE sheet formula, not a scraped value. Shipping, by contrast, is a
+"""The Total Profit cell is a live formula, not a scraped value. Shipping, by contrast, is a
 Python-computed NUMBER written once per sync (see TestShippingReproration below) — not a formula.
 
     Total Profit = Actual Payout + Cashback - Total Cost - Shipping - Insurance
@@ -15,7 +15,7 @@ for why a live SUMIF-based formula (the original design, briefly a separate "Pro
 column) was dropped in favor of this.
 
 These tests share test_ledger_sync's FakeWorksheet + helpers rather than re-deriving them, so the
-fake stays a single stand-in for gspread.
+fake stays a single stand-in for the worksheet contract.
 """
 
 from models.order import FIELDNAMES
@@ -41,7 +41,7 @@ class TestFormulaShape:
     def test_formula_shape_is_pinned(self):
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
         # (Expected Payout moved before Actual Payout on 2026-09-18: V->W, X->Y, deliberately)
-        # here rather than quietly producing wrong money on the sheet.
+        # here rather than quietly producing wrong money on the ledger.
         assert ledger_sync._cogs_formula(7) == (
             '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-Y7*L7-P7+N7+O7-Q7)*(1-S7)+Q7,"")))'
         )
@@ -56,7 +56,7 @@ class TestFormulaShape:
         cell. It is now `payout - COGS - insurance`, where `COGS = (cost+ship)*(1-rate)`. Those are the
         same number for every input — expand the second and you get the first — and this evaluates
         both to prove it rather than asserting it in a comment. If a future edit to either formula
-        breaks the identity, every historical profit figure on the sheet silently changes.
+        breaks the identity, every historical profit figure on the ledger silently changes.
         """
         for cost, ship, rate, ins, payout in [
             (798.0, 0.0, 0.04, 0.0, 820.0),
@@ -71,7 +71,7 @@ class TestFormulaShape:
             assert round(new, 9) == round(old, 9), (cost, ship, rate, ins, payout)
 
     def test_a_netted_return_equals_the_old_two_row_bookkeeping(self):
-        """Method 2's regression proof. The old sheets booked a partial return as a second negative
+        """Method 2's regression proof. The old bookkeeping recorded a partial return as a second negative
         row; the COGS formula now nets `Return Qty x Cost Per Item` out of the original row. For the
         same inputs the single netted row must equal the SUM of the old pair -- the live example is
         3 iPads at 399.99, one returned: 8.23 either way."""
@@ -113,7 +113,7 @@ class TestFormulaShape:
     def test_rewards_used_keep_the_full_cost_but_earn_no_cashback(self):
         """Amazon rewards SPENT on an order. Unlike a gift card they are NOT
         netted out of the cost — the user nets every Amazon reward from COGS at year end outside the
-        sheet, so netting here too would count it twice. They only leave the cashback basis: the
+        ledger, so netting here too would count it twice. They only leave the cashback basis: the
         card earns nothing on dollars it never paid. A blank cell computes the old number exactly."""
         cost, rate = 48.28, 0.05
         as_gift_card = (cost - cost) * (1 - rate)                 # the 09-07 treatment: cost 0
@@ -244,7 +244,7 @@ class TestFormulaIsWritten:
     def test_a_failed_formula_write_does_not_lose_the_scraped_row(self, sheet, tmp_path, caplog):
         # The row data is the irreplaceable part; the formula can be re-stamped on the next sync.
         def boom(*args, **kwargs):
-            raise RuntimeError("Sheets API down")
+            raise RuntimeError("the write failed")
 
         sheet.batch_update = boom
         sheet.rows = [list(HEADER)]
@@ -317,7 +317,7 @@ class TestShippingReproration:
         """The classic Best Buy undisclosed-split case: only the NEW box shows up in a given sync
         (the retailer surfaces one rotating tracking number at a time), but the order's ORIGINAL row
         must still be re-split now that a second box is known — not left at its old (now wrong) full
-        total. _reprorate_order_level re-derives from EVERY row of the order currently on the sheet, not
+        total. _reprorate_order_level re-derives from EVERY row of the order currently on the ledger, not
         just the ones this sync's CSV happened to include."""
         sheet.rows = [
             list(HEADER),
@@ -423,7 +423,7 @@ class TestShippingReproration:
         assert r[FIELDNAMES.index("sales_tax")] == 2.0
 
     def test_reprorate_writes_raw_not_user_entered(self, sheet, tmp_path):
-        # Shipping is a plain number, never a formula — USER_ENTERED would risk Sheets reinterpreting
+        # Shipping is a plain number, never a formula — USER_ENTERED would risk the write reinterpreting
         # it (harmless for a currency amount, but RAW is still the correct, deliberate choice here).
         sheet.rows = [list(HEADER)]
         path = write_csv_file(
@@ -481,7 +481,7 @@ class TestProfitColumnsUpsert:
         assert recorded[FIELDNAMES.index("cashback_rate")] == 0.015
 
     def test_cashback_rate_is_written_as_a_number_not_text(self, sheet, tmp_path):
-        # Text would break the formula's arithmetic (Sheets can't multiply a string).
+        # Text would break the formula's arithmetic (a formula can't multiply a string).
         sheet.rows = [list(HEADER)]
         path = write_csv_file(
             tmp_path,

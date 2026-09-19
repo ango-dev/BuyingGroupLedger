@@ -4,9 +4,7 @@ the affected rows with what is wrong beside them.
 
 The checks are the audit's own, unchanged: the same `run_checks` the CLI runs, over the same three
 grids. What differs per backend is only where the grids come from -- the SQLite ledger through the
-worksheet adapter (the CLI's path under `db`), the live Sheet through the read-only scope, or a
-CSV snapshot re-read once. The Sheet-only checks (formulas, formats, merges) report SKIP unless the
-backend IS the Sheet. A check's detail lines name rows ("row 157: order ... has no status", "rows
+worksheet adapter (the CLI's own path), or a CSV snapshot re-read once. A check's detail lines name rows ("row 157: order ... has no status", "rows
 [2, 3]: ..."); those numbers are read off the audited grid's own key columns, so a finding lands
 on the right order whatever numbering the dashboard's rows carry.
 """
@@ -143,7 +141,7 @@ def grids_from_snapshot(snapshot) -> Grids:
                 if value is None and row.text(fld):
                     value = row.text(fld)  # text in a numeric column ("*"): the audit should see it
                 elif fld in _INT_FIELDS and isinstance(value, float) and value.is_integer():
-                    value = int(value)  # a count is stored as an int, as the Sheet and the db store it
+                    value = int(value)  # a count is stored as an int, as the ledger stores it
             else:
                 value = row.text(fld)
             typed_line[i] = "" if value is None else value

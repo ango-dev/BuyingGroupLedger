@@ -184,14 +184,14 @@ _WEEKDAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday":
 
 # A MOVED-UP delivery renders the stale estimate UNDER the live one — "Now arriving Monday" in
 # the h4, "Previously expected October 19" in a second .od-status-message row. Both land in one status text, and the explicit "<Month> <Day>" scan
-# below used to prefer the STALE date over the bare weekday, so the sheet kept October while
+# below used to prefer the STALE date over the bare weekday, so the ledger kept October while
 # Amazon said next week. Everything from "previously" onward is history, never the answer.
 _PREVIOUS_ETA_RE = re.compile(r"(?<![A-Za-z])previously(?![A-Za-z]).*", re.IGNORECASE | re.DOTALL)
 
 # Digital line markers, matched against a SHIPMENT'S STATUS TEXT. A shipment whose status says it was
 # delivered electronically has no physical package, so it is never a reimbursable order line.
 # "balance is added to your account" is what Amazon prints for a Gift Card Balance Reload — captured
-# live as "Applied Gift Card balance is added to your account." after one reached the sheet
+# live as "Applied Gift Card balance is added to your account." after one reached the ledger
 # and booked $40.35 of cost against an order that can never ship.
 _DIGITAL_MARKERS = ("digital delivery", "ready to redeem", "redeem your", "gift card claim",
                     "balance is added to your account")
@@ -575,7 +575,7 @@ def _cash_back_consumed(summary_el) -> float | None:
 
     Live (orders 111-9990007-9990007 and 111-9990025-9990025, one checkout split in
     two, the consumer twin): each order's summary line showed the whole BALANCE ("Prime for Young
-    Adults cash back: -$89.10"), so the sheet held $89.10 PER ORDER instead of $89.10 split
+    Adults cash back: -$89.10"), so the ledger held $89.10 PER ORDER instead of $89.10 split
     across them. The line is the balance applied at checkout, not the amount spent. What an order
     consumed is what the card was not charged: "Total before tax" (the page's own net of subtotal
     + shipping − promo discounts, e.g. Free Shipping) + tax − gift card − Grand Total; when that
@@ -640,7 +640,7 @@ def missing_card_reason(order_details_html: str) -> str | None:
 
     An unmatched card is exactly how the rebuilt payment widget silently blanked Card Last 4 for a
     run: the parse "succeeded", so no
-    dossier was written and nothing alerted until the sheet audit. The API client calls this after
+    dossier was written and nothing alerted until the ledger audit. The API client calls this after
     a successful build whose rows all carry a blank card and, given a reason, files a dossier
     problem WITH the page attached while still RECORDING the rows — one unreadable field must
     alert, not drop reimbursement money (the blank fills itself once the parser is fixed).
@@ -791,7 +791,7 @@ def _sales_tax_amount(summary_el) -> float | None:
 
     Same 0-vs-None rule as _gift_card_amount: a parsed summary without the tax
     line reads as a real $0.00; only a missing summary comes back None so a blank never overwrites
-    a figure on the sheet. Twin of scrapers/amazon_mapping._sales_tax_amount.
+    a figure on the ledger. Twin of scrapers/amazon_mapping._sales_tax_amount.
     """
     if summary_el is None:
         return None
@@ -962,7 +962,7 @@ def _collapse_same_package_cards(rows: list[OrderItem], subtotal: float | None,
         f"({', '.join(ids)}) with identical items — a delayed package re-issued a tracking number "
         f"while its old card was still on the page. {len(rows) - len(survivors)} duplicate row(s) "
         f"dropped; the card carrying a tracking number was kept.\n\n"
-        f"If a row for the superseded tracking number is already on the sheet, mark it superseded "
+        f"If a row for the superseded tracking number is already on the ledger, mark it superseded "
         f"(the row stays, its money is blanked) with:\n"
         f"  python -m scripts.fix_superseded_shipments --order {order_id}",
     )
@@ -1018,7 +1018,7 @@ def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
     if not resolved:
         # Can't tell which box holds what. Record it as explicitly unresolved rather than book a number
         # that is wrong: "*" is deliberately not blank, because _merge_row preserves a blank and would
-        # quietly keep the inflated figure already on the sheet.
+        # quietly keep the inflated figure already on the ledger.
         for row in survivors:
             row.quantity = "*"
             row.total_cost = None
@@ -1041,7 +1041,7 @@ def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
         f"order whose subtotal is ${subtotal:.2f} — the hallmark of a delayed package that was "
         f"re-issued a new tracking number while the old card was still on the page.\n\n"
         f"{len(survivors)} card(s) worth ${after:.2f} were kept.{tail}\n\n"
-        f"If a row for the superseded tracking number is already on the sheet, mark it superseded "
+        f"If a row for the superseded tracking number is already on the ledger, mark it superseded "
         f"(the row stays, its money is blanked) with:\n"
         f"  python -m scripts.fix_superseded_shipments --order {order_id}",
     )
@@ -1117,7 +1117,7 @@ def build_order_items(
     # netted by the COGS formula (gift card subtracted — a tender the card never spent, so it earns
     # no cashback; tax added). This replaced _net_gift_card's silent cost-scaling (2026-08-30):
     # same algebra, but Total Cost now stays the GROSS number the order page shows and the amount is
-    # visible on the sheet. The toggle keeps its old name and meaning — netting off means the
+    # visible on the ledger. The toggle keeps its old name and meaning — netting off means the
     # gift-card amount is simply not emitted, so COGS uses the full sticker cost.
     gift_card = (_gift_card_amount(summary_el) if net_gift_cards else None)
     # Rewards SPENT (cash-back balance + points) are their own column: full cost kept, no cashback

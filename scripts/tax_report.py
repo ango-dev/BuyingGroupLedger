@@ -12,7 +12,7 @@ cash basis, money IN counts when it arrives and money OUT counts when it is spen
   - COGS        = the COGS cell, on rows whose **Order Date** falls in the year (cancelled and
                   superseded rows carry no money and are excluded)
   - insurance   = Insurance, on rows whose **Order Date** falls in the year -- the premium is charged
-                  at filing, which happens at ship time; the sheet keeps no filing date, and an order
+                  at filing, which happens at ship time; the ledger keeps no filing date, and an order
                   ships within days of being placed, so Order Date is the honest proxy
 
 So a December order paid in January is a cost in one year and income in the next -- and the report
@@ -25,8 +25,8 @@ the income arrives through the orders it funds, whose Gift Card cell netted thei
 counted in COGS but reported on its own line, NOT as money still owed (the audit's
 cogs_inputs_complete draws the same distinction).
 
-Reads the sheet through scripts/audit_ledger's READ-ONLY path (read-only OAuth scope), so it cannot
-write even by accident. Cashback is already netted into COGS by the sheet formula; the report shows
+Reads the ledger through scripts/audit_ledger's READ-ONLY path (the adapter refuses writes), so it cannot
+write even by accident. Cashback is already netted into COGS by the COGS formula; the report shows
 the gross cost and the cashback separately as well, so the netting is visible rather than implied.
 """
 
@@ -53,7 +53,7 @@ _SHEETS_EPOCH = date(1899, 12, 30)
 
 
 def _year_of(value) -> int | None:
-    """The year of a date cell: ISO text, or a Sheets serial if the column was ever typed as a Date."""
+    """The year of a date cell: ISO text, or a date serial if the column was ever typed as a Date."""
     if value is None or value == "":
         return None
     if isinstance(value, bool):
@@ -108,13 +108,13 @@ def build_report(sheet: Sheet, year: int) -> dict:
             total_cost = _money(cell("Total Cost"))
             shipping = _money(cell("Shipping"))
             rate = _money(cell("Cashback Rate"))
-            # The cost basis, mirroring the sheet's own COGS formula term for term (Total Cost and
+            # The cost basis, mirroring the ledger's own COGS formula term for term (Total Cost and
             # Quantity are GROSS; returns/gift card/tax are netted here, not in the stored cells).
             returns = _money(cell("Return Qty")) * _money(cell("Cost Per Item"))
             gift_card = _money(cell("Gift Card"))
             sales_tax = _money(cell("Sales Tax"))
-            # Rewards spent stay IN the cost (netted from COGS at year end outside the sheet) and
-            # only leave the cashback basis — the same shape as the sheet's formula.
+            # Rewards spent stay IN the cost (netted from COGS at year end outside the ledger) and
+            # only leave the cashback basis — the same shape as the ledger's formula.
             rewards_used = _money(cell("Rewards Used"))
             basis = total_cost - returns - gift_card + shipping + sales_tax - rewards_used
             cogs_cell = _parse_display_number(cell("COGS"))
@@ -244,7 +244,7 @@ def main(argv=None) -> None:
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--no-rows", action="store_true", help="totals and breakdowns only")
     parser.add_argument("--from-snapshot", metavar="PATH",
-                        help="read an audit_ledger --save-snapshot file instead of the live sheet")
+                        help="read an audit_ledger --save-snapshot file instead of the ledger")
     args = parser.parse_args(argv)
 
     year = args.year

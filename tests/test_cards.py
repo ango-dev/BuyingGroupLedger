@@ -3,7 +3,7 @@
 The failure mode this guards is quiet: a card that resolves to the wrong entry, or a rate read as
 200% instead of 2%, produces a plausible-looking profit number that's off by orders of magnitude and
 nothing in the run would complain. These tests pin the normalization, the fallbacks, and the
-blank-means-preserve rule the sheet upsert depends on.
+blank-means-preserve rule the ledger upsert depends on.
 """
 
 import json
@@ -59,7 +59,7 @@ class TestCardModel:
         assert Card(last4="4321", name="C").cashback_rate is None
 
     def test_bare_two_is_rejected_rather_than_guessed(self):
-        # "2" reads equally as 2% or 200%. Guessing wrong misstates every profit number on the sheet.
+        # "2" reads equally as 2% or 200%. Guessing wrong misstates every profit number on the ledger.
         with pytest.raises(ValidationError, match="outside 0-1"):
             Card(last4="4321", name="C", cashback_rate=2)
 
@@ -94,13 +94,13 @@ class TestResolveCard:
         assert resolve_card("8765", self.cards, default_rate=0.02) == ("Flat Rate Card", 0.02)
 
     def test_unconfigured_card_keeps_the_default_rate_but_no_name(self):
-        # Name blank on purpose: the gap stays visible on the sheet AND a hand-typed name survives
+        # Name blank on purpose: the gap stays visible on the ledger AND a hand-typed name survives
         # _merge_row. The rate still applies so Total Profit remains computable.
         assert resolve_card("0000", self.cards, default_rate=0.02) == ("", 0.02)
 
     def test_blank_last4_yields_blanks_not_the_default_rate(self):
         # THE important one: a partial re-check carries no card. Returning the default rate here would
-        # overwrite a card-specific rate on the sheet every single re-check.
+        # overwrite a card-specific rate on the ledger every single re-check.
         assert resolve_card("", self.cards, default_rate=0.02) == ("", None)
         assert resolve_card("   ", self.cards, default_rate=0.02) == ("", None)
 
@@ -230,7 +230,7 @@ class TestTagCards:
 class TestPromoCashback:
     """An Amazon order page can advertise a per-order bonus ("... plus an extra 1% back ..."), which
     the mapping hangs on the row and tag_cards ADDS to the card's own rate — cashback is deliberately
-    one summed rate on the sheet, not two columns."""
+    one summed rate on the ledger, not two columns."""
 
     CARDS = [Card(last4="4321", name="Prime", cashback_rate=0.05)]
 

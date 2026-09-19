@@ -177,7 +177,7 @@ class BaseRetailerScraper(abc.ABC):
         )
 
     def _load_order_state(self) -> dict:
-        """Recorded order state from the sheet for this profile (delivered ids + open orders). Fails soft.
+        """Recorded order state from the ledger for this profile (delivered ids + open orders). Fails soft.
 
         Terminal orders are trimmed to the discovery window: they exist only to tell the fetch step
         "skip these", and discovery never scans back past the window, so carrying every order ever
@@ -193,7 +193,7 @@ class BaseRetailerScraper(abc.ABC):
             # (the upsert key has no retailer column).
             return load_order_state(self.profile.label, since=earliest, retailer=self.retailer_name)
         except Exception:
-            # load_order_state has its OWN guard for an unreadable sheet (and alerts there), so this
+            # load_order_state has its OWN guard for an unreadable ledger (and alerts there), so this
             # only fires for something else entirely — a bad date window, an import failure. Alerted
             # for the same reason: it silently drops every open-order re-check for this run, which
             # looks identical to a healthy run in the log.

@@ -3,8 +3,8 @@
 Every writer -- the scrapers' upsert, the sort, the buying-group sync, the BFMR auto-reply, the
 dashboard's editor, the repair scripts -- addresses it as a positional grid through the worksheet
 face in ledger_db/worksheet.py (ledger.sync._get_worksheet hands that out); the audit and
-the dashboard read the same view read-only. The Google Sheet the grid vocabulary came from, and
-the mirror that used to copy it into this file, were deleted 2026-09-18.
+the dashboard read the same view read-only. The grid vocabulary predates the file (it replaced a
+Google Sheet on 2026-09-18; the story is in the design notes).
 
 WHY SQLITE: one operator, one Pi, one file that bind-mounts like everything else in `data/`, no
 server to run or back up separately, and the standard library speaks it. Postgres would add a

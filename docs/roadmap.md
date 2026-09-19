@@ -10,8 +10,9 @@ _Part of the [Buying Group Ledger](../README.md) docs._
 browser; Costco reads its GraphQL API with a stored token). The buying-group sync posts tracking,
 files insurance and reads payouts back unattended. Receipts are captured as files beside the ledger
 (served by the dashboard) with a capture-time guard that refuses a page which does not name its
-own order. The ledger itself is a SQLite file; the Google Sheet is deprecated. The sheet audit is a
-read-only script with 40 checks. Failures write a dossier — page, screenshot, selector audit —
+own order. The ledger is a SQLite file behind a worksheet-faced adapter, with the web dashboard as
+its UI (the Google Sheet was retired 2026-09-18; its story is in `the design notes`). The ledger
+audit is a read-only script with 34 checks. Failures write a dossier — page, screenshot, selector audit —
 instead of running a paid agent (retired 2026-08-29).
 
 **Worth building, none urgent**

@@ -1,8 +1,8 @@
-"""The one-off backfill that re-reads Amazon order pages to correct rows already on the sheet.
+"""The one-off backfill that re-reads Amazon order pages to correct rows already on the ledger.
 
 Terminal rows are never re-scraped, so an order that closed before the promo / gift-card rules
 existed still carries the pre-promo rate and full sticker cost. Only `plan_amazon_backfill` is
-exercised here: it is deliberately pure so the risky half (what would be WRITTEN to the live sheet)
+exercised here: it is deliberately pure so the risky half (what would be WRITTEN to the ledger)
 can be tested with no browser and no network. The fetch half is a thin CDP loop over production
 parsers, proven by the scrapers' own tests.
 """
@@ -98,7 +98,7 @@ class TestDoesNotClobber:
         ]
         p = plan(rows, keyed(rebuilt_item(cashback_rate=0.06)))
 
-        assert [c[0] for c in p["changes"]] == [3], "only the matched row, at its real sheet row"
+        assert [c[0] for c in p["changes"]] == [3], "only the matched row, at its real row"
 
     def test_a_blank_order_id_row_is_skipped(self):
         p = plan([sheet_row(**{"Order ID": "", "Cashback Rate": 0.05})],
@@ -109,7 +109,7 @@ class TestDoesNotClobber:
 
 class TestKeyMatching:
     def test_numeric_shipment_from_an_unformatted_read_still_matches(self):
-        """The sheet stores Shipment as a NUMBER, so an unformatted read yields 1 or 1.0 while the
+        """The ledger stores Shipment as a NUMBER, so an unformatted read yields 1 or 1.0 while the
         model holds "1". A mismatch here would quietly report 'nothing to change'."""
         for stored in (1, 1.0, "1"):
             rows = [sheet_row(**{"Order ID": "A1", "Order Date": "2026-08-12", "Item Name": "iPad",
@@ -118,7 +118,7 @@ class TestKeyMatching:
 
             assert p["changes"], f"shipment stored as {stored!r} should still match"
 
-    def test_a_rebuilt_row_absent_from_the_sheet_is_surfaced(self):
+    def test_a_rebuilt_row_absent_from_the_ledger_is_surfaced(self):
         # e.g. an order that split after it was recorded — the new shipment has no row yet.
         p = plan([], keyed(rebuilt_item(shipment="2", cashback_rate=0.06)))
 

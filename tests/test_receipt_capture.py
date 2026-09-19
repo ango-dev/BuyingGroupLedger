@@ -582,7 +582,7 @@ class TestOnlyShippedOrdersAreCaptured:
 
     @pytest.mark.parametrize("status", ["paid", "return"])
     def test_the_buying_groups_own_statuses_are_NOT_a_live_trigger(self, wired, status):
-        """No scraper can emit them — sync_tracking writes them to the SHEET after a scrape — so
+        """No scraper can emit them — sync_tracking writes them to the ledger after a scrape — so
         they can never reach a live capture. Excluding them makes the rule say what it means."""
         recorder = wired(Recorder())
 
@@ -593,7 +593,7 @@ class TestOnlyShippedOrdersAreCaptured:
 
     @pytest.mark.parametrize("status", ["paid", "return"])
     def test_the_backfill_may_opt_into_them(self, wired, status):
-        """The backfill reads statuses off the sheet, where a settled order genuinely IS finished.
+        """The backfill reads statuses off the ledger, where a settled order genuinely IS finished.
         16 of the first 40 rows were `paid`; without this they could never get a receipt at all."""
         recorder = wired(Recorder())
 
@@ -626,7 +626,7 @@ class TestCapturedExactlyOnce:
 
     The existing tests check a single run against a pre-seeded store. This drives the real sequence
     a scheduled deployment produces: run 1 captures, run 2..N find it already there. The bucket is
-    the source of truth (not the sheet, and not any local state), so this holds even if a sheet
+    the source of truth (not the ledger, and not any local state), so this holds even if a ledger
     write failed in between — which is the case that would otherwise re-capture forever.
     """
 
@@ -676,14 +676,14 @@ class TestCapturedExactlyOnce:
         assert b.calls == 0
         assert later[0].receipt_url != ""
 
-    def test_the_link_is_rebuilt_from_the_key_even_if_the_sheet_write_failed(self, wired):
-        """The bucket is the source of truth. A row whose Receipt Link never made it to the sheet
+    def test_the_link_is_rebuilt_from_the_key_even_if_the_ledger_write_failed(self, wired):
+        """The bucket is the source of truth. A row whose Receipt Link never made it to the ledger
         still gets the link re-derived next run, WITHOUT re-uploading."""
         store_ = wired(self.StatefulStore())
         capture.attach_receipts(_items(("A1", "2026-08-21", "T")), _profile(), "amazon",
                                 browser_factory=BrowserFactory())
 
-        fresh = _items(("A1", "2026-08-21", "T"))   # sheet lost the link; scraper emits blank
+        fresh = _items(("A1", "2026-08-21", "T"))   # ledger lost the link; scraper emits blank
         capture.attach_receipts(fresh, _profile(), "amazon", browser_factory=BrowserFactory())
 
         assert len(store_.puts) == 1

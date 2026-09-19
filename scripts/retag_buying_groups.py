@@ -1,18 +1,17 @@
 """
 One-off: retroactively apply buying-group classification (config.warehouses) to rows ALREADY on the
-Google Sheet ledger, and remove rows that classify as Personal.
+Ledger, and remove rows that classify as Personal.
 
 Why this exists: the classifier only tags NEW or re-checked rows at scrape time
 (main.run_scrape -> config.warehouses.tag_and_filter_personal). Rows recorded before the Buying Group
 column existed, or before warehouses.json had an entry that now matches them, are never revisited
 automatically. This script is the one-time backfill.
 
-DRY RUN BY DEFAULT — reads the live sheet but writes NOTHING. Just reports what it would do:
+DRY RUN BY DEFAULT — reads the ledger but writes NOTHING. Just reports what it would do:
     python -m scripts.retag_buying_groups
 
-Apply the changes for real (updates Buying Group cells, DELETES personal rows from the sheet). Deleted
-rows are backed up to data/purged_personal_<timestamp>.csv FIRST, so nothing is lost even outside
-Sheets' own version history:
+Apply the changes for real (updates Buying Group cells, DELETES personal rows from the ledger). Deleted
+rows are backed up to data/purged_personal_<timestamp>.csv FIRST, so nothing is lost:
     python -m scripts.retag_buying_groups --apply
 
 Order of operations on --apply (deliberate): header migration, then cell UPDATES (using the row numbers
@@ -45,9 +44,9 @@ def _col_letter(index0: int) -> str:
 def _print_plan(plan: dict, apply: bool) -> None:
     print(f"Buying-group retag plan ({'APPLYING' if apply else 'DRY RUN — nothing will be written'}):")
     if plan["needs_header_migration"]:
-        print("  Sheet predates the 'Buying Group' column; it will be added.")
+        print("  Ledger predates the 'Buying Group' column; it will be added.")
     print(f"  {len(plan['updates'])} row(s) would get a new/changed Buying Group tag")
-    print(f"  {len(plan['deletions'])} row(s) classify as Personal and would be REMOVED from the sheet")
+    print(f"  {len(plan['deletions'])} row(s) classify as Personal and would be REMOVED from the ledger")
     print(f"  {plan['unchanged']} row(s) unchanged")
     if plan["group_counts"]:
         print("  Resulting group counts (excluding deletions):")
@@ -66,7 +65,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--apply", action="store_true",
-        help="Actually write/delete on the live sheet (default: dry run, read-only)",
+        help="Actually write/delete on the ledger (default: dry run, read-only)",
     )
     args = parser.parse_args()
 
@@ -80,7 +79,7 @@ def main() -> None:
     worksheet = _get_worksheet()
     existing = worksheet.get_all_values()
     if not existing or not any(cell.strip() for cell in existing[0]):
-        raise SystemExit("Sheet is empty — nothing to retag.")
+        raise SystemExit("Ledger is empty — nothing to retag.")
 
     header = existing[0]
     plan = plan_buying_group_retag(header, existing[1:], warehouses)
@@ -125,7 +124,7 @@ def main() -> None:
         # it (none remain to process), so every row number in this list stays valid as we go.
         for row_number, *_ in sorted(plan["deletions"], key=lambda t: t[0], reverse=True):
             worksheet.delete_rows(row_number)
-        print(f"Deleted {len(plan['deletions'])} personal row(s) from the sheet.")
+        print(f"Deleted {len(plan['deletions'])} personal row(s) from the ledger.")
 
     print("\nDone.")
 

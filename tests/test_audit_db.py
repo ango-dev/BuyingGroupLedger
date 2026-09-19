@@ -89,7 +89,7 @@ class TestAuditOverTheDatabase:
         ws = DbWorksheet(db, read_only=True)
         results = {r.name: r for r in run_checks(Sheet(read_grids(ws, ws.title)), Options())}
         assert results["cogs_inputs_complete"].status == "FAIL"
-        assert "profit_formula_literal" not in results  # a Sheet check; gone with the Sheet
+        assert "profit_formula_literal" not in results  # a formula-text check, deleted with the formulas 2026-09-18
         assert not [r for r in results.values() if "Google Sheet" in r.summary]
         assert results["header_matches_schema"].status == "PASS"
         assert results["duplicate_primary_keys"].status == "PASS"

@@ -256,7 +256,7 @@ class BFMRClient(HttpClient):
         # shipment. One retailer order can carry SEVERAL BFMR purchases (multiple reservations of a
         # deal, or two deals bought together), and the old order+tracking key read the FIRST
         # purchase's shipment as the whole order being handled — so the other reservations sat
-        # empty at BFMR forever while the sheet ticked every row. Withholding the pair keeps the
+        # empty at BFMR forever while the ledger ticked every row. Withholding the pair keeps the
         # rows in the submission plan until submit_tracking has attached the package to every
         # purchase — which also makes a silently-dropped attachment retry itself next run.
         incomplete = {
@@ -368,7 +368,7 @@ class BFMRClient(HttpClient):
         # loop sent every row's number to the single indexed purchase, leaving the other
         # reservations EMPTY at BFMR while the order+tracking confirm read everything as submitted
         # — live on order 1399000016: three qty-2 reservations, one box, two purchases
-        # never received a shipment, and every sheet row ticked.
+        # never received a shipment, and every row ticked.
         orders: dict[str, dict[str, list[TrackingSubmission]]] = {}
         for row in rows:
             orders.setdefault(row.order_id, {}).setdefault(row.tracking_number, []).append(row)
@@ -612,7 +612,7 @@ class BFMRClient(HttpClient):
 
         Success is confirmed by RE-READING the tracker, for the same reason the first attempt is: BFMR
         has been seen to accept a request and record nothing. The ledger keeps the BARE number — every
-        later join runs through `bfmr_spellings`, and the sheet only ever knows what the retailer
+        later join runs through `bfmr_spellings`, and the ledger only ever knows what the retailer
         issued.
         """
         bare = obj["tracking_number"]
@@ -653,7 +653,7 @@ class BFMRClient(HttpClient):
             premium**, ~0.47% of the deal with a ~$2.00 floor.
 
         They are split rather than summed. Summing nets to the right bottom line — and did — but it
-        made a real cost invisible: the sheet would book $2,199.80 with no hint that $10.20 of
+        made a real cost invisible: the ledger would book $2,199.80 with no hint that $10.20 of
         insurance had been deducted from a $2,210 payout. Splitting puts the gross in Actual Payout
         and the premium in Insurance, which the Total Profit formula already subtracts, so the
         arithmetic is unchanged and the deduction is finally legible.
@@ -800,7 +800,7 @@ class BFMRClient(HttpClient):
         before a tracking number, before shipping, long before payment (live capture: a
         `status: "purchased"` row with no tracking and `amount_paid: null` already reads
         `payout_price: 1230`). `fetch_payouts` refuses to treat that figure as a SETTLEMENT; this
-        read is how it reaches the sheet as a COMMITMENT instead. Recorded the moment the user's hand-typed order number links the
+        read is how it reaches the ledger as a COMMITMENT instead. Recorded the moment the user's hand-typed order number links the
         reservation, a later tracker read that disagrees is BFMR moving the committed price —
         worth an alert, not a surprise at settlement.
 
@@ -1197,7 +1197,7 @@ def _free_spelling(taken: set, tracking_number: str) -> str:
 
 
 #: The skip reason `file_insurance` reports for a donation shipment. sync_tracking matches on it
-#: to write a real $0.00 into the row's Insurance cell, so the sheet reads "no premium, by design".
+#: to write a real $0.00 into the row's Insurance cell, so the ledger reads "no premium, by design".
 DONATION_SKIP_REASON = "donation shipment (1-cent payout) -- BFMR does not insure these"
 
 
@@ -1328,7 +1328,7 @@ def _no_purchase_hint(row) -> str:
         f"means matching on item name alone, and a wrong pick books the wrong deal.\n"
         f"\n"
         f"Check My Tracker for order {row.order_id}. If the reservation is still live, enter the "
-        f"order number and the tracking number by hand — the next run picks it up with no sheet edit."
+        f"order number and the tracking number by hand — the next run picks it up with no ledger edit."
     )
 
 
@@ -1417,7 +1417,7 @@ def _duplicate_tracking_hint(tracking_number: str, attempts: int = 0, *,
         f"\n"
         f"Background: https://support.bfmr.com/hc/en-us/articles/50968170907547\n"
         f"\n"
-        f"NOTHING TO EDIT ON THE SHEET. The next run reads My Tracker, matches whichever letter ends "
+        f"NOTHING TO EDIT ON THE LEDGER. The next run reads My Tracker, matches whichever letter ends "
         f"up there back to {tracking_number}, and fills the payout, premium and status as they arrive."
     )
 
@@ -1549,7 +1549,7 @@ def _bfmr_date_to_iso(value) -> str:
 
     The spec types `date_paid` as an INTEGER, which reads as a unix epoch — it is not. Live rows
     carry US-format `MM/DD/YYYY` strings (`reserved_at` adds a time). Parsing those as an epoch would
-    have produced 1970 dates, and the sheet would have looked merely odd rather than wrong.
+    have produced 1970 dates, and the ledger would have looked merely odd rather than wrong.
 
     Anything unrecognised returns "" rather than a guess: `Payout Date` is displayed, sorted and
     read by a human, and an invented date is worse than an empty cell.
