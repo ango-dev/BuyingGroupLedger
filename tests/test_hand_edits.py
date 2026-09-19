@@ -229,7 +229,7 @@ class TestThePageShowsIt:
         (logs_dir / "failures").mkdir()
         app = create_app(DbReader(db), writer=writer, logs_dir=logs_dir, failures_dir=logs_dir / "failures",
                          clock=lambda: datetime(2026, 9, 18, 12, tzinfo=timezone.utc),
-                         settings=dataclasses.replace(settings, container_run_interval_hours=6))
+                         settings=dataclasses.replace(settings, container_run_interval_hours=6, web_password=""))
         body = TestClient(app).get("/orders").text
         i = body.index('class="num edit hand"')
         assert 'data-field="cashback_rate"' in body[i:i + 80]

@@ -378,9 +378,20 @@ python -m web --snapshot data/ledger_backup_20260910T105451Z.csv
 ```
 
 Flags win over `config.json` and the environment. It binds to loopback unless `--host` (or
-`web.bind_host` / `WEB_BIND_HOST`) says otherwise — there is no authentication, so anything beyond
-localhost or Tailscale is a deliberate choice. `?refresh=1` on any page forces a re-read before the
-cache expires (still a read).
+`web.bind_host` / `WEB_BIND_HOST`) says otherwise. `?refresh=1` on any page forces a re-read before
+the cache expires (still a read).
+
+**Sign-in.** Set `web.password` / `WEB_PASSWORD` (Settings → Dashboard → Sign-in) and every page
+but the login page, the static assets and `/health` asks for it; blank means no sign-in at all, so
+set it *before* binding wider than loopback. The login page has a *Remember me* box: ticked, the
+sign-in lasts `web.remember_days` (730, two years); not ticked, `web.session_hours` (6). Both are
+on the same Settings panel, with the rate limit: `web.login_attempts` wrong passwords in a row
+from one address (5) lock that address out for `web.login_lockout_minutes` (15; 0 = never lock),
+and a lock is recorded as an alert on the Activity page, so it shows on the overview. The cookie
+is a signed token (`web/auth.py`), signed with a secret the dashboard keeps in `.state.json`
+(`web.session_secret`, made on first use, in every backup): a dashboard restart keeps everyone
+signed in, changing the password signs everyone out. *Sign out* is in the header. The settings are
+read at dashboard start: Save, then Restart dashboard.
 
 **On the host it runs inside the one container.** `docker/entrypoint.sh` starts it beside the
 scheduler when `web.enabled` is true (the default), restarts it if it ever exits, and

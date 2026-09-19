@@ -181,7 +181,7 @@ def client(tmp_path, config_file):
     (logs / "failures").mkdir()
     app = create_app(SnapshotReader(snap), logs_dir=logs, failures_dir=logs / "failures",
                      repo_root_dir=tmp_path, backup_dir=tmp_path / "backups", clock=lambda: NOW,
-                     settings=dataclasses.replace(settings, container_run_interval_hours=6))
+                     settings=dataclasses.replace(settings, container_run_interval_hours=6, web_password=""))
     return TestClient(app)
 
 

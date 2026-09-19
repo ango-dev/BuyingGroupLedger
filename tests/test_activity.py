@@ -185,7 +185,7 @@ class TestThePage:
         app = create_app(SnapshotReader(snapshot), logs_dir=logs, failures_dir=logs / "failures",
                          backup_dir=tmp_path / "backups", repo_root_dir=tmp_path,
                          clock=lambda: NOW,
-                         settings=dataclasses.replace(Settings(), container_run_interval_hours=6))
+                         settings=dataclasses.replace(Settings(), container_run_interval_hours=6, web_password=""))
         test_client = TestClient(app)
         test_client.activity_path = logs / "activity.jsonl"
         return test_client

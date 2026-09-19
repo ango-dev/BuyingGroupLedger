@@ -909,3 +909,22 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
   table.sheetlike td, table.sheetlike th, table.order-rows td, table.order-rows th { touch-action: manipulation; }
   table.sheetlike td.edit, table.order-rows td.edit { cursor: default; }
 }
+
+/* The sign-in page (web/auth.py): one card, centred, no header. */
+.login-wrap { display: flex; justify-content: center; padding: 8vh 0 0; }
+.login { width: 100%; max-width: 420px; }
+.login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.login-brand img { border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+.login-brand .wordmark { font-size: 1.12em; font-weight: 500; letter-spacing: -0.015em; }
+.login-brand .wordmark strong { font-weight: 800; color: var(--accent); }
+.login h1 { margin: 6px 0 12px; }
+.login .banner { border-radius: 6px; margin: 0 0 12px; padding: 8px 12px; }
+.login .banner.bad { background: color-mix(in srgb, var(--bad) 12%, var(--card)); color: var(--bad); }
+.login-field { display: block; margin: 0 0 12px; }
+.login-field span { display: block; font-size: 0.9em; color: var(--muted); margin-bottom: 4px; }
+.login-field input { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.login-field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.login-remember { display: block; margin: 0 0 14px; line-height: 1.5; }
+.login-actions { display: flex; align-items: center; gap: 12px; }
+.login-help { margin: 14px 0 0; }
+header .meta .signout { display: inline; margin: 0; }

@@ -40,6 +40,7 @@ KINDS: dict[str, str] = {
     "alert": "Alert",
     "health": "Container health",
     "dossier": "Failure dossier",
+    "signin": "Dashboard sign-in",
     "ack": "Acknowledged",
     "mirror": "DB mirror",
     "edit": "Dashboard edit",

@@ -64,7 +64,7 @@ def client(db, tmp_path):
     (logs / ".last_run").write_text("2026-09-18T09:00:00Z", encoding="utf-8")
     app = create_app(DbReader(db), logs_dir=logs, failures_dir=logs / "failures",
                      clock=lambda: NOW,
-                     settings=dataclasses.replace(settings, container_run_interval_hours=6))
+                     settings=dataclasses.replace(settings, container_run_interval_hours=6, web_password=""))
     return TestClient(app)
 
 

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{#- No header: a visitor who is not signed in gets no nav, no badges, no heartbeat. -#}
+{% block header %}{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <form method="post" action="/login" class="login panel" autocomplete="on">
+    <div class="login-brand">
+      <img src="/static/logo.svg?v={{ asset_version }}" alt="" width="36" height="36">
+      <span class="wordmark">Buying Group <strong>Ledger</strong></span>
+    </div>
+    <h1>Sign in</h1>
+    {% if error %}<div class="banner {{ 'warn' if locked else 'bad' }}" role="alert">{{ error }}</div>{% endif %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <label class="login-field">
+      <span>Password</span>
+      <input type="password" name="password" autocomplete="current-password" autofocus required {% if locked %}disabled{% endif %}>
+    </label>
+    <label class="check login-remember">
+      <input type="checkbox" name="remember" value="on" {% if remember %}checked{% endif %} {% if locked %}disabled{% endif %}>
+      Remember me on this device for {{ remember_label }}
+      <span class="muted small">— otherwise the sign-in ends after {{ session_label }}</span>
+    </label>
+    <div class="login-actions">
+      <button type="submit" class="primary" {% if locked %}disabled{% endif %}>Sign in</button>
+      {% if locked %}<span class="muted small">Locked for {{ retry_label }}.</span>{% endif %}
+    </div>
+    <p class="muted small login-help">Both lengths are in Settings → Dashboard → Sign-in, with the password and the rate limit.</p>
+  </form>
+</div>
+{% endblock %}

@@ -345,7 +345,7 @@ class TestOrdersRoutes:
         reader = GridReader(sheet)
         app = create_app(reader, logs_dir=logs_dir, failures_dir=tmp_path,
                          backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
-                         settings=dataclasses.replace(settings, container_run_interval_hours=6),
+                         settings=dataclasses.replace(settings, container_run_interval_hours=6, web_password=""),
                          writer=writer or LedgerCellWriter(opener=lambda: sheet, logs_dir=logs_dir))
         return TestClient(app)
 
@@ -523,7 +523,7 @@ class TestOrdersRoutes:
 
         app = create_app(SnapshotReader(path), logs_dir=logs_dir, failures_dir=tmp_path,
                          backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
-                         settings=dataclasses.replace(settings, container_run_interval_hours=6))
+                         settings=dataclasses.replace(settings, container_run_interval_hours=6, web_password=""))
         client = TestClient(app)
         body = client.get("/orders").text
         assert "view only (snapshot backend)" in body and 'class="num edit"' not in body
@@ -817,7 +817,7 @@ class TestOrderPageEditing:
 
         app = create_app(SnapshotReader(path), logs_dir=logs_dir, failures_dir=tmp_path,
                          backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
-                         settings=dataclasses.replace(settings, container_run_interval_hours=6))
+                         settings=dataclasses.replace(settings, container_run_interval_hours=6, web_password=""))
         body = TestClient(app).get("/orders/X").text
         assert 'data-field="insurance"' in body and 'class="num edit"' not in body
 

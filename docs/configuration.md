@@ -31,7 +31,7 @@ so this is the only thing to read.
 > exported variable win.
 
 <details>
-<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (43 of them)</summary>
+<summary><b>Every environment variable, and the <code>config.json</code> key it overrides</b> (48 of them)</summary>
 
 The list is generated from `ENV_TO_CONFIG` in [config/settings.py](../config/settings.py), which is the
 single place a name is mapped, and `tests/test_config_loader.py` fails if this table drifts from it.
@@ -81,6 +81,11 @@ fails closed on a typo rather than turning itself on.
 | `WEB_TOOL_SESSION_MINUTES` | `web.tool_session_minutes` |
 | `WEB_HEARTBEAT_STALE_HOURS` | `web.heartbeat_stale_hours` |
 | `WEB_PUBLIC_URL` | `web.public_url` |
+| `WEB_PASSWORD` | `web.password` |
+| `WEB_SESSION_HOURS` | `web.session_hours` |
+| `WEB_REMEMBER_DAYS` | `web.remember_days` |
+| `WEB_LOGIN_ATTEMPTS` | `web.login_attempts` |
+| `WEB_LOGIN_LOCKOUT_MINUTES` | `web.login_lockout_minutes` |
 | `LEDGER_DB_PATH` | `database.path` |
 | `BACKUP_ENABLED` † | `backups.enabled` |
 | `BACKUP_FREQUENCY` | `backups.frequency` |

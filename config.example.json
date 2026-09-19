@@ -91,7 +91,7 @@
     "snapshot_path": "",
     "// ledger_cache_ttl_seconds": "WEB_LEDGER_CACHE_TTL_SECONDS — how long the dashboard keeps a read of the ledger file before re-reading it, in seconds (reported by /health; ?refresh=1 on any page re-reads now).",
     "ledger_cache_ttl_seconds": 300,
-    "// bind_host": "WEB_BIND_HOST — loopback by default; there is no authentication, so bind wider (0.0.0.0 behind Tailscale) deliberately. The compose service publishes on 127.0.0.1 unless WEB_PUBLISH_HOST says otherwise.",
+    "// bind_host": "WEB_BIND_HOST — loopback by default; set `password` before binding wider (0.0.0.0 behind Tailscale or on the LAN). The compose service publishes on 127.0.0.1 unless WEB_PUBLISH_HOST says otherwise.",
     "bind_host": "127.0.0.1",
     "// port": "WEB_PORT",
     "port": 8765,
@@ -100,7 +100,17 @@
     "// heartbeat_stale_hours": "WEB_HEARTBEAT_STALE_HOURS — hours without a completed run before the header's heartbeat pill turns stale (the pill's tooltip shows it). 0 = twice the run interval, the container healthcheck's own rule.",
     "heartbeat_stale_hours": 0,
     "// public_url": "WEB_PUBLIC_URL — the dashboard's address as YOU open it (e.g. http://192.0.2.10:8765 over WireGuard): alerts link a failure dossier to its Activity page through it. Blank = alerts name the path on the host only.",
-    "public_url": ""
+    "public_url": "",
+    "// password": "WEB_PASSWORD — the dashboard's sign-in password. Blank = no sign-in at all (loopback or a private network is then the only protection), so set it BEFORE binding wider than loopback. Changing it signs every device out. Read at dashboard start.",
+    "password": "",
+    "// session_hours": "WEB_SESSION_HOURS — how long a sign-in lasts when Remember me is NOT ticked, in hours.",
+    "session_hours": 6,
+    "// remember_days": "WEB_REMEMBER_DAYS — how long a sign-in lasts when Remember me IS ticked, in days (730 = 2 years).",
+    "remember_days": 730,
+    "// login_attempts": "WEB_LOGIN_ATTEMPTS — wrong passwords in a row from one address before that address is locked out.",
+    "login_attempts": 5,
+    "// login_lockout_minutes": "WEB_LOGIN_LOCKOUT_MINUTES — how long that lock lasts, in minutes (0 = never lock). A lock is recorded as an alert on the Activity page.",
+    "login_lockout_minutes": 15
   },
 
   "// database": "THE LEDGER: the SQLite file (ledger_db/) the scrapers' upsert, the sort, the buying-group sync, the BFMR auto-reply, the dashboard's editor and every script write and read. Included in `python -m scripts.backup`.",

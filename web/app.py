@@ -10,6 +10,9 @@ or `python -m web` serves, built from config.json's `web` section.
 
 from __future__ import annotations
 
+import hmac
+import logging
+import math
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +28,7 @@ from fastapi.templating import Jinja2Templates
 from diagnostics import activity as activity_module
 from scripts import backup as backup_module
 
+from web import auth as auth_module
 from web import failures as failures_module
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
@@ -34,6 +38,10 @@ from web.queries import (CHOICE_FIELDS, Filters, _values as query_values, cell_c
 from web.recon_view import findings_for as recon_findings, reconcile
 from web import tax_inputs
 from web.summary import overview
+
+# The except paths below (the nav's audit, the activity log) already spoke to `log`; it was
+# never bound, so a caught error raised NameError instead of being logged. Bound 2026-09-19.
+log = logging.getLogger(__name__)
 
 HERE = Path(__file__).resolve().parent
 TEMPLATES_DIR = HERE / "templates"
@@ -126,11 +134,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                restarter: Callable[[], None] | None = None,
                container_restarter: Callable[[], None] | None = None,
                in_container: bool | None = None,
-               writer=None) -> FastAPI:
+               writer=None, session_secret: bytes | str | None = None) -> FastAPI:
     """`writer` is the ONE ledger-write path (web/ledger_writer.LedgerCellWriter): cell edits on
     the Orders page. None = the page is view-only (the snapshot backend, or a test).
     `container_restarter` / `in_container` are injection points for the container-restart
-    button (the defaults signal PID 1, and detect Docker by /.dockerenv)."""
+    button (the defaults signal PID 1, and detect Docker by /.dockerenv). `session_secret` signs
+    the sign-in cookies (default: the one kept in .state.json, made on first use)."""
     restart = restarter or _exit_soon
     restart_container = container_restarter or _signal_container
     in_container = _in_container() if in_container is None else bool(in_container)
@@ -206,6 +215,131 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             "heartbeat": context.pop("heartbeat", None) or heartbeat(),
         }
         return templates.TemplateResponse(request=request, name=name, context={**base, **context})
+
+    # ---- the sign-in (web/auth.py): a password, a rate limit, remember me ------------------------
+    # `web.password` set = every page but the login page, the static assets and /health (the
+    # container's healthcheck probes it; it holds no ledger data) wants the session cookie.
+    # Blank = the dashboard as it was, open.
+    def _setting(name: str, default):
+        value = getattr(settings, name, None)
+        return default if value in (None, "") else value
+
+    password = str(_setting("web_password", "")).strip()
+    auth_on = bool(password)
+    templates.env.globals["auth_enabled"] = auth_on
+    sessions = limiter = None
+    if auth_on:
+        secret = session_secret or auth_module.session_secret()
+        if isinstance(secret, str):
+            secret = secret.encode("utf-8")
+        epoch = lambda: clock().timestamp()  # noqa: E731 -- the injected clock, as seconds
+        sessions = auth_module.Sessions(secret, password,
+                                        session_hours=float(_setting("web_session_hours", 6)),
+                                        remember_days=float(_setting("web_remember_days", 730)),
+                                        clock=epoch)
+        limiter = auth_module.LoginLimiter(int(_setting("web_login_attempts", 5)),
+                                           float(_setting("web_login_lockout_minutes", 15)), clock=epoch)
+    OPEN_PREFIXES = ("/login", "/logout", "/static/", "/health")
+
+    def signed_in(request: Request) -> str:
+        """"session" / "remembered" / "" -- or "open" when there is no password."""
+        if not auth_on:
+            return "open"
+        return sessions.verify(request.cookies.get(auth_module.COOKIE))
+
+    def client_address(request: Request) -> str:
+        # The socket's peer, never a forwarded header: anyone can write X-Forwarded-For, and the
+        # rate limit is keyed on this.
+        return request.client.host if request.client else "unknown"
+
+    def _minutes(seconds: float) -> str:
+        return auth_module.describe(max(60, math.ceil(seconds / 60) * 60))
+
+    @app.middleware("http")
+    async def require_sign_in(request: Request, call_next):
+        path = request.url.path
+        if not auth_on or path.startswith(OPEN_PREFIXES) or signed_in(request):
+            return await call_next(request)
+        if request.headers.get("HX-Request"):
+            # A fragment request: send the whole window to the login page, back to the page it
+            # was on (htmx names it), not to the fragment's own address.
+            current = request.headers.get("HX-Current-URL", "")
+            from urllib.parse import urlsplit
+
+            parts = urlsplit(current) if current else None
+            back = (parts.path + (f"?{parts.query}" if parts.query else "")) if parts and parts.path else path
+            return Response(status_code=401,
+                            headers={"HX-Redirect": f"/login?next={quote(auth_module.safe_next(back), safe='')}"})
+        back = path + (f"?{request.url.query}" if request.url.query else "")
+        return RedirectResponse(url=f"/login?next={quote(back, safe='')}", status_code=303)
+
+    def login_page(request: Request, *, nxt: str = "/", error: str = "", locked: bool = False,
+                   retry: float = 0, remember: bool = False, status: int = 200):
+        response = page(request, "login.html", next=nxt, error=error, locked=locked, remember=remember,
+                        retry_label=_minutes(retry) if retry else "",
+                        remember_label=auth_module.describe(sessions.lifetime(True)),
+                        session_label=auth_module.describe(sessions.lifetime(False)))
+        response.status_code = status
+        if retry:
+            response.headers["Retry-After"] = str(int(math.ceil(retry)))
+        return response
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_get(request: Request):
+        nxt = auth_module.safe_next(request.query_params.get("next"))
+        if signed_in(request):
+            return RedirectResponse(url=nxt, status_code=303)
+        wait = limiter.retry_after(client_address(request))
+        if wait:
+            return login_page(request, nxt=nxt, locked=True, retry=wait, status=429,
+                              error=f"Too many wrong passwords from this address. Try again in {_minutes(wait)}.")
+        return login_page(request, nxt=nxt)
+
+    @app.post("/login", response_class=HTMLResponse)
+    async def login_post(request: Request):
+        if not auth_on:
+            return RedirectResponse(url="/", status_code=303)
+        form = await request.form()
+        nxt = auth_module.safe_next(str(form.get("next", "") or ""))
+        remember = str(form.get("remember", "") or "").strip().lower() in ("on", "1", "true", "yes")
+        address = client_address(request)
+        wait = limiter.retry_after(address)
+        if wait:
+            return login_page(request, nxt=nxt, remember=remember, locked=True, retry=wait, status=429,
+                              error=f"Too many wrong passwords from this address. Try again in {_minutes(wait)}.")
+        typed = str(form.get("password", "") or "")
+        if hmac.compare_digest(typed.encode("utf-8"), password.encode("utf-8")):
+            limiter.succeeded(address)
+            token, lifetime = sessions.issue(remember)
+            response = RedirectResponse(url=nxt, status_code=303)
+            response.set_cookie(auth_module.COOKIE, token, max_age=lifetime, httponly=True,
+                                samesite="lax", path="/")
+            act("signin", f"Dashboard sign-in from {address}"
+                + (f", remembered for {auth_module.describe(lifetime)}" if remember else ""),
+                {"address": address, "remember": remember})
+            return response
+        left = limiter.failed(address)
+        lock = limiter.lockout_seconds
+        if left == 0 and lock > 0:
+            log.warning("dashboard sign-in locked for %s after %d wrong passwords", address, limiter.max_attempts)
+            act("alert", f"Dashboard sign-in locked for {address}: {limiter.max_attempts} wrong passwords "
+                         f"in a row (locked for {_minutes(lock)})",
+                {"address": address, "attempts": limiter.max_attempts, "lockout_minutes": lock / 60})
+            return login_page(request, nxt=nxt, remember=remember, locked=True, retry=lock, status=429,
+                              error=f"Too many wrong passwords. This address is locked for {_minutes(lock)}.")
+        log.warning("dashboard sign-in: wrong password from %s", address)
+        if lock > 0:
+            error = (f"Wrong password. {left} attempt{'' if left == 1 else 's'} left before this address "
+                     f"is locked for {_minutes(lock)}.")
+        else:
+            error = "Wrong password."
+        return login_page(request, nxt=nxt, remember=remember, status=401, error=error)
+
+    @app.post("/logout")
+    def logout(request: Request):
+        response = RedirectResponse(url="/login" if auth_on else "/", status_code=303)
+        response.delete_cookie(auth_module.COOKIE, path="/")
+        return response
 
     LOUD_KINDS = ("alert", "dossier")
     LOUD_DAYS = 7
@@ -1434,6 +1568,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         body = {
             "ok": error is None,
             "read_only": True,
+            "password_protected": auth_on,
             "rows": rows,
             "schema_matches": schema,
             "heartbeat": heartbeat(),

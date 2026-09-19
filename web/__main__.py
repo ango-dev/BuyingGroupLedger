@@ -6,8 +6,8 @@
     python -m web --host 0.0.0.0 --port 8765        # e.g. to reach it over Tailscale
 
 Flags win over config.json and the environment, the same way a command-line value should. Binds to
-127.0.0.1 unless told otherwise: there is no authentication in phase 1, so anything beyond
-localhost / Tailscale is on you.
+127.0.0.1 unless told otherwise; set web.password (WEB_PASSWORD) before binding wider -- without
+one there is no sign-in (web/auth.py).
 """
 
 from __future__ import annotations

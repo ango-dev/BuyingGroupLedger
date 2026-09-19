@@ -194,7 +194,7 @@ class TestTheRoutes:
         logs.mkdir()
         app = create_app(SnapshotReader(data_dir=tmp_path / "empty"), logs_dir=logs, failures_dir=logs,
                          backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
-                         settings=dataclasses.replace(Settings(), container_run_interval_hours=6,
+                         settings=dataclasses.replace(Settings(), container_run_interval_hours=6, web_password="",
                                                       web_tool_session_minutes=30),
                          restarter=lambda: None)
         app.state.profile_sessions = tools.ProfileSessions(logs, minutes=30, clock=lambda: NOW,

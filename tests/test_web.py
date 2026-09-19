@@ -164,7 +164,9 @@ def _settings(**overrides):
     the heartbeat's stale threshold, and the developer's own .env may set RUN_INTERVAL_HOURS."""
     from config.settings import settings
 
-    return dataclasses.replace(settings, container_run_interval_hours=6, **overrides)
+    # The password blank too: the live Settings carry the developer's config.json, and a password
+    # there would put every page here behind the login page (tests/test_web_auth.py has the gate).
+    return dataclasses.replace(settings, **{"container_run_interval_hours": 6, "web_password": "", **overrides})
 
 
 # --------------------------------------------------------------------------------------------------
@@ -1942,6 +1944,6 @@ class TestOverviewAttention:
 
         app = create_app(Clean(), logs_dir=logs_dir, failures_dir=tmp_path / "f", backup_dir=tmp_path / "b",
                          repo_root_dir=tmp_path, clock=lambda: NOW,
-                         settings=dataclasses.replace(settings, container_run_interval_hours=6))
+                         settings=dataclasses.replace(settings, container_run_interval_hours=6, web_password=""))
         body = TestClient(app).get("/").text
         assert 'aria-label="needs attention"' not in body

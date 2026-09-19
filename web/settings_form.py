@@ -65,6 +65,9 @@ SUBGROUP_OF_ENV: dict[str, str] = {
     "DISCORD_ALERTS_ENABLED": "Discord", "DISCORD_WEBHOOK_URL": "Discord",
     "GMAIL_ALERTS_ENABLED": "Gmail", "GMAIL_ADDRESS": "Gmail",
     "GMAIL_APP_PASSWORD": "Gmail", "ALERT_EMAIL_TO": "Gmail",
+    # The Dashboard panel's sign-in (web/auth.py).
+    "WEB_PASSWORD": "Sign-in", "WEB_SESSION_HOURS": "Sign-in", "WEB_REMEMBER_DAYS": "Sign-in",
+    "WEB_LOGIN_ATTEMPTS": "Sign-in", "WEB_LOGIN_LOCKOUT_MINUTES": "Sign-in",
 }
 
 
@@ -324,9 +327,41 @@ def _validate_days(text: str) -> str:
     return parse_days_any(text)
 
 
-#: Text settings with a vocabulary of their own, checked before anything is written.
+def _validate_number(text: str, *, integer: bool, least: float, what: str):
+    """A sign-in length or count: blank keeps the default, otherwise a number of at least
+    `least` (a zero-hour session or a zero-attempt lock would sign everyone out for good)."""
+    if not text:
+        return ""
+    try:
+        value = int(text) if integer else float(text)
+    except ValueError as exc:
+        raise ValueError(f"not a number: {text!r}") from exc
+    if value < least:
+        raise ValueError(f"{what} must be at least {least:g}")
+    return value
+
+
+def _validate_session_hours(text):
+    return _validate_number(text, integer=False, least=0.05, what="a sign-in")
+
+
+def _validate_remember_days(text):
+    return _validate_number(text, integer=False, least=1 / 24, what="remember me")
+
+
+def _validate_attempts(text):
+    return _validate_number(text, integer=True, least=1, what="the attempts before a lock")
+
+
+def _validate_lockout(text):
+    return _validate_number(text, integer=False, least=0, what="the lock")
+
+
+#: Settings with a vocabulary or a floor of their own, checked before anything is written.
 _VALIDATORS = {"BACKUP_FREQUENCY": _validate_frequency, "BACKUP_TIME": _validate_time,
-               "BACKUP_DAYS": _validate_days}
+               "BACKUP_DAYS": _validate_days,
+               "WEB_SESSION_HOURS": _validate_session_hours, "WEB_REMEMBER_DAYS": _validate_remember_days,
+               "WEB_LOGIN_ATTEMPTS": _validate_attempts, "WEB_LOGIN_LOCKOUT_MINUTES": _validate_lockout}
 
 
 def _parse(setting: Setting, raw: str) -> Any:
@@ -443,8 +478,10 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
                       "combined-package auto-reply."),
     "receipts": ("Receipts", "Receipt capture: each order's proof of purchase, kept as a file beside "
                  "the ledger and served by this dashboard."),
-    "web": ("Dashboard", "This web dashboard: its ledger source, bind address and port. "
-            "Read once at dashboard start."),
+    "web": ("Dashboard", "This web dashboard: the address alerts link to, the heartbeat's stale "
+            "threshold, and the sign-in -- the password (blank = no sign-in), how long a plain "
+            "sign-in and a remembered one last, and how many wrong passwords lock an address out "
+            "for how long. Read once at dashboard start."),
     "database": ("Database", "The SQLite file that is the ledger. Read once at dashboard start."),
     "advanced": ("Advanced", "Where the ledger lives, which backend the dashboard serves, where it "
                  "listens, where receipts go, and the buying groups' API hosts. A wrong value here "

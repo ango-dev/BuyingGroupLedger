@@ -53,7 +53,7 @@ def client(config, tmp_path, monkeypatch):
     container_restarts = []
     app = create_app(SnapshotReader(data_dir=tmp_path), logs_dir=tmp_path, failures_dir=tmp_path,
                      backup_dir=tmp_path / "backups", repo_root_dir=tmp_path, clock=lambda: NOW,
-                     settings=dataclasses.replace(Settings(), container_run_interval_hours=6),
+                     settings=dataclasses.replace(Settings(), container_run_interval_hours=6, web_password=""),
                      restarter=lambda: restarts.append(1),
                      container_restarter=lambda: container_restarts.append(1), in_container=True)
     test_client = TestClient(app)
@@ -288,7 +288,7 @@ class TestSettingsPage:
     def test_outside_a_container_the_button_is_absent_and_the_route_refuses(self, config, tmp_path):
         app = create_app(SnapshotReader(data_dir=tmp_path), logs_dir=tmp_path, failures_dir=tmp_path,
                          backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
-                         settings=dataclasses.replace(Settings(), container_run_interval_hours=6),
+                         settings=dataclasses.replace(Settings(), container_run_interval_hours=6, web_password=""),
                          restarter=lambda: None, container_restarter=lambda: None, in_container=False)
         desktop = TestClient(app)
         assert 'action="/settings/restart-container"' not in desktop.get("/settings").text
@@ -561,6 +561,39 @@ class TestEntryCards:
         assert settings_form.field_label(by_env["LOOKBACK_DAYS"]) == ("Lookback days", "")
         assert settings_form.field_label(by_env["BFMR_API_KEY"]) == ("Api key", "bfmr")
         assert settings_form.RETAILER_KEYS == ("amazon", "amazon-business", "bestbuy", "costco")
+
+
+class TestSignInSettings:
+    """the password, both sign-in lengths and the rate limit are settings."""
+
+    def test_the_rows_sit_in_the_dashboard_panel_under_sign_in(self, client):
+        body = client.get("/settings").text
+        panel = body[body.index('id="s-web"'):body.index('id="s-database"') if 'id="s-database"' in body else body.index('id="s-backups"')]
+        assert '<h3 class="subgroup" id="s-web-sign-in">Sign-in</h3>' in panel
+        assert 'type="password" id="f-WEB_PASSWORD"' in panel  # a secret: never rendered back
+        for env in ("WEB_SESSION_HOURS", "WEB_REMEMBER_DAYS", "WEB_LOGIN_ATTEMPTS", "WEB_LOGIN_LOCKOUT_MINUTES"):
+            assert f'for="f-{env}"' in panel, env
+        assert 'for="f-WEB_PASSWORD"' in panel
+
+    def test_the_lengths_have_floors_and_the_password_saves_like_a_secret(self, config):
+        form = {s.env: "" for s in settings_form.schema()}
+        with pytest.raises(settings_form.SettingsError) as info:
+            settings_form.apply_scalars({**form, "WEB_SESSION_HOURS": "0", "WEB_LOGIN_ATTEMPTS": "0",
+                                         "WEB_REMEMBER_DAYS": "x"})
+        assert any(e.startswith("WEB_SESSION_HOURS:") for e in info.value.errors)
+        assert any(e.startswith("WEB_LOGIN_ATTEMPTS:") for e in info.value.errors)
+        assert any(e.startswith("WEB_REMEMBER_DAYS:") and "not a number" in e for e in info.value.errors)
+
+        changes = settings_form.apply_scalars({**form, "WEB_PASSWORD": "open sesame", "WEB_SESSION_HOURS": "12",
+                                               "WEB_REMEMBER_DAYS": "365", "WEB_LOGIN_LOCKOUT_MINUTES": "0"})
+        assert changes["web.password"] == "open sesame" and changes["web.session_hours"] == 12
+        assert changes["web.remember_days"] == 365 and changes["web.login_lockout_minutes"] == 0
+        by_env = {s.env: s for s in settings_form.schema()}
+        assert settings_form.restart_scope(by_env["WEB_PASSWORD"]) == "dashboard"  # read at dashboard start
+        settings_form.apply_scalars(form)  # blank keeps the password
+        assert config_value("web.password") == "open sesame"
+        settings_form.apply_scalars({**form, "WEB_PASSWORD__clear": "1"})
+        assert config_value("web.password") is None  # cleared: no sign-in
 
 
 class TestAdvancedSettings:

@@ -110,6 +110,13 @@ ENV_TO_CONFIG = {
     # Where YOU open the dashboard from (e.g. over WireGuard): alerts link a failure dossier to its
     # Activity page through it. Blank = alerts name the local path only.
     "WEB_PUBLIC_URL": "web.public_url",
+    # The dashboard's sign-in (web/auth.py): a password (blank = no sign-in),
+    # how long a plain sign-in and a "remember me" one last, and the brake on guessing.
+    "WEB_PASSWORD": "web.password",
+    "WEB_SESSION_HOURS": "web.session_hours",
+    "WEB_REMEMBER_DAYS": "web.remember_days",
+    "WEB_LOGIN_ATTEMPTS": "web.login_attempts",
+    "WEB_LOGIN_LOCKOUT_MINUTES": "web.login_lockout_minutes",
     # THE LEDGER: the SQLite file (ledger_db/) every writer and reader runs off.
     "LEDGER_DB_PATH": "database.path",
     # Scheduled backups (scripts/backup.py --scheduled, on the container's own cron): whether,
@@ -378,8 +385,9 @@ class Settings:
     # How long the dashboard serves a ledger read from memory before the next request re-reads
     # the file (a cheap local read; the name dates from when the read was remote).
     web_ledger_cache_ttl_seconds: int = _get_int("WEB_LEDGER_CACHE_TTL_SECONDS", 300)
-    # Loopback by default: phase 1 has no authentication, so reaching it from another machine is
-    # a deliberate choice (0.0.0.0 behind Tailscale, or the compose service's published port).
+    # Loopback by default. Binding wider (0.0.0.0 behind Tailscale, or the compose service's
+    # published port) is a deliberate choice, and one to make with `web_password` set: without a
+    # password there is no sign-in at all.
     web_bind_host: str = _get_str("WEB_BIND_HOST", "127.0.0.1")
     web_port: int = _get_int("WEB_PORT", 8765)
     # The Tools page's profile-login session: closed (cookies saved) after this many minutes if
@@ -391,6 +399,15 @@ class Settings:
     # The dashboard's address as the user reaches it (e.g. http://192.0.2.10:8765 over WireGuard),
     # for the links alerts carry. Blank = no link, just the path on the host.
     web_public_url: str = _get_str("WEB_PUBLIC_URL", "")
+    # The sign-in (web/auth.py). Blank password = no sign-in. A plain sign-in ends after
+    # `web_session_hours`; one with "remember me" ticked after `web_remember_days` (730 = 2
+    # years). `web_login_attempts` wrong passwords in a row from one address lock it out for
+    # `web_login_lockout_minutes` (0 = never lock). 
+    web_password: str = field(default=_get_str("WEB_PASSWORD"), repr=False)
+    web_session_hours: float = _get_float("WEB_SESSION_HOURS", 6)
+    web_remember_days: float = _get_float("WEB_REMEMBER_DAYS", 730)
+    web_login_attempts: int = _get_int("WEB_LOGIN_ATTEMPTS", 5)
+    web_login_lockout_minutes: float = _get_float("WEB_LOGIN_LOCKOUT_MINUTES", 15)
 
     # --- scheduled backups (docker/entrypoint.sh adds the cron line; scripts/backup.py) ---------
     # A zip of config.json / .state.json / .env / data/ (the ledger) into backups/, on the
