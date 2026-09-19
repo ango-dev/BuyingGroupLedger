@@ -485,12 +485,10 @@ class TestOverview:
         commitment lives in Expected Payout and leaves Total Profit blank until paid."""
         assert summary["column_sum"] == {"rows": 2, "profit": 193.0, "other": 0.0}
 
-    def test_cogs_input_gaps_skip_money_free_rows(self, summary):
-        gaps = summary["gaps"]
-        assert gaps["card_last4"] == {"rows": 1, "orders": 1, "sample": ["111-0000002-0000002"],
-                                      "more": 0}
-        # Row 8 has no rate; the gift-card row and the money-free rows are not gaps.
-        assert gaps["cashback_rate"]["sample"] == ["111-0000002-0000002"]
+    def test_the_overview_has_no_cogs_gaps_or_scheduler_sections(self, summary):
+        # the Audit page's cogs_inputs_complete covers the gaps, and the
+        # heartbeat lives in the header pill with its stale timer in Settings
+        assert "gaps" not in summary
 
     def test_status_counts_follow_the_vocabulary_order(self, summary):
         assert summary["status_counts"] == [("ordered", 2), ("shipped", 1), ("delivered", 2),
@@ -575,6 +573,18 @@ class TestHeartbeat:
         beat = read_heartbeat(logs_dir, now=NOW, interval_hours=6)
         assert beat == {**beat, "present": True, "stale": False, "age_seconds": 3 * 3600,
                         "age_text": "3h 0m", "threshold_seconds": 12 * 3600}
+
+    def test_the_stale_timer_is_a_setting_with_twice_the_interval_as_its_default(self, tmp_path):
+        from datetime import datetime, timezone
+
+        from web.heartbeat import read_heartbeat
+
+        now = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+        default = read_heartbeat(tmp_path, now=now, interval_hours=6)
+        assert default["threshold_seconds"] == 12 * 3600 and default["stale_hours"] == 12
+        custom = read_heartbeat(tmp_path, now=now, interval_hours=6, stale_hours=1.5)
+        assert custom["threshold_seconds"] == 5400 and custom["stale_hours"] == 1.5
+        assert read_heartbeat(tmp_path, now=now, interval_hours=6, stale_hours=None)["stale_hours"] == 12
 
     def test_stale_after_two_intervals_like_the_healthcheck(self, logs_dir):
         (logs_dir / ".last_run").write_text((NOW - timedelta(hours=13)).isoformat(),
@@ -662,7 +672,8 @@ class TestOverviewPage:
         assert "Projected profit" in body and "$263.60" in body
         assert "Realized profit" in body and "$193.00" in body
         assert "Open Rows" in body
-        assert "Blank Card Last 4" in body and "111-0000002-0000002" in body
+        assert "Blank Card Last 4" not in body and "COGS Input Gaps" not in body and ">Scheduler<" not in body
+        assert "stale after 12h without a completed run (Settings" in body  # the header pill's tooltip
         assert "no automatic writes" not in body and "loaded 2026" not in body  # header: pill + stamp gone
 
     def test_every_page_loads_the_in_page_tooltip_layer(self, client):

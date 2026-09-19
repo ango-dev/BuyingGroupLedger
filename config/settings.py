@@ -106,6 +106,7 @@ ENV_TO_CONFIG = {
     # How long the Tools page keeps a profile-login browser session open after the user walks
     # away before closing it (closing = saving the cookies).
     "WEB_TOOL_SESSION_MINUTES": "web.tool_session_minutes",
+    "WEB_HEARTBEAT_STALE_HOURS": "web.heartbeat_stale_hours",
     # Where YOU open the dashboard from (e.g. over WireGuard): alerts link a failure dossier to its
     # Activity page through it. Blank = alerts name the local path only.
     "WEB_PUBLIC_URL": "web.public_url",
@@ -384,6 +385,9 @@ class Settings:
     # The Tools page's profile-login session: closed (cookies saved) after this many minutes if
     # the user leaves it open. web/tools.ProfileSessions.
     web_tool_session_minutes: int = _get_int("WEB_TOOL_SESSION_MINUTES", 60)
+    # Hours without a completed run before the header's heartbeat pill turns stale. 0 = twice the run interval, the
+    # container healthcheck's own rule.
+    web_heartbeat_stale_hours: float = _get_float("WEB_HEARTBEAT_STALE_HOURS", 0)
     # The dashboard's address as the user reaches it (e.g. http://192.0.2.10:8765 over WireGuard),
     # for the links alerts carry. Blank = no link, just the path on the host.
     web_public_url: str = _get_str("WEB_PUBLIC_URL", "")

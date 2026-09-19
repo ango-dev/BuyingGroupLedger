@@ -126,7 +126,9 @@ Linux host has its own runbook: **[DEPLOY.md](../DEPLOY.md)**.
 ## The web dashboard
 
 The ledger's UI: a local web page over `data/ledger.sqlite3`, in `web/`: an overview (open rows by status and buying group,
-projected versus realized profit, the COGS input gaps, the scheduler heartbeat), a filterable and
+projected versus realized profit; the scheduler heartbeat is the pill in the header, stale after
+`web.heartbeat_stale_hours` -- its tooltip says so -- and the COGS input gaps are the Audit page's
+`cogs_inputs_complete` finding), a filterable and
 sortable ledger table, one page per order, an Activity page (what every run
 and every dashboard change did, with the failure dossiers' reports rendered in place), an **Audit**
 page and a **Reconciliation** page (both the Orders view over the affected rows — see below), a

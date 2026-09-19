@@ -12,7 +12,6 @@ from models.order import STATUSES
 from web.ledger_reader import LedgerRow, Snapshot
 
 #: How many order ids a gap list names before it says "and N more".
-GAP_SAMPLE = 12
 _MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
@@ -41,15 +40,6 @@ def _money_block(rows: list[LedgerRow]) -> dict:
     orders = {r.order_id for r in rows}
     return {"rows": len(rows), "orders": len(orders), "payout": round(payout, 2),
             "cogs": round(cogs, 2), "profit": round(profit, 2)}
-
-
-def _gap(rows: list[LedgerRow]) -> dict:
-    ids: list[str] = []
-    for row in rows:
-        if row.order_id not in ids:
-            ids.append(row.order_id)
-    return {"rows": len(rows), "orders": len(ids), "sample": ids[:GAP_SAMPLE],
-            "more": max(0, len(ids) - GAP_SAMPLE)}
 
 
 def _tile(label: str, value, kind: str, hint: str, href: str, tone: str = "",
@@ -214,11 +204,6 @@ def overview(snapshot: Snapshot, month: str = "", today: date | None = None) -> 
                   "other": round(sum(r.profit for r in column if not r.is_settled
                                      and not r.is_committed), 2)}
 
-    # The audit's cogs_inputs_complete gap: a row carrying cost whose COGS cannot net a rebate.
-    costed = [r for r in rows if not r.is_money_free and r.total_cost is not None]
-    no_card = _gap([r for r in costed if not r.text("card_last4")])
-    no_rate = _gap([r for r in costed if r.number("cashback_rate") is None])
-
     by_retailer = Counter(r.retailer or "(blank)" for r in rows)
     by_group = Counter(r.buying_group or "(blank)" for r in rows)
 
@@ -248,7 +233,6 @@ def overview(snapshot: Snapshot, month: str = "", today: date | None = None) -> 
         "projected": projected,
         "realized": realized,
         "column_sum": column_sum,
-        "gaps": {"card_last4": no_card, "cashback_rate": no_rate},
         "by_retailer": sorted(by_retailer.items()),
         "by_group": sorted(by_group.items()),
     }

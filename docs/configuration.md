@@ -79,6 +79,7 @@ fails closed on a typo rather than turning itself on.
 | `WEB_BIND_HOST` | `web.bind_host` |
 | `WEB_PORT` | `web.port` |
 | `WEB_TOOL_SESSION_MINUTES` | `web.tool_session_minutes` |
+| `WEB_HEARTBEAT_STALE_HOURS` | `web.heartbeat_stale_hours` |
 | `WEB_PUBLIC_URL` | `web.public_url` |
 | `LEDGER_DB_PATH` | `database.path` |
 | `BACKUP_ENABLED` † | `backups.enabled` |

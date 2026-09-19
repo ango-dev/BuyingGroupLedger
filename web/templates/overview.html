@@ -42,32 +42,4 @@
     {% with d=d %}{% include "_donut.html" %}{% endwith %}
   {% endfor %}
 </div>
-
-<h2>COGS Input Gaps</h2>
-<p class="muted">The audit's <code>cogs_inputs_complete</code> gap: a row carrying cost whose COGS
-cannot net a card rebate. Cancelled and superseded rows carry no money and are not counted.</p>
-<div class="columns">
-  {% for key, label in [('card_last4', 'Blank Card Last 4'), ('cashback_rate', 'Blank Cashback Rate')] %}
-  {% set gap = summary.gaps[key] %}
-  <section class="tile {{ 'warn' if gap.rows else '' }}">
-    <div class="label">{{ label }}</div>
-    <div class="value">{{ gap.rows }} <span class="muted">row(s) in {{ gap.orders }} order(s)</span></div>
-    {% if gap.sample %}
-    <ul class="ids">
-      {% for oid in gap.sample %}<li><a href="/orders/{{ oid }}">{{ oid }}</a></li>{% endfor %}
-      {% if gap.more %}<li class="muted">and {{ gap.more }} more</li>{% endif %}
-    </ul>
-    {% endif %}
-  </section>
-  {% endfor %}
-</div>
-
-<h2>Scheduler</h2>
-<section class="tiles">
-  <div class="tile {{ 'warn' if heartbeat.stale else '' }}">
-    <div class="label">Scheduler heartbeat</div>
-    <div class="value">{{ heartbeat.age_text or '—' }}</div>
-    <div class="hint">{{ heartbeat.message }}{% if heartbeat.present %}; stale after {{ (heartbeat.threshold_seconds // 3600) }}h{% endif %}</div>
-  </div>
-</section>
 {% endblock %}

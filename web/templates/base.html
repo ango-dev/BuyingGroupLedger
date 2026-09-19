@@ -60,7 +60,7 @@
       <span class="only-light">☾ dark</span><span class="only-dark">☀ light</span>
     </button>
     {% if heartbeat %}
-      <span class="pill {{ 'stale' if heartbeat.stale else 'ok' }}" title="{{ heartbeat.path }}">
+      <span class="pill {{ 'stale' if heartbeat.stale else 'ok' }}" title="{{ heartbeat.path }} — stale after {{ heartbeat.stale_hours | int if heartbeat.stale_hours == heartbeat.stale_hours | int else heartbeat.stale_hours }}h without a completed run (Settings → Dashboard → heartbeat stale hours; 0 = twice the run interval of {{ heartbeat.interval_hours }}h)">
         heartbeat: {{ heartbeat.message }}
       </span>
     {% endif %}

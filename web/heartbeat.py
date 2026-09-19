@@ -43,17 +43,20 @@ def humanize(seconds: float) -> str:
 
 
 def read_heartbeat(logs_dir: Path = LOGS_DIR, *, now: datetime | None = None,
-                   interval_hours: float = 6) -> dict:
+                   interval_hours: float = 6, stale_hours: float | None = None) -> dict:
     """{present, at, age_seconds, age_text, stale, threshold_seconds, interval_hours, message}.
 
     Missing stamp = no run has ever completed on this host, reported as stale with a message that
     says so rather than as an error: on a development PC that is simply the normal state.
     """
     now = now or datetime.now(timezone.utc)
-    threshold = int(interval_hours * 2 * 3600)
+    # Stale after `stale_hours` (web.heartbeat_stale_hours), else twice the interval as the
+    # container healthcheck reckons it.
+    threshold = int((stale_hours or interval_hours * 2) * 3600)
     stamp = Path(logs_dir) / STAMP_NAME
     base = {"present": False, "at": None, "age_seconds": None, "age_text": None,
             "stale": True, "threshold_seconds": threshold, "interval_hours": interval_hours,
+            "stale_hours": round(threshold / 3600, 2),
             "path": str(stamp)}
     if not stamp.is_file():
         return {**base, "message": f"no run has completed yet ({stamp.name} absent)"}

@@ -178,8 +178,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     templates.env.globals["header_of"] = FIELD_TO_HEADER.get
 
     def heartbeat() -> dict:
-        return heartbeat_module.read_heartbeat(logs_dir, now=clock(),
-                                              interval_hours=interval_hours)
+        return heartbeat_module.read_heartbeat(logs_dir, now=clock(), interval_hours=interval_hours,
+                                              stale_hours=settings.web_heartbeat_stale_hours or None)
 
     # The activity log this dashboard reads and appends to (diagnostics/activity.py): the same
     # file the scheduled run writes, since both share logs/.
