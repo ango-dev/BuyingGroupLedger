@@ -91,6 +91,13 @@ def test_the_expenses_grid_writes_undoes_narrows_and_deletes(client, served, pag
     assert "a new answer" in page.evaluate("document.querySelector('.pop').innerText")
     page.keyboard.press("Escape")
 
+    # a click on a column's header cell selects the whole column
+    page.click("table.expenses thead th:nth-child(4)")  # Category
+    assert page.evaluate('document.querySelectorAll("td.sel-cell").length') == 2
+    assert page.evaluate('Array.from(document.querySelectorAll("td.sel-cell")).every(td => td.dataset.field === "category")')
+    page.keyboard.press("Escape")
+    assert page.evaluate('document.querySelectorAll("td.sel-cell").length') == 0
+
     # the Add-an-Expense form's profile picker sits exactly beside its inputs
     boxes = page.evaluate("""() => Array.from(document.querySelectorAll('.expense-form .egrid > label, .expense-form .egrid > .lbl'))
         .slice(0, 4).map(el => { const c = el.querySelector('input, .summary-text').getBoundingClientRect(); return [Math.round(c.top), Math.round(c.height), Math.round(c.width)]; })""")

@@ -455,6 +455,18 @@ def update_expense_field(inputs: YearInputs, entry_id: str, field: str, value: s
     return update_expense(inputs, entry_id, fields, year=year, data_dir=data_dir)
 
 
+def sort_expenses(expenses: list[dict], field: str, desc: bool = False) -> list[dict]:
+    """The expenses list in the order a column header asks for: amounts as numbers, the rest as text, an
+    unknown field leaving the stored order (date, then when added)."""
+    if field not in EXPENSE_CELL_FIELDS:
+        return list(expenses)
+    if field == "amount":
+        key = lambda e: float(e.get("amount") or 0)  # noqa: E731
+    else:
+        key = lambda e: expense_raw(e, field).lower()  # noqa: E731
+    return sorted(expenses, key=key, reverse=desc)
+
+
 def remove_expenses(inputs: YearInputs, entry_ids: Iterable[str], *, data_dir: Path) -> list[dict]:
     """Drop every listed expense (the table's selected rows, one confirmation). Unknown ids are
     skipped. Returns what went."""

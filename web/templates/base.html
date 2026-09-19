@@ -47,7 +47,7 @@
     <a href="/orders" class="{{ 'active' if path.startswith('/orders') }}">Orders</a>
     <a href="/activity" class="{{ 'active' if path.startswith('/activity') }}">Activity{% if badges.activity %} <span class="badge" title="unacknowledged alerts and failure dossiers from the last 7 days">{{ badges.activity }}</span>{% endif %}</a>
     <a href="/audit" class="{{ 'active' if path.startswith('/audit') }}">Audit{% if badges.audit %} <span class="badge" title="rows a failing check flags">{{ badges.audit }}</span>{% endif %}</a>
-    <a href="/recon" class="{{ 'active' if path.startswith('/recon') }}">Recon{% if badges.recon %} <span class="badge" title="orders paid short of or over their commitment">{{ badges.recon }}</span>{% endif %}</a>
+    <a href="/recon" class="{{ 'active' if path.startswith('/recon') }}">Reconciliation{% if badges.recon %} <span class="badge" title="orders paid short of or over their commitment">{{ badges.recon }}</span>{% endif %}</a>
     <a href="/taxes" class="{{ 'active' if path.startswith('/taxes') }}">Taxes</a>
     <details class="multi nav-menu {{ 'active' if path.startswith('/tools') }}">
       <summary><span class="nav-link">Tools <span class="caret">▾</span></span></summary>

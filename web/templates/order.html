@@ -60,15 +60,17 @@
     <dt>Delivery Date</dt><dd>{{ s.delivery_date or '—' }}{% if s.delivery_date and s.status in ('ordered', 'shipped') %} <span class="tag committed" title="the retailer's estimated delivery date, until the run sees the package land">est.</span>{% endif %}</dd>
     <dt>Package ID</dt><dd class="mono">{{ s.package_id or '—' }}</dd>
   </dl>
+  {#- The shipment's rows in FULL -- every ledger column, each through the same cell as the Orders
+      table, so whatever edits there edits here. -#}
   <div class="card-rows-wrap">
   {% include "_cell_tips.html" %}
-  <table class="grid compact order-rows">
-    <thead><tr>{% for name in ORDER_COLUMNS %}<th class="{{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }}">{{ header_of(name) }}</th>{% endfor %}</tr></thead>
+  <table class="grid compact order-rows sheetlike">
+    <thead><tr>{% for name, heading in columns %}<th class="col-{{ name }} {{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }}">{{ heading }}</th>{% endfor %}</tr></thead>
     <tbody>
       {% for row in s.rows %}
       {% set key = {'order_id': row.order_id, 'order_date': row.order_date, 'item_name': row.item_name, 'shipment': row.shipment} %}
       <tr class="status-{{ row.status }} payout-{{ row.payout_state }}">
-        {% for name in ORDER_COLUMNS %}{% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}{% endfor %}
+        {% for name, heading in columns %}{% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}{% endfor %}
       </tr>
       {% endfor %}
     </tbody>

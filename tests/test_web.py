@@ -809,6 +809,20 @@ class TestOrdersPage:
         assert 'name="retailer" value="Costco" checked' in body
 
 
+class TestOrderPageRowsAndBadges:
+    def test_every_ledger_column_and_the_filled_badges(self, client):
+        """the order page's rows are the full row, editable as on the table, and
+        its status badges look like the cards'."""
+        from models.order import FIELDNAMES
+
+        body = client.get("/orders/BBY01-800000000001").text
+        table = body[body.index('<table class="grid compact order-rows sheetlike">'):]
+        head = table[:table.index("</thead>")]
+        assert all(f'class="col-{name}' in head for name in FIELDNAMES)  # every column, the table's order
+        assert 'class="tag status-' in body[body.index('<section class="facts">'):body.index("<h2>Payout</h2>")]
+        assert ">Reconciliation" in body[body.index("<nav"):body.index("</nav>")]
+
+
 class TestOrderPage:
     def test_one_order_with_its_shipments(self, client):
         response = client.get("/orders/BBY01-800000000001")
@@ -1536,7 +1550,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        "Picker.forget()", 'setProperty("--pinned-h"', 'getElementById("protect-edits")',
                        "function undo()", "function redo()", 'getAttribute("data-cell-url")', 'getAttribute("data-entry-id")',
                        'getAttribute("data-confirm-many")', "details.dataset.narrow",
-                       "function releaseSelection()", 'e.target.id === "release-hand"', '(e.key === "h" || e.key === "H")', 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
+                       "function releaseSelection()", 'e.target.id === "release-hand"', '(e.key === "h" || e.key === "H")',
+                       "function selectColumn(th, add, extend)", 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
                        "undoStack.push(step)", "redoStack = []", "toggleOff: alone",
                        "function choicesFor(field, td)", "Picker.choicesFor(field,",
                        '".cell-upload"', 'name="next" value="table"',
@@ -1768,7 +1783,7 @@ class TestNavBadges:
 
         nav = self._nav(client.get("/orders").text)
         assert re.search(r'>Audit <span class="badge"[^>]*>\d+</span></a>', nav)  # the fixture ledger fails checks
-        assert re.search(r'>Recon <span class="badge"[^>]*>\d+</span></a>', nav)  # and short-pays an order
+        assert re.search(r'>Reconciliation <span class="badge"[^>]*>\d+</span></a>', nav)  # and short-pays an order
         assert ">Activity</a>" in nav  # nothing loud yet: no badge at all
         path = logs_dir / "activity.jsonl"
         activity.record("alert", "boom", {}, path=path, at=NOW)

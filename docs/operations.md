@@ -154,7 +154,8 @@ coloured by status (ordered red, shipped orange, delivered yellow, paid green, r
 cancelled grey and superseded dark grey with strikethrough), a frozen header, full page width. It
 edits like a spreadsheet: click a
 cell to select it, Ctrl-click to add one to the selection (or take a selected one out), shift-click
-or drag for a range; double-click, Enter or just start typing to
+or drag for a range; click a column's header cell beside its name to select the whole column (the
+name itself sorts); double-click, Enter or just start typing to
 edit (the keystroke replaces the value); Enter saves, and fills every cell of a selected range;
 Esc cancels; Delete clears the selection; Ctrl+C copies the selection as tab-separated values
 (it pastes into Sheets or Excel) and Ctrl+V pastes a value into every selected cell or a block
@@ -258,6 +259,10 @@ is there for a browser that refuses the frame); log into the retailers, then *Cl
 closing the session is what saves the cookies, and the profile id is written to config.json. Leave
 the page and the session stays open; it is closed for you after `web.tool_session_minutes`
 (default 60). The recon probes and the one-off migrations stay on the command line.
+
+**The order page** (`/orders/<id>`) shows the order's facts, its money and, per shipment, its
+rows in FULL: every ledger column through the same editable cell as the Orders table, so whatever
+edits there edits here; its status badges are the cards' filled ones.
 
 **The Activity page** is the app's own account of what it did, newest first (the last seven days by
 default; the *Last* control widens it): for every scheduled
@@ -453,7 +458,7 @@ Neither writes anything.
   less** than it committed to — Actual Payout against Expected Payout, compared as order totals
   over the same settled rows (two cents of tolerance plus a cent per row for proration drift), the
   biggest gap first, with short-paid / over-paid / net totals in the lead. A row with no
-  commitment (MOD publishes none) is not compared. Fix a figure by editing the cell; take a real
+  commitment is not compared. Fix a figure by editing the cell; take a real
   shortfall up with the group.
 
 Each page -- Orders, Audit, Recon -- remembers its **own** view, page size and filters, and

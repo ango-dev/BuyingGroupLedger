@@ -1855,6 +1855,17 @@ class TestCancelledOrderDetection:
         )]
         assert bfmr.active_purchases_for(["STILL-OPEN", "ALREADY-DEAD"]) == {"STILL-OPEN"}
 
+    def test_active_quantities_sum_the_open_purchases_per_order(self, bfmr, transport):
+        """A partially cancelled retailer order is judged on units: BFMR still
+        showing qty 2 where 1 is coming is the divergence, an open purchase alone is not."""
+        transport.responses = [tracker(
+            {"purchase_id": "P1", "order_id": "HALF", "status": "shipped", "qty": 1, "deal_title": "PS5"},
+            {"purchase_id": "P2", "order_id": "HALF", "status": "cancelled", "qty": 1, "deal_title": "PS5"},
+            {"purchase_id": "P3", "order_id": "FULL", "status": "awaiting", "qty": 2, "deal_title": "PS5"},
+            {"purchase_id": "P4", "order_id": None, "total_payout": "-7.40", "deal_title": None},
+        )]
+        assert bfmr.active_purchase_quantities_for(["HALF", "FULL", "NONE"]) == {"HALF": 1, "FULL": 2}
+
     def test_an_insurance_fee_row_cannot_be_mistaken_for_an_open_purchase(self, bfmr, transport):
         """Fee rows carry no order number at all, which is what actually excludes them — the
         `_is_insurance_fee_row` check alongside is belt-and-braces. Worth pinning either way: a fee

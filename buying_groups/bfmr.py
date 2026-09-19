@@ -281,6 +281,21 @@ class BFMRClient(HttpClient):
             and not _is_insurance_fee_row(entry)
         }
 
+    def active_purchase_quantities_for(self, order_ids) -> dict[str, int]:
+        """How many units BFMR still holds ACTIVE purchases for, per order: the sum of `qty` over
+        the order's non-cancelled purchase rows. For a PARTIALLY cancelled retailer order (one
+        shipment cancelled, the other still coming) the
+        question is not whether a purchase is open but whether BFMR still expects MORE units than
+        are coming."""
+        wanted = {str(o).strip() for o in order_ids if str(o).strip()}
+        out: dict[str, int] = {}
+        for entry in self.fetch_tracker():
+            order_id = _order_id_of(entry)
+            if (order_id in wanted and entry.get("purchase_id") and not _is_cancelled_purchase(entry)
+                    and not _is_insurance_fee_row(entry)):
+                out[order_id] = out.get(order_id, 0) + (_as_int(entry.get("qty")) or 0)
+        return out
+
     def cancelled_purchases_for(self, order_ids) -> set[str]:
         """Which of these orders BFMR has CANCELLED the purchase for, with none still active.
 

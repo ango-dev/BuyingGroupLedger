@@ -577,11 +577,14 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             editing = next((e for e in inputs.expenses if e["id"] == request.query_params["edit"]), None)
         if editing is not None and draft is None:
             draft = {**editing, "receipt_url": (editing.get("receipt") or {}).get("url", "")}
+        esort = str(request.query_params.get("esort") or "").strip()  # the expenses table's header sort
+        edir = "asc" if str(request.query_params.get("edir") or "").lower() == "asc" else "desc"
         return page(request, "taxes.html", snapshot=snapshot, year=year, years=years,
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
                     draft=draft or {}, edit_entry=editing, expense_choices=tax_inputs.expense_choices(inputs),
-                    **extra)
+                    expenses=tax_inputs.sort_expenses(inputs.expenses, esort, edir == "desc") if esort else list(inputs.expenses),
+                    esort=esort, edir=edir, **extra)
 
     def load_tax_inputs(year: int):
         return tax_inputs.load_year(tax_inputs_path, year)
@@ -882,7 +885,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         view = order_view(snapshot.by_order(order_id))
         if view is None:
             raise HTTPException(status_code=404, detail=f"No ledger row carries Order ID {order_id!r}")
-        return page(request, "order.html", snapshot=snapshot, order=view,
+        return page(request, "order.html", snapshot=snapshot, order=view, columns=column_headings(),
                     editable=writer is not None,
                     notice=request.query_params.get("notice", ""),
                     error=request.query_params.get("error", ""))

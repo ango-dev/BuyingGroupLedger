@@ -321,6 +321,18 @@ class TestTaxesPage:
         assert re.search(r'data-field="date"[^>]*data-kind="date"', body) and re.search(r'data-field="category"[^>]*data-kind="choice"', body)
         assert '"category": ["supplies"]' in body and '"profile": ["alpha"]' in body  # the columns' previous answers
         assert 'data-tip-from="expense-hints"' in body and '<td colspan="2">Rows</td>' in body and "keep my edits" not in body
+        # the header names sort, as on the Orders table
+        assert 'href="/taxes?year=2026&esort=amount&edir=desc#s-expenses">Amount</a>' in body
+        by_amount = client.post("/taxes/expense/cell", params={"year": "2026"},
+                                data={"entry_id": ids[1], "field": "amount", "value": "99", "expected": "12.50"})
+        assert "data-error" not in by_amount.text
+        sorted_page = client.get("/taxes", params={"year": "2026", "esort": "amount", "edir": "desc"}).text
+        grid_at = sorted_page.index('class="grid compact expenses sheetlike"')
+        rows_part = sorted_page[grid_at:sorted_page.index("</tbody>", grid_at)]
+        assert rows_part.index(ids[1]) < rows_part.index(ids[0]) and "Amount ▼" in sorted_page
+        assert 'href="/taxes?year=2026&esort=amount&edir=asc#s-expenses">Amount ▼</a>' in sorted_page
+        client.post("/taxes/expense/cell", params={"year": "2026"},
+                    data={"entry_id": ids[1], "field": "amount", "value": "12.50", "expected": "99.00"})
         # one cell: the td comes back re-rendered (or with the error in data-error)
         td = client.post("/taxes/expense/cell", params={"year": "2026"},
                          data={"entry_id": ids[0], "field": "amount", "value": "20", "expected": "12.50"})

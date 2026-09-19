@@ -1,7 +1,8 @@
 // The Orders table edits like a spreadsheet. No build step, no framework.
 //
 //   click            selects a cell (the active cell, outlined); shift-click or drag selects a range;
-//                    Ctrl-click adds a cell (or takes a selected one out) and keeps the rest selected
+//                    Ctrl-click adds a cell (or takes a selected one out) and keeps the rest selected;
+//                    a click on a column's header cell (beside its name, which sorts) selects the column
 //   double-click     opens the editor (or press Enter, or just start typing: the keystroke replaces
 //                    the value, as in Sheets)
 //   Enter            saves; with a RANGE selected, fills every editable cell in it with the value
@@ -329,10 +330,34 @@
     });
   }
 
+  // A click on a column's HEADER CELL -- beside the name, which sorts -- selects the whole column,
+  // as in Sheets; Ctrl adds the column, Shift extends from the anchor's column.
+  function selectColumn(th, add, extend) {
+    var t = th.closest(GRID);
+    var rows = t && t.tBodies[0] ? t.tBodies[0].rows.length : 0;
+    if (!rows) return;
+    var c = th.cellIndex;
+    if (extend && anchor && t === grid) { ranges = []; grid = t; ranges.push(rect({ r: 0, c: anchor.c }, { r: rows - 1, c: c })); }
+    else {
+      if (!add || t !== grid) ranges = [];
+      grid = t;
+      anchor = { r: 0, c: c };
+      ranges.push(rect({ r: 0, c: c }, { r: rows - 1, c: c }));
+    }
+    active = { r: 0, c: c };
+    document.dispatchEvent(new Event("rows:clear"));
+    paint(true);
+  }
   // ---- mouse: click selects, shift-click / drag extend ---------------------------------------------
   document.addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
     if (e.target.closest && e.target.closest("a, button, input, .cell-edit, .cell-empty")) return;
+    var th = e.target.closest ? e.target.closest("th") : null;
+    if (th && th.closest(GRID) && !th.classList.contains("rownum")) {
+      e.preventDefault();
+      selectColumn(th, e.ctrlKey || e.metaKey, e.shiftKey);
+      return;
+    }
     var td = e.target.closest ? e.target.closest(GRID_TD) : null;
     if (!selectable(td)) return;
     if (td.hasAttribute("data-editing")) return;

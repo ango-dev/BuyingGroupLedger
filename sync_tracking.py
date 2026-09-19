@@ -184,6 +184,9 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
     skipped_no_tracking = 0
     skipped_cancelled = 0
     skipped_superseded = 0
+    #: Units still COMING per order (every row that is not cancelled or retired), so a partially
+    #: cancelled order is judged on quantity, not on having any cancelled row at all.
+    live_quantity_by_order: dict[str, int] = {}
     superseded_rows: list[tuple[int, str, str]] = []
     settled_keys: set[tuple[str, str]] = set()
     corrupted_tracking: list[tuple[int, str, str]] = []
@@ -230,6 +233,8 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
             if group_key:
                 cancelled_by_group.setdefault(group_key, []).append((row_number, order_id))
             continue
+        if cell("Quantity") != _UNRESOLVED_QUANTITY:
+            live_quantity_by_order[order_id] = live_quantity_by_order.get(order_id, 0) + _as_int(cell("Quantity"), 0)
 
         tracking = cell("Tracking Number")
         if _FLOAT_CORRUPTED_TRACKING.fullmatch(tracking):
@@ -369,6 +374,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
         "skipped_superseded": skipped_superseded,
         "superseded_rows": superseded_rows,
         "cancelled_by_group": cancelled_by_group,
+        "live_quantity_by_order": live_quantity_by_order,
         "awaiting_by_group": awaiting_by_group,
         "settled_keys": settled_keys,
     }
@@ -801,24 +807,52 @@ def _alert_on_cancelled_orders(group_key, client, plan, apply) -> None:
     if not cancelled or not hasattr(client, "active_purchases_for"):
         return
 
-    still_open = client.active_purchases_for(order_id for _row, order_id in cancelled)
-    affected = [(row, order_id) for row, order_id in cancelled if order_id in still_open]
-    if not affected:
-        return
+    # A PARTIALLY cancelled order -- some rows cancelled, units still coming on others -- is not a divergence
+    # in itself: the group SHOULD still hold a purchase for the part that ships. It is one only
+    # when the group still expects more units than are coming (BFMR showing 2 where 1 is left).
+    live = plan.get("live_quantity_by_order") or {}
+    fully = [(row, order_id) for row, order_id in cancelled if not live.get(order_id)]
+    partial: dict[str, list[int]] = {}
+    for row, order_id in cancelled:
+        if live.get(order_id):
+            partial.setdefault(order_id, []).append(row)
 
-    detail = "\n".join(f"  row {row}: order {order_id}" for row, order_id in affected)
-    log.warning("%s: %d cancelled order(s) still have an open purchase", group_key, len(affected))
-    _alert(
-        apply,
-        f"ACTION NEEDED — {group_key}: {len(affected)} cancelled order(s) still open there",
-        f"These orders are CANCELLED at the retailer, but {group_key} still shows an active "
-        f"purchase against the reservation:\n{detail}\n\n"
-        f"Decide and act by hand in My Tracker. This tool deliberately never cancels: cancelling "
-        f"releases the RESERVATION, and a retailer-cancelled order is often one you want to "
-        f"re-order into the same spot — which may not be reclaimable once given up.\n\n"
-        f"If you are not re-ordering, cancel the purchase there so it doesn't sit against your "
-        f"quota.",
-    )
+    if fully:
+        still_open = client.active_purchases_for(order_id for _row, order_id in fully)
+        affected = [(row, order_id) for row, order_id in fully if order_id in still_open]
+        if affected:
+            detail = "\n".join(f"  row {row}: order {order_id}" for row, order_id in affected)
+            log.warning("%s: %d cancelled order(s) still have an open purchase", group_key, len(affected))
+            _alert(
+                apply,
+                f"ACTION NEEDED — {group_key}: {len(affected)} cancelled order(s) still open there",
+                f"These orders are CANCELLED at the retailer, but {group_key} still shows an active "
+                f"purchase against the reservation:\n{detail}\n\n"
+                f"Decide and act by hand in My Tracker. This tool deliberately never cancels: cancelling "
+                f"releases the RESERVATION, and a retailer-cancelled order is often one you want to "
+                f"re-order into the same spot — which may not be reclaimable once given up.\n\n"
+                f"If you are not re-ordering, cancel the purchase there so it doesn't sit against your "
+                f"quota.",
+            )
+
+    if partial and hasattr(client, "active_purchase_quantities_for"):
+        held = client.active_purchase_quantities_for(partial)
+        over = [(order_id, held[order_id], live[order_id]) for order_id in partial
+                if held.get(order_id, 0) > live[order_id]]
+        if over:
+            detail = "\n".join(f"  order {order_id}: {coming} unit(s) still coming, {group_key} shows {shown}"
+                               f" (cancelled rows: {', '.join(str(r) for r in partial[order_id])})"
+                               for order_id, shown, coming in over)
+            log.warning("%s: %d partially cancelled order(s) still show the full quantity there",
+                        group_key, len(over))
+            _alert(
+                apply,
+                f"ACTION NEEDED — {group_key}: {len(over)} partially cancelled order(s) still show the full quantity there",
+                f"Part of these orders was cancelled at the retailer, but {group_key} still expects the "
+                f"original quantity:\n{detail}\n\n"
+                f"Reduce the purchase quantity by hand in My Tracker (BFMR only ever lets a quantity "
+                f"go DOWN, and this tool never cancels or reduces anything there itself).",
+            )
 
 
 def _alert_on_cancelled_purchases(group_key, client, plan, apply) -> None:

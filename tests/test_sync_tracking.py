@@ -416,6 +416,79 @@ class TestSupersededRowsAreRetired:
         assert plan["skipped_cancelled"] == 0 and plan["cancelled_by_group"] == {}
 
 
+class TestPartiallyCancelledOrders:
+    """order BBY01-809900000011 was split into two shipments and ONE was cancelled
+    on purpose; every run alerted that the order was cancelled. The alert is due only when the
+    buying group still expects more units than are coming."""
+
+    class FakeClient:
+        group_key = "BFMR"
+
+        def __init__(self, open_orders=(), held=None):
+            self.open_orders, self.held = set(open_orders), dict(held or {})
+            self.asked_open, self.asked_qty = None, None
+
+        def active_purchases_for(self, order_ids):
+            self.asked_open = list(order_ids)
+            return {o for o in self.asked_open if o in self.open_orders}
+
+        def active_purchase_quantities_for(self, order_ids):
+            self.asked_qty = list(order_ids)
+            return {o: q for o, q in self.held.items() if o in self.asked_qty}
+
+    @staticmethod
+    def _plan():
+        return plan_tracking_submissions(HEADER_LIST, [
+            shipped("HALF", "T1", **{"Shipment": 1, "Quantity": 1}),
+            shipped("HALF", "", **{"Shipment": 2, "Quantity": 1, "Status": "cancelled"}),
+            shipped("GONE", "", **{"Quantity": 2, "Status": "cancelled"}),
+        ])
+
+    def test_the_plan_counts_the_units_still_coming_per_order(self):
+        plan = self._plan()
+        assert plan["live_quantity_by_order"] == {"HALF": 1}  # GONE has nothing coming
+        assert sorted(plan["cancelled_by_group"]["BFMR"]) == [(3, "HALF"), (4, "GONE")]
+
+    def test_a_partial_cancellation_the_group_already_reduced_is_silent(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
+        client = self.FakeClient(open_orders={"HALF"}, held={"HALF": 1})
+        sync_tracking._alert_on_cancelled_orders("BFMR", client, self._plan(), apply=True)
+        assert sent == []  # an open purchase for the half still coming is right, not a divergence
+        assert client.asked_open == ["GONE"]  # only the fully cancelled order is checked for openness
+
+    def test_a_partial_cancellation_the_group_still_shows_in_full_alerts(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
+        client = self.FakeClient(open_orders={"HALF"}, held={"HALF": 2})
+        sync_tracking._alert_on_cancelled_orders("BFMR", client, self._plan(), apply=True)
+        assert len(sent) == 1
+        subject, body = sent[0]
+        assert subject == "ACTION NEEDED — BFMR: 1 partially cancelled order(s) still show the full quantity there"
+        assert "order HALF: 1 unit(s) still coming, BFMR shows 2 (cancelled rows: 3)" in body
+        assert "Reduce the purchase quantity by hand" in body and "never cancels or reduces" in body
+
+    def test_a_fully_cancelled_order_still_open_at_the_group_alerts_as_before(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
+        client = self.FakeClient(open_orders={"GONE"}, held={})
+        sync_tracking._alert_on_cancelled_orders("BFMR", client, self._plan(), apply=True)
+        assert len(sent) == 1 and sent[0][0] == "ACTION NEEDED — BFMR: 1 cancelled order(s) still open there"
+        assert "row 4: order GONE" in sent[0][1] and "HALF" not in sent[0][1]
+
+    def test_a_group_that_cannot_report_quantities_is_not_asked_about_partials(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
+
+        class Mod:
+            def active_purchases_for(self, order_ids):
+                return set(order_ids)
+
+        sync_tracking._alert_on_cancelled_orders("MOD", Mod(), {"cancelled_by_group": {"MOD": [(3, "HALF")]},
+                                                                "live_quantity_by_order": {"HALF": 1}}, apply=True)
+        assert sent == []
+
+
 class TestTrackingSubmittedCheckbox:
     def _plan(self, **overrides):
         return plan_tracking_submissions(HEADER_LIST, [shipped("O1", "T1", **overrides)])
