@@ -347,13 +347,14 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     templates.env.globals["LINK_FIELDS"] = LINK_FIELDS
     templates.env.globals["MONEY_FIELDS"] = MONEY_FIELDS
 
-    from web.queries import (CARD_COLUMNS, ORDER_COLUMNS, PER_PAGE_CHOICES, SORT_CHOICES,
+    from web.queries import (CARD_COLUMNS, ORDER_COLUMNS, PER_PAGE_CHOICES, SEARCH_FIELDS, SORT_CHOICES,
                              order_cards, paginate)
 
     templates.env.globals["PER_PAGE_CHOICES"] = PER_PAGE_CHOICES
     templates.env.globals["ORDER_COLUMNS"] = ORDER_COLUMNS
     templates.env.globals["CARD_COLUMNS"] = CARD_COLUMNS
     templates.env.globals["SORT_CHOICES"] = SORT_CHOICES
+    templates.env.globals["SEARCH_FIELDS"] = SEARCH_FIELDS  # the search box names every column it looks in
 
     from starlette.datastructures import QueryParams
 

@@ -815,6 +815,16 @@ class TestOrdersPage:
         assert client.get("/audit", params={"card": "0315"}).status_code == 200  # the scoped pages share the bar
         assert client.get("/recon", params={"card": "0315"}).status_code == 200
 
+    def test_the_search_box_names_every_column_it_searches(self, client):
+        from web.ledger_reader import FIELD_TO_HEADER
+        from web.queries import SEARCH_FIELDS
+
+        body = client.get("/orders").text
+        box = body[body.index('id="q"'):body.index(">", body.index('id="q"'))]
+        for field in SEARCH_FIELDS:
+            assert FIELD_TO_HEADER[field].lower() in box, field
+        assert "card name, card last 4" in box
+
     def test_facets_come_from_the_whole_ledger(self, client):
         body = client.get("/orders", params={"retailer": "Costco"}).text
         assert 'name="retailer" value="Best Buy" >' in body  # still offered while Costco is chosen

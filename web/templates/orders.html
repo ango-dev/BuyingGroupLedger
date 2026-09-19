@@ -36,7 +36,10 @@
   {% endfor %}
   {% block extra_filters %}{% endblock %}
   <label class="search">Search
-    <input id="q" type="search" name="q" value="{{ filters.q }}" placeholder="order id, item, tracking, package id, last 4, address">
+    {#- The placeholder is derived from SEARCH_FIELDS, so it names every column the search looks in.
+       -#}
+    {% set searched = [] %}{% for f in SEARCH_FIELDS %}{% set _ = searched.append(header_of(f) | lower) %}{% endfor %}
+    <input id="q" type="search" name="q" value="{{ filters.q }}" placeholder="{{ searched | join(', ') }}" title="searches {{ searched | join(', ') }}">
   </label>
   {# The overview's tiles link here with these three; they are editable in place so a click-through
      can be widened or narrowed without going back. #}
