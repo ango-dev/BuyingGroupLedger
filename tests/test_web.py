@@ -823,7 +823,7 @@ class TestOrdersPage:
         box = body[body.index('id="q"'):body.index(">", body.index('id="q"'))]
         for field in SEARCH_FIELDS:
             assert FIELD_TO_HEADER[field].lower() in box, field
-        assert "card name, card last 4" in box
+        assert "card, card last 4" in box  # the Card Name column is headed "Card"
 
     def test_facets_come_from_the_whole_ledger(self, client):
         body = client.get("/orders", params={"retailer": "Costco"}).text
