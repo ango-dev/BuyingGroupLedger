@@ -838,7 +838,14 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
   header .meta { width: 100%; justify-content: space-between; padding-bottom: 6px; }
   header .meta .pill { max-width: 62vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   details.multi .menu { max-width: calc(100vw - 24px); }
+  /* the Tools menu: fixed to the viewport, so the scrolling link row neither clips it when open
+     nor lets its (laid-out, hidden) box widen the page when closed */
+  header nav details.nav-menu .menu { position: fixed; left: 12px; right: 12px; top: 92px; width: auto; min-width: 0; max-width: none; }
   main { padding: 0 12px 32px; }
+  /* Settings: the grid's column may shrink below its content (an entry table's nowrap headers set
+     a 672px minimum otherwise), and the tables scroll sideways inside their panel */
+  .settings-layout > * { min-width: 0; }
+  .settings-main table.entry-table, .settings-main table.grid { display: block; overflow-x: auto; max-width: 100%; }
   .filters { flex-wrap: wrap; }
   .filters .reset { margin-left: 0; }
   .filters label.search { flex: 1 1 100%; max-width: none; }
