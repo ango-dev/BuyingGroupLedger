@@ -362,6 +362,7 @@ class TestOrdersRoutes:
         assert cogs_td and "edit" not in cogs_td.group(1)  # a formula: never editable
         assert '<tr class="status-shipped' in body and '<tr class="status-paid' in body
         assert "works like a spreadsheet" in body
+        assert '<p class="muted small lead">Every row of the ledger' in body  # a description, as the other pages have
         assert "/static/edit.js" in body
         # The row tools.
         assert 'name="sel"' in body and 'id="sel-all"' in body

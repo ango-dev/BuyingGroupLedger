@@ -830,6 +830,26 @@ class TestFailuresPage:
             (directory / "report.md").write_text(report, encoding="utf-8")
         return directory
 
+    def test_a_dossier_downloads_as_one_zip_for_an_agent(self, client, failures_dir):
+        """a download button before details; the zip holds the whole dossier."""
+        import io
+        import zipfile
+
+        name = "costco_profile-bravo_20260830T070304Z"
+        self._dossier(failures_dir, name, self.REPORT)
+        page = client.get("/activity", params={"type": "dossier", "days": "0"}).text
+        assert f'href="/activity/dossier/{name}/download"' in page
+        assert page.index(f'href="/activity/dossier/{name}/download"') < page.index(">report</button>")
+        response = client.get(f"/activity/dossier/{name}/download")
+        assert response.status_code == 200 and response.headers["content-type"] == "application/zip"
+        assert response.headers["content-disposition"] == f'attachment; filename="{name}.zip"'
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert sorted(archive.namelist()) == [f"{name}/report.md", f"{name}/response_1.txt"]
+            report = archive.read(f"{name}/report.md").decode("utf-8").replace("\r\n", "\n")
+            assert report == self.REPORT  # the file may carry CRLF on Windows
+        assert client.get("/activity/dossier/nope/download").status_code == 404
+        assert client.get("/activity/dossier/..%2F..%2Fconfig.json/download").status_code == 404
+
     def test_newest_first_with_reports_rendered_and_hosted_links_verbatim(self, client, failures_dir):
         self._dossier(failures_dir, "costco_profile-bravo_20260830T070304Z", self.REPORT)
         self._dossier(failures_dir, "amazon_profile-charlie_20260914T160056Z", "# Newer\n\ntext\n")
@@ -1709,4 +1729,4 @@ class TestActivityLayout:
     def test_activity_uses_the_orders_layout(self, client):
         body = client.get("/activity").text
         assert '<body class="wide">' in body
-        assert body.index("<h1>Activity</h1>") < body.index('<p class="muted lead">') < body.index('<div class="pinned">') < body.index('id="activity-filters"') < body.index('id="activity-table"')
+        assert body.index("<h1>Activity</h1>") < body.index('<p class="muted small lead">') < body.index('<div class="pinned">') < body.index('id="activity-filters"') < body.index('id="activity-table"')

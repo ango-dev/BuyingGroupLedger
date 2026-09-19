@@ -17,7 +17,7 @@ from urllib.parse import quote
 from typing import Callable
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -903,6 +903,26 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             else:
                 response.delete_cookie(HIDE_COOKIE)  # "hide nothing": forget, rather than store ""
         return response
+
+    @app.get("/activity/dossier/{name}/download")
+    def dossier_download(name: str):
+        """The dossier's directory as ONE zip -- report.md, the captured pages, the screenshots, the
+        selector audit -- which is what to hand an AI agent (or a person) to fix the selector that
+        broke. Only a dossier the failures directory lists: no path is taken
+        from the name."""
+        import io
+        import zipfile
+
+        dossier = next((d for d in failures_module.list_dossiers(failures_dir) if d.name == name), None)
+        if dossier is None:
+            raise HTTPException(status_code=404, detail=f"no dossier named {name!r}")
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(dossier.path.rglob("*")):
+                if path.is_file():
+                    archive.write(path, arcname=f"{dossier.name}/{path.relative_to(dossier.path).as_posix()}")
+        return Response(content=buffer.getvalue(), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{dossier.name}.zip"'})
 
     @app.get("/failures")
     def failures_page(request: Request):

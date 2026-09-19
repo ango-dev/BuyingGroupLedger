@@ -10,7 +10,7 @@
    (Audit, Recon), scroll away; the filter bar (and the add-row form) in .pinned stick to the top
    once they have, and the table's header sticks just below (edit.js measures --pinned-h). #}
 {% block heading %}<h1>Orders</h1>{% endblock %}
-{% block lead %}{% endblock %}
+{% block lead %}<p class="muted small lead">Every row of the ledger, as a table that edits like a spreadsheet or as one card per order. Filter, sort and search; add a row, select rows to delete, upload a receipt; a cell you type is kept by every run until you clear it.</p>{% endblock %}
 <div class="pinned">
 <form id="filters" class="filters" method="get" action="{{ base }}"
       hx-get="{{ base }}" hx-target="#orders-table" hx-indicator="#orders-table" hx-push-url="true"

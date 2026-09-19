@@ -1238,6 +1238,58 @@ def check_payout_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
     )
 
 
+#: What every row must carry, and what each stage must (or must not) carry on top. A cancelled / superseded row carries no money by design, so only its identity
+#: is mandatory there.
+MANDATORY_ALWAYS = ("Order Date", "Status", "Retailer", "Item Name", "Shipment", "Order ID")
+MANDATORY_COSTED = ("Quantity", "Cost Per Item", "Total Cost", "Profile")
+MANDATORY_BY_STAGE = {
+    "shipped": ("Tracking Number",),
+    "delivered": ("Tracking Number", "Delivery Date"),
+    "paid": ("Tracking Number", "Actual Payout", "Payout Date"),
+    "return": ("Tracking Number", "Return Qty", "Return Date"),
+}
+#: Cells a stage should NOT have yet: a value there means the status is stale (WARN, not FAIL).
+UNEXPECTED_BY_STAGE = {
+    "ordered": ("Tracking Number", "Delivery Date", "Payout Date"),
+    "shipped": ("Payout Date",),
+}
+
+
+@check("mandatory_by_stage")
+def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
+    """Every row carries its identity and, unless cancelled / superseded, its cost inputs and a
+    profile; each stage carries what that stage implies (a shipped row a tracking number, a paid
+    row an amount and a date, a return its quantity and date). A cell that should still be blank
+    at a stage (a tracking number on an `ordered` row) is a stale status, a WARN. The one place a
+    cell deleted by accident from the table is caught."""
+    grid = sheet.grids.formatted
+    fails, warns = [], []
+    for row_number, _ in sheet.ledger_rows(grid):
+        def cell(name: str) -> str:
+            return str(sheet.cell(grid, row_number, name)).strip()
+
+        status = cell("Status").lower()
+        required = list(MANDATORY_ALWAYS)
+        if status not in ("cancelled", "superseded"):
+            required += MANDATORY_COSTED
+        required += MANDATORY_BY_STAGE.get(status, ())
+        missing = [name for name in required if not cell(name)]
+        if missing:
+            fails.append(f"row {row_number} ({status or 'no status'}): missing {', '.join(missing)}")
+        stale = [name for name in UNEXPECTED_BY_STAGE.get(status, ()) if cell(name)]
+        if stale:
+            warns.append(f"row {row_number} ({status}): carries {', '.join(stale)} -- is the status stale?")
+    if fails:
+        return Result("mandatory_by_stage", "FAIL",
+                      f"{len(fails)} row(s) miss a mandatory cell for their stage",
+                      _truncate(fails + warns, opts.max_detail))
+    if warns:
+        return Result("mandatory_by_stage", "WARN",
+                      f"{len(warns)} row(s) carry a cell their stage should not have yet -- a stale status?",
+                      _truncate(warns, opts.max_detail))
+    return Result("mandatory_by_stage", "PASS", "every row carries what its stage requires")
+
+
 @check("paid_rows_have_a_payout")
 def check_paid_rows_have_a_payout(sheet: Sheet, opts: Options) -> Result:
     """A row the buying group reports as `paid` must carry the amount it was paid.

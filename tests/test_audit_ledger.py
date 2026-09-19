@@ -1295,3 +1295,43 @@ class TestPackageIdPerShipment:
         sheet = build(self._row(2, package_id=9999990206101794))
         r = result_for(sheet, "package_id_per_shipment")
         assert r.status == "FAIL" and "stored as int" in r.details[0]
+
+
+class TestMandatoryByStage:
+    """the audit checks for missing mandatory values, by stage."""
+
+    def test_a_healthy_ledger_passes(self):
+        sheet = build(row_cells(2), row_cells(3, Status=Cell("shipped"), **{"Delivery Date": Cell("")}),
+                      row_cells(4, Status=Cell("cancelled"), **{"Cost Per Item": Cell(""), "Total Cost": Cell(""), "Quantity": Cell("")}))
+        assert result_for(sheet, "mandatory_by_stage").status == "PASS"
+
+    def test_a_deleted_mandatory_cell_fails_and_names_it(self):
+        sheet = build(row_cells(2, Profile=Cell("")), row_cells(3, **{"Cost Per Item": Cell("")}))
+        result = result_for(sheet, "mandatory_by_stage")
+        assert result.status == "FAIL"
+        assert any("row 2 (delivered): missing Profile" in d for d in result.details)
+        assert any("row 3 (delivered): missing Cost Per Item" in d for d in result.details)
+
+    def test_each_stage_requires_its_own_cells(self):
+        shipped = build(row_cells(2, Status=Cell("shipped"), **{"Tracking Number": Cell("")}))
+        assert "missing Tracking Number" in result_for(shipped, "mandatory_by_stage").details[0]
+        paid = build(row_cells(2, Status=Cell("paid"), **{"Actual Payout": Cell(100.0, fmt="currency"), "Payout Date": Cell("")}))
+        assert "missing Payout Date" in result_for(paid, "mandatory_by_stage").details[0]
+        paid_ok = build(row_cells(2, Status=Cell("paid"), **{"Actual Payout": Cell(100.0, fmt="currency"), "Payout Date": Cell("2026-09-01")}))
+        assert result_for(paid_ok, "mandatory_by_stage").status == "PASS"
+        returned = build(row_cells(2, Status=Cell("return"), **{"Return Qty": Cell(""), "Return Date": Cell("")}))
+        assert "missing Return Qty, Return Date" in result_for(returned, "mandatory_by_stage").details[0]
+
+    def test_a_cell_a_stage_should_not_have_yet_is_a_stale_status_warning(self):
+        ordered = build(row_cells(2, Status=Cell("ordered"), **{"Delivery Date": Cell("")}))  # keeps its tracking number
+        result = result_for(ordered, "mandatory_by_stage")
+        assert result.status == "WARN" and "row 2 (ordered): carries Tracking Number" in result.details[0]
+        clean = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Delivery Date": Cell("")}))
+        assert result_for(clean, "mandatory_by_stage").status == "PASS"
+
+    def test_a_money_free_row_needs_only_its_identity(self):
+        sheet = build(row_cells(2, Status=Cell("superseded"), **{"Cost Per Item": Cell(""), "Total Cost": Cell(""),
+                                                                 "Quantity": Cell(""), "Profile": Cell("")}))
+        assert result_for(sheet, "mandatory_by_stage").status == "PASS"
+        sheet = build(row_cells(2, Status=Cell("cancelled"), Retailer=Cell("")))
+        assert result_for(sheet, "mandatory_by_stage").status == "FAIL"

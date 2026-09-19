@@ -70,6 +70,13 @@ that overspends MaxOutDeals' daily quota. Every container start runs it and **al
 — a container that refuses to start also stops scraping; `PREFLIGHT_STRICT=true` fails fast instead.
 It cannot verify the MaxOutDeals IP allowlist from the host, so it warns about that every time.
 
+## Handing a dossier to whoever fixes it
+
+The Activity page's *download* button on a dossier row is the whole dossier as one zip -- the
+report (selector audit, traceback), the captured pages and the screenshots -- which is what to
+upload to an AI coding agent, or send to a person, to fix the selector that broke. The dossier is
+redacted but may still carry names and addresses: never commit one.
+
 ## Auditing the ledger
 
 `pytest` proves the *code* is right; it can't see the data. `scripts/audit_ledger.py` checks the
