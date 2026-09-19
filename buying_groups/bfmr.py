@@ -713,7 +713,7 @@ class BFMRClient(HttpClient):
             # a row with no money is not just cosmetically odd — `paid` is TERMINAL, so it would stop
             # the retailer re-checking a row whose payout had never arrived. All three land together on
             # a later sync once BFMR settles; if that never happens, the row simply stays open and
-            # `audit_sheet`'s open_row_staleness surfaces it rather than it going quietly wrong.
+            # `audit_ledger`'s open_row_staleness surfaces it rather than it going quietly wrong.
             settled = parse_money(entry.get("amount_paid")) if paid else None
             if paid and not settled:
                 # Scoped to `paid` deliberately: a `returned` package reports no amount either, and

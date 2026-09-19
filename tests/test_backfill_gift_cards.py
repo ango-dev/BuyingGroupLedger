@@ -8,7 +8,7 @@ arithmetic wrong double-nets a gift card out of COGS.
 """
 
 from scripts.backfill_gift_cards import collect_candidates, plan_order_writes
-from sheets.ledger_sync import HEADER
+from ledger.sync import HEADER
 
 
 def row(**values):

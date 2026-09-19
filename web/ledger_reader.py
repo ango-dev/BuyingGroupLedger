@@ -1,7 +1,7 @@
 """The ONE way the web dashboard reads the ledger. Two backends, one shape, no write path.
 
     DbReader        the ledger itself, data/ledger.sqlite3 (ledger_db), read fresh on every load.
-    SnapshotReader  a CSV under data/sheet_backup_*.csv (the backups every --apply script writes),
+    SnapshotReader  a CSV under data/ledger_backup_*.csv (the backups every --apply script writes),
                     newest by default. Development and tests run on this: no credentials, no network.
 
 Both hand back the same `Snapshot`: a list of `LedgerRow`s keyed by FIELDNAMES, read BY HEADER NAME
@@ -10,11 +10,11 @@ rather than by position. That matters more than it looks: a backup written befor
 dashboard must never guess a column from its position the way the upsert legitimately does.
 
 NOTHING HERE RE-TYPES THE LEDGER'S SEMANTICS. Column names come from models.order.FIELDNAMES and
-sheets.ledger_sync.HEADER; the status vocabulary from models.order; money parsing from
-sheets.ledger_sync._parse_display_number (the same parser the upsert runs on a formatted read); the
+ledger.sync.HEADER; the status vocabulary from models.order; money parsing from
+ledger.sync._parse_display_number (the same parser the upsert runs on a formatted read); the
 gift-card tag from config.warehouses. The one piece of arithmetic done here -- COGS and Total Profit
 for a row whose cell holds a formula literal instead of a number, which is what a CSV backup carries
--- mirrors sheets.ledger_sync._cogs_formula / _profit_formula and is pinned against them by
+-- mirrors ledger.sync._cogs_formula / _profit_formula and is pinned against them by
 tests/test_web.py so the two cannot drift apart silently.
 """
 
@@ -30,12 +30,12 @@ from typing import Callable, Protocol
 
 from config.warehouses import is_deliberately_unrouted
 from models.order import FIELDNAMES, MONEY_FREE_STATUSES
-from sheets.ledger_sync import HEADER, _NUMERIC_FIELDS, _parse_checkbox, _parse_display_number
+from ledger.sync import HEADER, _NUMERIC_FIELDS, _parse_checkbox, _parse_display_number
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 #: What every --apply script names its pre-write backup (scripts/sort_ledger.py and friends).
-SNAPSHOT_GLOB = "sheet_backup_*.csv"
+SNAPSHOT_GLOB = "ledger_backup_*.csv"
 
 #: Headings a ledger may still carry from before a rename; read as the field they became.
 LEGACY_HEADERS = {"Payout Amount": "payout_amount"}  # -> "Actual Payout", 2026-09-18
@@ -45,7 +45,7 @@ FIELD_TO_HEADER = dict(zip(FIELDNAMES, HEADER))
 #: A payout is SETTLED when it carries its date or a buying-group outcome status -- never on the
 #: amount alone, because since 2026-09-11 the sync fills Actual Payout with BFMR's COMMITTED price
 #: while the package is still open (docs/data-model.md, "Actual Payout holds two kinds of number").
-#: The same rule scripts/audit_sheet.check_cogs_inputs_complete counts a row settled by.
+#: The same rule scripts/audit_ledger.check_cogs_inputs_complete counts a row settled by.
 SETTLED_STATUSES = ("paid", "return")
 #: The dashboard's OPEN rows: the group has not paid yet. Delivered counts --
 #: the scrapers' TERMINAL_STATUSES is a different question (whether a row is ever re-read).
@@ -242,7 +242,7 @@ class LedgerRow:
 
 
 def cogs_of(row: LedgerRow) -> float | None:
-    """sheets.ledger_sync._cogs_formula, in Python:
+    """ledger.sync._cogs_formula, in Python:
 
         COGS = (Total Cost - Return Qty x Cost Per Item - Gift Card + Shipping + Sales Tax
                 - Rewards Used) x (1 - Cashback Rate) + Rewards Used
@@ -267,7 +267,7 @@ def cogs_of(row: LedgerRow) -> float | None:
 
 
 def profit_of(row: LedgerRow) -> float | None:
-    """sheets.ledger_sync._profit_formula, in Python: Actual Payout - COGS - Insurance, blank until
+    """ledger.sync._profit_formula, in Python: Actual Payout - COGS - Insurance, blank until
     a payout exists and blank on a money-free row."""
     if row.is_money_free:
         return None
@@ -371,7 +371,7 @@ class LedgerReader(Protocol):
 
 
 def newest_snapshot(data_dir: Path = DATA_DIR) -> Path:
-    """The newest data/sheet_backup_*.csv. The timestamp is in the name, so name order IS time
+    """The newest data/ledger_backup_*.csv. The timestamp is in the name, so name order IS time
     order; mtime breaks a tie. A missing directory or no backups at all is a loud error."""
     candidates = sorted(Path(data_dir).glob(SNAPSHOT_GLOB),
                         key=lambda p: (p.name, p.stat().st_mtime))
@@ -512,7 +512,7 @@ def reader_from_settings(settings, *, source: str | None = None,
     chosen = (source or settings.web_ledger_source or "db").strip().lower()
     snapshot_path = snapshot_path or settings.web_snapshot_path or None
     if chosen == "db":
-        return DbReader(settings.ledger_db_path, ttl_seconds=settings.web_sheet_cache_ttl_seconds)
+        return DbReader(settings.ledger_db_path, ttl_seconds=settings.web_ledger_cache_ttl_seconds)
     if chosen == "snapshot":
         return SnapshotReader(snapshot_path)
     raise ValueError(

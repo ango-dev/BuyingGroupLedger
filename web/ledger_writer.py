@@ -13,7 +13,7 @@ typed number would be overwritten or, worse, freeze a formula), and Last Scraped
 stamp). Status must be one of the ledger's vocabulary; the date columns must be ISO text or blank
 (a real Date in the cell would change a key and duplicate the row -- docs/data-model.md).
 
-HOW A CELL IS WRITTEN, mirroring sheets/ledger_sync: the row is located BY KEY on a fresh read (the
+HOW A CELL IS WRITTEN, mirroring ledger/sync: the row is located BY KEY on a fresh read (the
 sheet may have been re-sorted since the page loaded), the current display text must equal what the
 page showed (`expected`) or the edit is refused as a conflict, a value goes RAW through the upsert's
 own `_coerce` (a number stays a number, a checkbox a boolean, a date plain text), and a blank goes
@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Callable
 
 from models.order import FIELDNAMES, STATUSES, normalize_shipment
-from sheets.ledger_sync import (
+from ledger.sync import (
     HEADER, _BOOL_FIELDS, _COL, _NUMERIC_FIELDS, _blank_to_none, _coerce,
     _ensure_grid_rows, _last_occupied_row, _parse_checkbox, _write_profit_formulas,
 )
@@ -224,7 +224,7 @@ def _forget(worksheet, key: dict) -> None:
         log.exception("the row was deleted but its hand-edit marks could not be cleared")
 
 
-class SheetCellWriter:
+class LedgerCellWriter:
     """Write cells, append a row, delete rows. `opener` and `logs_dir` are injection points.
     Every cell it writes under the `db` backend is recorded as hand-edited, so no scheduled run
     overwrites it (ledger_db/hand_edits); a deleted row's marks are cleared."""

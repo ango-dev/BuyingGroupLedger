@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config.warehouses import load_warehouses
-from sheets.ledger_sync import HEADER, _get_worksheet, plan_buying_group_retag
+from ledger.sync import HEADER, _get_worksheet, plan_buying_group_retag
 
 log = logging.getLogger("retag_buying_groups")
 

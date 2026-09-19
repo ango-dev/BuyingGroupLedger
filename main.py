@@ -56,7 +56,7 @@ from scrapers.base import (  # noqa: E402
 )
 from scrapers.bestbuy import BestBuyScraper  # noqa: E402
 from scrapers.costco import CostcoScraper  # noqa: E402
-from sheets.ledger_sync import sort_ledger_by_date_desc, sync_csv_to_sheet  # noqa: E402
+from ledger.sync import sort_ledger_by_date_desc, sync_csv_to_ledger  # noqa: E402
 
 log = logging.getLogger("main")
 
@@ -120,7 +120,7 @@ def _capture_receipts(items: list, scraper: BaseRetailerScraper, label: str) -> 
     Swallowing everything is the whole contract. This step is additive — a receipt is proof of
     purchase you'll want when a buying group asks for one — but a missing receipt costs an
     inconvenience while a missing ORDER costs reimbursement money. So a storage outage, an expired
-    browser session or a changed page must not stop write_csv and sync_csv_to_sheet from running
+    browser session or a changed page must not stop write_csv and sync_csv_to_ledger from running
     three lines later, which is exactly what would happen if this propagated into run_scrape's
     post-scrape guard.
 
@@ -197,7 +197,7 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
     log.info("Wrote %d line item(s) to %s", len(items), csv_path)
 
     try:
-        result = sync_csv_to_sheet(csv_path)
+        result = sync_csv_to_ledger(csv_path)
         log.info("Synced %s into the Google Sheet ledger.", csv_path.name)
     except Exception:
         # This alert has always existed, but it never said what was LOST. A sync failure discards

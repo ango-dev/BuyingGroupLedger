@@ -228,7 +228,7 @@ class TestTheRoutes:
         for key in ("run_once", "preflight", "tax_report", "backfill_tracking", "costco_token"):
             assert f'href="/tools?tool={key}"' in menu
             assert f'id="t-{key}"' not in body  # not shown until picked
-        assert 'tool=audit_sheet' in menu and 'tool=migrate_expected_payout' in menu
+        assert 'tool=audit_ledger' in menu and 'tool=migrate_expected_payout' in menu
         assert 'class="multi nav-menu' in client.get("/settings").text  # on every page
         assert "Log a Profile In" in body and 'action="/tools/profile/start"' in body
         assert "after 30 minutes" in body

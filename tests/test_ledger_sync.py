@@ -12,13 +12,13 @@ import pytest
 
 from models.order import FIELDNAMES, OrderItem, normalize_shipment, shipment_label
 from models.warehouse import Jig, Warehouse
-from sheets import ledger_sync
-from sheets.ledger_sync import (
+from ledger import sync as ledger_sync
+from ledger.sync import (
     HEADER,
     _merge_row,
     load_order_state,
     plan_buying_group_retag,
-    sync_csv_to_sheet,
+    sync_csv_to_ledger,
 )
 
 
@@ -243,7 +243,7 @@ class TestSyncUpsert:
                  shipment="1", status="ordered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 1
         assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "ordered"
@@ -261,7 +261,7 @@ class TestSyncUpsert:
                  shipment="3", status="shipped", tracking_number="TRK1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert len(rows) == 1, "the blank-Order-ID record must not create a row"
@@ -281,7 +281,7 @@ class TestSyncUpsert:
                  status="shipped", tracking_number="1Z999"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 1, "re-check must update, not append a duplicate"
         updated = sheet.data_rows()[0]
@@ -302,7 +302,7 @@ class TestSyncUpsert:
             dict(**common, shipment="2", status="ordered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 2
 
@@ -321,7 +321,7 @@ class TestSyncUpsert:
                  status="shipped"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 2, (
             "differing shipment labels produce two rows — this is the duplicate-row bug, pinned "
@@ -342,7 +342,7 @@ class TestSyncUpsert:
                  shipment="1", status="delivered", delivery_date="2026-08-12"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert len(rows) == 1, "a divergent-name row must update in place, not append a duplicate"
@@ -364,7 +364,7 @@ class TestSyncUpsert:
                  status="delivered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 3, "ambiguous shipment line must not be reconciled"
 
@@ -384,7 +384,7 @@ class TestSyncUpsert:
                  status="shipped"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 3, "ambiguous (2 incoming) shipment line must not reconcile"
 
@@ -406,7 +406,7 @@ class TestSyncUpsert:
                  delivery_date="2026-06-30"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert len(rows) == 1, "same tracking number must reconcile, not duplicate"
@@ -438,7 +438,7 @@ class TestSyncUpsert:
                  shipment="1", tracking_number="TRK_B", status="delivered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert len(rows) == 2, "swapped-number rows must reconcile by tracking, not duplicate"
@@ -463,7 +463,7 @@ class TestSyncUpsert:
             dict(item_name="SKU C page name", shipment="9", status="delivered", **common),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 3, "ambiguous tracking (2 existing) must not reconcile"
 
@@ -483,7 +483,7 @@ class TestSyncUpsert:
                  status="shipped", tracking_number="TRK1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 3, "two incoming for one tracking must not reconcile"
 
@@ -493,7 +493,7 @@ class TestSyncUpsert:
             tmp_path, dict(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1")
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.rows[0] == HEADER
 
@@ -524,7 +524,7 @@ class TestSyncUpsert:
                  status="shipped"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.rows[0] == HEADER, "header row should be migrated to the full schema"
         assert len(sheet.data_rows()) == 1, "legacy row should match, not duplicate"
@@ -543,7 +543,7 @@ class TestSyncUpsert:
                  status="shipped"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.col_count == len(HEADER)
         assert sheet.added_cols == len(HEADER) - len(legacy_header)
@@ -565,7 +565,7 @@ class TestSyncUpsert:
                  status="shipped", buying_group="BFMR"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.rows[0] == HEADER, "header row should be migrated to include Buying Group"
         assert len(sheet.data_rows()) == 1, "legacy row should match, not duplicate"
@@ -584,7 +584,7 @@ class TestSyncUpsert:
                  status="delivered", delivery_date="2026-08-12", buying_group=""),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         r = sheet.data_rows()[0]
         assert r[FIELDNAMES.index("buying_group")] == "BFMR", "blank re-check tag must not wipe it"
@@ -595,7 +595,7 @@ class TestSyncUpsert:
         path = write_csv_file(tmp_path, dict(order_id="A1", order_date="2026-08-08", item_name="W"))
 
         with pytest.raises(RuntimeError, match="not a recognized header"):
-            sync_csv_to_sheet(path)
+            sync_csv_to_ledger(path)
 
 
 class TestSameKeyCollapse:
@@ -622,7 +622,7 @@ class TestSameKeyCollapse:
                  status="shipped", delivery_date="2026-08-10"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 1, "the two half-rows must collapse to one"
         r = sheet.data_rows()[0]
@@ -642,7 +642,7 @@ class TestSameKeyCollapse:
                  shipment="1", status="shipped", tracking_number="1Z999"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 1
         r = sheet.data_rows()[0]
@@ -660,7 +660,7 @@ class TestSameKeyCollapse:
                  shipment="1", status="delivered", delivery_date="2026-08-10"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         r = sheet.data_rows()[0]
         assert r[FIELDNAMES.index("status")] == "delivered"
@@ -676,7 +676,7 @@ class TestSameKeyCollapse:
             dict(**common, shipment="2", status="ordered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 2
 
@@ -706,7 +706,7 @@ class TestUndisclosedSplit:
                  status="shipped", tracking_number="128095", quantity="15"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
         assert set(rows) == {"1", 2}, "the new box must be appended, not overwrite"
@@ -736,7 +736,7 @@ class TestUndisclosedSplit:
                  status="delivered", tracking_number="128095", quantity="15"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 2, "must not re-duplicate a box whose number already has a row"
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
@@ -756,7 +756,7 @@ class TestUndisclosedSplit:
                  status="delivered", tracking_number="086084"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 1
         assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "delivered"
@@ -775,7 +775,7 @@ class TestUndisclosedSplit:
                  status="shipped", tracking_number="128095"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 1
         assert sheet.data_rows()[0][FIELDNAMES.index("tracking_number")] == "128095"
@@ -804,7 +804,7 @@ class TestStatusOnlyMovesForwardOnTheSheet:
                  status="ordered", tracking_number="", quantity="1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "delivered"
 
@@ -820,7 +820,7 @@ class TestStatusOnlyMovesForwardOnTheSheet:
                  status="shipped", tracking_number="1Z999", quantity="1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "shipped"
 
@@ -838,7 +838,7 @@ class TestStatusOnlyMovesForwardOnTheSheet:
                  status="delivered", tracking_number="1Z999", quantity="1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "return"
 
@@ -856,7 +856,7 @@ class TestStatusOnlyMovesForwardOnTheSheet:
                  status="ordered", tracking_number="1Z999", quantity="1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "ordered"
 
@@ -898,7 +898,7 @@ class TestRepeatedTrackingNumberIsAMisRead:
                  status="shipped", tracking_number="...348", quantity="1", total_cost="999.99"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
         assert len(sheet.data_rows()) == 2, "no phantom third box"
@@ -929,7 +929,7 @@ class TestRepeatedTrackingNumberIsAMisRead:
                  status="shipped", tracking_number="1Z999", quantity="1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 2
         for r in sheet.data_rows():
@@ -950,7 +950,7 @@ class TestRepeatedTrackingNumberIsAMisRead:
                  status="shipped", tracking_number="128095", quantity="15"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 2
         assert len(alerts) == 1 and "Split shipment" in alerts[0][0]
@@ -1287,7 +1287,7 @@ class TestNumericCoercionOnMerge:
                  status="shipped"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         written = sheet.data_rows()[0]
         assert written[FIELDNAMES.index("quantity")] == 1, "preserved quantity must be int, not '1'"
@@ -1408,7 +1408,7 @@ class TestNumericCellsInTextColumns:
                  status="shipped", tracking_number="1Z1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 1, "a numeric Shipment cell must not append a duplicate"
         assert sheet.data_rows()[0][FIELDNAMES.index("status")] == "shipped"
@@ -1424,7 +1424,7 @@ class TestNumericCellsInTextColumns:
                  status="shipped", tracking_number="1Z1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 1
 
@@ -1442,7 +1442,7 @@ class TestShipmentStoredAsANumber:
                  status="ordered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         value = sheet.data_rows()[0][FIELDNAMES.index("shipment")]
         assert value == 1
@@ -1462,7 +1462,7 @@ class TestShipmentStoredAsANumber:
                  status="shipped", tracking_number="1Z1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("shipment")] == 1
 
@@ -1481,7 +1481,7 @@ class TestShipmentStoredAsANumber:
                  status="shipped", tracking_number="128095", quantity="15"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         new_box = next(r for r in sheet.data_rows()
                        if r[FIELDNAMES.index("tracking_number")] == "128095")
@@ -1498,7 +1498,7 @@ class TestShipmentStoredAsANumber:
                  status="ordered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("shipment")] == "Box A"
 
@@ -1512,7 +1512,7 @@ class TestShipmentStoredAsANumber:
                  card_last4="0315"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         value = sheet.data_rows()[0][FIELDNAMES.index("card_last4")]
         assert value == "0315"
@@ -1528,7 +1528,7 @@ class TestShipmentStoredAsANumber:
                  quantity="3"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         value = sheet.data_rows()[0][FIELDNAMES.index("quantity")]
         assert value == 3
@@ -1574,7 +1574,7 @@ class TestBlankCellsDoNotStripNumberFormatting:
             order_id="N1", order_date="2026-08-13", item_name="Thing", shipment="1",
             status="shipped", tracking_number="1Z1", quantity="1", cost_per_item="10.00"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         appended = [r for r in sent if r and r[FIELDNAMES.index("order_id")] == "N1"]
         assert appended, "the row should have been appended"
@@ -1631,7 +1631,7 @@ class TestAppendAnchorAndGridLimits:
             order_id="NEW-1", order_date="2026-08-13", item_name="Thing", shipment="1",
             status="shipped", tracking_number="1Z9", quantity="1", cost_per_item="5.00"))
 
-        sync_csv_to_sheet(path)  # must not raise the grid-limit error
+        sync_csv_to_ledger(path)  # must not raise the grid-limit error
 
         written = [r for r in sheet.data_rows() if r[FIELDNAMES.index("order_id")] == "NEW-1"]
         assert written, "the appended row must actually land"
@@ -1644,7 +1644,7 @@ class TestAppendAnchorAndGridLimits:
             order_id="NEW-2", order_date="2026-08-13", item_name="Thing", shipment="1",
             status="shipped", tracking_number="1Z8", quantity="1", cost_per_item="5.00"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.added_rows > 0, "the sheet must be grown before writing past its last row"
 
@@ -1668,7 +1668,7 @@ class TestCancelledRowsCarryNoMoney:
             cost_per_item="199.00", total_cost="398.00", shipping="9.99",
         ))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         written = sheet.data_rows()[0]
         for field in self._MONEY:
@@ -1692,7 +1692,7 @@ class TestCancelledRowsCarryNoMoney:
             status="cancelled",
         ))
 
-        result = sync_csv_to_sheet(path)
+        result = sync_csv_to_ledger(path)
 
         assert result["updated"] == 1 and result["appended"] == 0
         written = sheet.data_rows()[0]
@@ -1707,7 +1707,7 @@ class TestCancelledRowsCarryNoMoney:
             status="delivered", cost_per_item="199.00", total_cost="398.00", shipping="9.99",
         ))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         written = sheet.data_rows()[0]
         assert written[FIELDNAMES.index("total_cost")] == 398.0
@@ -1749,7 +1749,7 @@ class TestAReLabelledSingleUnitIsNotASplit:
             total_cost="1349.00",
         ))
 
-        result = sync_csv_to_sheet(path)
+        result = sync_csv_to_ledger(path)
 
         assert result["updated"] == 1 and result["appended"] == 1
         live, retired = sheet.data_rows()
@@ -1770,8 +1770,8 @@ class TestAReLabelledSingleUnitIsNotASplit:
             order_id="B1", order_date="2026-08-10", item_name="Laptop", shipment="1",
             status="shipped", tracking_number="NEW", quantity="1", total_cost="1349.00",
         ))
-        sync_csv_to_sheet(path)
-        sync_csv_to_sheet(path)  # the API keeps reporting NEW against shipment 1
+        sync_csv_to_ledger(path)
+        sync_csv_to_ledger(path)  # the API keeps reporting NEW against shipment 1
 
         assert len(sheet.data_rows()) == 2, "no second superseded row, no duplicate live row"
         assert len(alerts) == 1
@@ -1783,7 +1783,7 @@ class TestAReLabelledSingleUnitIsNotASplit:
             status="shipped", tracking_number="NEW", quantity="15",
         ))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
         assert rows["1"][FIELDNAMES.index("tracking_number")] == "OLD"
@@ -1797,7 +1797,7 @@ class TestAReLabelledSingleUnitIsNotASplit:
             status="shipped", tracking_number="NEW", quantity="2",
         ))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert "Split shipment" in alerts[0][0]
 
@@ -1826,7 +1826,7 @@ class TestConflictingSameKeyRowsAreNeverMerged:
                  tracking_number="U", quantity="1", cost_per_item="10.00", total_cost="10.00"),
         )
 
-        result = sync_csv_to_sheet(path)
+        result = sync_csv_to_ledger(path)
 
         assert result["skipped_conflicts"] == 1 and result["appended"] == 1
         assert [r[FIELDNAMES.index("order_id")] for r in sheet.data_rows()] == ["B2"]
@@ -1842,7 +1842,7 @@ class TestConflictingSameKeyRowsAreNeverMerged:
             dict(self._KEY, status="delivered", delivery_date="2026-09-09", quantity="1", total_cost="626.29"),
         )
 
-        result = sync_csv_to_sheet(path)
+        result = sync_csv_to_ledger(path)
 
         assert result["skipped_conflicts"] == 0 and result["appended"] == 1
         written = sheet.data_rows()[0]
@@ -1926,7 +1926,7 @@ class TestSupersededRows:
             order_id="A1", order_date="2026-08-08", item_name="W", shipment="2", status="shipped",
             tracking_number="NEW", quantity="1", cost_per_item="100.00", total_cost="100.00",
         ))
-        result = sync_csv_to_sheet(path)
+        result = sync_csv_to_ledger(path)
         assert result["appended"] == 1
         assert sheet.data_rows()[0] == retired_before
         assert sheet.data_rows()[-1][FIELDNAMES.index("total_cost")] == 100.0
@@ -1937,7 +1937,7 @@ class TestSupersededRows:
             order_id="A1", order_date="2026-08-08", item_name="W (re-worded)", shipment="2",
             status="ordered", quantity="1", cost_per_item="100.00", total_cost="100.00",
         ))
-        result = sync_csv_to_sheet(path)
+        result = sync_csv_to_ledger(path)
         assert result["appended"] == 1
         assert sheet.data_rows()[0] == retired_before
 
@@ -1948,7 +1948,7 @@ class TestSupersededRows:
             status="shipped", tracking_number="DEAD", quantity="1", cost_per_item="100.00",
             total_cost="100.00",
         ))
-        result = sync_csv_to_sheet(path)
+        result = sync_csv_to_ledger(path)
         assert result["appended"] == 1
         assert sheet.data_rows()[0] == retired_before
 
@@ -1971,7 +1971,7 @@ class TestSupersededRows:
             tracking_number="LIVE", quantity="1", cost_per_item="100.00", total_cost="100.00",
             shipping="40.00",
         ))
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
         rows = sheet.data_rows()
         assert rows[0][FIELDNAMES.index("shipping")] == ""      # the retired row stays blank
         assert rows[1][FIELDNAMES.index("shipping")] == 40.0    # the live row takes the whole total
@@ -2048,7 +2048,7 @@ class TestClassifyOrderStateIsPure:
     """The classifier is the loop load_order_state used to run inline; it must answer offline."""
 
     def test_it_takes_a_grid_and_needs_no_sheet(self):
-        from sheets.ledger_sync import classify_order_state
+        from ledger.sync import classify_order_state
         grid = [
             list(HEADER),
             row(order_id="A1", order_date="2026-08-08", item_name="W", shipment="1",
@@ -2066,7 +2066,7 @@ class TestClassifyOrderStateIsPure:
         assert classify_order_state(grid, "nobody") == {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
 
     def test_load_order_state_delegates_to_it(self, sheet, monkeypatch):
-        import sheets.ledger_sync as ls
+        import ledger.sync as ls
         sheet.rows = [list(HEADER), row(order_id="A1", order_date="2026-08-08", item_name="W",
                                         shipment="1", status="shipped", profile_label="p1")]
         seen = {}
@@ -2107,7 +2107,7 @@ class TestPreservedCellsComeFromStoredValues:
         shown[FIELDNAMES.index("payout_amount")] = ""   # a ;;; number format renders nothing
         self._lossy(sheet, monkeypatch, shown)
 
-        sync_csv_to_sheet(self._incoming(tmp_path))
+        sync_csv_to_ledger(self._incoming(tmp_path))
 
         assert sheet.rows[1][FIELDNAMES.index("payout_amount")] == 631.0
 
@@ -2122,7 +2122,7 @@ class TestPreservedCellsComeFromStoredValues:
         shown[FIELDNAMES.index("total_cost")] = "$1,300"
         self._lossy(sheet, monkeypatch, shown)
 
-        sync_csv_to_sheet(self._incoming(tmp_path))
+        sync_csv_to_ledger(self._incoming(tmp_path))
 
         assert sheet.rows[1][FIELDNAMES.index("cost_per_item")] == 1300.45
 
@@ -2131,7 +2131,7 @@ class TestPreservedCellsComeFromStoredValues:
                      status="delivered", tracking_number="1Z1", profile_label="p1", payout_amount="$12.50")
         sheet.rows = [list(HEADER), stored]
 
-        sync_csv_to_sheet(self._incoming(tmp_path))
+        sync_csv_to_ledger(self._incoming(tmp_path))
 
         assert sheet.rows[1][FIELDNAMES.index("payout_amount")] == 12.5   # _coerce parsed the text, as before
 
@@ -2141,7 +2141,7 @@ class TestPreservedCellsComeFromStoredValues:
                      status="shipped", tracking_number="1Z1", profile_label="p1", payout_amount="12.5")
         sheet.rows = [list(HEADER), stored]
 
-        sync_csv_to_sheet(self._incoming(tmp_path))
+        sync_csv_to_ledger(self._incoming(tmp_path))
 
         assert sheet.rows[1][FIELDNAMES.index("payout_amount")] == 12.5
         assert sheet.rows[1][FIELDNAMES.index("status")] == "delivered"
@@ -2212,7 +2212,7 @@ class TestAProperPerPackageSplitNeverHitsTheSafetyNet:
 
     def test_two_packages_land_as_two_rows_with_their_own_quantities(self, sheet, tmp_path, alerts):
         sheet.rows = [list(HEADER)]
-        sync_csv_to_sheet(write_csv_file(tmp_path, self._A, self._B))
+        sync_csv_to_ledger(write_csv_file(tmp_path, self._A, self._B))
 
         rows = {str(r[FIELDNAMES.index("shipment")]): r for r in sheet.data_rows()}
         assert rows["1"][FIELDNAMES.index("quantity")] == 2 and rows["1"][FIELDNAMES.index("total_cost")] == 2698.0
@@ -2222,10 +2222,10 @@ class TestAProperPerPackageSplitNeverHitsTheSafetyNet:
 
     def test_a_later_read_updates_both_in_place(self, sheet, tmp_path, alerts):
         sheet.rows = [list(HEADER)]
-        sync_csv_to_sheet(write_csv_file(tmp_path, self._A, self._B))
+        sync_csv_to_ledger(write_csv_file(tmp_path, self._A, self._B))
         delivered = [dict(self._A, status="delivered"), dict(self._B, status="delivered")]
 
-        result = sync_csv_to_sheet(write_csv_file(tmp_path, *delivered))
+        result = sync_csv_to_ledger(write_csv_file(tmp_path, *delivered))
 
         assert result == dict(result, updated=2, appended=0, split_rows=0)
         assert len(sheet.data_rows()) == 2 and alerts == []
@@ -2235,7 +2235,7 @@ class TestAProperPerPackageSplitNeverHitsTheSafetyNet:
         number unchanged on package 1 -- an exact-key update plus a clean append, no '*'."""
         sheet.rows = [list(HEADER), row(**dict(self._A, quantity="3", total_cost="4047.00"))]
 
-        sync_csv_to_sheet(write_csv_file(tmp_path, self._A, self._B))
+        sync_csv_to_ledger(write_csv_file(tmp_path, self._A, self._B))
 
         rows = {str(r[FIELDNAMES.index("shipment")]): r for r in sheet.data_rows()}
         assert rows["1"][FIELDNAMES.index("quantity")] == 2 and rows["1"][FIELDNAMES.index("tracking_number")] == "529900000011"
@@ -2292,7 +2292,7 @@ class TestPackageIdDeferral:
             self._incoming(shipment="2", tracking_number="TBA-A", package_id="AAA"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = self._by_shipment(sheet)
         assert len(sheet.data_rows()) == 2 and set(rows) == {"1", "2"}
@@ -2309,7 +2309,7 @@ class TestPackageIdDeferral:
         # The card moved to position 2 on the page, so the exact key misses; the id finds it.
         path = write_csv_file(tmp_path, self._incoming(shipment="2", tracking_number="TBA-NEW", package_id="P1"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = self._by_shipment(sheet)
         assert rows["1"][_F["tracking_number"]] == "TBA-NEW" and rows["1"][_F["package_id"]] == "P1"
@@ -2323,7 +2323,7 @@ class TestPackageIdDeferral:
         sheet.rows = [list(HEADER), self._existing(shipment="1", tracking_number="TBA-A", package_id="")]
         path = write_csv_file(tmp_path, self._incoming(shipment="2", tracking_number="TBA-A", package_id="NEW"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = self._by_shipment(sheet)
         assert list(rows) == ["1"] and rows["1"][_F["package_id"]] == "NEW"
@@ -2334,7 +2334,7 @@ class TestPackageIdDeferral:
         path = write_csv_file(tmp_path, self._incoming(shipment="1", tracking_number="TBA-A", package_id="",
                                                        status="delivered"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = self._by_shipment(sheet)
         assert list(rows) == ["1"]
@@ -2358,7 +2358,7 @@ class TestPackageIdDeferral:
                            cost_per_item=15, total_cost=15),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         by_name = {r[_F["item_name"]]: r for r in sheet.data_rows()}
         assert set(by_name) == {"Case", "Pencil", "Sleeve"}
@@ -2375,7 +2375,7 @@ class TestPackageIdDeferral:
         ]
         path = write_csv_file(tmp_path, self._incoming(shipment="2", tracking_number="TBA-NEW", package_id="P1"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = self._by_shipment(sheet)
         assert rows["1"][_F["status"]] == "superseded" and rows["1"][_F["tracking_number"]] == "TBA-OLD"
@@ -2392,7 +2392,7 @@ class TestPackageIdDeferral:
             self._incoming(shipment="2", tracking_number="TBA-A", package_id="AAA", status="delivered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = self._by_shipment(sheet)
         assert set(rows) == {"1", "2"}
@@ -2411,7 +2411,7 @@ class TestPackageIdDeferral:
         path = write_csv_file(tmp_path, self._incoming(shipment="1", tracking_number="TBA-NEW",
                                                        package_id="NxWmqLBj2", quantity=3, total_cost=2847))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = self._by_shipment(sheet)
         assert set(rows) == {"1", "2"}
@@ -2427,7 +2427,7 @@ class TestPackageIdDeferral:
         sheet.rows = [list(HEADER), self._existing(shipment="1", tracking_number="TBA-OLD", package_id="OLD-ID")]
         path = write_csv_file(tmp_path, self._incoming(shipment="1", tracking_number="TBA-NEW", package_id="NEW-ID"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = self._by_shipment(sheet)
         assert (rows["1"][_F["tracking_number"]], rows["1"][_F["package_id"]], rows["1"][_F["total_cost"]]) == ("TBA-NEW", "NEW-ID", 949)
@@ -2444,7 +2444,7 @@ class TestPackageIdDeferral:
             writer.writerow({k: v for k, v in self._incoming(shipment="1", tracking_number="TBA-A",
                                                              status="delivered").items() if k in old_fields})
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = self._by_shipment(sheet)
         assert list(rows) == ["1"]
@@ -2489,7 +2489,7 @@ class TestPreShipCardsMergedIntoOnePackage:
                               self._incoming("HABA Busy Board", "1"),
                               self._incoming("Fat Brain Kupz", "1"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert len(rows) == 2                                   # nothing appended
@@ -2512,7 +2512,7 @@ class TestPreShipCardsMergedIntoOnePackage:
                               self._incoming("Fat Brain Kupz", "2", status="ordered",
                                              tracking_number="", package_id=""))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert len(rows) == 3
@@ -2526,7 +2526,7 @@ class TestPreShipCardsMergedIntoOnePackage:
                       self._existing("Fat Brain Kupz", "2", package_id="PKG2", status="ordered")]
         path = write_csv_file(tmp_path, self._incoming("Fat Brain Kupz", "1", package_id="PKG2"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert len(rows) == 1 and str(rows[0][_F["shipment"]]) == "2"   # id rule: keeps its number
@@ -2570,7 +2570,7 @@ class TestCostcoRenamesLinesWhenAnOrderIsCancelled:
         sheet.rows = [list(HEADER), self._existing(self.LONG_P, 2), self._existing(self.LONG_B, 1)]
         path = write_csv_file(tmp_path, self._incoming(self.TERSE_P, 2), self._incoming(self.TERSE_B, 1))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert len(rows) == 2                                      # nothing appended
@@ -2589,7 +2589,7 @@ class TestCostcoRenamesLinesWhenAnOrderIsCancelled:
                               self._incoming("IPAD AIR 11 M4 256GB SBLU (Item #2042810)", 1,
                                              status="ordered"))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert len(rows) == 3
@@ -2603,7 +2603,7 @@ class TestCostcoRenamesLinesWhenAnOrderIsCancelled:
         sheet.rows = [list(HEADER), self._existing("iPad Air Purple", 2), self._existing("iPad Air Blue", 1)]
         path = write_csv_file(tmp_path, self._incoming("IPAD AIR PURP", 2), self._incoming("IPAD AIR BLUE", 1))
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 4
 
@@ -2612,8 +2612,8 @@ class TestCostcoRenamesLinesWhenAnOrderIsCancelled:
 # The 2026-08-12 column reorder: the guard that stops a mis-ordered grid being scrambled, and the
 # Shipment relabelling. Rows are written POSITIONALLY from column A, so a grid whose columns are in
 # a different order than FIELDNAMES would be overwritten with values in the wrong cells -- no
-# exception, no log, just silently wrong money. (Moved from tests/test_reorder_sheet.py when the
-# Sheet migration script went, 2026-09-18.)
+# exception, no log, just silently wrong money. (Moved here when the Sheet migration script and
+# its tests went, 2026-09-18.)
 # --------------------------------------------------------------------------------------------------
 
 # The pre-reorder column order, as the live sheet actually held it before 2026-08-12.
@@ -2668,7 +2668,7 @@ class TestOrderMismatchGuard:
         )
 
         with pytest.raises(RuntimeError, match="different ORDER"):
-            sync_csv_to_sheet(path)
+            sync_csv_to_ledger(path)
 
         # The point of raising: the existing row is untouched, not overwritten with shuffled values.
         assert sheet.data_rows()[0][OLD_HEADER.index("Total Cost")] == "199.99"
@@ -2680,7 +2680,7 @@ class TestOrderMismatchGuard:
             dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("order_id")] == "A1"
 
@@ -2691,7 +2691,7 @@ class TestLastOccupiedRowAndTheCheckbox:
         _last_occupied_row skips rows whose only content is that False. Looked up via FIELDNAMES
         on a grid in another order it lands on the wrong column -- so the padding is not
         recognised and every grid row counts as occupied (live, 983 rows on a 42-row ledger)."""
-        from sheets.ledger_sync import _last_occupied_row
+        from ledger.sync import _last_occupied_row
 
         old_header = [h for h in HEADER if h != "Tracking Submitted"] + ["Tracking Submitted"]
         checkbox_i = old_header.index("Tracking Submitted")
@@ -2706,7 +2706,7 @@ class TestLastOccupiedRowAndTheCheckbox:
             "looked up via FIELDNAMES the checkbox is missed and the whole grid reads as occupied"
 
     def test_a_grid_already_in_the_current_order_still_works_without_the_hint(self):
-        from sheets.ledger_sync import _last_occupied_row
+        from ledger.sync import _last_occupied_row
 
         checkbox_i = FIELDNAMES.index("tracking_submitted")
         real_row = [""] * len(HEADER)

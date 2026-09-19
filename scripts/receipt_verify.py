@@ -34,7 +34,7 @@ import sys
 
 from receipts import store
 from receipts.sources import not_final_reason
-from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet
+from ledger.sync import HEADER, _col_letter, _get_worksheet
 
 # Any one of these is enough to call the document costed. Deliberately loose: four retailers word it
 # four ways ("Grand Total", "Order Total", "Total"), and this is a completeness check, not a parse.

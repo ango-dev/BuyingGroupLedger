@@ -10,7 +10,7 @@ value computed at scrape time would be stale the moment either is entered — an
 terminal, never re-scraped, so it would stay stale forever. Total Profit therefore stays a live
 formula. Shipping doesn't have that problem (it depends only on scraped data, which is only ever
 current as of the last re-scrape anyway), so its cost-weighted split is computed once in Python by
-sheets.ledger_sync._reprorate_order_level and written as a plain number — see that function's docstring
+ledger.sync._reprorate_order_level and written as a plain number — see that function's docstring
 for why a live SUMIF-based formula (the original design, briefly a separate "Prorated Shipping"
 column) was dropped in favor of this.
 
@@ -19,8 +19,8 @@ fake stays a single stand-in for gspread.
 """
 
 from models.order import FIELDNAMES
-from sheets import ledger_sync
-from sheets.ledger_sync import HEADER, sync_csv_to_sheet
+from ledger import sync as ledger_sync
+from ledger.sync import HEADER, sync_csv_to_ledger
 
 from tests.test_ledger_sync import row, sheet, write_csv_file  # noqa: F401  (sheet is a fixture)
 
@@ -194,7 +194,7 @@ class TestFormulaIsWritten:
                  status="ordered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         # Row 2 was updated in place, row 3 appended — both need the formula.
         assert set(sheet.profit_formulas()) == {2, 3}
@@ -211,7 +211,7 @@ class TestFormulaIsWritten:
             dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.batch_input_options == ["USER_ENTERED"]
         assert all(e["values"][0][0].startswith("=") for e in sheet.batched)
@@ -223,7 +223,7 @@ class TestFormulaIsWritten:
             dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="Shipment 1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         # BOTH derived columns are stamped, in one batch — Total Profit reads the COGS cell, so
         # stamping one without the other would leave a live formula pointing at a frozen number.
@@ -237,7 +237,7 @@ class TestFormulaIsWritten:
         sheet.rows = [list(HEADER)]
         path = write_csv_file(tmp_path, dict(order_id="", item_name="Orphan"))  # blank id -> skipped
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.batched == []
 
@@ -254,7 +254,7 @@ class TestFormulaIsWritten:
         )
 
         with caplog.at_level("ERROR"):
-            sync_csv_to_sheet(path)
+            sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("order_id")] == "A1"
         assert "Total Profit formula" in caplog.text
@@ -273,13 +273,13 @@ class TestFormulaIsWritten:
                  status="shipped", tracking_number="1Z1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("total_profit")] == ledger_sync._profit_formula(2)
 
 
 class TestShippingReproration:
-    """_reprorate_order_level (sheets/ledger_sync.py) rewrites every row of a touched order's Shipping
+    """_reprorate_order_level (ledger/sync.py) rewrites every row of a touched order's Shipping
     cell to its own cost-weighted share of the order's raw shipping total — replacing the raw
     order-level number every scraper/agent emits, in place, as a plain number (not a formula)."""
 
@@ -293,7 +293,7 @@ class TestShippingReproration:
                  quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="19.99"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("shipping")] == 19.99
 
@@ -307,7 +307,7 @@ class TestShippingReproration:
                  quantity="1", cost_per_item="300.00", total_cost="300.00", shipping="40.00"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert rows[0][FIELDNAMES.index("shipping")] == 10.0   # 40 * 100/400
@@ -331,7 +331,7 @@ class TestShippingReproration:
                  quantity="1", cost_per_item="300.00", total_cost="300.00", shipping="40.00"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert rows[0][FIELDNAMES.index("shipping")] == 10.0   # the untouched sibling, re-split
@@ -354,7 +354,7 @@ class TestShippingReproration:
                  status="shipped", tracking_number="1Z1"),  # no shipping/cost figures at all
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert rows[0][FIELDNAMES.index("shipping")] == "10.0"
@@ -370,7 +370,7 @@ class TestShippingReproration:
                  shipping="12.00"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("shipping")] == 0.0
 
@@ -389,7 +389,7 @@ class TestShippingReproration:
                  gift_card="50.00", sales_tax="8.00"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         rows = sheet.data_rows()
         assert rows[0][FIELDNAMES.index("gift_card")] == 12.5   # 50 * 100/400
@@ -412,7 +412,7 @@ class TestShippingReproration:
                  quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="40.00"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 1, "the re-check must match the existing row, not append"
         r = sheet.data_rows()[0]
@@ -432,7 +432,7 @@ class TestShippingReproration:
                  quantity="1", cost_per_item="100.00", total_cost="100.00", shipping="19.99"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert "RAW" in sheet.batch_input_options
 
@@ -453,7 +453,7 @@ class TestProfitColumnsUpsert:
                  status="delivered"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         recorded = sheet.data_rows()[0]
         assert recorded[FIELDNAMES.index("insurance")] == 4.50
@@ -474,7 +474,7 @@ class TestProfitColumnsUpsert:
                  status="shipped", tracking_number="1Z1"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         recorded = sheet.data_rows()[0]
         assert recorded[FIELDNAMES.index("card_name")] == "Freedom"
@@ -489,6 +489,6 @@ class TestProfitColumnsUpsert:
                  card_name="Freedom", cashback_rate="0.015"),
         )
 
-        sync_csv_to_sheet(path)
+        sync_csv_to_ledger(path)
 
         assert sheet.data_rows()[0][FIELDNAMES.index("cashback_rate")] == 0.015

@@ -75,7 +75,7 @@ from buying_groups.base import BuyingGroupError, PayoutRecord, TrackingSubmissio
 from config.warehouses import is_deliberately_unrouted
 from buying_groups.registry import PROVIDERS, get_client, resolve_group
 from models.order import FIELDNAMES, RETIRED_STATUSES
-from sheets.ledger_sync import (
+from ledger.sync import (
     HEADER,
     _col_letter,
     _get_worksheet,
@@ -114,7 +114,7 @@ _UNRESOLVED_QUANTITY = "*"
 
 
 # --- the pure planner ---------------------------------------------------------------------------
-# Kept here rather than in sheets/ledger_sync.py on purpose: `sheets` is a lower layer than
+# Kept here rather than in ledger/sync.py on purpose: `sheets` is a lower layer than
 # `buying_groups`, and having it import a provider registry would invert the dependency — the same
 # reason config/cards.py hand-copies KNOWN_RETAILERS instead of importing main. scripts/
 # backfill_profit_columns.py:plan_profit_backfill sets the precedent for a pure planner living
@@ -209,7 +209,7 @@ def plan_tracking_submissions(header: list[str], data_rows: list[list]) -> dict:
 
         order_id = cell("Order ID")
         if not order_id:
-            continue  # same rule as sync_csv_to_sheet: a blank Order ID is not a real row
+            continue  # same rule as sync_csv_to_ledger: a blank Order ID is not a real row
 
         # A RETIRED row (superseded, the design notes) holds a tracking number Amazon re-issued. That dead
         # number really was posted, and the groups hold it -- but it will never move, so it must
@@ -754,8 +754,8 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
     header = [str(c) for c in existing[0]]
     if header != list(HEADER):
         raise SystemExit(
-            "Sheet header doesn't match the current schema; run `python -m scripts.reorder_sheet` "
-            f"first.\n  sheet:    {header}\n  expected: {list(HEADER)}"
+            "The ledger's header doesn't match the current schema (the file migrates its own columns "
+            f"on open, so this should not happen).\n  ledger:   {header}\n  expected: {list(HEADER)}"
         )
 
     plan = plan_tracking_submissions(header, existing[1:])
@@ -1119,7 +1119,7 @@ def _write_payout_cells(worksheet, writes: dict[int, dict], apply: bool) -> None
     carrying the Total Profit formula freezes it into whatever number it last evaluated to, and this
     module writes precisely the cells that formula depends on — so skipping it would leave every
     touched row showing a stale profit that nothing downstream would flag.
-    `scripts/audit_sheet.py:check_profit_formula_literal` is the tripwire for getting this wrong.
+    `scripts/audit_ledger.py:check_profit_formula_literal` is the tripwire for getting this wrong.
     """
     data = [
         {"range": f"{_col_letter(HEADER.index(col))}{row_number}", "values": [[value]]}

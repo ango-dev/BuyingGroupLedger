@@ -928,7 +928,7 @@ def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
     alerted. And if the survivors STILL do not reconcile — e.g. a qty-6 order split 3+3 where one box
     was re-tracked, giving 3/3/3 — quantities are left UNRESOLVED ("*" with a blank cost) rather than
     guessed, the same convention ledger_sync's undisclosed-split net uses and which
-    audit_sheet.unresolved_split_quantity exists to surface.
+    audit_ledger.unresolved_split_quantity exists to surface.
     """
     if subtotal is None or not rows:
         return rows
@@ -1117,7 +1117,7 @@ def build_order_items(
             # never be submitted to a buying group and will never be paid out on its own — the income
             # arrives through the order the balance pays for, whose COGS drops by this amount via its
             # Gift Card cell. Left blank it would instead read as an ordinary order still awaiting
-            # payment, which is what audit_sheet's cogs_inputs_complete counts as a year-boundary
+            # payment, which is what audit_ledger's cogs_inputs_complete counts as a year-boundary
             # straddle. config.warehouses.tag_and_filter_personal preserves this tag.
             item_group = GIFT_CARD if kept_gift_card else ""
             qty_el = container.select_one(".od-item-view-qty")

@@ -22,12 +22,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from models.order import FIELDNAMES
-from sheets.ledger_sync import _BOOL_FIELDS, _INT_FIELDS, _NUMERIC_FIELDS
+from ledger.sync import _BOOL_FIELDS, _INT_FIELDS, _NUMERIC_FIELDS
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PATH = ROOT / "data" / "ledger.sqlite3"
 
-#: The ledger's upsert key (sheets/ledger_sync._record_key): Order ID + Order Date + Item Name +
+#: The ledger's upsert key (ledger/sync._record_key): Order ID + Order Date + Item Name +
 #: Shipment.
 KEY_FIELDS = ("order_id", "order_date", "item_name", "shipment")
 #: Sheet formulas whose RESULT is stored here as a number.

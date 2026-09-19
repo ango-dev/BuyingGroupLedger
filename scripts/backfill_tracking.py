@@ -26,7 +26,7 @@ import sys
 from collections import defaultdict
 
 from buying_groups.bfmr import BFMRClient, _tracking_of
-from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet
+from ledger.sync import HEADER, _col_letter, _get_worksheet
 
 
 def plan_backfill(grid: list[list], bfmr_rows: list[dict]) -> tuple[list[tuple[int, str, str]], list[str]]:

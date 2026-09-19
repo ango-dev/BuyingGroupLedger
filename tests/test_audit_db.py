@@ -1,6 +1,6 @@
 """The Audit and Reconciliation pages over the SQLite ledger -- the backend the host runs. The
 audit's grids come from the worksheet adapter (the CLI's own path under `db`), so a finding on
-the page is exactly what `python -m scripts.audit_sheet` would print."""
+the page is exactly what `python -m scripts.audit_ledger` would print."""
 from __future__ import annotations
 
 import dataclasses
@@ -84,7 +84,7 @@ class TestAuditOverTheDatabase:
         assert "no rate resolved" not in body
 
     def test_the_checks_run_over_the_adapter_exactly_as_the_cli_does(self, db):
-        from scripts.audit_sheet import Options, Sheet, read_grids, run_checks
+        from scripts.audit_ledger import Options, Sheet, read_grids, run_checks
 
         ws = DbWorksheet(db, read_only=True)
         results = {r.name: r for r in run_checks(Sheet(read_grids(ws, ws.title)), Options())}

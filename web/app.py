@@ -127,7 +127,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                container_restarter: Callable[[], None] | None = None,
                in_container: bool | None = None,
                writer=None) -> FastAPI:
-    """`writer` is the ONE sheet-write path (web/ledger_writer.SheetCellWriter): cell edits on
+    """`writer` is the ONE sheet-write path (web/ledger_writer.LedgerCellWriter): cell edits on
     the Orders page. None = the page is view-only (the snapshot backend, or a test).
     `container_restarter` / `in_container` are injection points for the container-restart
     button (the defaults signal PID 1, and detect Docker by /.dockerenv)."""
@@ -217,9 +217,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     # The sheet writer: cell edits on the Orders page. The snapshot backend is a CSV, so there is
     # nothing to write to and the page stays view-only there.
     if writer is None and reader.backend != "snapshot":
-        from web.ledger_writer import SheetCellWriter
+        from web.ledger_writer import LedgerCellWriter
 
-        writer = SheetCellWriter(logs_dir=logs_dir)
+        writer = LedgerCellWriter(logs_dir=logs_dir)
     app.state.writer = writer
     import json
 
@@ -304,7 +304,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return sorted(years, reverse=True)
 
     def tax_report_for(snapshot, year: int) -> dict:
-        from scripts.audit_sheet import Sheet
+        from scripts.audit_ledger import Sheet
         from scripts.tax_report import build_report
 
         return build_report(Sheet(audit_grids(reader, snapshot)), year)

@@ -25,7 +25,7 @@ the income arrives through the orders it funds, whose Gift Card cell netted thei
 counted in COGS but reported on its own line, NOT as money still owed (the audit's
 cogs_inputs_complete draws the same distinction).
 
-Reads the sheet through scripts/audit_sheet's READ-ONLY path (read-only OAuth scope), so it cannot
+Reads the sheet through scripts/audit_ledger's READ-ONLY path (read-only OAuth scope), so it cannot
 write even by accident. Cashback is already netted into COGS by the sheet formula; the report shows
 the gross cost and the cashback separately as well, so the netting is visible rather than implied.
 """
@@ -40,12 +40,12 @@ from datetime import date, timedelta
 
 from config.warehouses import is_deliberately_unrouted
 from models.order import MONEY_FREE_STATUSES
-from scripts.audit_sheet import (
+from scripts.audit_ledger import (
     Grids,
     Sheet,
     _parse_display_number,
     _snapshot_path,
-    open_worksheet_readonly,
+    open_ledger_readonly,
     read_grids,
 )
 
@@ -244,7 +244,7 @@ def main(argv=None) -> None:
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--no-rows", action="store_true", help="totals and breakdowns only")
     parser.add_argument("--from-snapshot", metavar="PATH",
-                        help="read an audit_sheet --save-snapshot file instead of the live sheet")
+                        help="read an audit_ledger --save-snapshot file instead of the live sheet")
     args = parser.parse_args(argv)
 
     year = args.year
@@ -259,7 +259,7 @@ def main(argv=None) -> None:
         with open(_snapshot_path(args.from_snapshot), encoding="utf-8") as fh:
             grids = Grids.from_snapshot(json.load(fh))
     else:
-        worksheet, title = open_worksheet_readonly()
+        worksheet, title = open_ledger_readonly()
         grids = read_grids(worksheet, title)
     if not grids.formatted:
         raise SystemExit("The worksheet is empty.")

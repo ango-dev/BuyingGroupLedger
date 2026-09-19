@@ -1,4 +1,4 @@
-"""Offline tests for scripts/audit_sheet.py.
+"""Offline tests for scripts/audit_ledger.py.
 
 THE POINT OF THE FAKE IN THIS FILE. The auditor's whole job is to notice disagreements between the
 three Google Sheets render modes, so a fake that returns the same grid for every mode would make
@@ -22,9 +22,9 @@ from typing import Any
 import pytest
 
 from models.order import FIELDNAMES
-from scripts import audit_sheet
-from scripts.audit_sheet import Grids, Options, Sheet, run_checks
-from sheets.ledger_sync import HEADER, _COL, _cogs_formula, _profit_formula
+from scripts import audit_ledger
+from scripts.audit_ledger import Grids, Options, Sheet, run_checks
+from ledger.sync import HEADER, _COL, _cogs_formula, _profit_formula
 from tests.test_ledger_sync import _as_sheet_text
 
 _SHEETS_EPOCH = date(1899, 12, 30)
@@ -178,7 +178,7 @@ def build(*rows: list[Cell]) -> Sheet:
 
 def grids_for(*rows: list[Cell]) -> Grids:
     """The Grids a fake worksheet holding these rows would produce."""
-    return audit_sheet.read_grids(RenderedFakeWorksheet([header_cells(), *rows]))
+    return audit_ledger.read_grids(RenderedFakeWorksheet([header_cells(), *rows]))
 
 
 def result_for(sheet: Sheet, name: str, opts: Options | None = None):
@@ -235,14 +235,14 @@ class TestTheFakeMatchesRealGspread:
 def test_read_grids_requests_all_three_modes_exactly_once():
     """The anti-drift guarantee: the auditor asks for each representation, deliberately, once."""
     worksheet = RenderedFakeWorksheet([header_cells(), row_cells(2)])
-    audit_sheet.read_grids(worksheet)
+    audit_ledger.read_grids(worksheet)
     assert worksheet.reads == ["FORMATTED_VALUE", "UNFORMATTED_VALUE", "FORMULA"]
 
 
 def _called_names(path: str) -> set[str]:
     """Every function/method NAME the module actually calls.
 
-    Parsed from the AST rather than grepped, because audit_sheet.py deliberately NAMES the mutating
+    Parsed from the AST rather than grepped, because audit_ledger.py deliberately NAMES the mutating
     calls it refuses to make, in order to explain why — a substring scan would flag that explanation
     as the very thing it warns against.
     """
@@ -263,14 +263,14 @@ def _called_names(path: str) -> set[str]:
 
 def test_the_audit_module_never_calls_a_writer():
     """Crude, but this is exactly the class of mistake that recurs here, and it's cheap insurance."""
-    called = _called_names(audit_sheet.__file__)
+    called = _called_names(audit_ledger.__file__)
     for forbidden in (
         "_write_profit_formulas", "add_worksheet", "append_row", "append_rows",
         "batch_update", "update", "update_cell", "update_cells", "delete_rows", "clear",
         # The opener that CREATES a missing tab (ledger_sync.py:172-178) — see the module docstring.
         "_get_worksheet",
     ):
-        assert forbidden not in called, f"audit_sheet.py must not call {forbidden!r}"
+        assert forbidden not in called, f"audit_ledger.py must not call {forbidden!r}"
     # Positive control: the guard is actually looking at real calls.
     assert "read_grids" in called
 
@@ -304,7 +304,7 @@ def test_a_reordered_header_fails_and_skips_every_index_based_check():
     swapped = list(HEADER)
     swapped[0], swapped[1] = swapped[1], swapped[0]
     worksheet = RenderedFakeWorksheet([[Cell(n) for n in swapped], row_cells(2)])
-    sheet = Sheet(audit_sheet.read_grids(worksheet))
+    sheet = Sheet(audit_ledger.read_grids(worksheet))
     results = {r.name: r for r in run_checks(sheet, Options())}
     assert results["header_matches_schema"].status == "FAIL"
     assert any("MOVED" in d for d in results["header_matches_schema"].details)
@@ -442,7 +442,7 @@ class TestQuantityIsChecked:
     """
 
     def test_numeric_columns_check_genuinely_does_not_inspect_quantity(self):
-        from sheets.ledger_sync import _INT_FIELDS, _NUMERIC_FIELDS
+        from ledger.sync import _INT_FIELDS, _NUMERIC_FIELDS
 
         assert "quantity" not in {f for f in _NUMERIC_FIELDS if f not in _INT_FIELDS}
 
@@ -469,24 +469,24 @@ class TestQuantityIsChecked:
 
 def test_exit_code_is_1_on_failure_and_0_otherwise():
     healthy = run_checks(build(row_cells(2)), Options())
-    assert audit_sheet.exit_code(healthy, strict=False) == 0
+    assert audit_ledger.exit_code(healthy, strict=False) == 0
     broken = run_checks(build(row_cells(2, **{"Card Last 4": Cell(766)})), Options())
-    assert audit_sheet.exit_code(broken, strict=False) == 1
+    assert audit_ledger.exit_code(broken, strict=False) == 1
 
 
 def test_strict_promotes_warnings_to_a_failing_exit_code():
     a = row_cells(2, **{"Order ID": Cell("BBY01-1"), "Shipping": Cell(10.0), "Item Name": Cell("A")})
     b = row_cells(3, **{"Order ID": Cell("BBY01-1"), "Shipping": Cell(0.0), "Item Name": Cell("B")})
     results = run_checks(build(a, b), Options())
-    assert audit_sheet.exit_code(results, strict=False) == 0
-    assert audit_sheet.exit_code(results, strict=True) == 1
+    assert audit_ledger.exit_code(results, strict=False) == 0
+    assert audit_ledger.exit_code(results, strict=True) == 1
 
 
 def test_a_snapshot_round_trips_through_json():
     import json
 
     worksheet = RenderedFakeWorksheet([header_cells(), row_cells(2)])
-    grids = audit_sheet.read_grids(worksheet)
+    grids = audit_ledger.read_grids(worksheet)
     restored = Grids.from_snapshot(json.loads(json.dumps(grids.to_snapshot(), default=str)))
     assert restored.formatted == grids.formatted
     assert restored.formula == grids.formula
@@ -499,7 +499,7 @@ def test_a_snapshot_round_trips_through_json():
 def test_a_broken_check_does_not_hide_the_checks_after_it():
     sheet = build(row_cells(2))
 
-    @audit_sheet.check("deliberately_broken")
+    @audit_ledger.check("deliberately_broken")
     def _boom(s, o):
         raise ValueError("boom")
 
@@ -507,9 +507,9 @@ def test_a_broken_check_does_not_hide_the_checks_after_it():
         results = run_checks(sheet, Options())
         broken = [r for r in results if r.name == "deliberately_broken"][0]
         assert broken.status == "FAIL" and "ValueError" in broken.summary
-        assert len(results) == len(audit_sheet.CHECKS)
+        assert len(results) == len(audit_ledger.CHECKS)
     finally:
-        audit_sheet.CHECKS[:] = [c for c in audit_sheet.CHECKS if c[0] != "deliberately_broken"]
+        audit_ledger.CHECKS[:] = [c for c in audit_ledger.CHECKS if c[0] != "deliberately_broken"]
 
 
 def test_header_and_fieldnames_stay_paired():
@@ -610,7 +610,7 @@ class TestSupersededRowsCarryNoMoney:
     """The one non-negotiable of a kept superseded row: every money cell blank."""
 
     def _retired(self, n=2, **overrides):
-        from sheets.ledger_sync import _cogs_formula, _profit_formula
+        from ledger.sync import _cogs_formula, _profit_formula
         cells = dict(_SUPERSEDED_MONEY_BLANKS)
         cells.update({
             "Status": Cell("superseded"), "Shipment": Cell(2), "Tracking Number": Cell("DEAD"),
@@ -674,7 +674,7 @@ class TestReviewFindings:
         # The point of INFO: these two cannot, on their own, make --strict exit non-zero.
         # (Scoped to this pair deliberately -- the coverage checks read the real warehouses.json /
         # cards.json, so a whole-sheet exit code would depend on the user's config, not on the code.)
-        assert audit_sheet.exit_code(pair, strict=True) == 0
+        assert audit_ledger.exit_code(pair, strict=True) == 0
 
     def test_one_tracking_number_under_two_orders_is_still_a_warning(self):
         a = row_cells(2, **{"Order ID": Cell("C-1"), "Tracking Number": Cell("1Z1")})
@@ -685,7 +685,7 @@ class TestReviewFindings:
         """It used to return the height WARN before ever comparing, so --expect-rows reported success
         on the one sheet state that most warrants a hard stop."""
         worksheet = RenderedFakeWorksheet([header_cells(), row_cells(2)])
-        grids = audit_sheet.read_grids(worksheet)
+        grids = audit_ledger.read_grids(worksheet)
         ragged = Grids(
             formatted=grids.formatted,
             unformatted=grids.unformatted + [["extra"]],
@@ -696,9 +696,9 @@ class TestReviewFindings:
         assert result.status == "FAIL" and "expected 99" in result.summary
 
     def test_render_modes_disagreeing_on_height_is_a_failure_not_a_warning(self):
-        """sync_csv_to_sheet takes its append anchor from the formatted read's height alone."""
+        """sync_csv_to_ledger takes its append anchor from the formatted read's height alone."""
         worksheet = RenderedFakeWorksheet([header_cells(), row_cells(2)])
-        grids = audit_sheet.read_grids(worksheet)
+        grids = audit_ledger.read_grids(worksheet)
         ragged = Grids(
             formatted=grids.formatted,
             unformatted=grids.unformatted + [["extra"]],
@@ -723,7 +723,7 @@ class TestReviewFindings:
     def test_informational_results_are_counted_in_the_tally(self):
         a = row_cells(2, **{"Order ID": Cell("C-1"), "Item Name": Cell("A"), "Tracking Number": Cell("1Z1")})
         b = row_cells(3, **{"Order ID": Cell("C-1"), "Item Name": Cell("B"), "Tracking Number": Cell("1Z1")})
-        text = audit_sheet.render_text(run_checks(build(a, b), Options()), {}, verbose=False)
+        text = audit_ledger.render_text(run_checks(build(a, b), Options()), {}, verbose=False)
         assert "informational" in text
 
 
@@ -781,23 +781,23 @@ class TestStatusRegression:
     def test_a_status_walking_backwards_is_surfaced(self):
         before = grids_for(row_cells(2, Status=Cell("return")))
         after = grids_for(row_cells(2, Status=Cell("paid")))
-        diff = audit_sheet.diff_snapshots(before, after)
+        diff = audit_ledger.diff_snapshots(before, after)
         assert len(diff["status_regressed"]) == 1
         assert "BACKWARDS" in diff["status_regressed"][0]
 
     def test_normal_forward_progress_is_not_a_regression(self):
         before = grids_for(row_cells(2, Status=Cell("shipped")))
         after = grids_for(row_cells(2, Status=Cell("delivered")))
-        assert audit_sheet.diff_snapshots(before, after)["status_regressed"] == []
+        assert audit_ledger.diff_snapshots(before, after)["status_regressed"] == []
 
     def test_an_unchanged_status_is_not_a_regression(self):
         grids = grids_for(row_cells(2, Status=Cell("paid")))
-        assert audit_sheet.diff_snapshots(grids, grids)["status_regressed"] == []
+        assert audit_ledger.diff_snapshots(grids, grids)["status_regressed"] == []
 
     def test_a_regression_is_called_out_in_the_rendered_diff(self):
         before = grids_for(row_cells(2, Status=Cell("paid")))
         after = grids_for(row_cells(2, Status=Cell("ordered")))
-        text = audit_sheet.render_diff(audit_sheet.diff_snapshots(before, after), "before.json", 8)
+        text = audit_ledger.render_diff(audit_ledger.diff_snapshots(before, after), "before.json", 8)
         assert "BACKWARDS" in text and "REGRESSED" in text
 
 
@@ -807,19 +807,19 @@ class TestCompare:
     def test_a_new_order_shows_as_added(self):
         before = grids_for(row_cells(2))
         after = grids_for(row_cells(2), row_cells(3))
-        diff = audit_sheet.diff_snapshots(before, after)
+        diff = audit_ledger.diff_snapshots(before, after)
         assert len(diff["added"]) == 1 and not diff["removed"] and not diff["changed"]
         assert diff["rows_before"] == 1 and diff["rows_after"] == 2
 
     def test_a_status_change_shows_as_a_changed_cell_not_an_add(self):
         before = grids_for(row_cells(2, Status=Cell("ordered")))
         after = grids_for(row_cells(2, Status=Cell("shipped")))
-        diff = audit_sheet.diff_snapshots(before, after)
+        diff = audit_ledger.diff_snapshots(before, after)
         assert not diff["added"] and not diff["removed"]
         assert any("Status" in c and "ordered" in c and "shipped" in c for c in diff["changed"])
 
     def test_a_deleted_row_shows_as_removed(self):
-        diff = audit_sheet.diff_snapshots(grids_for(row_cells(2), row_cells(3)), grids_for(row_cells(2)))
+        diff = audit_ledger.diff_snapshots(grids_for(row_cells(2), row_cells(3)), grids_for(row_cells(2)))
         assert len(diff["removed"]) == 1
 
     def test_last_scraped_at_is_ignored_so_it_cannot_bury_the_real_signal(self):
@@ -827,7 +827,7 @@ class TestCompare:
         reported every row as changed."""
         before = grids_for(row_cells(2, **{"Last Scraped At": Cell("2026-08-01T00:00:00Z")}))
         after = grids_for(row_cells(2, **{"Last Scraped At": Cell("2026-08-12T00:00:00Z")}))
-        assert audit_sheet.diff_snapshots(before, after)["changed"] == []
+        assert audit_ledger.diff_snapshots(before, after)["changed"] == []
 
 
 class TestRowsAreDateDescending:
@@ -984,15 +984,15 @@ class TestSnapshotPath:
     """A snapshot is the whole sheet, PII included, so a bare name must not land in the CWD."""
 
     def test_a_bare_filename_lands_under_data(self):
-        assert audit_sheet._snapshot_path("before.json") == audit_sheet.SNAPSHOT_DIR / "before.json"
+        assert audit_ledger._snapshot_path("before.json") == audit_ledger.SNAPSHOT_DIR / "before.json"
 
     def test_a_relative_directory_is_honoured(self):
         from pathlib import Path
-        assert audit_sheet._snapshot_path("out/x.json") == Path("out/x.json")
+        assert audit_ledger._snapshot_path("out/x.json") == Path("out/x.json")
 
     def test_an_absolute_path_is_honoured(self, tmp_path):
         target = tmp_path / "x.json"
-        assert audit_sheet._snapshot_path(str(target)) == target
+        assert audit_ledger._snapshot_path(str(target)) == target
 
     def test_data_is_gitignored(self):
         from pathlib import Path
@@ -1072,8 +1072,8 @@ class TestCompareEmitsResults:
     """--compare used to print prose that gated nothing. Each KIND of change now has a verdict."""
 
     def _classify(self, before, after):
-        diff = audit_sheet.diff_snapshots(grids_for(*before), grids_for(*after))
-        return {r.name: r for r in audit_sheet.classify_diff(diff, Options())}
+        diff = audit_ledger.diff_snapshots(grids_for(*before), grids_for(*after))
+        return {r.name: r for r in audit_ledger.classify_diff(diff, Options())}
 
     def _row(self, n, **kw):
         base = {"Order ID": Cell(f"O{n}"), "Tracking Number": Cell(f"1Z{n}"), "Shipment": Cell(1)}
@@ -1147,15 +1147,15 @@ class TestCompareEmitsResults:
 
     def test_json_output_hides_the_internal_records(self):
         import json
-        diff = audit_sheet.diff_snapshots(grids_for(self._row(2)), grids_for(self._row(2)))
-        payload = json.loads(audit_sheet.render_json([], {}, False, diff))
+        diff = audit_ledger.diff_snapshots(grids_for(self._row(2)), grids_for(self._row(2)))
+        payload = json.loads(audit_ledger.render_json([], {}, False, diff))
         assert "_records" not in payload["diff"] and "added" in payload["diff"]
 
     def test_the_verdicts_reach_the_exit_code(self):
         before, after = [self._row(2), self._row(3)], [self._row(2)]
-        diff = audit_sheet.diff_snapshots(grids_for(*before), grids_for(*after))
-        results = audit_sheet.classify_diff(diff, Options())
-        assert audit_sheet.exit_code(results, strict=False) == 1
+        diff = audit_ledger.diff_snapshots(grids_for(*before), grids_for(*after))
+        results = audit_ledger.classify_diff(diff, Options())
+        assert audit_ledger.exit_code(results, strict=False) == 1
 
 
 class TestImportedShapesAreNotFailures:

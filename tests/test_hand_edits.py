@@ -12,9 +12,9 @@ from ledger_db import hand_edits
 from ledger_db.store import LedgerDb
 from ledger_db.worksheet import DbWorksheet
 from models.order import FIELDNAMES
-from sheets import ledger_sync
-from sheets.ledger_sync import HEADER, _COL
-from web.ledger_writer import SheetCellWriter
+from ledger import sync as ledger_sync
+from ledger.sync import HEADER, _COL
+from web.ledger_writer import LedgerCellWriter
 
 KEY = {"order_id": "X1", "order_date": "2026-09-01", "item_name": "Thing", "shipment": "1"}
 KEYT = ("X1", "2026-09-01", "Thing", "1")
@@ -90,7 +90,7 @@ class TestTheRecord:
 
 class TestTheWriterRecords:
     def test_a_cell_edit_a_bulk_edit_and_a_deletion(self, ws, db, logs_dir):
-        writer = SheetCellWriter(opener=lambda: ws, logs_dir=logs_dir)
+        writer = LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir)
         writer.write_cell(KEY, "cashback_rate", "6%", expected="0.04")
         assert hand_edits.protected(db) == {KEYT: {"cashback_rate"}}
         writer.write_cells([KEY, {**KEY, "order_id": "missing"}], "insurance", "2.5")
@@ -105,7 +105,7 @@ class TestTheWriterRecords:
         assert hand_edits.protected(db) == {}
 
     def test_a_hand_added_row_is_protected_where_it_was_typed(self, ws, db, logs_dir):
-        writer = SheetCellWriter(opener=lambda: ws, logs_dir=logs_dir)
+        writer = LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir)
         writer.add_row({"order_id": "H1", "order_date": "2026-09-02", "item_name": "Typed",
                         "shipment": "1", "status": "ordered", "quantity": "1", "cost_per_item": "50",
                         "retailer": "Costco"})
@@ -118,13 +118,13 @@ class TestTheRunKeepsThem:
     def test_the_upsert_keeps_a_hand_typed_rate_and_still_moves_the_status(self, ws, db, tmp_path,
                                                                             monkeypatch, logs_dir):
         monkeypatch.setattr(ledger_sync, "_get_worksheet", lambda: ws)
-        SheetCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "cashback_rate", "0.06")
+        LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "cashback_rate", "0.06")
         # the next run re-reads the order: the card's configured rate and a new status
         csv_path = write_csv_file(tmp_path / "orders.csv", {
             **KEY, "status": "shipped", "retailer": "Costco", "quantity": "1", "cost_per_item": "100",
             "total_cost": "100", "cashback_rate": "0.04", "tracking_number": "1Z1", "card_last4": "4351",
         })
-        result = ledger_sync.sync_csv_to_sheet(csv_path)
+        result = ledger_sync.sync_csv_to_ledger(csv_path)
         assert result["updated"] == 1
         stored = db.fetch_rows()[0]
         assert stored["cashback_rate"] == 0.06, "typed by hand: the run does not get a say"
@@ -143,7 +143,7 @@ class TestTheRunKeepsThem:
         ws.update(range_name="A3", values=[row(order_id="X1", order_date="2026-09-01", item_name="Other",
                                                shipment="2", status="ordered", quantity="1",
                                                cost_per_item="300", total_cost="300")])
-        SheetCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "shipping", "9.99")
+        LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "shipping", "9.99")
         ledger_sync._reprorate_order_level(ws, {"X1"}, {"shipping": {"X1": 40.0}})
         by_shipment = {r["shipment"]: r for r in db.fetch_rows()}
         assert by_shipment[1]["shipping"] == 9.99      # typed: kept
@@ -152,7 +152,7 @@ class TestTheRunKeepsThem:
     def test_the_sync_drops_a_hand_typed_payout_from_its_writes(self, ws, db, logs_dir):
         import sync_tracking
 
-        SheetCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "payout_amount", "123")
+        LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "payout_amount", "123")
         plan = {"key_by_row": {2: KEYT, 3: ("Y1", "d", "i", "1")}}
         writes = {2: {"Actual Payout": 130.0, "Insurance": 1.5, "Payout Date": "2026-09-10"},
                   3: {"Actual Payout": 50.0}}
@@ -183,7 +183,7 @@ class TestThePageShowsIt:
         from web.app import create_app
         from web.ledger_reader import DbReader
 
-        SheetCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "cashback_rate", "0.06")
+        LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "cashback_rate", "0.06")
         (logs_dir / "failures").mkdir()
         app = create_app(DbReader(db), logs_dir=logs_dir, failures_dir=logs_dir / "failures",
                          clock=lambda: datetime(2026, 9, 18, 12, tzinfo=timezone.utc),

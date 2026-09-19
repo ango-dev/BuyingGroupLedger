@@ -5,17 +5,17 @@ keys, spot-check that Shipment is still an int and Card Last 4 still has its lea
 results were written up as PROSE in the design notes and the audit itself was thrown away each time. This is
 that ritual as a runnable artifact.
 
-    python -m scripts.audit_sheet                        # audit the ledger
-    python -m scripts.audit_sheet --expect-rows 23       # ... and assert the row count
-    python -m scripts.audit_sheet --save-snapshot before.json   # lands in data/ (gitignored: it holds PII)
-    python -m scripts.audit_sheet --from-snapshot before.json   # re-audit offline
-    python -m scripts.audit_sheet --json                 # machine-readable, for before/after diffs
+    python -m scripts.audit_ledger                        # audit the ledger
+    python -m scripts.audit_ledger --expect-rows 23       # ... and assert the row count
+    python -m scripts.audit_ledger --save-snapshot before.json   # lands in data/ (gitignored: it holds PII)
+    python -m scripts.audit_ledger --from-snapshot before.json   # re-audit offline
+    python -m scripts.audit_ledger --json                 # machine-readable, for before/after diffs
 
 READ-ONLY IS ENFORCED IN TWO LAYERS, because an auditor that can mutate what it audits is worse
 than no auditor at all:
   1. It opens the ledger through the READ-ONLY worksheet adapter (ledger_db/worksheet.py,
      read_only=True): every write method raises, so the capability simply isn't there. It never
-     calls sheets.ledger_sync._get_worksheet(), the writers' opener.
+     calls ledger.sync._get_worksheet(), the writers' opener.
   2. The checks never receive a worksheet -- only the frozen `Grids` value read once up front. No
      check *can* call a mutator because no check holds anything mutable.
 
@@ -39,7 +39,7 @@ from models.order import (
     FIELDNAMES, MONEY_FREE_STATUSES, RETIRED_STATUSES, STATUSES, TERMINAL_STATUSES,
     normalize_shipment,
 )
-from sheets.ledger_sync import (
+from ledger.sync import (
     HEADER,
     _INT_FIELDS,
     _NUMERIC_FIELDS,
@@ -103,7 +103,7 @@ class Grids:
     """The same sheet read three ways. The disagreements between them are the point.
 
     formatted   FORMATTED_VALUE   -- always str. "4%", "$1,299.00"; a formula cell shows its RESULT.
-                                    This is what sync_csv_to_sheet sees and keys rows on.
+                                    This is what sync_csv_to_ledger sees and keys rows on.
     unformatted UNFORMATTED_VALUE -- real types: 0.04, 1299.0, and a date SERIAL if a date column was
                                     formatted as a Date. The only mode that reveals a cell's type.
     formula     FORMULA           -- the literal "=LET(...)" for a formula cell. The only mode that
@@ -134,23 +134,15 @@ class Grids:
 
 
 def open_ledger_readonly():
-    """The ledger as a READ-ONLY worksheet (ledger_db/worksheet.py): no credentials, nothing to
-    create, every write refused."""
+    """The ledger as a READ-ONLY worksheet (ledger_db/worksheet.py): every write refused.
+    Deliberately NOT ledger.sync._get_worksheet(): the audit must never hold a writable handle on
+    what it audits."""
     from config.settings import settings
     from ledger_db.store import LedgerDb
     from ledger_db.worksheet import DbWorksheet
 
     worksheet = DbWorksheet(LedgerDb(settings.ledger_db_path), read_only=True)
     return worksheet, worksheet.title
-
-
-def open_worksheet_readonly():
-    """Open the ledger read-only (open_ledger_readonly; the name is the Sheet era's).
-
-    Deliberately NOT sheets.ledger_sync._get_worksheet(): the audit must never hold a writable
-    handle on what it audits.
-    """
-    return open_ledger_readonly()
 
 
 def read_grids(worksheet, spreadsheet_title: str = "") -> Grids:
@@ -187,7 +179,7 @@ def _is_effectively_blank(sheet, grid, row_number: int) -> bool:
     `blank_order_id_rows` report hundreds of "orphans" and `content_outside_the_schema` warn about
     empty space, i.e. exactly the noise that gets an auditor ignored.
 
-    Mirrors sheets.ledger_sync._last_occupied_row, which anchors appends on the same rule.
+    Mirrors ledger.sync._last_occupied_row, which anchors appends on the same rule.
     """
     for index, value in enumerate(grid[row_number - 1] if row_number - 1 < len(grid) else []):
         if not str(value).strip():
@@ -346,7 +338,8 @@ def check_header(sheet: Sheet, opts: Options) -> Result:
     for i, name in enumerate(expected):
         if name in actual and actual.index(name) != i:
             details.append(f"MOVED    {name!r}: column {actual.index(name) + 1}, expected {i + 1}")
-    details.append("Fix: python -m scripts.reorder_sheet  (then --apply)")
+    details.append("Fix: the ledger file migrates its columns on open (ledger_db/store.py); "
+                   "an unknown column means the file was written by newer code")
     return Result("header_matches_schema", "FAIL", "header does not match the schema", _truncate(details, 20))
 
 
@@ -363,7 +356,7 @@ def check_row_count(sheet: Sheet, opts: Options) -> Result:
     if opts.expect_rows is not None and total != opts.expect_rows:
         return Result("row_count", "FAIL", f"{summary} -- expected {opts.expect_rows}")
     if len(heights) > 1:
-        # sync_csv_to_sheet computes its append anchor as len(existing)+1 from the FORMATTED read
+        # sync_csv_to_ledger computes its append anchor as len(existing)+1 from the FORMATTED read
         # alone, so a height disagreement is an append-anchor signal, not a curiosity.
         return Result(
             "row_count", "FAIL",
@@ -462,7 +455,7 @@ def check_package_id_per_shipment(sheet: Sheet, opts: Options) -> Result:
     """One package id under ONE Shipment number per order -- the exact shape of the 2026-08-22 bug.
 
     Package ID (column 33, beside Card Last 4) is the retailer's own identity for a physical package, and
-    sync_csv_to_sheet matches on (Order ID, Package ID) before anything else. A multi-SKU carton is
+    sync_csv_to_ledger matches on (Order ID, Package ID) before anything else. A multi-SKU carton is
     several rows sharing one id AND one Shipment number (fine, INFO). One id under TWO Shipment
     numbers is the same package booked twice (history 1f) -- FAIL. Retired rows are skipped: a
     superseded row keeps its id under an N+1 number by design. A cell stored as a NUMBER is a FAIL
@@ -1013,7 +1006,7 @@ def check_total_cost(sheet: Sheet, opts: Options) -> Result:
 
 @check("shipping_is_cost_weighted")
 def check_shipping_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
-    """_reprorate_order_level (sheets/ledger_sync.py) rewrites each row's Shipping to its own
+    """_reprorate_order_level (ledger/sync.py) rewrites each row's Shipping to its own
     cost-weighted SHARE of its order's raw shipping total -- so Shipping / Total Cost should be the
     SAME ratio across every row of one order. A row that disagrees was prorated against a different
     raw total than its siblings (stale from before a later box was discovered, or a manual edit), and
@@ -1053,7 +1046,7 @@ def check_shipping_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
 @check("buying_group_coverage")
 def check_buying_group_coverage(sheet: Sheet, opts: Options) -> Result:
     from config.warehouses import load_warehouses
-    from sheets.ledger_sync import plan_buying_group_retag
+    from ledger.sync import plan_buying_group_retag
 
     warehouses = load_warehouses()
     if not warehouses:
@@ -1289,7 +1282,7 @@ def check_unresolved_split_quantity(sheet: Sheet, opts: Options) -> Result:
     Left unresolved it is a money bomb, not just an untidy row: with Total Cost blank and a payout
     filled, the profit formula evaluates `payout + (0+0)*rate - 0 - 0 - ins`, so **the entire payout
     is booked as profit**. The blank Total Cost also drops out of _reprorate_order_level's cost-weighted
-    split (sheets/ledger_sync.py), so that box absorbs none of the order's shipping and its sibling
+    split (ledger/sync.py), so that box absorbs none of the order's shipping and its sibling
     row absorbs all of it.
 
     Nothing else surfaces this after the one alert fired at creation time.
@@ -1793,7 +1786,7 @@ def main() -> None:
             grids = Grids.from_snapshot(json.load(f))
         grids.meta["source"] = f"snapshot {from_path}"
     else:
-        worksheet, title = open_worksheet_readonly()
+        worksheet, title = open_ledger_readonly()
         grids = read_grids(worksheet, title)
 
     if not grids.formatted:

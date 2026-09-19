@@ -1,7 +1,7 @@
 """`python -m web` -- serve the read-only dashboard locally.
 
     python -m web                                   # config.json's `web` section (default: newest snapshot)
-    python -m web --source snapshot --snapshot data/sheet_backup_20260910T105451Z.csv
+    python -m web --source snapshot --snapshot data/ledger_backup_20260910T105451Z.csv
     python -m web --source sheet                    # the live Sheet, read-only scope, 300 s cache
     python -m web --host 0.0.0.0 --port 8765        # e.g. to reach it over Tailscale
 
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
                              "config web.ledger_source / WEB_LEDGER_SOURCE)")
     parser.add_argument("--snapshot", default=None,
                         help="a specific CSV for the snapshot backend (default: the newest "
-                             "data/sheet_backup_*.csv; config web.snapshot_path / WEB_SNAPSHOT_PATH)")
+                             "data/ledger_backup_*.csv; config web.snapshot_path / WEB_SNAPSHOT_PATH)")
     parser.add_argument("--reload", action="store_true", help="auto-reload on code changes (dev)")
     args = parser.parse_args(argv)
 

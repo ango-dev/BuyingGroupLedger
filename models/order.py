@@ -65,22 +65,22 @@ STATUSES = ("ordered", "shipped", "delivered", "cancelled", "paid", "return", "s
 TERMINAL_STATUSES = ("delivered", "cancelled", "paid", "return", "superseded")
 # Never a merge target and never touched by the buying-group sync: the row is a closed record.
 RETIRED_STATUSES = ("superseded",)
-# Every amount cell blank -- see sheets/ledger_sync._BLANK_FIELDS_BY_STATUS for which cells, since
+# Every amount cell blank -- see ledger/sync._BLANK_FIELDS_BY_STATUS for which cells, since
 # the two differ (a cancelled row keeps Quantity as "how many were ordered"; a superseded row does
 # not, because Quantity is the multiplier that double-counted the re-labelled package).
 MONEY_FREE_STATUSES = ("cancelled", "superseded")
 
-# CSV/Sheet column order — keep in sync with output/csv_writer.py and sheets/ledger_sync.py HEADER,
+# CSV/Sheet column order — keep in sync with output/csv_writer.py and ledger/sync.py HEADER,
 # which is this same list in display-name form, positionally 1:1. tests/test_schema.py pins BOTH.
 #
 # ORDER IS READING ORDER, chosen by the user (2026-08-12): identity first (when/what/where), then the
 # money columns left-to-right in the order you reason about them (cost -> cashback -> payout ->
 # profit), then reference/audit columns you rarely scan, parked at the end.
 #
-# CHANGING THIS ORDER IS A MIGRATION, NOT AN EDIT. Rows are written to the sheet POSITIONALLY from
+# CHANGING THIS ORDER IS A MIGRATION, NOT AN EDIT. Rows are written to the ledger POSITIONALLY from
 # column A, so reordering here without rewriting the existing rows silently scrambles every one of
-# them. This list was reordered ONCE (2026-08-12) and `scripts/reorder_sheet.py` conformed the live
-# sheet to it — it remaps by column NAME, so it also covers any future reorder. Still, the cheap and
+# them. The ledger file migrates its table by column NAME on open (ledger_db/store.py), which
+# covers a reorder; the formula letters in tests/test_profit_formula.py are pinned. Still, the cheap and
 # preferred way to add a column stays APPENDING at the end: existing rows just gain a trailing blank
 # and no migration is needed.
 FIELDNAMES = [
@@ -122,7 +122,7 @@ FIELDNAMES = [
     "cost_per_item",
     "total_cost",
     # Every scraper emits the ORDER-LEVEL shipping total, repeated on every shipment row (see
-    # OrderItem.shipping below) — sheets.ledger_sync.sync_csv_to_sheet is what turns that into each
+    # OrderItem.shipping below) — ledger.sync.sync_csv_to_ledger is what turns that into each
     # row's actual cost-weighted SHARE before it lands on the sheet, so this field's value in a CSV
     # and its value in the ledger are deliberately NOT the same number.
     "shipping",
@@ -172,8 +172,7 @@ FIELDNAMES = [
     # Cost), written by sync_tracking the moment the purchase links the order and left alone once
     # the row settles -- beside the ACTUAL payout so the two read together and the dashboard's
     # Reconciliation page can compare them. Column added 2026-09-18 (last), moved here the same
-    # day: under `ledger.backend` = `db` the store migrates its table by name on start; the
-    # deprecated Sheet needs `python -m scripts.reorder_sheet --apply`. Always blank from a
+    # day: the store migrates its table by name on open. Always blank from a
     # scraper; excluded from both formulas.
     "expected_payout",
     "payout_amount",
@@ -181,11 +180,11 @@ FIELDNAMES = [
     # --- returns: a PARTIAL return is ONE hand edit on the original
     # row, never a second negative row. Quantity / Total Cost keep the GROSS bought values the
     # scraper wrote; the COGS formula reads return_quantity and nets the returned units out of the
-    # cost basis itself (see sheets.ledger_sync._cogs_formula), which sums to exactly what the old
+    # cost basis itself (see ledger.sync._cogs_formula), which sums to exactly what the old
     # two-row bookkeeping did. A fully-returned order keeps status `return`.
     "return_quantity",
     "return_date",
-    # DERIVED IN THE SHEET, not here: sheets.ledger_sync writes a live formula into this cell so the
+    # DERIVED IN THE SHEET, not here: ledger.sync writes a live formula into this cell so the
     # number updates the moment insurance/payout are typed in — a Python-computed value would go
     # stale, and a delivered row is never re-scraped to refresh it. Kept in FIELDNAMES (emitted blank)
     # so the column still exists positionally in the CSV and the sheet row.
@@ -254,10 +253,10 @@ class OrderItem(BaseModel):
     payout_amount: float | None = None
     # The group's committed payout (see FIELDNAMES). Filled by sync_tracking, never by a scraper.
     expected_payout: float | None = None
-    # Always blank from here; sheets.ledger_sync writes a live formula into the cell instead.
+    # Always blank from here; ledger.sync writes a live formula into the cell instead.
     # Both are DERIVED IN THE SHEET (live formulas) and always emitted blank from here — they
     # exist on the model only so FIELDNAMES can name real fields and the columns hold their
-    # position in the CSV. See sheets.ledger_sync._cogs_formula / _profit_formula.
+    # position in the CSV. See ledger.sync._cogs_formula / _profit_formula.
     cogs: float | None = None
     total_profit: float | None = None
     # Always blank from a scraper; sync_tracking.py ticks it when a buying group accepts the tracking

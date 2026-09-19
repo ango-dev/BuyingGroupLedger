@@ -23,7 +23,7 @@ DRY RUN BY DEFAULT — reads the live sheet, loads the order pages, and writes N
     python -m scripts.backfill_amazon_promo --limit 3          # only the 3 most recent orders
     python -m scripts.backfill_amazon_promo --order 111-9990017-9990017
 
-Apply for real (backs the sheet up to data/sheet_backup_<timestamp>.csv FIRST):
+Apply for real (backs the sheet up to data/ledger_backup_<timestamp>.csv FIRST):
     python -m scripts.backfill_amazon_promo --apply
 """
 
@@ -37,14 +37,14 @@ from ledger_db.worksheet import ValueInputOption, ValueRenderOption
 
 # This drives the cloud browser, and the Browser-Use SDK reads BROWSER_USE_API_KEY out of the
 # ENVIRONMENT itself. Importing config.settings is what puts the config.json value there. It
-# currently arrives transitively via sheets.ledger_sync, but stated explicitly so an import
+# currently arrives transitively via ledger.sync, but stated explicitly so an import
 # tidy-up somewhere else cannot quietly break this script with a valid config.
 import config.settings  # noqa: F401
 from config.cards import load_cards, tag_cards
 from config.profiles import load_profiles_for_retailer
 from models.card import parse_rate
 from models.order import FIELDNAMES
-from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet
+from ledger.sync import HEADER, _col_letter, _get_worksheet
 
 log = logging.getLogger("backfill_amazon_promo")
 
@@ -91,7 +91,7 @@ def _cell_number(field: str, value):
 
 
 def _key(order_id, order_date, item_name, shipment) -> tuple:
-    """The ledger's upsert key (sheets/ledger_sync.py: Order ID + Order Date + Item Name + Shipment).
+    """The ledger's upsert key (ledger/sync.py: Order ID + Order Date + Item Name + Shipment).
 
     Shipment is normalized through int() where possible because the sheet stores it as a NUMBER, so
     an unformatted read can hand back 1 or 1.0 while the model holds "1" — three spellings of one
@@ -234,9 +234,9 @@ def main() -> None:
     header = [str(c) for c in existing[0]]
     if header != list(HEADER):
         raise SystemExit(
-            "Sheet header doesn't match the current schema, so this would target the wrong columns. "
-            f"Run `python -m scripts.reorder_sheet` first.\n  sheet:    {header}\n"
-            f"  expected: {list(HEADER)}"
+            "The ledger's header doesn't match the current schema, so this would target the wrong "
+            f"columns (the file migrates its own columns on open, so this should not happen).\n"
+            f"  ledger:   {header}\n  expected: {list(HEADER)}"
         )
 
     idx = {name: header.index(name) for name in header}
@@ -280,7 +280,7 @@ def main() -> None:
     backup_dir = Path("data")
     backup_dir.mkdir(exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup_path = backup_dir / f"sheet_backup_{stamp}.csv"
+    backup_path = backup_dir / f"ledger_backup_{stamp}.csv"
     with backup_path.open("w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows(existing)
     print(f"\nBacked the whole sheet up -> {backup_path}")
@@ -290,7 +290,7 @@ def main() -> None:
     worksheet.batch_update(data, value_input_option=ValueInputOption.raw)
     print(f"Wrote {len(data)} cell(s).")
     print("\nTotal Profit recalculates itself — it is a live formula over these columns.")
-    print("Verify with `python -m scripts.audit_sheet`.")
+    print("Verify with `python -m scripts.audit_ledger`.")
 
 
 if __name__ == "__main__":

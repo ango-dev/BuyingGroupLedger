@@ -2,7 +2,7 @@
 One-off: fill the Card / Cashback Rate / Total Profit columns on rows ALREADY on the ledger.
 
 Why this exists: those three columns are derived at SCRAPE time (main.run_scrape -> config.cards.
-tag_cards, and sheets.ledger_sync stamps the profit formula on the rows it touches). A row that was
+tag_cards, and ledger.sync stamps the profit formula on the rows it touches). A row that was
 already `delivered` or `cancelled` when the columns were introduced is TERMINAL — no future run ever
 re-reads it — so it would keep blank cells forever. This is the backfill.
 
@@ -32,7 +32,7 @@ from ledger_db.worksheet import ValueInputOption, ValueRenderOption
 
 from config.cards import load_cards, resolve_card
 from models.card import normalize_last4, parse_rate
-from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet, _write_profit_formulas
+from ledger.sync import HEADER, _col_letter, _get_worksheet, _write_profit_formulas
 
 log = logging.getLogger("backfill_profit_columns")
 
@@ -99,7 +99,7 @@ def plan_profit_backfill(header: list[str], data_rows: list[list[str]], cards,
             return str(row[i]).strip() if i is not None and i < len(row) else ""
 
         if not cell(oid_idx):
-            continue  # same rule as sync_csv_to_sheet: a blank Order ID isn't a real row
+            continue  # same rule as sync_csv_to_ledger: a blank Order ID isn't a real row
         formula_rows.append(row_number)
 
         last4 = cell(last4_idx)
@@ -183,8 +183,8 @@ def main() -> None:
     header = [str(c) for c in existing[0]]
     if header != list(HEADER):
         raise SystemExit(
-            "Sheet header doesn't match the current schema; run `python -m scripts.reorder_sheet` "
-            f"first.\n  sheet:    {header}\n  expected: {list(HEADER)}"
+            "The ledger's header doesn't match the current schema (the file migrates its own columns "
+            f"on open, so this should not happen).\n  ledger:   {header}\n  expected: {list(HEADER)}"
         )
 
     plan = plan_profit_backfill(header, existing[1:], cards, refresh=args.refresh)

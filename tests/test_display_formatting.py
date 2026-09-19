@@ -18,8 +18,8 @@ from unittest.mock import patch
 import pytest
 
 from models.order import FIELDNAMES
-from sheets import ledger_sync
-from sheets.ledger_sync import HEADER, _coerce, _parse_display_number, sync_csv_to_sheet
+from ledger import sync as ledger_sync
+from ledger.sync import HEADER, _coerce, _parse_display_number, sync_csv_to_ledger
 
 from tests.test_ledger_sync import FakeWorksheet, row, write_csv_file  # noqa: F401
 
@@ -77,7 +77,7 @@ class TestFormattedSheetSurvivesARecheck:
                  status="shipped", tracking_number="1Z1"),
         )
         with patch.object(ledger_sync, "_get_worksheet", lambda: ws):
-            sync_csv_to_sheet(path)
+            sync_csv_to_ledger(path)
         return ws.data_rows()[0]
 
     def test_percent_formatted_rate_stays_numeric(self, tmp_path):
@@ -119,7 +119,7 @@ class TestFormattedSheetSurvivesARecheck:
                  card_last4="4335", card_name="Venmo Visa", cashback_rate="0.13"),
         )
         with patch.object(ledger_sync, "_get_worksheet", lambda: ws):
-            sync_csv_to_sheet(path)
+            sync_csv_to_ledger(path)
 
         assert ws.data_rows()[0][FIELDNAMES.index("cashback_rate")] == pytest.approx(0.13)
 

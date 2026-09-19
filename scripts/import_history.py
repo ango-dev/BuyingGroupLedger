@@ -8,7 +8,7 @@
 WHY THIS EXISTS. Pasting rows straight into the sheet is fine for a handful, but a real export has
 the errors the audit is BLIND to: a rate column that means 1% where you meant 13.5%, an Insurance
 column with the sign flipped, a date column whose 3/11 might be March or November, three tracking
-numbers in one cell. `audit_sheet` checks shapes; this checks the MONEY. The feature that justifies
+numbers in one cell. `audit_ledger` checks shapes; this checks the MONEY. The feature that justifies
 it over pasting is the reconciliation: every source row's own profit figure is recomputed from the
 mapped inputs, and any row that disagrees by more than a cent FAILS the import before a cell is
 written. If the numbers agree everywhere, the mapping is right everywhere.
@@ -30,7 +30,7 @@ WHAT IT DOES, IN ORDER (every step prints what it did):
      names (skipped -- the scraped rows are authoritative -- unless `--allow-existing-orders`), and
      which reuse a tracking number already on the sheet under another order.
   7. Write a normalised CSV to data/import_<ts>.csv. With `--apply`, sync it through the SAME
-     upsert every scrape uses (sheets.ledger_sync.sync_csv_to_sheet) and re-sort the sheet.
+     upsert every scrape uses (ledger.sync.sync_csv_to_ledger) and re-sort the sheet.
 
 Rows with NO tracking number are accepted and WARNED about (a delivered order from before the
 ledger often has none; the buying-group sync can never match such a row to a payout). Rows with no
@@ -51,7 +51,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from models.order import FIELDNAMES, STATUSES, TERMINAL_STATUSES, OrderItem, shipment_label
-from sheets.ledger_sync import HEADER, _parse_display_number
+from ledger.sync import HEADER, _parse_display_number
 
 log = logging.getLogger(__name__)
 
@@ -541,8 +541,8 @@ def main(argv=None) -> int:
     to_write = items
     if not args.no_sheet:
         try:
-            from scripts.audit_sheet import open_worksheet_readonly, read_grids
-            ws, title = open_worksheet_readonly()
+            from scripts.audit_ledger import open_ledger_readonly, read_grids
+            ws, title = open_ledger_readonly()
             grid = read_grids(ws, title).formatted
         except Exception as exc:  # noqa: BLE001
             print(f"\nLive-sheet preview skipped ({type(exc).__name__}: {exc}); pass --no-sheet to silence.")
@@ -572,10 +572,10 @@ def main(argv=None) -> int:
     if not args.apply:
         print("\nDRY RUN -- nothing written to the sheet. Re-run with --apply to import.")
         return 0
-    from sheets.ledger_sync import sort_ledger_by_date_desc, sync_csv_to_sheet
-    sync_csv_to_sheet(out_path)
+    from ledger.sync import sort_ledger_by_date_desc, sync_csv_to_ledger
+    sync_csv_to_ledger(out_path)
     sort_ledger_by_date_desc()
-    print("\nImported and re-sorted. Run `python -m scripts.audit_sheet --compare <before.json> --strict` to judge it.")
+    print("\nImported and re-sorted. Run `python -m scripts.audit_ledger --compare <before.json> --strict` to judge it.")
     return 0
 
 

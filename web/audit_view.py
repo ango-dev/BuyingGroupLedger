@@ -1,4 +1,4 @@
-"""The Audit page: scripts/audit_sheet's checks run against the ledger the dashboard serves, and
+"""The Audit page: scripts/audit_ledger's checks run against the ledger the dashboard serves, and
 every row a check names is mapped back to its order so the Orders view (table or cards) can show
 the affected rows with what is wrong beside them.
 
@@ -18,7 +18,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable
 
-from scripts.audit_sheet import Grids, Options, Result, Sheet, read_grids, run_checks
+from scripts.audit_ledger import Grids, Options, Result, Sheet, read_grids, run_checks
 
 #: The row numbers a detail line names: "row 157: ...", "row 157, Card: ...", "rows [2, 3]: ...".
 _ROWS = re.compile(r"^rows?\s+([\d,\s\[\]]+)")
@@ -120,7 +120,7 @@ def grids_from_snapshot(snapshot) -> Grids:
     """A CSV backup read three ways: the same grid, with the two formula columns carrying the
     values the reader computes for them (a backup stores the formula TEXT, which every money
     check would read as blank). Rows sit at their own row numbers; a note row is blank."""
-    from sheets.ledger_sync import _INT_FIELDS
+    from ledger.sync import _INT_FIELDS
     from web.ledger_reader import HEADER_TO_FIELD, NUMERIC_COLUMNS
 
     header = list(snapshot.header)

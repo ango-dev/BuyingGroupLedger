@@ -2,14 +2,14 @@
 
 Two things make this more than a cosmetic sort, and both are what these tests actually guard:
 
-1. **Rows may only move AFTER sync_csv_to_sheet has finished writing.** Sync caches each matched row's
+1. **Rows may only move AFTER sync_csv_to_ledger has finished writing.** Sync caches each matched row's
    NUMBER from its pre-sync snapshot and writes updates to `A{row_number}`; reordering while those are
    in flight would put every update on the wrong row, silently. Hence sorting is a separate step, and
    appends still go to the bottom (a sort is a total ordering, so where a row is inserted can't change
    where it ends up).
 
 2. **The Total Profit formula is position-bound.** It uses same-row relative references, so a row that
-   moves needs the formula for its NEW position. scripts/audit_sheet.py's check_profit_formula_literal
+   moves needs the formula for its NEW position. scripts/audit_ledger.py's check_profit_formula_literal
    fails any row whose stored formula isn't exactly _profit_formula(row_number) — that's the live
    tripwire, and `test_every_moved_row_gets_the_formula_for_its_new_position` is its offline twin.
 """
@@ -17,8 +17,8 @@ Two things make this more than a cosmetic sort, and both are what these tests ac
 import pytest
 
 from models.order import FIELDNAMES
-from sheets import ledger_sync
-from sheets.ledger_sync import HEADER, _profit_formula, sort_ledger_by_date_desc
+from ledger import sync as ledger_sync
+from ledger.sync import HEADER, _profit_formula, sort_ledger_by_date_desc
 
 from tests.test_ledger_sync import FakeWorksheet, row, sheet, write_csv_file  # noqa: F401
 
@@ -147,7 +147,7 @@ class TestFormulasFollowTheRows:
 class TestGuardsAndNoOps:
     def test_a_misordered_header_is_refused(self, sheet):
         # Sorting addresses columns positionally, so a differently-ordered sheet would sort the wrong
-        # ones. Same posture as sync_csv_to_sheet's guard: refuse rather than corrupt.
+        # ones. Same posture as sync_csv_to_ledger's guard: refuse rather than corrupt.
         sheet.rows = [list(reversed(HEADER)), seeded(order_id="A", order_date="2026-08-02")]
 
         with pytest.raises(RuntimeError, match="different ORDER"):
@@ -173,7 +173,7 @@ class TestGuardsAndNoOps:
         assert sheet.sort_calls == []
 
     def test_blank_order_id_rows_are_not_counted_as_data(self, sheet):
-        # Matches sync_csv_to_sheet's rule: a row with no Order ID isn't a ledger row. It must not
+        # Matches sync_csv_to_ledger's rule: a row with no Order ID isn't a ledger row. It must not
         # extend the sort range, or the range would cover trailing junk.
         sheet.rows = [
             list(HEADER),
@@ -262,7 +262,7 @@ class TestRowsAddedByHand:
         assert sheet.rows[3] == note
 
     def test_formulas_follow_the_ledger_rows_and_skip_the_rest(self, sheet):
-        # audit_sheet checks BOTH halves of this: profit_formula_literal fails a ledger row whose
+        # audit_ledger checks BOTH halves of this: profit_formula_literal fails a ledger row whose
         # formula doesn't match its row number, and no_stray_formulas fails a formula on a non-row.
         sheet.rows = [
             list(HEADER),
@@ -302,7 +302,7 @@ class TestSyncReportsWhatItDid:
             dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1"),
         )
 
-        result = ledger_sync.sync_csv_to_sheet(path)
+        result = ledger_sync.sync_csv_to_ledger(path)
 
         assert result["appended"] == 1 and result["updated"] == 0
 
@@ -317,7 +317,7 @@ class TestSyncReportsWhatItDid:
                  status="shipped", tracking_number="1Z1"),
         )
 
-        result = ledger_sync.sync_csv_to_sheet(path)
+        result = ledger_sync.sync_csv_to_ledger(path)
 
         assert result["appended"] == 0 and result["updated"] == 1
 
@@ -407,7 +407,7 @@ class TestRunScrapeTriggersTheSort:
             if sort_raises:
                 raise RuntimeError("sheets API exploded")
 
-        monkeypatch.setattr(main, "sync_csv_to_sheet", lambda path: sync_result)
+        monkeypatch.setattr(main, "sync_csv_to_ledger", lambda path: sync_result)
         monkeypatch.setattr(main, "sort_ledger_by_date_desc", fake_sort)
         monkeypatch.setattr(main, "write_csv", lambda items: __import__("pathlib").Path("orders.csv"))
         monkeypatch.setattr(main, "_classify_and_drop_personal", lambda items, label: items)

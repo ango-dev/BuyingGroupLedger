@@ -7,7 +7,7 @@ all of them and writes the two files that replace them:
     config.json    everything you author        (gitignored)
     .state.json    the rotating Costco tokens   (gitignored, app-written)
 
-DRY RUN BY DEFAULT, matching sort_ledger / reorder_sheet / sync_tracking. It prints the config it
+DRY RUN BY DEFAULT, matching sort_ledger / sync_tracking. It prints the config it
 would write with every secret masked, and touches nothing:
 
     python -m scripts.migrate_config

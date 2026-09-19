@@ -8,7 +8,7 @@ import pytest
 import main as main_module
 import respond_bfmr
 from config.loader import load_state, save_state
-from sheets.ledger_sync import HEADER
+from ledger.sync import HEADER
 
 TRACKING = "999900001111"
 MESSAGE_ID = "<synthetic-0002@buyformeretail.com>"

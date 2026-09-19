@@ -9,12 +9,12 @@ import csv
 
 from models.order import FIELDNAMES, STATUSES, TERMINAL_STATUSES, OrderItem
 from output.csv_writer import write_csv
-from sheets.ledger_sync import HEADER
+from ledger.sync import HEADER
 
 
 def test_header_and_fieldnames_have_matching_length():
     assert len(HEADER) == len(FIELDNAMES), (
-        "HEADER (sheets/ledger_sync.py) and FIELDNAMES (models/order.py) describe the same columns "
+        "HEADER (ledger/sync.py) and FIELDNAMES (models/order.py) describe the same columns "
         "positionally. Adding a column means appending to BOTH."
     )
 
@@ -25,7 +25,8 @@ def test_column_order_is_pinned():
     Rows are written to the sheet positionally from column A, so reordering FIELDNAMES/HEADER without
     rewriting the rows already on the sheet silently scrambles every one of them, and moves the cells
     the Total Profit formula points at. This test is the tripwire: if you meant to reorder, update the
-    lists here too AND run `python -m scripts.reorder_sheet --apply` against the live sheet.
+    lists here too, re-pin the formula letters in tests/test_profit_formula.py, and know that the
+    ledger file migrates its table by column NAME on open (ledger_db/store.py).
 
     Adding a column is the cheap case — APPEND it to both lists and to the end of both lists here;
     existing rows just gain a trailing blank and no migration is needed.
@@ -61,7 +62,7 @@ def test_fieldnames_match_order_item_fields():
 
 
 def test_csv_writer_emits_exactly_fieldnames(tmp_path):
-    """The CSV header is what sync_csv_to_sheet reads by name, so it must be FIELDNAMES verbatim."""
+    """The CSV header is what sync_csv_to_ledger reads by name, so it must be FIELDNAMES verbatim."""
     item = OrderItem(retailer="Amazon", order_id="1", order_date="2026-08-08", item_name="Thing")
 
     path = write_csv([item], output_dir=tmp_path)
@@ -91,7 +92,7 @@ def test_every_money_free_status_has_a_blank_field_list():
     """The vocabulary and the blanking table must stay in step, and a superseded row blanks
     strictly MORE than a cancelled one (Quantity, the multiplier that double-counted the box)."""
     from models.order import MONEY_FREE_STATUSES
-    from sheets.ledger_sync import _BLANK_FIELDS_BY_STATUS
+    from ledger.sync import _BLANK_FIELDS_BY_STATUS
 
     assert set(_BLANK_FIELDS_BY_STATUS) == set(MONEY_FREE_STATUSES)
     assert set(_BLANK_FIELDS_BY_STATUS["superseded"]) > set(_BLANK_FIELDS_BY_STATUS["cancelled"])
@@ -134,7 +135,7 @@ def test_package_id_defaults_blank_and_stays_text():
     """Package ID (2026-09-09; beside Card Last 4 since 2026-09-10): blank means unknown and never blocks a match, and the value is TEXT —
     a Costco packageNumber keeps its leading zeros through the model and through the sheet
     coercion, or the id on the sheet would no longer equal what the mapping emits."""
-    from sheets.ledger_sync import _coerce
+    from ledger.sync import _coerce
 
     item = OrderItem(retailer="Costco", order_id="1", order_date="2026-09-09", item_name="Thing")
     assert item.package_id == ""

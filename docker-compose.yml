@@ -38,7 +38,7 @@ services:
       WEB_ENABLED: "${WEB_ENABLED:-}"
       WEB_LEDGER_SOURCE: "${WEB_LEDGER_SOURCE:-}"
       WEB_SNAPSHOT_PATH: "${WEB_SNAPSHOT_PATH:-}"
-      WEB_SHEET_CACHE_TTL_SECONDS: "${WEB_SHEET_CACHE_TTL_SECONDS:-}"
+      WEB_LEDGER_CACHE_TTL_SECONDS: "${WEB_LEDGER_CACHE_TTL_SECONDS:-}"
       LEDGER_DB_PATH: "${LEDGER_DB_PATH:-}"
     ports:
       # The dashboard, published on the host's LOOPBACK by default -- it has no authentication and

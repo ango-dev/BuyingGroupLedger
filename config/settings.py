@@ -97,7 +97,7 @@ ENV_TO_CONFIG = {
     "WEB_ENABLED": "web.enabled",
     "WEB_LEDGER_SOURCE": "web.ledger_source",
     "WEB_SNAPSHOT_PATH": "web.snapshot_path",
-    "WEB_SHEET_CACHE_TTL_SECONDS": "web.sheet_cache_ttl_seconds",
+    "WEB_LEDGER_CACHE_TTL_SECONDS": "web.ledger_cache_ttl_seconds",
     "WEB_BIND_HOST": "web.bind_host",
     "WEB_PORT": "web.port",
     # How long the Tools page keeps a profile-login browser session open after the user walks
@@ -353,7 +353,7 @@ class Settings:
 
     # --- the read-only web dashboard (web/; `python -m web` / the `web` compose profile) ----------
     # Which backend web.ledger_reader serves: "db" (the ledger file, database.path) or "snapshot"
-    # (a data/sheet_backup_*.csv -- the newest, or `web_snapshot_path`). The scheduler never reads
+    # (a data/ledger_backup_*.csv -- the newest, or `web_snapshot_path`). The scheduler never reads
     # any of these. Anything else is refused at startup, not defaulted.
     # In the container, docker/entrypoint.sh starts the dashboard beside the scheduler when this is
     # true (and healthcheck.sh probes it). Off = the container is a pure scheduler, as before.
@@ -367,7 +367,7 @@ class Settings:
     ledger_db_path: str = _get_str("LEDGER_DB_PATH", "data/ledger.sqlite3")
     # How long the dashboard serves a ledger read from memory before the next request re-reads
     # the file (a cheap local read; the name is a leftover of the Sheet era).
-    web_sheet_cache_ttl_seconds: int = _get_int("WEB_SHEET_CACHE_TTL_SECONDS", 300)
+    web_ledger_cache_ttl_seconds: int = _get_int("WEB_LEDGER_CACHE_TTL_SECONDS", 300)
     # Loopback by default: phase 1 has no authentication, so reaching it from another machine is
     # a deliberate choice (0.0.0.0 behind Tailscale, or the compose service's published port).
     web_bind_host: str = _get_str("WEB_BIND_HOST", "127.0.0.1")

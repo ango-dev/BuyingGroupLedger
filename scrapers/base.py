@@ -184,7 +184,7 @@ class BaseRetailerScraper(abc.ABC):
         delivered would grow the state for nothing.
         """
         try:
-            from sheets.ledger_sync import load_order_state
+            from ledger.sync import load_order_state
 
             _, earliest, _ = self._date_window()
             # Scope to THIS retailer's rows: a profile can host several retailers (e.g. profile-alpha

@@ -52,7 +52,7 @@ from bs4 import BeautifulSoup
 
 import config.settings  # noqa: F401  -- loads config.json so the cloud-browser API key reaches the SDK
 from models.order import MONEY_FREE_STATUSES
-from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet, _parse_display_number
+from ledger.sync import HEADER, _col_letter, _get_worksheet, _parse_display_number
 
 #: retailer display name on the sheet -> (retailer_key, mapping module name, api module name)
 _RETAILERS = {

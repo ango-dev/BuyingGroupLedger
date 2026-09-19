@@ -9,7 +9,7 @@ parsers, proven by the scrapers' own tests.
 
 from models.order import OrderItem
 from scripts.backfill_amazon_promo import plan_amazon_backfill
-from sheets.ledger_sync import HEADER
+from ledger.sync import HEADER
 
 
 def sheet_row(**values):

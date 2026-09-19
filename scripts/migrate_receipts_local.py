@@ -22,7 +22,7 @@ import urllib.request
 from urllib.parse import urlsplit
 
 from receipts import store
-from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet
+from ledger.sync import HEADER, _col_letter, _get_worksheet
 
 
 def key_from_link(link: str) -> str | None:

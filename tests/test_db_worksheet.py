@@ -1,8 +1,8 @@
 """The SQLite ledger behind a worksheet face (ledger_db/worksheet.py), and the `ledger.backend`
 flag that routes every writer to it -- the database cutover's second stage.
 
-Offline: the adapter is exercised directly, then the REAL upsert (sheets.ledger_sync
-.sync_csv_to_sheet), the sort, the dashboard's cell writer and the tracking sync's read all run
+Offline: the adapter is exercised directly, then the REAL upsert (ledger.sync
+.sync_csv_to_ledger), the sort, the dashboard's cell writer and the tracking sync's read all run
 against it unchanged -- which is the whole point of the adapter.
 """
 
@@ -18,8 +18,8 @@ from config.settings import Settings
 from ledger_db.store import LedgerDb
 from ledger_db.worksheet import DbWorksheet, ReadOnly, parse_a1
 from models.order import FIELDNAMES
-from sheets import ledger_sync
-from sheets.ledger_sync import HEADER
+from ledger import sync as ledger_sync
+from ledger.sync import HEADER
 
 
 def row(**values):
@@ -199,7 +199,7 @@ class TestTheWritersRunOnIt:
                                    "shipment": "1", "status": "ordered", "retailer": "Costco",
                                    "quantity": "1", "cost_per_item": "100", "total_cost": "100",
                                    "cashback_rate": "0.04", "tracking_submitted": "FALSE"})
-        result = ledger_sync.sync_csv_to_sheet(csv_path)
+        result = ledger_sync.sync_csv_to_ledger(csv_path)
         assert result["appended"] == 1 and result["updated"] == 0
         stored = db.fetch_rows()
         assert len(stored) == 1 and stored[0]["status"] == "ordered" and stored[0]["cogs"] == 96.0
@@ -212,7 +212,7 @@ class TestTheWritersRunOnIt:
                                   {"order_id": "X1", "order_date": "2026-09-01", "item_name": "Thing",
                                    "shipment": "1", "status": "shipped", "retailer": "Costco",
                                    "tracking_number": "1Z999"})
-        result = ledger_sync.sync_csv_to_sheet(csv_path)
+        result = ledger_sync.sync_csv_to_ledger(csv_path)
         assert result["appended"] == 0 and result["updated"] == 1
         stored = db.fetch_rows()
         assert len(stored) == 1
@@ -227,20 +227,20 @@ class TestTheWritersRunOnIt:
              "status": "delivered", "retailer": "Costco", "total_cost": "10"},
             {"order_id": "NEW", "order_date": "2026-09-01", "item_name": "b", "shipment": "1",
              "status": "ordered", "retailer": "Costco", "total_cost": "20"})
-        ledger_sync.sync_csv_to_sheet(csv_path)
+        ledger_sync.sync_csv_to_ledger(csv_path)
         result = ledger_sync.sort_ledger_by_date_desc()
         assert result["sorted_rows"] == 2 and result["already_sorted"] is False
         assert [r["order_id"] for r in db.fetch_rows()] == ["NEW", "OLD"]
         assert [r["sheet_row"] for r in db.fetch_rows()] == [2, 3]
 
     def test_the_dashboard_writer_edits_a_cell_by_key(self, db, tmp_path):
-        from web.ledger_writer import SheetCellWriter
+        from web.ledger_writer import LedgerCellWriter
 
         ws = DbWorksheet(db)
         ws.update(range_name="A2", values=[row(order_id="X1", order_date="2026-09-01",
                                               item_name="Thing", shipment="1", status="shipped",
                                               total_cost=100.0)])
-        writer = SheetCellWriter(opener=lambda: DbWorksheet(db), logs_dir=tmp_path)
+        writer = LedgerCellWriter(opener=lambda: DbWorksheet(db), logs_dir=tmp_path)
         key = {"order_id": "X1", "order_date": "2026-09-01", "item_name": "Thing", "shipment": "1"}
         writer.write_cell(key, "status", "delivered", expected="shipped")
         assert db.fetch_rows()[0]["status"] == "delivered"
@@ -276,14 +276,14 @@ class TestTheFlag:
         assert ws.db.path == tmp_path / "l.sqlite3"
 
     def test_the_readonly_opener_hands_out_a_readonly_adapter_under_db(self, tmp_path, monkeypatch):
-        import scripts.audit_sheet as audit
+        import scripts.audit_ledger as audit
         from config import settings as settings_module
 
         monkeypatch.setattr(settings_module, "settings", dataclasses.replace(
             settings_module.settings, ledger_db_path=str(tmp_path / "l.sqlite3")))
         ws, title = audit.open_ledger_readonly()
         assert isinstance(ws, DbWorksheet) and ws.read_only and title == "l.sqlite3"
-        ws2, title2 = audit.open_worksheet_readonly()
+        ws2, title2 = audit.open_ledger_readonly()
         assert isinstance(ws2, DbWorksheet) and ws2.read_only and title2 == title
 
     def test_the_dashboard_reads_the_database(self, tmp_path):

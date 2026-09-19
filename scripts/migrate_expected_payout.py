@@ -17,7 +17,7 @@ WHAT MOVES, EXACTLY. A ledger row (has an Order ID) with a non-zero Actual Payou
 Date whose Status is not `paid` / `return` (a buying-group outcome settles a dateless payout: MOD
 pays without a date) and not money-free (cancelled / superseded rows are blanked by rule). A row
 that already carries a DIFFERENT Expected Payout is reported and left alone -- two figures need a
-human. Every write goes through sheets.ledger_sync._get_worksheet, so under `ledger.backend` = `db`
+human. Every write goes through ledger.sync._get_worksheet, so under `ledger.backend` = `db`
 this edits data/ledger.sqlite3 and under `sheet` the (deprecated) Google Sheet.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ import argparse
 import sys
 
 from models.order import MONEY_FREE_STATUSES
-from sheets.ledger_sync import (
+from ledger.sync import (
     HEADER, _clear_cells, _col_letter, _get_worksheet, _parse_display_number, _write_profit_formulas,
 )
 

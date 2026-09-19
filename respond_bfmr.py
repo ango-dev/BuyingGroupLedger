@@ -51,7 +51,7 @@ from buying_groups.bfmr_email import (
 )
 from config.loader import load_state, save_state
 from config.settings import settings
-from sheets.ledger_sync import HEADER, _get_worksheet
+from ledger.sync import HEADER, _get_worksheet
 
 log = logging.getLogger("respond_bfmr")
 
@@ -317,8 +317,8 @@ def _sheet(sheet_values: list[list] | None) -> tuple[list[str], list[list]]:
     header = [str(c) for c in sheet_values[0]]
     if header != list(HEADER):
         raise SystemExit(
-            "Sheet header doesn't match the current schema; run `python -m scripts.reorder_sheet` "
-            f"first.\n  sheet:    {header}\n  expected: {list(HEADER)}"
+            "The ledger's header doesn't match the current schema (the file migrates its own columns "
+            f"on open, so this should not happen).\n  ledger:   {header}\n  expected: {list(HEADER)}"
         )
     return header, sheet_values[1:]
 

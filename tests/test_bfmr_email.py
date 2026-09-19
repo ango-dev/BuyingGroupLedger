@@ -7,7 +7,7 @@ from pathlib import Path
 from buying_groups.bfmr_email import (
     attribute_serials, build_reply, parse_request, resolve_box, split_serials,
 )
-from sheets.ledger_sync import HEADER
+from ledger.sync import HEADER
 
 FIXTURE = Path(__file__).parent / "fixtures" / "bfmr_combined_package_email.eml"
 DOMAINS = ["buyformeretail.com", "bfmr.com"]

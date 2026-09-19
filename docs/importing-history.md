@@ -36,13 +36,13 @@ normalised CSV under `data/`. Rows that are not terminal are refused (`--allow-o
 cost are skipped so a later scrape can still fill that order (`--keep-no-cost`); rows with no
 tracking number are accepted with a warning; rows with no order number get a synthetic one
 (`BFMR-IMPORT-<date>`) so a referral bonus still reaches the tax report. `--apply` writes through
-the same upsert every scrape uses and re-sorts; bracket it with `audit_sheet --save-snapshot` /
+the same upsert every scrape uses and re-sorts; bracket it with `audit_ledger --save-snapshot` /
 `--compare --strict`.
 
 ## Bulk-importing history by hand
 
 Pasting a batch of finished orders straight into the sheet is fine, and in one way safer than routing
-them through `sync_csv_to_sheet`: a paste doesn't go through the upsert, so a mistake can't silently
+them through `sync_csv_to_ledger`: a paste doesn't go through the upsert, so a mistake can't silently
 overwrite an existing row. Errors just sit there as rows, and the audit names them.
 
 **Before you paste — format `Order Date`, `Delivery Date` and `Payout Date` as Plain text.** This is the
@@ -64,7 +64,7 @@ Leave `Profile`, `Order Link`, `Tracking Link`, `Delivery Address`, `Card Last 4
 blank if you don't have them; none of it is read for a terminal row. Fill `Card` and `Cashback Rate`
 directly, since `Card` is normally *derived* from `Card Last 4` and that only happens during a scrape.
 
-Finish with `python -m scripts.sort_ledger --apply`, then `python -m scripts.audit_sheet`.
+Finish with `python -m scripts.sort_ledger --apply`, then `python -m scripts.audit_ledger`.
 
 **What the audit will and won't catch.** It's a strong net for *mechanical* errors — Date-typed cells,
 duplicate keys, `Cost Per Item` not reconciling, text in numeric columns, embedded newlines, blank

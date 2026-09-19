@@ -36,7 +36,7 @@ from config.profiles import load_profiles_for_retailer
 from receipts import store
 from receipts.capture import attach_receipts
 from receipts.sources import is_capturable
-from sheets.ledger_sync import HEADER, _col_letter, _get_worksheet
+from ledger.sync import HEADER, _col_letter, _get_worksheet
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("backfill_receipts")
@@ -149,7 +149,7 @@ def _write_links(worksheet, updates, apply):
     Writes ONLY that one column. sync_tracking's _write_payout_cells has to re-stamp the Total
     Profit formula after writing, because it touches cells that formula reads; this touches a column
     the formula has nothing to do with, so the formula is left alone.
-    `scripts/audit_sheet.py:check_profit_formula_literal` is the tripwire either way — run it after.
+    `scripts/audit_ledger.py:check_profit_formula_literal` is the tripwire either way — run it after.
     """
     col = _col_letter(HEADER.index("Receipt Link"))
     data = [{"range": f"{col}{row}", "values": [[link]]}
@@ -222,7 +222,7 @@ def run(apply=False, only_retailer=None, limit=None):
 
     if apply:
         print(f"\nWrote {total_written} Receipt Link cell(s). "
-              f"Now run `python -m scripts.audit_sheet` to confirm the sheet is still sound.")
+              f"Now run `python -m scripts.audit_ledger` to confirm the sheet is still sound.")
     else:
         print("\nDry run — nothing was captured and nothing was written. Re-run with --apply.")
     return 0

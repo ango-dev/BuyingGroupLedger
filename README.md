@@ -53,11 +53,11 @@ The parts worth reading if you're here to look at the engineering rather than to
 |---|---|---|
 | Deterministic primary, loud failure | `scrapers/<retailer>{,_api,_mapping}.py` | Cost is a per-run tax; silent data loss is unbounded. A normal run spends nothing, and a failure records nothing rather than something wrong — and says so. |
 | The failure dossier is the failure path | `diagnostics/dossier.py`, `CdpBrowser.__exit__` | A paid agent run hid *what* broke. The dossier captures the page at the failure and audits every declared selector against it, so the fix is a code change made from evidence, not a retry that costs money. The agent fallback has been removed entirely. |
-| The schema is a wire format | `models/order.py` `FIELDNAMES`, `sheets/ledger_sync.py` `HEADER` | Rows are written *positionally*. Reordering columns without migrating scrambles every historical row with no error, so a test pins the pairing and the sync refuses to write a mismatched header. |
+| The schema is a wire format | `models/order.py` `FIELDNAMES`, `ledger/sync.py` `HEADER` | Rows are written *positionally*. Reordering columns without migrating scrambles every historical row with no error, so a test pins the pairing and the sync refuses to write a mismatched header. |
 | Idempotent upsert, blanks never overwrite | `ledger_sync.py` `_merge_row`, `_collapse_records` | Re-checks return partial data. A blank field must never erase a known-good value, and two paths reporting the same row in one sync must collapse rather than clobber. |
-| Reconcile on tracking number first | `ledger_sync.py` `sync_csv_to_sheet` | Different writers (scrapers, imports, hand edits) can legitimately disagree about shipment *numbering*. Tracking number is an identity both read identically, so it beats the synthetic key. |
+| Reconcile on tracking number first | `ledger_sync.py` `sync_csv_to_ledger` | Different writers (scrapers, imports, hand edits) can legitimately disagree about shipment *numbering*. Tracking number is an identity both read identically, so it beats the synthetic key. |
 | Undisclosed-split safety net | `ledger_sync.py` | A retailer API that exposes one tracking number per line and rotates it will silently lose a box. An update that changes a non-blank tracking number to a *different* one appends instead of overwriting, and alerts. |
-| Audit the live data, not just the code | `scripts/audit_sheet.py` | Tests prove the code; they can't see the sheet. 40+ invariant checks, authenticated **read-only** so it cannot write even by accident. |
+| Audit the live data, not just the code | `scripts/audit_ledger.py` | Tests prove the code; they can't see the sheet. 40+ invariant checks, authenticated **read-only** so it cannot write even by accident. |
 | Ask storage before opening a browser | `receipts/capture.py` | Receipt capture runs every scrape, but the existence check comes first — so the common re-check run creates no cloud browser at all, and a browser is only ever paid for by a genuinely new order. |
 | Refuse to store a sign-in page | `receipts/sources.py` `looks_logged_out` | A login wall renders and uploads perfectly. Storing one would mark the order as having a receipt *forever*, because the object exists and no later run retries. |
 | Catch silent misconfiguration at boot | `scripts/preflight.py`, `docker/healthcheck.sh` | A missing dependency fails three retailers without raising; a dead scheduler produces no signal at all. Both now announce themselves. |
@@ -127,7 +127,7 @@ Free things worth running often:
 ```bash
 .venv/bin/python -m pytest                          # offline tests, no credentials
 .venv/bin/python -m scripts.preflight               # offline config check
-.venv/bin/python -m scripts.audit_sheet             # read-only audit of the live sheet
+.venv/bin/python -m scripts.audit_ledger             # read-only audit of the live sheet
 .venv/bin/python -m sync_tracking                   # DRY RUN of the buying-group sync
 .venv/bin/python -m scripts.tax_report 2026         # read-only cash-basis year report
 ```
@@ -151,14 +151,14 @@ scrapers/<retailer>_mapping.py   pure payload -> OrderItem rows (offline-tested)
 scrapers/<retailer>_signin.py    deterministic sign-in for the retailers that need one
 scrapers/cdp.py         Playwright-over-CDP browser helper; snapshots the page into a dossier on failure
 diagnostics/dossier.py  the failure dossier: page + screenshot + selector audit -> logs/failures/
-sheets/ledger_sync.py   Google Sheet upsert (safe partial refresh), sort, formulas, order-state loader
+ledger/sync.py   Google Sheet upsert (safe partial refresh), sort, formulas, order-state loader
 output/csv_writer.py    per-run CSV
 alerts/notifier.py      email + Discord alerts
 sync_tracking.py        post tracking numbers to buying groups + pull payouts back (dry-run default)
 buying_groups/          provider contract + BFMR + MaxOutDeals adapters + Buying Group -> provider registry
 receipts/               receipt URL/key rules, the file store, capture orchestration
 scripts/preflight.py    offline check for silent misconfiguration
-scripts/audit_sheet.py  read-only audit of the live sheet's invariants (writes nothing)
+scripts/audit_ledger.py  read-only audit of the live sheet's invariants (writes nothing)
 scripts/tax_report.py   read-only cash-basis tax report for one year (two dates: payout vs order)
 scripts/import_history.py  import a foreign spreadsheet of finished orders; reconciles its profit column (dry-run default)
 scripts/backfill_tracking.py  fill blank tracking numbers from BFMR by order number (dry-run default)

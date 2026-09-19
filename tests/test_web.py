@@ -23,7 +23,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from models.order import FIELDNAMES, MONEY_FREE_STATUSES, TERMINAL_STATUSES  # noqa: E402
-from sheets.ledger_sync import HEADER, _COL, _cogs_formula, _profit_formula  # noqa: E402
+from ledger.sync import HEADER, _COL, _cogs_formula, _profit_formula  # noqa: E402
 from web import ledger_reader  # noqa: E402
 from web.app import ROUTES, create_app, money, percent  # noqa: E402
 from web.failures import hosted_copies, list_dossiers, parse_name  # noqa: E402
@@ -134,7 +134,7 @@ NOTE_ROW = row(item_name="-- a note below the block, no Order ID --")
 
 @pytest.fixture
 def snapshot_path(tmp_path) -> Path:
-    return write_snapshot(tmp_path / "sheet_backup_20260917T000000Z.csv", *LEDGER_ROWS, NOTE_ROW)
+    return write_snapshot(tmp_path / "ledger_backup_20260917T000000Z.csv", *LEDGER_ROWS, NOTE_ROW)
 
 
 @pytest.fixture
@@ -196,7 +196,7 @@ class TestSnapshotReader:
         shuffled = [""] * len(old_header)
         for name, value in by_name.items():
             shuffled[old_index[name]] = value
-        path = write_snapshot(tmp_path / "sheet_backup_old.csv", shuffled, header=old_header)
+        path = write_snapshot(tmp_path / "ledger_backup_old.csv", shuffled, header=old_header)
 
         snapshot = SnapshotReader(path).load()
 
@@ -211,7 +211,7 @@ class TestSnapshotReader:
         header = [h for h in HEADER if h != "Rewards Used"]
         record = [v for h, v in zip(HEADER, row(order_id="X1", order_date="2026-09-01",
                                                    total_cost="10")) if h != "Rewards Used"]
-        path = write_snapshot(tmp_path / "sheet_backup_short.csv", record, header=header)
+        path = write_snapshot(tmp_path / "ledger_backup_short.csv", record, header=header)
 
         snapshot = SnapshotReader(path).load()
 
@@ -221,20 +221,20 @@ class TestSnapshotReader:
 
     def test_newest_backup_is_chosen_by_its_timestamped_name(self, tmp_path):
         for stamp in ("20260901T000000Z", "20260917T120000Z", "20260910T105451Z"):
-            write_snapshot(tmp_path / f"sheet_backup_{stamp}.csv", row(order_id=stamp))
+            write_snapshot(tmp_path / f"ledger_backup_{stamp}.csv", row(order_id=stamp))
         (tmp_path / "before_live.json").write_text("{}", encoding="utf-8")  # not a backup
 
-        assert newest_snapshot(tmp_path).name == "sheet_backup_20260917T120000Z.csv"
+        assert newest_snapshot(tmp_path).name == "ledger_backup_20260917T120000Z.csv"
         assert SnapshotReader(data_dir=tmp_path).load().rows[0].order_id == "20260917T120000Z"
 
     def test_no_backup_is_a_loud_error_not_an_empty_page(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="sheet_backup_"):
+        with pytest.raises(FileNotFoundError, match="ledger_backup_"):
             newest_snapshot(tmp_path)
 
     def test_a_relative_explicit_path_is_under_the_repo_root(self):
-        reader = SnapshotReader("data/sheet_backup_x.csv")
+        reader = SnapshotReader("data/ledger_backup_x.csv")
 
-        assert reader.resolve() == ledger_reader.ROOT / "data" / "sheet_backup_x.csv"
+        assert reader.resolve() == ledger_reader.ROOT / "data" / "ledger_backup_x.csv"
 
     def test_health_names_the_file(self, snapshot_path):
         health = SnapshotReader(snapshot_path).health()
@@ -252,7 +252,7 @@ class TestSnapshotReader:
 class TestReadOnlyGuarantee:
     WRITE_TOKENS = (
         "append_row", "batch_update", "add_rows", "add_cols", "delete_rows", "update_cell",
-        "update_acell", "_get_worksheet", "sync_csv_to_sheet", "sort_ledger_by_date_desc",
+        "update_acell", "_get_worksheet", "sync_csv_to_ledger", "sort_ledger_by_date_desc",
     )
     #: The only two things web/ may do with a worksheet handle: one read, and its title.
     WORKSHEET_USE = re.compile(r"\bworksheet\.(?!get_values\b|title\b)\w+")
@@ -886,7 +886,7 @@ class TestHealth:
         test_client = TestClient(app)
 
         health = test_client.get("/health")
-        assert health.status_code == 503 and "sheet_backup_" in health.json()["error"]
+        assert health.status_code == 503 and "ledger_backup_" in health.json()["error"]
         assert test_client.get("/").status_code == 503
         assert test_client.get("/orders").status_code == 503
 
@@ -900,7 +900,7 @@ class TestReaderFromSettings:
     def test_default_is_the_ledger_file(self, tmp_path):
         from web.ledger_reader import DbReader
 
-        reader = reader_from_settings(_settings(web_ledger_source="db", web_sheet_cache_ttl_seconds=42,
+        reader = reader_from_settings(_settings(web_ledger_source="db", web_ledger_cache_ttl_seconds=42,
                                                 ledger_db_path=str(tmp_path / "l.sqlite3")))
         assert isinstance(reader, DbReader) and reader.ttl_seconds == 42.0
         assert reader.db.path == tmp_path / "l.sqlite3"
@@ -912,8 +912,8 @@ class TestReaderFromSettings:
 
     def test_snapshot_path_from_config(self):
         reader = reader_from_settings(_settings(web_ledger_source="snapshot",
-                                                web_snapshot_path="data/sheet_backup_x.csv"))
-        assert reader.resolve().name == "sheet_backup_x.csv"
+                                                web_snapshot_path="data/ledger_backup_x.csv"))
+        assert reader.resolve().name == "ledger_backup_x.csv"
 
     def test_explicit_arguments_win(self):
         reader = reader_from_settings(_settings(web_ledger_source="db"), source="snapshot",
@@ -931,7 +931,7 @@ class TestReaderFromSettings:
 
         assert ENV_TO_CONFIG["WEB_LEDGER_SOURCE"] == "web.ledger_source"
         assert ENV_TO_CONFIG["WEB_SNAPSHOT_PATH"] == "web.snapshot_path"
-        assert ENV_TO_CONFIG["WEB_SHEET_CACHE_TTL_SECONDS"] == "web.sheet_cache_ttl_seconds"
+        assert ENV_TO_CONFIG["WEB_LEDGER_CACHE_TTL_SECONDS"] == "web.ledger_cache_ttl_seconds"
         assert ENV_TO_CONFIG["WEB_BIND_HOST"] == "web.bind_host"
         assert ENV_TO_CONFIG["WEB_PORT"] == "web.port"
         assert ENV_TO_CONFIG["WEB_ENABLED"] == "web.enabled"
@@ -939,7 +939,7 @@ class TestReaderFromSettings:
         assert _settings().web_enabled in (True, False)
         assert _settings().ledger_db_path
         defaults = _settings()
-        assert defaults.web_sheet_cache_ttl_seconds == 300 or defaults.web_sheet_cache_ttl_seconds > 0
+        assert defaults.web_ledger_cache_ttl_seconds == 300 or defaults.web_ledger_cache_ttl_seconds > 0
 
 
 # --------------------------------------------------------------------------------------------------
@@ -1051,7 +1051,7 @@ class TestBackupScript:
         (root / "config.json").write_text('{"secret": 1}', encoding="utf-8")
         (root / ".state.json").write_text("{}", encoding="utf-8")
         (root / "data" / "ledger.sqlite3").write_bytes(b"sqlite")
-        (root / "data" / "sheet_backup_20260910T105451Z.csv").write_text("a,b\n", encoding="utf-8")
+        (root / "data" / "ledger_backup_20260910T105451Z.csv").write_text("a,b\n", encoding="utf-8")
         (root / "data" / "__pycache__").mkdir()
         (root / "data" / "__pycache__" / "x.pyc").write_bytes(b"")
         (root / "logs" / "run.log").write_text("log", encoding="utf-8")
@@ -1063,7 +1063,7 @@ class TestBackupScript:
 
         assert [m.as_posix() for m in backup_members(repo)] == [
             "config.json", ".state.json", "data/ledger.sqlite3",
-            "data/sheet_backup_20260910T105451Z.csv",
+            "data/ledger_backup_20260910T105451Z.csv",
         ]
 
     def test_create_then_restore_into_a_fresh_clone(self, repo, tmp_path):
@@ -1076,7 +1076,7 @@ class TestBackupScript:
         assert list_backups(repo / "backups") == [archive]
         manifest = read_manifest(archive)
         assert manifest["files"] == ["config.json", ".state.json", "data/ledger.sqlite3",
-                                     "data/sheet_backup_20260910T105451Z.csv"]
+                                     "data/ledger_backup_20260910T105451Z.csv"]
         with zipfile.ZipFile(archive) as z:
             assert "logs/run.log" not in z.namelist()
 
@@ -1194,7 +1194,7 @@ class TestBackupPage:
         archive = tmp_path / "ledger_backup_x.zip"
         with zipfile.ZipFile(archive, "w") as z:
             z.writestr("config.json", '{"restored": true}')
-            z.writestr("data/sheet_backup_1.csv", "a\n")
+            z.writestr("data/ledger_backup_1.csv", "a\n")
         client = self._client(repo, snapshot_path, logs_dir, failures_dir)
 
         page = client.get("/settings").text
@@ -1208,7 +1208,7 @@ class TestBackupPage:
         assert response.status_code == 303 and response.headers["location"].startswith("/settings?message=Restored")
         assert "restart=container" in response.headers["location"]  # config.json came back
         assert (repo / "config.json").read_text(encoding="utf-8") == '{"restored": true}'
-        assert (repo / "data" / "sheet_backup_1.csv").is_file()
+        assert (repo / "data" / "ledger_backup_1.csv").is_file()
 
         # Now configured: the form is still there, existing files are KEPT
         # unless overwrite is ticked.
@@ -1479,7 +1479,7 @@ class TestStaticAssetsCarryTheirBlocks:
 
 
 class TestAuditPage:
-    """scripts/audit_sheet's checks over the ledger the dashboard serves, each finding on its row."""
+    """scripts/audit_ledger's checks over the ledger the dashboard serves, each finding on its row."""
 
     def test_the_page_is_the_orders_view_over_the_flagged_rows(self, client):
         body = client.get("/audit").text

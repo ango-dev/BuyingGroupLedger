@@ -333,8 +333,8 @@ cat logs/.last_run
 nothing ever — it authenticates read-only:
 
 ```bash
-docker compose run --rm --entrypoint python ledger -m scripts.audit_sheet
-docker compose run --rm --entrypoint python ledger -m scripts.audit_sheet --stale-days 2
+docker compose run --rm --entrypoint python ledger -m scripts.audit_ledger
+docker compose run --rm --entrypoint python ledger -m scripts.audit_ledger --stale-days 2
 ```
 
 `--stale-days` catches open orders that stopped being re-scraped, which is the data-side shadow of
@@ -453,7 +453,7 @@ switches, what must never be run casually, and where to look first.
 Two things to tell it that it can't infer:
 
 - **A live run costs real money** and, with `BUYING_GROUP_SYNC_ENABLED=true`, files real insurance and
-  submits real tracking to third parties. Reading logs, running `pytest`, and running `audit_sheet`
+  submits real tracking to third parties. Reading logs, running `pytest`, and running `audit_ledger`
   or `preflight` are all free and safe. `python main.py` is not.
 - **`sync_tracking` defaults to a dry run** and only writes with `--apply`. Keep it that way unless
   you mean it.
@@ -475,9 +475,9 @@ Do these in order, or you'll get two schedulers writing the same sheet:
    BuyingGroupLedger`. Likewise stop any local container: `docker compose down`. The run lock is a
    file in `logs/`, so it is per-machine and will **not** stop two hosts scraping the same sheet.
 2. Snapshot the sheet so you can prove the first run behaved:
-   `python -m scripts.audit_sheet --save-snapshot before.json`
+   `python -m scripts.audit_ledger --save-snapshot before.json`
 3. Bring the server up and force one run.
-4. `python -m scripts.audit_sheet --compare before.json` — a healthy cutover updates rows and appends
+4. `python -m scripts.audit_ledger --compare before.json` — a healthy cutover updates rows and appends
    only genuinely new orders. Duplicates would show as added rows with keys you recognise.
 
 Nothing needs re-authorising: profiles, proxies and the sheet are all cloud-side. The only host-bound

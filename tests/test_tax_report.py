@@ -2,8 +2,8 @@
 
 from scripts import tax_report
 from scripts.tax_report import _year_of, build_report, render_text
-from sheets.ledger_sync import _cogs_formula, _profit_formula
-from tests.test_audit_sheet import Cell, build, row_cells
+from ledger.sync import _cogs_formula, _profit_formula
+from tests.test_audit_ledger import Cell, build, row_cells
 
 
 def _row(n, *, order_date, payout_date="", payout="", status="paid", cogs=798.0, insurance="",
@@ -129,17 +129,17 @@ class TestRendering:
 
     def test_main_reads_a_snapshot_offline(self, tmp_path, capsys, monkeypatch):
         import json
-        from tests.test_audit_sheet import grids_for
+        from tests.test_audit_ledger import grids_for
         snap = tmp_path / "s.json"
         snap.write_text(json.dumps(grids_for(_row(2, order_date="2026-03-01")).to_snapshot(), default=str))
-        monkeypatch.setattr(tax_report, "open_worksheet_readonly", lambda: (_ for _ in ()).throw(AssertionError("must not open the live sheet")))
+        monkeypatch.setattr(tax_report, "open_ledger_readonly", lambda: (_ for _ in ()).throw(AssertionError("must not open the live sheet")))
         tax_report.main(["2026", "--from-snapshot", str(snap), "--json"])
         out = json.loads(capsys.readouterr().out)
         assert out["year"] == 2026 and out["totals"]["cogs"] == 798.0
 
     def test_main_asks_for_the_year_when_omitted(self, tmp_path, capsys, monkeypatch):
         import json
-        from tests.test_audit_sheet import grids_for
+        from tests.test_audit_ledger import grids_for
         snap = tmp_path / "s.json"
         snap.write_text(json.dumps(grids_for(_row(2, order_date="2026-03-01")).to_snapshot(), default=str))
         answers = iter(["nope", "2026"])

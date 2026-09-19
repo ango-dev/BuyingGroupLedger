@@ -8,7 +8,7 @@ an entry whose column is `__delete_row__` DELETES that row instead (value is ign
 that the row's Order ID still equals `current_value`); deletions run LAST, bottom-up, so the cell
 writes and the other row numbers in the plan stay valid. Sheets shifts the rows below up and
 re-anchors the relative formulas itself. --
-the shape `audit_sheet`'s before/after comparison can produce (row, column, the value from the
+the shape `audit_ledger`'s before/after comparison can produce (row, column, the value from the
 BEFORE snapshot, the value there now). Each write is a single cell by A1 address, RAW (no formula
 parsing, no locale interpretation), and only happens if the cell STILL holds `current_value`: a cell
 somebody has edited since the plan was made is left alone and reported, never overwritten.
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 from models.order import FIELDNAMES
-from sheets.ledger_sync import (
+from ledger.sync import (
     _BOOL_FIELDS, _NUMERIC_FIELDS, HEADER, _col_letter, _get_worksheet, _parse_display_number,
 )
 

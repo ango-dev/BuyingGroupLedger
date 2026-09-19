@@ -501,7 +501,7 @@ def test_an_unresolvable_duplicate_is_marked_rather_than_guessed():
     rows = build_order_items(html, tracking_by_shipment={"1": "A", "2": "B", "3": "C"})
 
     assert len(rows) == 1
-    assert rows[0].quantity == "*", "'*' is the existing convention audit_sheet.unresolved_split_quantity reads"
+    assert rows[0].quantity == "*", "'*' is the existing convention audit_ledger.unresolved_split_quantity reads"
     assert rows[0].total_cost is None, "no cost is better than a wrong cost"
 
 
@@ -684,7 +684,7 @@ def test_the_real_block_picks_the_track_link_over_its_siblings():
 def test_a_kept_gift_card_row_is_tagged_as_deliberately_unrouted():
     """It funds inventory, so its cost belongs on the ledger — but it will never be submitted to a
     buying group and never paid out on its own. Left blank it reads as an ordinary order still
-    awaiting payment, which audit_sheet's cogs_inputs_complete would count as a year-boundary
+    awaiting payment, which audit_ledger's cogs_inputs_complete would count as a year-boundary
     straddle for the life of the row."""
     from config.warehouses import GIFT_CARD, is_deliberately_unrouted, tag_and_filter_personal
     from models.warehouse import Jig, Warehouse

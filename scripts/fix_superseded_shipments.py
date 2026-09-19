@@ -48,9 +48,9 @@ DRY RUN BY DEFAULT — reads the live sheet and the order pages, and writes NOTH
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021 --delete
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021 \\
-        --restore-from data/sheet_backup_20260822T200318Z.csv
+        --restore-from data/ledger_backup_20260822T200318Z.csv
 
-Apply for real (backs the sheet up to data/sheet_backup_<timestamp>.csv FIRST):
+Apply for real (backs the sheet up to data/ledger_backup_<timestamp>.csv FIRST):
     python -m scripts.fix_superseded_shipments --order 111-9990021-9990021 --apply
 """
 
@@ -65,11 +65,11 @@ from ledger_db.worksheet import ValueInputOption, ValueRenderOption
 
 # This drives the cloud browser, and the Browser-Use SDK reads BROWSER_USE_API_KEY out of the
 # ENVIRONMENT itself. Importing config.settings is what puts the config.json value there. It
-# currently arrives transitively via sheets.ledger_sync, but stated explicitly so an import
+# currently arrives transitively via ledger.sync, but stated explicitly so an import
 # tidy-up somewhere else cannot quietly break this script with a valid config.
 import config.settings  # noqa: F401
 from models.order import FIELDNAMES, shipment_label
-from sheets.ledger_sync import (
+from ledger.sync import (
     HEADER,
     _SUPERSEDED_BLANK_FIELDS,
     _clear_cells,
@@ -386,7 +386,7 @@ def _backup(existing: list[list]) -> Path:
     backup_dir = Path("data")
     backup_dir.mkdir(exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup_path = backup_dir / f"sheet_backup_{stamp}.csv"
+    backup_path = backup_dir / f"ledger_backup_{stamp}.csv"
     with backup_path.open("w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows(existing)
     print(f"\nBacked the whole sheet up -> {backup_path}")
@@ -400,9 +400,9 @@ def _read_sheet(worksheet) -> tuple[list[str], list[list]]:
     header = [str(c) for c in existing[0]]
     if header != list(HEADER):
         raise SystemExit(
-            "Sheet header doesn't match the current schema, so this would target the wrong columns. "
-            f"Run `python -m scripts.reorder_sheet` first.\n  sheet:    {header}\n"
-            f"  expected: {list(HEADER)}"
+            "The ledger's header doesn't match the current schema, so this would target the wrong "
+            f"columns (the file migrates its own columns on open, so this should not happen).\n"
+            f"  ledger:   {header}\n  expected: {list(HEADER)}"
         )
     return header, existing
 
@@ -427,7 +427,7 @@ def _apply_marks(worksheet, header: list[str], plan: dict) -> None:
         raise SystemExit(
             f"Status did not stick on row(s) {wrong} -- add `superseded` to the Status column's "
             "data-validation dropdown and re-run; their money cells are ALREADY blank, which "
-            "`python -m scripts.audit_sheet` will report until the status lands."
+            "`python -m scripts.audit_ledger` will report until the status lands."
         )
     print(f"Marked {len(rows)} row(s) superseded (money blanked, renumbered after the live boxes).")
 
@@ -471,7 +471,7 @@ def _restore(args, worksheet, header: list[str], existing: list[list]) -> None:
         )
     print(f"\nRestored {len(appends)} row(s) at row(s) {new_rows} and stamped their formulas. "
           "They sit at the bottom: run `python -m scripts.sort_ledger --apply`, then "
-          "`python -m scripts.audit_sheet`.")
+          "`python -m scripts.audit_ledger`.")
 
 
 def main() -> None:
@@ -486,7 +486,7 @@ def main() -> None:
                         help="Delete the dead row instead of marking it superseded (the old repair)")
     parser.add_argument("--restore-from", metavar="BACKUP_CSV",
                         help="Put a row an earlier --delete removed back as a superseded row, from "
-                             "that run's data/sheet_backup_<ts>.csv (no browser needed)")
+                             "that run's data/ledger_backup_<ts>.csv (no browser needed)")
     args = parser.parse_args()
 
     worksheet = _get_worksheet()
@@ -546,12 +546,12 @@ def main() -> None:
 
         # MANDATORY after a delete, not tidy: Total Profit uses same-row relative references, so every
         # row that shifted up now carries a formula pointing at its OLD position.
-        # audit_sheet.profit_formula_literal is the tripwire for getting this wrong.
+        # audit_ledger.profit_formula_literal is the tripwire for getting this wrong.
         remaining = len(existing) - 1 - len(plan["deletions"])
         _write_profit_formulas(worksheet, list(range(2, remaining + 2)))
         print(f"Re-stamped the Total Profit formula on {remaining} row(s).")
 
-    print("\nDone. Verify with `python -m scripts.audit_sheet`.")
+    print("\nDone. Verify with `python -m scripts.audit_ledger`.")
 
 
 if __name__ == "__main__":

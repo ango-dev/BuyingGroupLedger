@@ -28,7 +28,7 @@ after anyone is watching — and always record how a run *ended*, including its 
 stamp `logs/.last_run`, the same heartbeat the container healthcheck uses: if that file is stale, the
 scheduler has stopped firing, which is otherwise a completely silent failure. Check it with
 `cat logs/.last_run`, and cross-check the data side with
-`python -m scripts.audit_sheet --stale-days 2` (see [Auditing the sheet](diagnostics.md#auditing-the-sheet)).
+`python -m scripts.audit_ledger --stale-days 2` (see [Auditing the sheet](diagnostics.md#auditing-the-sheet)).
 
 **Before trusting either scheduler on a new machine, run `python -m scripts.preflight`** — it's
 offline and free, and it catches the misconfigurations that keep working while doing the wrong thing
@@ -134,7 +134,7 @@ the header (remembered per browser; follows the system until you choose). The de
 `requirements-web.txt`, an optional install on a desktop and part of the one Docker image.
 
 **No automatic writes.** Every *read* of the Sheet goes through
-`scripts.audit_sheet.open_worksheet_readonly`, the `spreadsheets.readonly` scope, so nothing that
+`scripts.audit_ledger.open_ledger_readonly`, the `spreadsheets.readonly` scope, so nothing that
 merely displays the ledger can write it. The dashboard never calls a retailer or a buying-group
 API, never runs a scrape, and never changes the ledger schema (`FIELDNAMES` / `HEADER` are frozen;
 `tests/test_schema.py` enforces them). **The one Sheet write is a cell you edit by hand on the
@@ -281,15 +281,15 @@ lists every `WEB_*` setting):
 
 | Backend | Reads | For |
 |---|---|---|
-| `db` | `data/ledger.sqlite3` (see below), refreshed from the read-only Sheet every `web.sheet_cache_ttl_seconds` (300 s), or from `web.snapshot_path` when one is set | the host: instant pages, one Sheet read per interval, the copy survives restarts |
+| `db` | `data/ledger.sqlite3` (see below), refreshed from the read-only Sheet every `web.ledger_cache_ttl_seconds` (300 s), or from `web.snapshot_path` when one is set | the host: instant pages, one Sheet read per interval, the copy survives restarts |
 | `sheet` | the live worksheet, read-only scope, cached in memory for the same interval | a desktop look at the live ledger |
-| `snapshot` (default) | the newest `data/sheet_backup_*.csv` (every `--apply` script writes one), or `web.snapshot_path` | development, tests, no credentials |
+| `snapshot` (default) | the newest `data/ledger_backup_*.csv` (every `--apply` script writes one), or `web.snapshot_path` | development, tests, no credentials |
 
 Cells are read **by column name**, so a backup written before a column moved still reads correctly;
 `/health` reports `schema_matches: false` (with the missing and extra columns) when a source's header
 is not the current order. A CSV backup stores `COGS` and `Total Profit` as formula text, so for those
 two columns the page computes the same arithmetic as the sheet formula (`web.ledger_reader.cogs_of`,
-pinned against `sheets.ledger_sync._cogs_formula`'s own cell references by a test).
+pinned against `ledger.sync._cogs_formula`'s own cell references by a test).
 
 **Projected versus realized.** Since 2026-09-11 a Actual Payout with a blank Payout Date on an open
 row is BFMR's *committed* price, not money received ([data model](data-model.md)). The dashboard
@@ -309,7 +309,7 @@ sums agree to the cent. There is no `Expected Payout` column (parked in
 ```bash
 .venv/Scripts/pip install -r requirements-web.txt      # once (Linux: .venv/bin/pip)
 python -m web                                          # http://127.0.0.1:8765/ over the newest backup
-python -m web --snapshot data/sheet_backup_20260910T105451Z.csv
+python -m web --snapshot data/ledger_backup_20260910T105451Z.csv
 python -m web --source sheet                           # the live Sheet, read-only
 python -m web --source db                              # the SQLite copy, refreshed from the Sheet
 ```
@@ -337,13 +337,13 @@ Set `web.ledger_source` to `db` in the host's `config.json` (the example does). 
 ### The SQLite copy of the ledger (`ledger_db/`)
 
 `data/ledger.sqlite3` is a **mirror** of the Sheet: one `ledger_rows` table whose columns are
-`FIELDNAMES` in order, typed from `sheets/ledger_sync.py`'s own field sets, keyed on the upsert key,
+`FIELDNAMES` in order, typed from `ledger/sync.py`'s own field sets, keyed on the upsert key,
 plus a `mirror_runs` log. Every mirror replaces the table in one transaction, so the copy is always
 "the Sheet as of that read". Two things write it, and both only *read* the Sheet:
 
 ```bash
 python -m scripts.mirror_sheet_to_db                                   # live Sheet -> DB (read-only scope)
-python -m scripts.mirror_sheet_to_db --from-snapshot data/sheet_backup_20260910T105451Z.csv
+python -m scripts.mirror_sheet_to_db --from-snapshot data/ledger_backup_20260910T105451Z.csv
 ```
 
 the dashboard's `db` backend, which runs the same mirror on its cache interval, and **the scheduled
@@ -410,7 +410,7 @@ where the ledger lives:
 
 How it works: every writer addresses the ledger as a positional grid through a handful of
 `gspread.Worksheet` methods, so `ledger_db/worksheet.py` implements that surface over the SQLite
-file and `sheets.ledger_sync._get_worksheet()` hands it out instead of a Google worksheet — the
+file and `ledger.sync._get_worksheet()` hands it out instead of a Google worksheet — the
 money-path code runs unchanged, and the tests that pin its behaviour run against the adapter too.
 COGS and Total Profit are never stored as formula text: the two columns are computed from the row
 on every read (the same Python mirrors of the formulas the dashboard already used), so the numbers
@@ -433,7 +433,7 @@ To stay on the Sheet for now, set `"ledger": {"backend": "sheet"}` in `config.js
 Under `db`: `python -m scripts.mirror_sheet_to_db` and the end-of-run mirror refuse to run (a
 mirror from the stale Sheet would overwrite the ledger), the dashboard serves the file directly
 whatever `web.ledger_source` says (an explicit `--source` still wins for development), `/health`
-reports `ledger_backend`, and `python -m scripts.audit_sheet` runs its DATA checks against the
+reports `ledger_backend`, and `python -m scripts.audit_ledger` runs its DATA checks against the
 database through the worksheet adapter (keys, money invariants, missing mandatory cells,
 staleness) while the Sheet-only checks — formulas, formats, merged cells, the formatted/stored
 disagreement — report SKIP (`--from-snapshot` still audits a saved Sheet snapshot in full). The
@@ -450,7 +450,7 @@ Both are the **Orders view** — the same filter bar, table or cards, sort, sear
 — over a subset of rows, with a **Finding** column (table) or block (card) beside each.
 Neither writes anything.
 
-- **Audit** (`/audit`, `web/audit_view.py`): every check of `scripts.audit_sheet` run against the
+- **Audit** (`/audit`, `web/audit_view.py`): every check of `scripts.audit_ledger` run against the
   ledger the dashboard serves (under `db`, through the worksheet adapter — the CLI's own path; the
   Sheet-only checks skip), then every row a check named, mapped to its order. The lead shows the
   checks with their status and how many rows each flagged; the **Check** dropdown narrows the rows

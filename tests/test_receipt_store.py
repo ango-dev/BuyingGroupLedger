@@ -90,7 +90,7 @@ class TestTheMigrationOffOci:
         from ledger_db.store import LedgerDb
         from ledger_db.worksheet import DbWorksheet
         from models.order import FIELDNAMES
-        from sheets.ledger_sync import HEADER
+        from ledger.sync import HEADER
 
         ws = DbWorksheet(LedgerDb(on.parent / "ledger.sqlite3"))
         row = lambda oid, ship, link: [{"order_id": oid, "order_date": "2026-09-01", "item_name": "x",  # noqa: E731

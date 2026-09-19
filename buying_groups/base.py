@@ -15,7 +15,7 @@ So the abstraction here is deliberately thin: shared transport, shared vocabular
 Anything a provider does differently belongs in that provider's adapter, not in a flag here.
 
 `TrackingSubmission` is the vocabulary — one per eligible ledger row, built by the pure planner in
-sheets/ledger_sync.py, and translated by each adapter into whatever its API wants. `PayoutRecord`
+ledger/sync.py, and translated by each adapter into whatever its API wants. `PayoutRecord`
 is the return trip: what a group paid, keyed by tracking number, which is the one identifier both
 sides always agree on.
 

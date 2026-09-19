@@ -73,7 +73,7 @@ class TestReceiptCaptureCannotCostARow:
         written, synced = [], []
         monkeypatch.setattr(main, "write_csv",
                             lambda items: written.append(items) or __import__("pathlib").Path("x.csv"))
-        monkeypatch.setattr(main, "sync_csv_to_sheet", lambda p: synced.append(p) or {"appended": 0})
+        monkeypatch.setattr(main, "sync_csv_to_ledger", lambda p: synced.append(p) or {"appended": 0})
         monkeypatch.setattr("receipts.capture.attach_receipts",
                             lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("bucket down")))
         fired = []
@@ -95,7 +95,7 @@ class TestReceiptCaptureCannotCostARow:
                             lambda *a, **kw: order.append("capture"))
         monkeypatch.setattr(main, "write_csv",
                             lambda items: order.append("csv") or __import__("pathlib").Path("x.csv"))
-        monkeypatch.setattr(main, "sync_csv_to_sheet", lambda p: {"appended": 0})
+        monkeypatch.setattr(main, "sync_csv_to_ledger", lambda p: {"appended": 0})
         monkeypatch.setattr(main, "alert", lambda *a: None)
 
         main.run_scrape(_Scraper(profile))
@@ -165,7 +165,7 @@ class TestSheetFailuresAreLoudNotSilent:
         monkeypatch.setattr(main, "_classify_and_drop_personal", lambda items, label: items)
         monkeypatch.setattr(main, "_tag_cards", lambda items, label: None)
         monkeypatch.setattr(main, "write_csv", lambda items: __import__("pathlib").Path("x.csv"))
-        monkeypatch.setattr(main, "sync_csv_to_sheet",
+        monkeypatch.setattr(main, "sync_csv_to_ledger",
                             lambda p: (_ for _ in ()).throw(RuntimeError("APIError 400")))
         fired = []
         monkeypatch.setattr(main, "alert", lambda subject, body: fired.append((subject, body)))
@@ -179,7 +179,7 @@ class TestSheetFailuresAreLoudNotSilent:
     def test_an_unreadable_order_state_alerts(self, monkeypatch):
         """The 503 case. It is not enough to log: the run then looks completely normal apart from
         fetching fewer orders than usual."""
-        from sheets import ledger_sync
+        from ledger import sync as ledger_sync
 
         monkeypatch.setattr(ledger_sync, "_get_worksheet",
                             lambda: (_ for _ in ()).throw(RuntimeError("503 unavailable")))
@@ -196,7 +196,7 @@ class TestSheetFailuresAreLoudNotSilent:
         """The old wording read as conservative OVER-fetching. The real effect is the opposite: the
         fetch set is (new-in-window + still-open re-checks), so an empty state fetches FEWER orders.
         Live it took Amazon from "fetching 1" to "fetching 0"."""
-        from sheets import ledger_sync
+        from ledger import sync as ledger_sync
 
         monkeypatch.setattr(ledger_sync, "_get_worksheet",
                             lambda: (_ for _ in ()).throw(RuntimeError("boom")))

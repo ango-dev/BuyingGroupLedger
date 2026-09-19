@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from models.order import FIELDNAMES
-from sheets.ledger_sync import HEADER, _cogs_formula, _profit_formula
+from ledger.sync import HEADER, _cogs_formula, _profit_formula
 from ledger_db.store import KEY_FIELDS, LedgerDb, columns, ledger_rows_ddl, sql_type
 from ledger_db.worksheet import DbWorksheet
 from web.ledger_reader import DbReader
@@ -224,10 +224,10 @@ class TestFactory:
 
         base = dataclasses.replace(settings, web_ledger_source="db",
                                    ledger_db_path=str(tmp_path / "x.sqlite3"),
-                                   web_sheet_cache_ttl_seconds=120)
+                                   web_ledger_cache_ttl_seconds=120)
         reader = reader_from_settings(base)
         assert isinstance(reader, DbReader)
         assert reader.ttl_seconds == 120.0 and reader.db.path == tmp_path / "x.sqlite3"
 
-        dev = reader_from_settings(base, source="snapshot", snapshot_path="data/sheet_backup_x.csv")
+        dev = reader_from_settings(base, source="snapshot", snapshot_path="data/ledger_backup_x.csv")
         assert isinstance(dev, SnapshotReader)

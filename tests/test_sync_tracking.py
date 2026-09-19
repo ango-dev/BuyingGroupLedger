@@ -11,7 +11,7 @@ import sync_tracking
 
 from buying_groups.base import PayoutRecord, SubmissionResult
 from models.order import STATUSES
-from sheets.ledger_sync import HEADER
+from ledger.sync import HEADER
 from sync_tracking import (
     EXPECTED_PAYOUT_COL,
     INSURANCE_COL,
@@ -75,7 +75,7 @@ class TestEligibility:
         assert not plan["by_group"] and plan["skipped_no_tracking"] == 1
 
     def test_a_blank_order_id_row_is_ignored_entirely(self):
-        """Same rule sync_csv_to_sheet applies: a row with no Order ID is not a real order."""
+        """Same rule sync_csv_to_ledger applies: a row with no Order ID is not a real order."""
         plan = plan_tracking_submissions(HEADER_LIST, [shipped("", "T1")])
         assert not plan["by_group"]
         assert plan["skipped_no_tracking"] == 0 and plan["skipped_cancelled"] == 0

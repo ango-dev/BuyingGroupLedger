@@ -1,7 +1,7 @@
 """The SQLite ledger wearing a gspread.Worksheet face -- how the app runs off the database.
 
 THE CUTOVER, STAGE TWO. Every writer in this codebase -- the scrapers'
-upsert (sheets/ledger_sync.sync_csv_to_sheet), the sort, the buying-group sync (payouts, insurance,
+upsert (ledger/sync.sync_csv_to_ledger), the sort, the buying-group sync (payouts, insurance,
 the submitted tick), the BFMR auto-reply's read, the dashboard's cell editor, the backfill scripts --
 addresses the ledger as a POSITIONAL GRID through a handful of gspread.Worksheet methods:
 
@@ -14,7 +14,7 @@ addresses the ledger as a POSITIONAL GRID through a handful of gspread.Worksheet
 So rather than rewrite 3,000 lines of money-path code, THIS class implements that surface over the
 SQLite file: the grid is HEADER at row 1 and one ledger row per `sheet_row` beneath it, every write
 lands in the file at once (the whole table, one transaction -- the ledger is a few hundred rows),
-and `sheets.ledger_sync._get_worksheet()` hands it out instead of a Google worksheet whenever
+and `ledger.sync._get_worksheet()` hands it out instead of a Google worksheet whenever
 `ledger.backend` is `db`. The writers do not know the difference, and the tests that pin their
 behaviour against the fake worksheet pin it against this one too.
 
@@ -44,7 +44,7 @@ import re
 from typing import Any
 
 from models.order import FIELDNAMES
-from sheets.ledger_sync import HEADER, _BOOL_FIELDS, _INT_FIELDS, _NUMERIC_FIELDS
+from ledger.sync import HEADER, _BOOL_FIELDS, _INT_FIELDS, _NUMERIC_FIELDS
 
 from ledger_db.store import FORMULA_FIELDS, LedgerDb
 
@@ -109,7 +109,7 @@ def _typed(field: str, value: Any) -> Any:
     if field in _NUMERIC_FIELDS and not isinstance(value, bool):
         if isinstance(value, (int, float)):
             return int(value) if field in _INT_FIELDS and float(value).is_integer() else value
-        from sheets.ledger_sync import _parse_display_number
+        from ledger.sync import _parse_display_number
 
         number = _parse_display_number(value)
         if number is None:

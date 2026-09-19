@@ -72,22 +72,22 @@ It cannot verify the MaxOutDeals IP allowlist from the host, so it warns about t
 
 ## Auditing the sheet
 
-`pytest` proves the *code* is right; it can't see the live sheet. `scripts/audit_sheet.py` checks the
+`pytest` proves the *code* is right; it can't see the live sheet. `scripts/audit_ledger.py` checks the
 sheet itself against every invariant the ledger depends on, and **writes nothing, ever** (it
 authenticates with a read-only scope, so it isn't merely well-behaved — it isn't permitted to write):
 
 ```bash
-.venv/bin/python -m scripts.audit_sheet                  # Windows: .venv\Scripts\python -m ...
-.venv/bin/python -m scripts.audit_sheet --expect-rows 23 # also assert the row count
+.venv/bin/python -m scripts.audit_ledger                  # Windows: .venv\Scripts\python -m ...
+.venv/bin/python -m scripts.audit_ledger --expect-rows 23 # also assert the row count
 ```
 
 It's worth running **before and after** a live run — the diff is what proves a run updated rows
 instead of duplicating them, and `--compare` does that for you:
 
 ```bash
-.venv/bin/python -m scripts.audit_sheet --save-snapshot before.json
+.venv/bin/python -m scripts.audit_ledger --save-snapshot before.json
 .venv/bin/python main.py
-.venv/bin/python -m scripts.audit_sheet --compare before.json
+.venv/bin/python -m scripts.audit_ledger --compare before.json
 ```
 
 That reports added / removed / changed rows keyed on the upsert key — and **judges** them, as
@@ -103,7 +103,7 @@ changed.) Exit code is `0` when nothing failed, `1` on a failure (or on a warnin
 so it can gate a scheduled run.
 
 What it checks, and why each one matters: the header matches `HEADER` **exactly** (right names in the
-wrong order is the one failure that scrambles every row with no error — see the column-order warning in [Data model](data-model.md)); no duplicate upsert keys, on all four of the keys `sync_csv_to_sheet` uses (a package id under two Shipment numbers of one order is the re-tracked-shipment double-count); every row's
+wrong order is the one failure that scrambles every row with no error — see the column-order warning in [Data model](data-model.md)); no duplicate upsert keys, on all four of the keys `sync_csv_to_ledger` uses (a package id under two Shipment numbers of one order is the re-tracked-shipment double-count); every row's
 `Total Profit` still holds the *live formula* rather than a number frozen from a past read, and that
 formula still points at the current columns; and that the cell **types** are intact — `Shipment` an
 int, `Card Last 4` text with its leading zeros, the money columns numeric rather than `"$1,299.00"`

@@ -14,12 +14,12 @@ placed the same day.
 
 Re-stamps every Total Profit formula afterwards, which is mandatory rather than tidy: the formula
 uses same-row relative references, so a row that moves needs the formula for its NEW position.
-`scripts/audit_sheet.py`'s check_profit_formula_literal is the tripwire for getting that wrong.
+`scripts/audit_ledger.py`'s check_profit_formula_literal is the tripwire for getting that wrong.
 
 DRY RUN BY DEFAULT — reads the live sheet and writes NOTHING, showing the order it would produce:
     python -m scripts.sort_ledger
 
-Apply for real (backs the sheet up to data/sheet_backup_<timestamp>.csv FIRST):
+Apply for real (backs the sheet up to data/ledger_backup_<timestamp>.csv FIRST):
     python -m scripts.sort_ledger --apply
 """
 
@@ -29,7 +29,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sheets.ledger_sync import HEADER, _get_worksheet, sort_ledger_by_date_desc
+from ledger.sync import HEADER, _get_worksheet, sort_ledger_by_date_desc
 
 log = logging.getLogger("sort_ledger")
 
@@ -116,9 +116,9 @@ def main() -> None:
     header = [str(c) for c in existing[0]]
     if header != list(HEADER):
         raise SystemExit(
-            "Sheet header doesn't match the current schema, so sorting would target the wrong "
-            f"columns. Run `python -m scripts.reorder_sheet` first.\n  sheet:    {header}\n"
-            f"  expected: {list(HEADER)}"
+            "The ledger's header doesn't match the current schema, so sorting would target the wrong "
+            f"columns (the file migrates its own columns on open, so this should not happen).\n"
+            f"  ledger:   {header}\n  expected: {list(HEADER)}"
         )
 
     plan = plan_sort(header, existing[1:])
@@ -131,14 +131,14 @@ def main() -> None:
     backup_dir = Path("data")
     backup_dir.mkdir(exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup_path = backup_dir / f"sheet_backup_{stamp}.csv"
+    backup_path = backup_dir / f"ledger_backup_{stamp}.csv"
     with backup_path.open("w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows(existing)
     print(f"\nBacked the whole sheet up -> {backup_path}")
 
     result = sort_ledger_by_date_desc(worksheet)
     print(f"Sorted {result['sorted_rows']} row(s) and re-stamped their Total Profit formulas.")
-    print("\nDone. Verify with `python -m scripts.audit_sheet`.")
+    print("\nDone. Verify with `python -m scripts.audit_ledger`.")
 
 
 if __name__ == "__main__":

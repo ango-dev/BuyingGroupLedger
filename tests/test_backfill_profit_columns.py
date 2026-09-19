@@ -7,7 +7,7 @@ would have written, and it must not overwrite anything typed by hand unless expl
 
 from models.card import Card
 from scripts.backfill_profit_columns import plan_profit_backfill
-from sheets.ledger_sync import HEADER
+from ledger.sync import HEADER
 
 CARDS = [
     Card(last4="4321", name="Amex Business Gold", cashback_rate=0.01,
@@ -47,7 +47,7 @@ class TestFills:
         assert any(f[3] == "Amex Business Gold" for f in p["fills"])
 
     def test_row_without_an_order_id_is_skipped_entirely(self):
-        # Same rule as sync_csv_to_sheet — it isn't a real ledger row.
+        # Same rule as sync_csv_to_ledger — it isn't a real ledger row.
         p = plan(sheet_row(**{"Card Last 4": "4321"}))
 
         assert p["fills"] == []

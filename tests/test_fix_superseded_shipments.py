@@ -7,7 +7,7 @@ parsers, and the apply half is single-cell writes over gspread.
 
 from models.order import FIELDNAMES
 from scripts.fix_superseded_shipments import plan_restore, plan_supersede_fix
-from sheets.ledger_sync import HEADER, _SUPERSEDED_BLANK_FIELDS
+from ledger.sync import HEADER, _SUPERSEDED_BLANK_FIELDS
 
 OID = "111-9990021-9990021"
 DEAD, LIVE = "TBA999000000007", "TBA999000000009"

@@ -28,7 +28,7 @@ It is plain text — Costco ids carry leading zeros — and blank when unknown (
 order whose links are gone). The sync matches an incoming row on **(Order ID, Package ID) before the
 tracking number**, keeping the row's recorded Shipment number and item name, so a package lands on
 its own row however Amazon re-orders its cards; a multi-SKU carton shares one id across its rows and
-is told apart by item name. A blank id never blocks a match. `audit_sheet`'s
+is told apart by item name. A blank id never blocks a match. `audit_ledger`'s
 `package_id_per_shipment` fails if one id ever sits under two Shipment numbers of one order.
 
 **Expected Payout (since 2026-09-18, beside it) is the buying group's COMMITMENT; Actual Payout
@@ -76,9 +76,9 @@ correctly on the dashboard in the meantime.*
 **Receipt Link** points at the order's captured receipt in object storage — see [Receipt capture](receipts.md). It's per *order*, so every row of a multi-item order carries the same link.
 
 > **Column order is part of the wire format.** Rows are written to the sheet *positionally* from column
-> A, so `FIELDNAMES` (models/order.py) and `HEADER` (sheets/ledger_sync.py) define where every value
+> A, so `FIELDNAMES` (models/order.py) and `HEADER` (ledger/sync.py) define where every value
 > lands. Reordering them without rewriting the rows already on the sheet would silently scramble every
-> one of them, so `sync_csv_to_sheet` **refuses to write** to a sheet whose header order doesn't match,
+> one of them, so `sync_csv_to_ledger` **refuses to write** to a sheet whose header order doesn't match,
 > and `python -m scripts.reorder_sheet --apply` is what conforms an existing sheet to a new order.
 > **Adding** a column is the cheap case: append it to both lists and existing rows just gain a trailing
 > blank — no migration needed.
@@ -102,7 +102,7 @@ hand-write **Total Profit** — it's position-bound and re-stamped on every sort
 to fill in and is never overwritten by anything. **Actual Payout** and **Payout Date** are hand-entered
 too, but the buying-group sync fills them in once the group pays (it never blanks a cell it has no
 figure for, so a value you typed only changes if the group reports a different one). A note or spacer row belongs *below* the last order, where the sort leaves it alone; put one
-inside the block and it gets shuffled in among the orders. `scripts/audit_sheet.py` flags all of this.
+inside the block and it gets shuffled in among the orders. `scripts/audit_ledger.py` flags all of this.
 
 **Status** is one of `ordered`, `shipped`, `delivered`, `cancelled`, `paid`, `return`, `superseded`. The first two are
 the live lifecycle the scrapers maintain; the other five are **terminal** — the order drops out of
@@ -113,7 +113,7 @@ money cell (Quantity included) is blank, and nothing ever submits, insures, pays
 (`superseded_rows_carry_no_money` in the audit enforces the blank money). `paid` and `return` come from the **buying group**, not the retailer (see [Buying groups](buying-groups.md)): BFMR reports both, MOD confirms `paid` by listing a package as received but has no
 return signal, so a MOD return is typed in by hand. A status only ever moves forward, so that
 hand-typed `return` survives every later run. Anything outside this vocabulary keeps the order **open forever**, so it
-gets re-read on every run indefinitely — wasted work on an order that is already finished. `audit_sheet`'s `column_shape` fails an unknown status for exactly that
+gets re-read on every run indefinitely — wasted work on an order that is already finished. `audit_ledger`'s `column_shape` fails an unknown status for exactly that
 reason.
 
 ## How rows are built

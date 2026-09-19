@@ -170,7 +170,7 @@ TOOLS: tuple[Tool, ...] = (
     Tool("sort_ledger", "scripts.sort_ledger", "Sort the ledger",
          "Sort newest-first and re-stamp the formulas (the run does this itself after an append).",
          "Ledger Fixes", (APPLY,), writes=True),
-    Tool("audit_sheet", "scripts.audit_sheet", "Audit the ledger",
+    Tool("audit_ledger", "scripts.audit_ledger", "Audit the ledger",
          "The read-only invariant audit: keys, money, missing mandatory cells, staleness. The Audit page "
          "shows the same findings by row.",
          "Checks", (Field("--stale-days", "Stale after (days)", "int", default="3"),

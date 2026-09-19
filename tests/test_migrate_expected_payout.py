@@ -9,7 +9,7 @@ from ledger_db.store import LedgerDb
 from ledger_db.worksheet import DbWorksheet
 from models.order import FIELDNAMES
 from scripts.migrate_expected_payout import apply_migration, main, plan_migration
-from sheets.ledger_sync import HEADER
+from ledger.sync import HEADER
 
 
 def row(**values):

@@ -172,7 +172,7 @@ def client(tmp_path, config_file):
     config_file(profiles=[{"label": "alpha", "profile_id": "", "retailers": ["costco", "amazon-business"]}],
                 cards=[{"last4": "0315", "name": "USB Prime Business", "cashback_rate": 0.05},
                        {"last4": "4351", "name": "Venmo Visa", "cashback_rate": 0.09, "virtual": True}])
-    snap = tw.write_snapshot(tmp_path / "sheet_backup_20260918T000000Z.csv", *tw.LEDGER_ROWS)
+    snap = tw.write_snapshot(tmp_path / "ledger_backup_20260918T000000Z.csv", *tw.LEDGER_ROWS)
     logs = tmp_path / "logs"
     logs.mkdir()
     (logs / "failures").mkdir()

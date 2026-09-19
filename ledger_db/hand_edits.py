@@ -7,7 +7,7 @@ ledger database itself, keyed by the row's upsert key and the field. Nothing gue
 merely differs from what a scraper would write is not a hand edit, the record is.
 
 WHO HONOURS IT. Every writer a scheduled run drives: the scraper upsert's merge
-(sheets.ledger_sync._merge_row keeps the existing value of a protected field), the order-level
+(ledger.sync._merge_row keeps the existing value of a protected field), the order-level
 reproration (shipping / gift card / sales tax / rewards shares), and the buying-group sync's
 payout / insurance / expected-payout writes (sync_tracking._drop_protected). The explicit repair
 scripts (the backfills, retag, the profit-column refresh) are NOT gated: they are the user

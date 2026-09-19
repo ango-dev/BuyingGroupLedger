@@ -13,7 +13,7 @@ import pytest
 
 from diagnostics import activity
 from models.order import FIELDNAMES
-from sheets.ledger_sync import HEADER
+from ledger.sync import HEADER
 
 NOW = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
 
@@ -123,7 +123,7 @@ class TestRecordedAtTheSource:
         monkeypatch.setattr(main_module, "_tag_cards", lambda items, label: None)
         monkeypatch.setattr(main_module, "_capture_receipts", lambda items, scraper, label: None)
         monkeypatch.setattr(main_module, "write_csv", lambda items: tmp_path / "orders.csv")
-        monkeypatch.setattr(main_module, "sync_csv_to_sheet",
+        monkeypatch.setattr(main_module, "sync_csv_to_ledger",
                             lambda path: {"updated": 1, "appended": 1, "split_rows": 0,
                                           "suspect_tracking": [], "skipped_blank": 0,
                                           "skipped_conflicts": 0})
@@ -175,7 +175,7 @@ class TestThePage:
 
         logs = tmp_path / "logs"
         (logs / "failures").mkdir(parents=True)
-        snapshot = tmp_path / "sheet_backup_20260918T000000Z.csv"
+        snapshot = tmp_path / "ledger_backup_20260918T000000Z.csv"
         with snapshot.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(HEADER)

@@ -76,7 +76,7 @@ fails closed on a typo rather than turning itself on.
 | `WEB_ENABLED` † | `web.enabled` |
 | `WEB_LEDGER_SOURCE` | `web.ledger_source` |
 | `WEB_SNAPSHOT_PATH` | `web.snapshot_path` |
-| `WEB_SHEET_CACHE_TTL_SECONDS` | `web.sheet_cache_ttl_seconds` |
+| `WEB_LEDGER_CACHE_TTL_SECONDS` | `web.ledger_cache_ttl_seconds` |
 | `WEB_BIND_HOST` | `web.bind_host` |
 | `WEB_PORT` | `web.port` |
 | `WEB_TOOL_SESSION_MINUTES` | `web.tool_session_minutes` |

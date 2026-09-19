@@ -27,14 +27,13 @@ _SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)
 # Display names for the sheet's header row, positionally 1:1 with models.order.FIELDNAMES — rows are
 # written positionally from column A, so the two lists must stay the same length and order.
 # tests/test_schema.py pins both lists in full, so any reorder fails loudly and forces the author to
-# migrate the live sheet (scripts/reorder_sheet.py) rather than silently scrambling existing rows.
-# ADDING a column means appending to BOTH lists, which needs no migration.
+# think about the ledger file's column migration (ledger_db/store.py copies by NAME on open) rather
+# than silently scrambling existing rows. ADDING a column means appending to BOTH lists.
 HEADER = [
     # --- what it is ---
     "Order Date",
-    "Status",  # PINNED AT COLUMN B — the sheet's status colour rules are `=$B2="delivered"` and
-               # friends, and reorder_sheet rewrites VALUES without moving columns, so moving Status
-               # would leave all six rules colouring every row by whatever landed in B instead.
+    "Status",  # PINNED AT COLUMN B (a Sheet-era rule the dashboard's row colours no longer need;
+               # kept because nothing is gained by moving it and the formula letters are pinned)
     "Retailer",
     "Item Name",
     "Shipment",  # bare number ("1", "2"), not "Shipment 1" — the column heading already says it
@@ -504,7 +503,7 @@ def _row_key(values: list) -> tuple:
     return key_of_row(values)
 
 
-def sync_csv_to_sheet(csv_path: Path) -> None:
+def sync_csv_to_ledger(csv_path: Path) -> None:
     worksheet = _get_worksheet()
     _ensure_grid_cols(worksheet)
     # Cells the user typed on the dashboard: the merge below keeps them whatever a scrape says.
@@ -548,9 +547,9 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
         raise RuntimeError(
             f"Worksheet '{getattr(worksheet, "title", "ledger")}' has the ledger's columns in a "
             "different ORDER than the current schema, so writing to it positionally would scramble "
-            "existing rows. Nothing was written. Run `python -m scripts.reorder_sheet` to preview the "
-            "migration, then `python -m scripts.reorder_sheet --apply` to rewrite the sheet into the "
-            f"current order.\n  sheet:  {header}\n  expected: {list(HEADER)}"
+            "existing rows. Nothing was written. The ledger file migrates its own columns on open "
+            f"(ledger_db/store.py), so this should not happen.\n  ledger:   {header}\n"
+            f"  expected: {list(HEADER)}"
         )
     key_idx = [header.index(col) for col in key_cols]
     oid_idx = header.index("Order ID")
@@ -1098,19 +1097,19 @@ _SORT_SPEC = (("Order Date", "des"), ("Order ID", "asc"), ("Shipment", "asc"))
 def sort_ledger_by_date_desc(worksheet=None) -> dict:
     """Sort the ledger newest-first, then re-stamp every Total Profit formula.
 
-    Sorting is done as a SEPARATE step after sync_csv_to_sheet rather than inside it, and that
+    Sorting is done as a SEPARATE step after sync_csv_to_ledger rather than inside it, and that
     ordering is load-bearing: sync caches each matched row's NUMBER from its pre-sync snapshot
     (key_to_existing and friends) and writes updates to `A{row_number}`. Moving rows while those
     numbers are in flight would write every update onto the wrong row — silently, since nothing
     downstream re-reads to check. So rows only ever move once sync has finished writing.
 
-    This is also why appends still go to the BOTTOM (see sync_csv_to_sheet): a sort is a total
+    This is also why appends still go to the BOTTOM (see sync_csv_to_ledger): a sort is a total
     ordering, so the insert position can't affect the final result, and appending leaves the
     "updates never add rows" invariant that the cached row numbers depend on completely intact.
 
     RE-STAMPING EVERY DATA ROW is required, not optional. _profit_formula emits same-row relative
     references (Payout/Total Cost/Shipping/Cashback Rate/Insurance all `{col}{n}`), so a row that
-    moves needs the formula for its NEW position. scripts/audit_sheet.py's check_profit_formula_literal
+    moves needs the formula for its NEW position. scripts/audit_ledger.py's check_profit_formula_literal
     fails any row whose stored formula isn't exactly _profit_formula(row_number), which is the tripwire
     for getting this wrong.
 
@@ -1124,19 +1123,20 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
         return {"sorted_rows": 0, "already_sorted": True}
 
     header = [str(c) for c in existing[0]]
-    # Same exact-order requirement as sync_csv_to_sheet: sorting addresses columns by position, so a
+    # Same exact-order requirement as sync_csv_to_ledger: sorting addresses columns by position, so a
     # sheet whose columns are in a different order would be sorted on the wrong ones.
     if header != list(HEADER):
         raise RuntimeError(
             f"Worksheet '{getattr(worksheet, "title", "ledger")}' has the ledger's columns in a "
             "different ORDER than the current schema, so sorting would target the wrong columns. "
-            "Nothing was sorted. Run `python -m scripts.reorder_sheet` first."
+            "Nothing was sorted. The ledger file migrates its own columns on open (ledger_db/store.py), "
+            "so this should not happen."
         )
 
     oid_idx = header.index("Order ID")
 
     def ledger_row_numbers(grid) -> list[int]:
-        """1-based row numbers of the rows the ledger owns. Same rule as sync_csv_to_sheet: a row
+        """1-based row numbers of the rows the ledger owns. Same rule as sync_csv_to_ledger: a row
         with no Order ID isn't one (it can never be matched or updated)."""
         return [
             n for n, r in enumerate(grid[1:], start=2)
@@ -1152,13 +1152,13 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
     # only when every row in the block carries an Order ID, and a hand-added sheet doesn't have to:
     # a spacer, a note, a half-typed row all count as neither. Each one made the old count-derived
     # bound fall a row short, leaving that many rows off the bottom of the range — excluded from this
-    # sort and every future one, silently, since being out of order is only a WARN in audit_sheet and
+    # sort and every future one, silently, since being out of order is only a WARN in audit_ledger and
     # drift between appends is expected anyway. Locating the last row also keeps a note BELOW the
     # block outside the range, which simply using len(existing) would sweep into the middle of it.
     last_row = row_numbers[-1]
     # An EXPLICIT range matters for the same family of reasons: gspread's unranged sort spans the
     # sheet's full row_count, which drags the trailing empty rows through the data block and would
-    # leave blank rows interleaved (which audit_sheet's check_content_outside_the_schema then flags).
+    # leave blank rows interleaved (which audit_ledger's check_content_outside_the_schema then flags).
     cell_range = f"A2:{_col_letter(len(HEADER) - 1)}{last_row}"
     specs = tuple((header.index(name) + 1, direction) for name, direction in _SORT_SPEC)
 
@@ -1167,7 +1167,7 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
     # Non-ledger rows inside the block move too, and not always to the bottom — Sheets orders EMPTY
     # cells last, but a row blank only in Order ID still sorts on its Order Date and can land
     # mid-block. So which rows are ledger rows now is a fact about the sheet AFTER the sort, and
-    # stamping a position-bound formula anywhere else is exactly what audit_sheet's
+    # stamping a position-bound formula anywhere else is exactly what audit_ledger's
     # check_no_stray_formulas fails on. One extra read buys correctness in every arrangement.
     _write_profit_formulas(worksheet, ledger_row_numbers(worksheet.get_all_values()))
     log.info("Ledger sort: %d row(s) sorted newest-first over %s.", len(row_numbers), cell_range)
@@ -1178,7 +1178,7 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
 # "no such number" instead of "a real zero", and so a stray SUM over the raw column can't pick them up.
 #
 # cashback_rate and card_name are deliberately NOT here: they describe the CARD, not an amount, and
-# nothing sums them — while blanking the rate would trip audit_sheet's card/rate coverage check on
+# nothing sums them — while blanking the rate would trip audit_ledger's card/rate coverage check on
 # every cancelled row for no gain. COGS and Total Profit aren't here either; they're formulas that
 # blank themselves on a cancelled row (see _cogs_formula).
 _CANCELLED_BLANK_FIELDS = (
@@ -1205,7 +1205,7 @@ def _blank_money_for_status(row: list) -> list:
     row, so any money here would be counted twice (see _BLANK_FIELDS_BY_STATUS for the one
     difference between the two field sets).
 
-    Applied at WRITE time (here and in scripts/reorder_sheet.py) rather than by a one-off cleanup,
+    Applied at WRITE time rather than by a one-off cleanup,
     because a cleanup only fixes the rows that exist when it runs. Both statuses are terminal, so a
     row blanked here is never re-scraped and never re-populated.
 
@@ -1350,7 +1350,7 @@ def _reprorate_order_level(worksheet, order_ids: set, raw_totals: dict) -> None:
     grid = worksheet.get_all_values()
     header = grid[0] if grid else []
     if header != list(HEADER):
-        return  # sync_csv_to_sheet already refused to write in this case; nothing to reprorate
+        return  # sync_csv_to_ledger already refused to write in this case; nothing to reprorate
     oid_i = header.index("Order ID")
     cost_i = header.index("Total Cost")
     status_i = header.index("Status")
@@ -1416,9 +1416,9 @@ def _last_occupied_row(existing: list[list], checkbox_index: int | None = None) 
     genuine note parked below the ledger still counts, so appends continue to land after it rather
     than overwriting it — which is the behaviour `len(existing)` was chosen for in the first place.
     """
-    # `checkbox_index` exists for the MIGRATION WINDOW. Defaulting to FIELDNAMES is right whenever
-    # the sheet already matches the current schema, but scripts/reorder_sheet.py reads a sheet that is
-    # BY DEFINITION still in the OLD column order — so FIELDNAMES points at the wrong column, the
+    # `checkbox_index` exists for a MIGRATION WINDOW (the 2026-08-12 column reorder). Defaulting to
+    # FIELDNAMES is right whenever the grid matches the current schema, but a grid still in an OLD
+    # column order has FIELDNAMES pointing at the wrong column, so the
     # materialised FALSEs are not recognised as checkbox padding, and every grid row counts as
     # occupied. That made the reorder rewrite 983 rows on a 42-row ledger. Callers holding the sheet's
     # own header pass the index from THAT.
@@ -1588,7 +1588,7 @@ def plan_buying_group_retag(header: list[str], data_rows: list[list[str]], wareh
 
     `header` is the sheet's CURRENT header row (may predate the Buying Group column — that's reported
     via `needs_header_migration`, not assumed). `data_rows` is `existing[1:]` (no header). Rows with a
-    blank Order ID are skipped, same rule as sync_csv_to_sheet.
+    blank Order ID are skipped, same rule as sync_csv_to_ledger.
 
     Returns:
         {
@@ -1726,7 +1726,7 @@ def classify_order_state(existing: list[list], profile_label: str | None = None,
                          since: str | None = None, retailer: str | None = None) -> dict:
     """The PURE half of load_order_state: sheet grid (header row first) -> order state.
 
-    Split out so it can be asked questions offline -- by tests, and by scripts/audit_sheet's
+    Split out so it can be asked questions offline -- by tests, and by scripts/audit_ledger's
     `state_visibility` check, which runs it for every configured profile x retailer and reports
     what each run would see and, more importantly, which rows NO run can see. The Profile-strip
     bug lived here for weeks precisely because this loop only ever ran inside a

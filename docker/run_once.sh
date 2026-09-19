@@ -3,7 +3,7 @@
 #
 # The heartbeat is the point. Without it, a container whose cron never fires looks IDENTICAL to one
 # with nothing to do: no error, no log line, no alert. The only existing way to notice was running
-# `scripts/audit_sheet.py --stale-days` by hand. Now every completed run stamps logs/.last_run, and
+# `scripts/audit_ledger.py --stale-days` by hand. Now every completed run stamps logs/.last_run, and
 # healthcheck.sh marks the container unhealthy when that stamp goes stale.
 set -uo pipefail
 
