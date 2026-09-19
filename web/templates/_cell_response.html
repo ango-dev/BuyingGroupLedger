@@ -1,0 +1,8 @@
+{#- What POST /orders/cell answers with: the one <td> re-rendered (htmx swaps it in place) and,
+    when the column is a choice column, the column's previous answers re-rendered OUT OF BAND into
+    #cell-choices -- computed from the ledger as it is now, so a value typed and then changed back
+    is not offered. -#}
+{% include "_cell.html" %}
+{%- if col in CHOICE_FIELDS and choices is defined %}
+<script type="application/json" id="cell-choices" hx-swap-oob="true">{{ choices | tojson }}</script>
+{%- endif %}

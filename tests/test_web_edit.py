@@ -377,7 +377,9 @@ class TestOrdersRoutes:
         assert re.search(r'data-field="tracking_submitted"[^>]*data-kind="check"', body)
         assert 'type="checkbox" class="cell-check"' in body and "☑" not in body and "☐" not in body
         choices = re.search(r'<script type="application/json" id="cell-choices">(.*?)</script>', body, re.S)
-        assert choices and "Costco" in json.loads(choices.group(1))["retailer"]
+        parsed = json.loads(choices.group(1))
+        assert choices and "Costco" in parsed["values"]["retailer"]
+        assert isinstance(parsed["card_pairs"], list)
         assert 'class="cell-upload" data-order-id="BBY01-1"' in body
         assert 'name="order_date" data-date' in body
         # every date-like editable uses the page's own picker: no native date / month controls anywhere
@@ -412,6 +414,16 @@ class TestOrdersRoutes:
         assert "now reads" in conflict.text and sheet.writes == []
         formula = client.post("/orders/cell", data={**KEY, "field": "cogs", "value": "1"})
         assert "not editable" in formula.text
+
+    def test_a_choice_cell_write_refreshes_the_dropdown_out_of_band(self, sheet, tmp_path, logs_dir):
+        """a value typed and then changed back must not linger in the dropdown --
+        the list is re-rendered from the ledger with every choice-cell write; a text column's write
+        carries no list."""
+        client = self._client(sheet, tmp_path, logs_dir)
+        choice = client.post("/orders/cell", data={**KEY, "field": "profile_label", "value": "profile-new", "expected": ""})
+        assert 'id="cell-choices" hx-swap-oob="true"' in choice.text and "profile-new" in choice.text
+        plain = client.post("/orders/cell", data={**KEY, "field": "insurance", "value": "2", "expected": ""})
+        assert "hx-swap-oob" not in plain.text
 
     def test_the_bulk_edit_route_is_gone(self, sheet, tmp_path, logs_dir):
         # 2026-09-18: the grid's range fill (select a range, type, Enter) replaced the field/value bar.

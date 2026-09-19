@@ -163,7 +163,8 @@ does every date field on a form, and the Placed in / Paid in filters open a mont
 name and the year in the calendar's head are buttons, so any month or year is a click away; Ctrl+;
 puts today's date into a date cell or field, as in Sheets); Status, Retailer, Buying Group, Card Name, Card Last 4 and Profile
 open the column's every previous answer (most used first, the current one marked), typing narrows
-the list, and a new answer typed in is a previous answer from then on. Tracking Submitted is a
+the list, and a new answer typed in is a previous answer from then on; Card Name and Card Last 4
+narrow each other by the pairings the ledger and the settings' cards know. Tracking Submitted is a
 checkbox: a click, Space or Enter toggles it. The Receipt Link cell carries an upload button
 (⤒): pick a file and the link lands on every row of the order, the table re-rendering in place.
 Every write is one conflict-checked cell write, run one after another. **A cell you edit is protected from then

@@ -31,6 +31,26 @@ def choice_values(rows) -> dict[str, list[str]]:
                 counts[field][value] += 1
     return {f: [v for v, _ in sorted(c.items(), key=lambda kv: (-kv[1], kv[0].lower()))]
             for f, c in counts.items()}
+
+
+def card_pairs(rows, cards=()) -> list[list[str]]:
+    """Every (Card Name, Card Last 4) pairing the ledger's rows and the settings' cards know, most
+    used first, so the editor can narrow one to the other."""
+    counts: Counter = Counter()
+    for row in rows:
+        name, last4 = row.text("card_name").strip(), row.text("card_last4").strip()
+        if name and last4:
+            counts[(name, last4)] += 1
+    for card in cards:
+        name, last4 = str(getattr(card, "name", "") or "").strip(), str(getattr(card, "last4", "") or "").strip()
+        if name and last4:
+            counts[(name, last4)] += 0  # present, ranked below every used pair
+    return [[n, l4] for (n, l4), _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0][0].lower(), kv[0][1]))]
+
+
+def cell_choices(rows, cards=()) -> dict:
+    """What #cell-choices carries: the previous answers per choice column, and the card pairs."""
+    return {"values": choice_values(rows), "card_pairs": card_pairs(rows, cards)}
 #: Right-aligned, money-formatted.
 MONEY_FIELDS = ("cost_per_item", "total_cost", "shipping", "sales_tax", "gift_card", "rewards_used",
                 "cogs", "insurance", "payout_amount", "total_profit", "expected_payout")

@@ -29,7 +29,7 @@ from web import failures as failures_module
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
 from web.audit_view import AuditCache, audit_grids, audit_key, key_of, run_audit
-from web.queries import (Filters, _values as query_values, choice_values, column_headings, facets, filter_rows,
+from web.queries import (CHOICE_FIELDS, Filters, _values as query_values, cell_choices, column_headings, facets, filter_rows,
                          order_view, sort_rows)
 from web.recon_view import findings_for as recon_findings, reconcile
 from web import tax_inputs
@@ -327,6 +327,15 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     templates.env.globals["row_key"] = row_key
 
+    def settings_cards() -> list:
+        """The settings' cards, for the Card Name <-> Card Last 4 pairing; none when unreadable."""
+        try:
+            from config.cards import load_cards
+
+            return list(load_cards())
+        except Exception:  # noqa: BLE001 -- a broken cards section must not break the Orders page
+            return []
+
     def orders_context(request: Request, params=None, *, scope: str = "", **extra) -> dict:
         snapshot = load(request)
         params = params if params is not None else request.query_params
@@ -364,7 +373,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             "snapshot": snapshot, "filters": filters, "rows": rows, "total": len(snapshot.rows),
             "facets": facets(snapshot.rows), "columns": column_headings(),
             "editable": writer is not None, "wide": True,
-            "choices": choice_values(snapshot.rows) if writer is not None else {},
+            "choices": cell_choices(snapshot.rows, settings_cards()) if writer is not None else {},
             "scope": scope, "base": SCOPES[scope], "findings": findings,
             "findings_by_order": by_order, **extra,
         }
@@ -635,8 +644,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         row = next((r for r in snapshot.rows
                     if r.order_id == key["order_id"] and r.order_date == key["order_date"]
                     and r.item_name == key["item_name"] and r.shipment == key["shipment"]), None)
-        return page(request, "_cell.html", snapshot=snapshot, row=row, col=field, key=key,
-                    editable=writer is not None, error=error)
+        return page(request, "_cell_response.html", snapshot=snapshot, row=row, col=field, key=key,
+                    editable=writer is not None, error=error,
+                    choices=cell_choices(snapshot.rows, settings_cards()) if field in CHOICE_FIELDS else None)
 
     @app.get("/orders/{order_id}", response_class=HTMLResponse)
     def order(request: Request, order_id: str):
