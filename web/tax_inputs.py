@@ -420,6 +420,62 @@ def update_expense(inputs: YearInputs, entry_id: str, fields: Mapping[str, str],
     return entry
 
 
+#: The expenses table's editable columns, in the table's order.
+EXPENSE_CELL_FIELDS = ("date", "description", "category", "profile", "email", "receipt_url", "amount")
+
+
+def expense_raw(entry: Mapping, field: str) -> str:
+    """What a cell of the expenses table shows for `field`, as text (the inline editor's
+    data-raw): the amount to the cent, the receipt's link (blank when it is an uploaded file)."""
+    if not entry:
+        return ""
+    if field == "amount":
+        return f"{float(entry.get('amount') or 0):.2f}"
+    if field == "receipt_url":
+        return str((entry.get("receipt") or {}).get("url") or "")
+    return str(entry.get(field) or "")
+
+
+def update_expense_field(inputs: YearInputs, entry_id: str, field: str, value: str, *, year: int,
+                         data_dir: Path, expected: str | None = None) -> dict:
+    """ONE cell of the expenses table (the inline editor): the entry's other fields stay, the
+    whole entry is validated as on add, and `expected` -- what the cell showed -- must still be
+    what the entry has, or the write is refused as a conflict (as the Orders grid does). A link
+    typed into the receipt cell replaces an uploaded file; a blank one leaves the receipt alone
+    (a receipt is required). KeyError for an unknown id, ValueError naming what is wrong."""
+    if field not in EXPENSE_CELL_FIELDS:
+        raise ValueError(f"{field} is not editable")
+    entry = next((e for e in inputs.expenses if e["id"] == entry_id), None)
+    if entry is None:
+        raise KeyError(entry_id)
+    if expected is not None and expense_raw(entry, field) != expected:
+        raise ValueError(f"the cell changed meanwhile: it now reads {expense_raw(entry, field)!r}; reload and try again")
+    fields = {f: expense_raw(entry, f) for f in EXPENSE_CELL_FIELDS}
+    fields[field] = value
+    return update_expense(inputs, entry_id, fields, year=year, data_dir=data_dir)
+
+
+def remove_expenses(inputs: YearInputs, entry_ids: Iterable[str], *, data_dir: Path) -> list[dict]:
+    """Drop every listed expense (the table's selected rows, one confirmation). Unknown ids are
+    skipped. Returns what went."""
+    gone = []
+    for entry_id in entry_ids:
+        entry = remove_expense(inputs, entry_id, data_dir=data_dir)
+        if entry is not None:
+            gone.append(entry)
+    return gone
+
+
+def expense_choices(inputs: YearInputs) -> dict:
+    """The previous answers per choice column of the expenses table, for the inline editor's
+    dropdown (the same #cell-choices shape the Orders grid reads)."""
+    values = {}
+    for field in ("category", "profile", "email"):
+        seen = sorted({str(e.get(field) or "").strip() for e in inputs.expenses} - {""}, key=str.lower)
+        values[field] = seen
+    return {"values": values, "card_pairs": []}
+
+
 def remove_expense(inputs: YearInputs, entry_id: str, *, data_dir: Path) -> dict | None:
     """Drop one expense (and its uploaded receipt file). Returns it, or None if unknown."""
     for entry in inputs.expenses:

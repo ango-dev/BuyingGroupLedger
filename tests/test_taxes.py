@@ -261,7 +261,7 @@ class TestTaxesPage:
                                  data={"date": "2026-03-04", "description": "tape", "amount": "1", "email": "a@b.co",
                                        "receipt_url": "https://x/r"})
         assert email_only.status_code == 303
-        assert ">Paid by<" in client.get("/taxes", params={"year": "2026"}).text
+        assert ">Profile<" in client.get("/taxes", params={"year": "2026"}).text  # its own column, editable in place
 
     def test_an_expense_is_edited_in_place_and_keeps_its_receipt_unless_replaced(self, client, tmp_path):
         client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
@@ -301,6 +301,50 @@ class TestTaxesPage:
         files = sorted(p.name for p in (tmp_path / "data" / "expenses" / "2026").glob("*"))
         assert files == [f"{entry_id}_two.pdf"]
         assert client.post("/taxes/expense/nope", params={"year": "2026"}, data={"description": "x"}).status_code == 404
+
+    def test_the_expenses_table_edits_like_the_orders_grid(self, client, tmp_path):
+        """the Orders grid's cells, row numbers, one-cell writes, a bulk
+        delete."""
+        import re
+
+        for when, what in (("2026-03-04", "boxes"), ("2026-03-05", "tape")):
+            client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                        data={"date": when, "description": what, "amount": "12.50", "profile": "alpha",
+                              "category": "supplies", "receipt_url": "https://x/r"})
+        store = tmp_path / "data" / "tax_inputs.json"
+        ids = [e["id"] for e in json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"]]
+        body = client.get("/taxes", params={"year": "2026"}).text
+        assert 'class="grid compact expenses sheetlike" data-cell-url="/taxes/expense/cell?year=2026"' in body
+        assert body.count('name="sel"') == 2 and 'id="sel-all"' in body and 'id="delete-selected"' in body
+        assert 'action="/taxes/expenses/delete?year=2026" data-confirm=' in body and 'data-confirm-many="Delete the {n} selected expenses?' in body
+        assert f'data-field="amount" data-entry-id="{ids[0]}" data-raw="12.50"' in body
+        assert re.search(r'data-field="date"[^>]*data-kind="date"', body) and re.search(r'data-field="category"[^>]*data-kind="choice"', body)
+        assert '"category": ["supplies"]' in body and '"profile": ["alpha"]' in body  # the columns' previous answers
+        assert 'data-tip-from="expense-hints"' in body and '<td colspan="2">Rows</td>' in body and "keep my edits" not in body
+        # one cell: the td comes back re-rendered (or with the error in data-error)
+        td = client.post("/taxes/expense/cell", params={"year": "2026"},
+                         data={"entry_id": ids[0], "field": "amount", "value": "20", "expected": "12.50"})
+        assert td.status_code == 200 and td.text.lstrip().startswith("<td") and 'data-raw="20.00"' in td.text
+        assert "data-error" not in td.text and "$20.00" in td.text
+        assert json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"][0]["amount"] == 20.0
+        bad = client.post("/taxes/expense/cell", params={"year": "2026"},
+                          data={"entry_id": ids[0], "field": "date", "value": "2025-01-01", "expected": "2026-03-04"})
+        assert 'data-error="Date must fall in 2026"' in bad.text and 'data-raw="2026-03-04"' in bad.text  # unchanged
+        stale = client.post("/taxes/expense/cell", params={"year": "2026"},
+                            data={"entry_id": ids[0], "field": "amount", "value": "1", "expected": "12.50"})
+        assert "changed meanwhile" in stale.text and 'data-raw="20.00"' in stale.text
+        gone = client.post("/taxes/expense/cell", params={"year": "2026"}, data={"entry_id": "nope", "field": "amount", "value": "1"})
+        assert 'data-error="no such expense' in gone.text
+        link = client.post("/taxes/expense/cell", params={"year": "2026"},
+                           data={"entry_id": ids[1], "field": "receipt_url", "value": "https://x/new", "expected": "https://x/r"})
+        assert 'href="https://x/new"' in link.text
+        blank = client.post("/taxes/expense/cell", params={"year": "2026"},
+                            data={"entry_id": ids[1], "field": "receipt_url", "value": "", "expected": "https://x/new"})
+        assert 'href="https://x/new"' in blank.text and "data-error" not in blank.text  # a receipt stays: it is required
+        # the selected rows go together, one confirmation
+        deleted = client.post("/taxes/expenses/delete", params={"year": "2026"}, data={"sel": ids}, follow_redirects=False)
+        assert deleted.status_code == 303 and "Deleted" in deleted.headers["location"]
+        assert json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"] == []
 
     def test_it_refuses_the_wrong_methods(self, client):
         assert client.put("/taxes").status_code == 405

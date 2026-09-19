@@ -19,13 +19,17 @@
   {# Only the form's OWN requests write the remembered filters / view. #}
   <input type="hidden" name="remember" value="1">
   {% if scope %}<input type="hidden" name="scope" value="{{ scope }}">{% endif %}
-  {% for param, label, options, chosen in (('retailer', 'Retailer', facets.retailers, filters.retailers), ('profile', 'Profile', facets.profiles, filters.profiles), ('status', 'Status', facets.statuses, filters.statuses), ('group', 'Buying group', facets.groups, filters.groups)) %}
+  {#- An option is a value, or a (value, label) pair: the Card facet files by Card Last 4 and shows
+      the card's name with it. -#}
+  {% for param, label, options, chosen in (('retailer', 'Retailer', facets.retailers, filters.retailers), ('profile', 'Profile', facets.profiles, filters.profiles), ('status', 'Status', facets.statuses, filters.statuses), ('group', 'Buying group', facets.groups, filters.groups), ('card', 'Card', facets.cards, filters.cards)) %}
+  {% set labels = {} %}{% for o in options %}{% if o is not string %}{% set _ = labels.update({o[0]: o[1]}) %}{% endif %}{% endfor %}
+  {% set ns = namespace(names=[]) %}{% for c in chosen %}{% set ns.names = ns.names + [labels.get(c, c)] %}{% endfor %}
   <details class="multi" data-param="{{ param }}">
-    <summary><span class="lbl">{{ label }}</span> <span class="summary-text"><span class="summary-value">{{ 'all' if not chosen else (chosen | join(', ') if chosen | length <= 2 else (chosen | length) ~ ' selected') }}</span><span class="caret">▾</span></span></summary>
+    <summary><span class="lbl">{{ label }}</span> <span class="summary-text"><span class="summary-value">{{ 'all' if not chosen else (ns.names | join(', ') if chosen | length <= 2 else (chosen | length) ~ ' selected') }}</span><span class="caret">▾</span></span></summary>
     <div class="menu">
       <label class="all"><input type="checkbox" class="all-box" {{ 'checked' if not chosen }}> All</label>
-      {% for v in options %}
-      <label><input type="checkbox" name="{{ param }}" value="{{ v }}" {{ 'checked' if v in chosen }}> {{ v }}</label>
+      {% for o in options %}{% set v = o if o is string else o[0] %}{% set text = o if o is string else o[1] %}
+      <label><input type="checkbox" name="{{ param }}" value="{{ v }}" {{ 'checked' if v in chosen }}> {{ text }}</label>
       {% endfor %}
     </div>
   </details>

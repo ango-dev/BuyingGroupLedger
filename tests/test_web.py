@@ -788,6 +788,16 @@ class TestOrdersPage:
         assert [c.strip() for c in cells][:3] == ["$2,000.00", "$1,259.99", "$1,000.00"]
         assert "sort=total_cost&amp;dir=asc" in body or "sort=total_cost&dir=asc" in body
 
+    def test_the_card_facet_files_by_last4_and_shows_the_name(self, client):
+        body = client.get("/orders").text
+        card = body[body.index('data-param="card"'):body.index("</details>", body.index('data-param="card"'))]
+        assert 'name="card" value="0315" >' in card and "…0315</label>" in card  # the name rides with the number
+        assert 'value="(blank)"' in card  # a row without a card
+        narrowed = client.get("/orders", params={"card": "0315"}).text
+        assert "…0315" in narrowed and 'name="card" value="0315" checked' in narrowed
+        assert client.get("/audit", params={"card": "0315"}).status_code == 200  # the scoped pages share the bar
+        assert client.get("/recon", params={"card": "0315"}).status_code == 200
+
     def test_facets_come_from_the_whole_ledger(self, client):
         body = client.get("/orders", params={"retailer": "Costco"}).text
         assert 'name="retailer" value="Best Buy" >' in body  # still offered while Costco is chosen
@@ -1445,13 +1455,13 @@ class TestMultiSelectFilters:
     def test_links_carry_repeated_params(self):
         from web.queries import query_string
 
-        f = Filters.from_query({"retailer": ["Costco", "Best Buy"], "group": ["MOD"]})
+        f = Filters.from_query({"retailer": ["Costco", "Best Buy"], "group": ["MOD"], "card": ["0315"]})
         assert query_string(f.as_query(sort="total_cost")) == (
-            "retailer=Costco&retailer=Best+Buy&group=MOD&sort=total_cost&dir=desc")
+            "retailer=Costco&retailer=Best+Buy&group=MOD&card=0315&sort=total_cost&dir=desc")
 
     def test_the_page_renders_checkbox_dropdowns_with_an_all_box(self, client):
         body = client.get("/orders", params={"retailer": ["Costco", "Best Buy"]}).text
-        assert body.count('<details class="multi"') == 4
+        assert body.count('<details class="multi"') == 5  # retailer, profile, status, buying group, card
         retailer = body[body.index('data-param="retailer"'):body.index('data-param="profile"')]
         assert 'name="retailer" value="Costco" checked' in retailer
         assert 'name="retailer" value="Best Buy" checked' in retailer
@@ -1519,7 +1529,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        'ctrl && e.key === ";"', "function fillToday()", "function toggleCheck(td)",
                        'contains("cell-check")', 'e.key === " " && td.getAttribute("data-kind") === "check"',
                        "Picker.forget()", 'setProperty("--pinned-h"', 'getElementById("protect-edits")',
-                       "function undo()", "function redo()", 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
+                       "function undo()", "function redo()", 'getAttribute("data-cell-url")', 'getAttribute("data-entry-id")',
+                       'getAttribute("data-confirm-many")', 'e.key === "z" || e.key === "Z"', 'e.key === "y" || e.key === "Y"',
                        "undoStack.push(step)", "redoStack = []", "toggleOff: alone",
                        "function choicesFor(field, td)", "Picker.choicesFor(field,",
                        '".cell-upload"', 'name="next" value="table"',

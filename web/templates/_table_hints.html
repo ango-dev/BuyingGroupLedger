@@ -20,7 +20,9 @@
     <tr class="sec"><td colspan="2">Rows</td></tr>
     <tr><td>select</td><td>click a row number; Ctrl-click adds one; drag down the numbers or shift-click for a range</td></tr>
     <tr><td>all / none</td><td>click #</td></tr>
-    <tr><td>delete rows</td><td>Delete or Backspace removes the selected rows from the ledger (asked once)</td></tr>
+    <tr><td>delete rows</td><td>Delete or Backspace removes the selected rows (asked once)</td></tr>
+    {% endif %}
+    {% if protect %}
     <tr class="sec"><td colspan="2">Edits</td></tr>
     <tr><td>keep my edits</td><td>on: a cell you type is kept by every run; off: a correction the runs may overwrite</td></tr>
     {% endif %}

@@ -735,6 +735,8 @@ table.schedule td.neg { color: var(--bad); }
 .expense-form .egrid .dropzone { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; min-width: 0; max-width: none; padding: 4px 12px; }
 .expense-form .inline-form { margin: 12px 0 0; }
 .grid.expenses tr.editing td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.panel .sheet { overflow: auto; }
+.panel table.sheetlike tfoot td { border-top: 1px solid var(--line); font-weight: 600; }
 .grid.expenses td.actions { white-space: nowrap; }
 @media (max-width: 900px) { .expense-form .egrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tax-form .entry-table input[type=text] { width: 100%; box-sizing: border-box; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }

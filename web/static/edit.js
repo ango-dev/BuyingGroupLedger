@@ -122,17 +122,25 @@
   // not undoable here. The stacks are this page load's: a full reload starts empty.
   var undoStack = [], redoStack = [], UNDO_LIMIT = 100;
   function newStep(mode) { return { mode: mode || "edit", entries: [] }; }
+  // A row's key: the ledger's four-part upsert key on the Orders grid, an entry id on the Taxes
+  // page's expenses grid (data-entry-id). A grid names where its cells post in data-cell-url.
   function keyOf(td) {
-    return { order_id: td.getAttribute("data-order-id"), order_date: td.getAttribute("data-order-date"),
-             item_name: td.getAttribute("data-item-name"), shipment: td.getAttribute("data-shipment"),
-             field: td.getAttribute("data-field") };
+    return { order_id: td.getAttribute("data-order-id") || "", order_date: td.getAttribute("data-order-date") || "",
+             item_name: td.getAttribute("data-item-name") || "", shipment: td.getAttribute("data-shipment") || "",
+             entry_id: td.getAttribute("data-entry-id") || "", field: td.getAttribute("data-field") };
+  }
+  function cellUrl(td) {
+    var t = td.closest ? td.closest("table") : null;
+    return (t && t.getAttribute("data-cell-url")) || "/orders/cell";
   }
   function findCell(k) {  // the cell for a key + field as it is NOW (swaps replace the element)
-    var tds = document.querySelectorAll('td[data-field="' + k.field + '"][data-order-id]');
+    var tds = document.querySelectorAll('td[data-field="' + k.field + '"]');
     for (var i = 0; i < tds.length; i++) {
       var td = tds[i];
-      if (td.getAttribute("data-order-id") === k.order_id && td.getAttribute("data-order-date") === k.order_date &&
-          td.getAttribute("data-item-name") === k.item_name && td.getAttribute("data-shipment") === k.shipment) return td;
+      if (!td.hasAttribute("data-order-id") && !td.hasAttribute("data-entry-id")) continue;
+      var mine = keyOf(td);
+      if (mine.order_id === k.order_id && mine.order_date === k.order_date && mine.item_name === k.item_name &&
+          mine.shipment === k.shipment && mine.entry_id === k.entry_id) return td;
     }
     return null;
   }
@@ -174,6 +182,7 @@
       order_date: key.order_date,
       item_name: key.item_name,
       shipment: key.shipment,
+      entry_id: key.entry_id,
       field: key.field,
       value: value,
       expected: raw,
@@ -181,9 +190,10 @@
       protect: (function () { var box = document.getElementById("protect-edits"); return box && !box.checked ? "0" : "1"; })()
     };
     var mine = step || newStep("edit");
+    var url = cellUrl(td);
     td.classList.add("saving");
     queue = queue.then(function () {
-      return htmx.ajax("POST", "/orders/cell", { target: td, swap: "outerHTML", values: values });
+      return htmx.ajax("POST", url, { target: td, swap: "outerHTML", values: values });
     }).then(function () {
       var fresh = findCell(key);
       if (!fresh || fresh.hasAttribute("data-error")) return;  // refused: nothing to undo
@@ -488,8 +498,14 @@
     if (out) out.textContent = String(n);
     var button = document.getElementById("delete-selected");
     if (button) {
-      button.setAttribute("hx-confirm", n === 1 ? "Delete the selected row from the ledger? This cannot be undone here."
-                                                : "Delete the " + n + " selected rows from the ledger? This cannot be undone here.");
+      // The wording is the button's own (data-confirm-one / -many, {n} = the count); the Orders
+      // grid asks through htmx's hx-confirm, a plain form (the expenses grid) through its
+      // data-confirm and the page's dialog.
+      var one = button.getAttribute("data-confirm-one") || "Delete the selected row from the ledger? This cannot be undone here.";
+      var many = button.getAttribute("data-confirm-many") || "Delete the {n} selected rows from the ledger? This cannot be undone here.";
+      var text = n === 1 ? one : many.replace("{n}", String(n));
+      button.setAttribute("hx-confirm", text);
+      if (button.form && button.form.hasAttribute("data-confirm")) button.form.setAttribute("data-confirm", text);
     }
   }
   function clearRows() {

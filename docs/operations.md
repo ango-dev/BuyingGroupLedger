@@ -209,8 +209,9 @@ it lands where the sync's own append would (after the last occupied row), Total 
 from Quantity × Cost Per Item, and the row sorts into date order on the next sync. A key that
 already exists is refused.
 
-**Filters select all that apply.** Retailer, Profile, Status and Buying group are checkbox
-dropdowns: tick any combination; *All* clears the others (and re-ticks itself when the last value
+**Filters select all that apply.** Retailer, Profile, Status, Buying group and Card (by Card
+Last 4, shown with the card's name; *(blank)* for rows without one) are checkbox dropdowns: tick
+any combination; *All* clears the others (and re-ticks itself when the last value
 is unticked). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
 
 **Two views.** The *View* control in the filter bar switches between the spreadsheet-like table and
@@ -469,7 +470,10 @@ holds what the ledger cannot know:
   inside every backup, served back from the page) or a link. Who paid is the profile OR the
   email of the account -- one is enough. A row's *edit* button opens it in the form and saves it
   in place (the receipt stays unless a new file or a different link is given). Deleting an entry
-  deletes its file.
+  deletes its file. The list itself is a grid like the Orders table: click a cell, type, Enter;
+  fill a range; Ctrl+C / Ctrl+V; Ctrl+Z; the row numbers select rows and Delete removes them after
+  one confirmation. A link typed into a receipt cell replaces an uploaded file; a blank leaves the
+  receipt alone, since one is required.
   Counted under line 27a.
 - **Program cashback** — Prime (young adult cashback), Prime Business (rewards) and Costco
   Executive (cashback) pay cashback of their own,

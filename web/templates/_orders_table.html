@@ -19,7 +19,7 @@
       <tr><td>default</td><td>on for Orders; off for Audit and Recon, where an edit usually fixes a finding the run should then own</td></tr>
     </table>
   </div>
-  {% with id='table-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}{% else %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
+  {% with id='table-hints', rows=True, protect=True %}{% include "_table_hints.html" %}{% endwith %}{% else %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
 </div>
 {% include "_cell_tips.html" %}
 <div class="sheet" id="sheet">

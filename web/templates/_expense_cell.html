@@ -1,0 +1,17 @@
+{#- ONE <td> of the expenses table (Taxes): taxes.html renders every cell with it and POST
+    /taxes/expense/cell answers with it alone (htmx swaps the td in place). The same attributes
+    the Orders grid's cells carry (static/edit.js): data-field, data-raw, data-kind, and the row's
+    key -- here data-entry-id. `e` may be None after a write to an entry that is gone. -#}
+{%- set raw = expense_raw(e, field) -%}
+{%- set kind = 'date' if field == 'date' else 'choice' if field in ('category', 'profile', 'email') else 'text' -%}
+<td class="{{ 'num' if field == 'amount' }}{{ ' mono' if field == 'date' }}{{ ' muted' if field == 'category' }} edit{{ ' error' if error }}" data-field="{{ field }}" data-entry-id="{{ entry_id }}" data-raw="{{ raw }}" tabindex="0" data-kind="{{ kind }}" data-tip-from="tip-cell-{{ kind }}"{% if error %} data-error="{{ error }}"{% endif %}>
+  {%- if error %}<span class="cell-error" title="{{ error }}">⚠ {{ error }}</span> {% endif -%}
+  {%- if e -%}
+    {%- if field == 'amount' %}{{ e.amount | money }}
+    {%- elif field == 'receipt_url' -%}
+      {%- if e.receipt.file %}<a href="/taxes/receipt/{{ e.id }}?year={{ year }}" rel="noopener" title="the uploaded file; a link typed here replaces it">{{ e.receipt.name }}</a>
+      {%- elif e.receipt.url %}<a href="{{ e.receipt.url }}" rel="noopener" title="{{ e.receipt.url }}">receipt ↗</a>
+      {%- else %}<span class="muted cell-empty">add ↗</span>{% endif %}<button type="button" class="cell-edit" title="edit the link" aria-label="edit the receipt link">✎</button>
+    {%- else %}{{ raw }}{% endif -%}
+  {%- endif -%}
+</td>

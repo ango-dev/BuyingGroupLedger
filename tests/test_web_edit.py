@@ -378,7 +378,7 @@ class TestOrdersRoutes:
         assert 'data-tip-from="tip-cell-date"' in body and '<div id="tip-cell-date" hidden>' in body  # a cell's how-to
         assert "Ctrl+Z / Ctrl+Y" in body
         assert '<td colspan="2">Rows</td>' in body  # the hint pill's table (the switch, the cells and the heartbeat have theirs too)
-        assert "Delete or Backspace removes the selected rows from the ledger (asked once)" in body
+        assert "Delete or Backspace removes the selected rows (asked once)" in body
         # the editor's kind per cell: a calendar on dates, previous answers on choice columns
         assert re.search(r'data-field="payout_date"[^>]*data-kind="date"', body)
         assert re.search(r'data-field="profile_label"[^>]*data-kind="choice"', body)

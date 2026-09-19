@@ -41,21 +41,31 @@
   <header><h2>Expenses — {{ year }}</h2>
     <p class="muted">Everything spent for the business in {{ year }} beyond the ledger's purchases: supplies, memberships, card annual fees. Every entry needs its date, amount, who paid (the profile, or the email of the account), and a receipt — uploaded (kept under <code>data/expenses/</code>, inside every backup) or linked. Counted under Other expenses (line 27a).</p></header>
   {% if inputs.expenses %}
-  <table class="grid compact expenses">
-    <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Paid by</th><th>Receipt</th><th class="num">Amount</th><th></th></tr></thead>
-    <tbody>
-      {% for e in inputs.expenses %}
-      <tr{% if edit_entry and edit_entry.id == e.id %} class="editing"{% endif %}>
-        <td class="mono">{{ e.date }}</td><td>{{ e.description }}</td><td class="muted">{{ e.category }}</td>
-        <td>{{ e.profile }}{% if e.profile and e.email %} <span class="muted">·</span> {% endif %}<span class="muted small">{{ e.email }}</span></td>
-        <td>{% if e.receipt.file %}<a href="/taxes/receipt/{{ e.id }}?year={{ year }}" rel="noopener">{{ e.receipt.name }}</a>{% elif e.receipt.url %}<a href="{{ e.receipt.url }}" rel="noopener">receipt ↗</a>{% endif %}</td>
-        <td class="num">{{ e.amount | money }}</td>
-        <td class="num actions"><a class="button small" href="/taxes?year={{ year }}&edit={{ e.id }}#expense-form" title="edit this expense">edit</a> <button type="submit" form="del-expense-{{ e.id }}" class="danger small" title="remove this expense">✕</button></td>
-      </tr>
-      {% endfor %}
-      <tr class="total"><td colspan="5">Total</td><td class="num">{{ inputs.expense_total | money }}</td><td></td></tr>
-    </tbody>
-  </table>
+  {#- The list is a GRID like the Orders table: static/edit.js drives it --
+      click, type, Enter; a range fill; Ctrl+C / Ctrl+V; undo; row numbers select rows and Delete
+      removes them after one confirmation (this form, answered by the page's dialog). A cell
+      posts to data-cell-url and gets the <td> back. The row's own edit / ✕ buttons stay. -#}
+  <form id="bulk" method="post" action="/taxes/expenses/delete?year={{ year }}" data-confirm="Delete every selected expense? Their uploaded receipts are deleted too.">
+    <div class="muted count">{{ inputs.expenses | length }} expense(s) · <span id="sel-count">0</span> selected {% with id='expense-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}</div>
+    <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Delete the selected expense? Its uploaded receipt is deleted too." data-confirm-many="Delete the {n} selected expenses? Their uploaded receipts are deleted too.">Delete selected</button>
+    {% include "_cell_tips.html" %}
+    <div class="sheet">
+    <table class="grid compact expenses sheetlike" data-cell-url="/taxes/expense/cell?year={{ year }}">
+      <thead><tr><th class="rownum" title="select / unselect every expense"><input type="checkbox" id="sel-all" hidden aria-label="select all">#</th><th>Date</th><th>Description</th><th>Category</th><th>Profile</th><th>Email</th><th>Receipt</th><th class="num">Amount</th><th></th></tr></thead>
+      <tbody>
+        {% for e in inputs.expenses %}
+        <tr{% if edit_entry and edit_entry.id == e.id %} class="editing"{% endif %}>
+          <td class="rownum muted" title="expense {{ loop.index }} — click to select"><input type="checkbox" name="sel" value="{{ e.id }}" hidden aria-label="select expense {{ loop.index }}">{{ loop.index }}</td>
+          {% for field in ('date', 'description', 'category', 'profile', 'email', 'receipt_url', 'amount') %}{% with e=e, field=field, entry_id=e.id, error='' %}{% include "_expense_cell.html" %}{% endwith %}{% endfor %}
+          <td class="num actions"><a class="button small" href="/taxes?year={{ year }}&edit={{ e.id }}#expense-form" title="edit this expense in the form (to upload a receipt)">edit</a> <button type="submit" form="del-expense-{{ e.id }}" class="danger small" title="remove this expense">✕</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot><tr class="total"><td colspan="8">Total</td><td class="num">{{ inputs.expense_total | money }}</td><td></td></tr></tfoot>
+    </table>
+    </div>
+  </form>
+  <script type="application/json" id="cell-choices">{{ expense_choices | tojson }}</script>
   {% for e in inputs.expenses %}<form method="post" id="del-expense-{{ e.id }}" action="/taxes/expense/{{ e.id }}/delete?year={{ year }}" class="entry-delete" hidden data-confirm="Remove the expense {{ e.description }} ({{ e.amount | money }}) from {{ year }}? Its uploaded receipt is deleted too."></form>{% endfor %}
   {% else %}
   <p class="muted">No expenses entered for {{ year }} yet.</p>

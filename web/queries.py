@@ -110,12 +110,15 @@ def _values(params, name: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class Filters:
-    """The Orders page's state. The four facets are MULTI-select: an empty tuple means every value."""
+    """The Orders page's state. The five facets are MULTI-select: an empty tuple means every value. The
+    card facet holds Card Last 4 values ("(blank)" for rows without one: "why
+    is there no way to search by Card")."""
 
     retailers: tuple[str, ...] = ()
     profiles: tuple[str, ...] = ()
     statuses: tuple[str, ...] = ()
     groups: tuple[str, ...] = ()
+    cards: tuple[str, ...] = ()
     q: str = ""
     sort: str = DEFAULT_SORT
     desc: bool = True
@@ -162,6 +165,7 @@ class Filters:
             profiles=_values(params, "profile"),
             statuses=tuple(s.lower() for s in _values(params, "status")),
             groups=_values(params, "group"),
+            cards=_values(params, "card"),
             q=str(params.get("q") or "").strip(),
             sort=sort,
             desc=desc,
@@ -190,7 +194,7 @@ class Filters:
     def as_query(self, **overrides) -> dict:
         """The query mapping for a link; multi-valued facets are lists (encode with doseq)."""
         values = {"retailer": list(self.retailers), "profile": list(self.profiles),
-                  "status": list(self.statuses), "group": list(self.groups), "q": self.q,
+                  "status": list(self.statuses), "group": list(self.groups), "card": list(self.cards), "q": self.q,
                   "month": self.month, "paid": self.paid, "state": self.state,
                   "sort": self.sort, "dir": "desc" if self.desc else "asc",
                   "view": self.view if self.view != "table" else "",
@@ -224,6 +228,8 @@ def filter_rows(rows: list[LedgerRow], filters: Filters) -> list[LedgerRow]:
         if filters.profiles and row.profile not in filters.profiles:
             continue
         if filters.statuses and row.status not in filters.statuses:
+            continue
+        if filters.cards and (row.text("card_last4").strip() or "(blank)") not in filters.cards:
             continue
         if filters.groups and (row.buying_group or "(blank)") not in filters.groups:
             continue
@@ -283,7 +289,30 @@ def facets(rows: list[LedgerRow]) -> dict:
         "profiles": sorted({r.profile for r in rows if r.profile}),
         "statuses": sorted({r.status for r in rows if r.status}),
         "groups": sorted({r.buying_group or "(blank)" for r in rows}),
+        "cards": card_facet(rows),
     }
+
+
+def card_facet(rows) -> list[tuple[str, str]]:
+    """The Card filter's options: (Card Last 4, "Name …1234") per card the ledger's rows carry,
+    the name being the one the rows use most for that number, plus ("(blank)", "(blank)") when
+    a row has no card. Sorted by label."""
+    names: dict[str, Counter] = {}
+    blank = False
+    for row in rows:
+        last4 = row.text("card_last4").strip()
+        if not last4:
+            blank = True
+            continue
+        names.setdefault(last4, Counter())[row.text("card_name").strip()] += 1
+    out = []
+    for last4, counts in names.items():
+        name = max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        out.append((last4, f"{name} …{last4}" if name else f"…{last4}"))
+    out.sort(key=lambda kv: kv[1].lower())
+    if blank:
+        out.append(("(blank)", "(blank)"))
+    return out
 
 
 def column_headings() -> list[tuple[str, str]]:

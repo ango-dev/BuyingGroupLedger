@@ -580,7 +580,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return page(request, "taxes.html", snapshot=snapshot, year=year, years=years,
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
-                    draft=draft or {}, edit_entry=editing, **extra)
+                    draft=draft or {}, edit_entry=editing, expense_choices=tax_inputs.expense_choices(inputs),
+                    **extra)
 
     def load_tax_inputs(year: int):
         return tax_inputs.load_year(tax_inputs_path, year)
@@ -638,6 +639,48 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         act("settings", f"Expense added to {year}: {entry['description']} ({entry['amount']:.2f})",
             {"year": year, "id": entry["id"], "amount": entry["amount"], "profile": entry["profile"]})
         return RedirectResponse(url=f"/taxes?year={year}&notice={quote('Added ' + entry['description'])}#s-expenses",
+                                status_code=303)
+
+    @app.post("/taxes/expense/cell", response_class=HTMLResponse)
+    async def taxes_expense_cell(request: Request):
+        """Write ONE cell of the expenses table (the Taxes page's inline editor, the Orders grid's
+        machinery) and answer with that cell re-rendered. Always 200 with the cell: an error rides
+        in its data-error, so htmx swaps it in and the message shows where the edit was made."""
+        form = await request.form()
+        year = requested_year(request, clock().year, form)
+        entry_id = str(form.get("entry_id", ""))
+        field = str(form.get("field", ""))
+        value = str(form.get("value", ""))
+        expected = form.get("expected")
+        inputs = load_tax_inputs(year)
+        error = ""
+        try:
+            tax_inputs.update_expense_field(inputs, entry_id, field, value, year=year, data_dir=data_dir,
+                                            expected=None if expected is None else str(expected))
+        except KeyError:
+            error = "no such expense (the table is stale: reload the page)"
+        except ValueError as exc:
+            error = str(exc)
+        entry = next((e for e in inputs.expenses if e["id"] == entry_id), None)
+        if not error:
+            tax_inputs.save_year(tax_inputs_path, year, inputs)
+            act("settings", f"Expense edited in {year}: {field} on {entry['description']}: {expected!r} → {value!r}",
+                {"year": year, "id": entry_id, "field": field, "was": expected, "now": value})
+        return page_no_snapshot(request, "_expense_cell.html", e=entry, field=field, entry_id=entry_id,
+                                year=year, error=error)
+
+    @app.post("/taxes/expenses/delete")
+    async def taxes_expenses_delete(request: Request):
+        """Delete every selected expense (the table's row selection, confirmed once)."""
+        form = await request.form()
+        year = requested_year(request, clock().year, form)
+        inputs = load_tax_inputs(year)
+        gone = tax_inputs.remove_expenses(inputs, [str(v) for v in form.getlist("sel")], data_dir=data_dir)
+        if gone:
+            tax_inputs.save_year(tax_inputs_path, year, inputs)
+            act("settings", f"{len(gone)} expense(s) removed from {year}: " + ", ".join(e["description"] for e in gone[:10]),
+                {"year": year, "ids": [e["id"] for e in gone]})
+        return RedirectResponse(url=f"/taxes?year={year}&notice={quote(f'Deleted {len(gone)} expense(s)')}#s-expenses",
                                 status_code=303)
 
     @app.post("/taxes/expense/{entry_id}")
@@ -995,6 +1038,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     templates.env.globals["KINDS"] = activity_module.KINDS
     templates.env.globals["nav_badges"] = nav_badges
+    templates.env.globals["expense_raw"] = tax_inputs.expense_raw
     templates.env.globals["run_label"] = activity_module.run_label
     templates.env.globals["run_started_at"] = activity_module.run_started_at
 
