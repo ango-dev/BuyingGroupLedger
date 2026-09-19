@@ -1424,6 +1424,7 @@ class TestImpossibleValues:
 
     def test_identifiers_that_do_not_fit_their_retailer(self):
         assert "is not the shape of a Best Buy order number" in self._fails(**{"Order ID": Cell("111-1234567-1234567")})
+        assert result_for(build(row_cells(2, **{"Order ID": Cell("BBY02-806123456789")})), "impossible_values").status == "PASS"  # any BBYnn-
         assert "Order Link points at another site than Best Buy" in self._fails(**{"Order Link": Cell("https://www.amazon.com/gp/order/1")})
         assert "Receipt Link is filed under another retailer than Best Buy" in self._fails(**{"Receipt Link": Cell("/receipts/costco/2026-08/1.pdf")})
         assert "a Tracking Link with no Tracking Number" in self._fails(**{"Tracking Number": Cell(""), "Tracking Submitted": Cell(False), "Tracking Link": Cell("https://ups.com/t/1")})

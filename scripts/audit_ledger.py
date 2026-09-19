@@ -1348,7 +1348,7 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
 RETAILER_SHAPES = {
     "amazon": (r"^\d{3}-\d{7}-\d{7}$", ("amazon.com",), "amazon"),
     "amazon business": (r"^\d{3}-\d{7}-\d{7}$", ("amazon.com",), "amazon-business"),
-    "best buy": (r"^BBY01-\d+$", ("bestbuy.com",), "bestbuy"),
+    "best buy": (r"^BBY\d+-\d+$", ("bestbuy.com",), "bestbuy"),  # BBY01-, BBY02-, ...
     "costco": (r"^\d+$", ("costco.com",), "costco"),
 }
 #: Amounts that can never be negative (a payout can: a clawback nets below zero, so it is a WARN).
