@@ -1261,9 +1261,17 @@ MANDATORY_BY_STAGE = {
 }
 #: Cells a stage should NOT have yet: a value there means the status is stale (WARN, not FAIL).
 UNEXPECTED_BY_STAGE = {
-    "ordered": ("Tracking Number", "Delivery Date", "Payout Date"),
+    # Delivery Date is NOT here: the scraper fills it with the retailer's estimate before delivery.
+    #
+    "ordered": ("Tracking Number", "Payout Date"),
     "shipped": ("Payout Date",),
 }
+#: A gift-card row (Buying Group = the gift-card marker, or an item name that says so) has no
+#: package: no tracking number, no delivery address, no delivery date. One SOLD to a buying group
+#: (AI, for example) must still have Tracking Submitted ticked from shipped on -- the tick says the
+#: gift card was submitted.
+GIFT_CARD_HINTS = ("gift card", "egift", "e-gift", "balance reload")
+GIFT_CARD_EXEMPT = ("Tracking Number", "Delivery Address", "Delivery Date")
 
 
 @check("mandatory_by_stage")
@@ -1274,6 +1282,8 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
     return its quantity and date). A cell that should still be blank
     at a stage (a tracking number on an `ordered` row) is a stale status, a WARN. The one place a
     cell deleted by accident from the table is caught."""
+    from config.warehouses import is_deliberately_unrouted
+
     grid = sheet.grids.formatted
     fails, warns = [], []
     for row_number, _ in sheet.ledger_rows(grid):
@@ -1285,8 +1295,16 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
         if status not in ("cancelled", "superseded"):
             required += MANDATORY_COSTED
         required += MANDATORY_BY_STAGE.get(status, ())
+        ticked = list(MANDATORY_TICKED_BY_STAGE.get(status, ()))
+        group = cell("Buying Group")
+        unrouted = is_deliberately_unrouted(group)
+        gift_card = unrouted or any(h in cell("Item Name").lower() for h in GIFT_CARD_HINTS)
+        if gift_card:
+            required = [name for name in required if name not in GIFT_CARD_EXEMPT]
+            if unrouted or not group:
+                ticked = []  # nothing to submit; a card sold to a group keeps the tick requirement
         missing = [name for name in required if not cell(name)]
-        missing += [f"{name} (not ticked)" for name in MANDATORY_TICKED_BY_STAGE.get(status, ())
+        missing += [f"{name} (not ticked)" for name in ticked
                     if cell(name).lower() not in ("true", "1", "yes", "checked")]
         if missing:
             fails.append(f"row {row_number} ({status or 'no status'}): missing {', '.join(missing)}")

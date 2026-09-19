@@ -1344,6 +1344,32 @@ class TestMandatoryByStage:
         clean = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Delivery Date": Cell("")}))
         assert result_for(clean, "mandatory_by_stage").status == "PASS"
 
+    def test_an_estimated_delivery_date_on_an_open_row_is_not_stale(self):
+        ordered = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell("")}))  # keeps its Delivery Date
+        assert result_for(ordered, "mandatory_by_stage").status == "PASS"
+
+    def test_a_gift_card_has_no_package_but_one_sold_to_a_group_is_submitted(self):
+        from config.warehouses import GIFT_CARD
+
+        bought = build(row_cells(2, Status=Cell("delivered"), **{"Buying Group": Cell(GIFT_CARD), "Tracking Number": Cell(""),
+                                                                 "Delivery Address": Cell(""), "Delivery Date": Cell(""),
+                                                                 "Tracking Submitted": Cell(False)}))
+        assert result_for(bought, "mandatory_by_stage").status == "PASS"
+        by_name = build(row_cells(2, Status=Cell("delivered"), **{"Item Name": Cell("Amazon.com eGift Card"), "Buying Group": Cell(""),
+                                                                  "Tracking Number": Cell(""), "Delivery Address": Cell(""),
+                                                                  "Tracking Submitted": Cell(False)}))
+        # a gift card still names its group (the marker for a bought one, the group for a sold one)
+        assert result_for(by_name, "mandatory_by_stage").details == ("row 2 (delivered): missing Buying Group",)
+        sold = build(row_cells(2, Status=Cell("shipped"), **{"Item Name": Cell("Apple Gift Card $500"), "Buying Group": Cell("AI"),
+                                                             "Tracking Number": Cell(""), "Delivery Address": Cell(""),
+                                                             "Delivery Date": Cell(""), "Tracking Submitted": Cell(False)}))
+        result = result_for(sold, "mandatory_by_stage")
+        assert result.status == "FAIL" and result.details[0] == "row 2 (shipped): missing Tracking Submitted (not ticked)"
+        sold_ok = build(row_cells(2, Status=Cell("shipped"), **{"Item Name": Cell("Apple Gift Card $500"), "Buying Group": Cell("AI"),
+                                                                "Tracking Number": Cell(""), "Delivery Address": Cell(""),
+                                                                "Delivery Date": Cell(""), "Tracking Submitted": Cell(True)}))
+        assert result_for(sold_ok, "mandatory_by_stage").status == "PASS"
+
     def test_a_money_free_row_needs_only_its_identity(self):
         sheet = build(row_cells(2, Status=Cell("superseded"), **{"Cost Per Item": Cell(""), "Total Cost": Cell(""),
                                                                  "Quantity": Cell(""), "Profile": Cell("")}))
