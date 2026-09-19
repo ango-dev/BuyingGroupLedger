@@ -1465,7 +1465,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        ".pop.cal", ".pop .choice", ".pop .cal-months .cal-month", "td .cell-upload", ".chip.virtual",
                        "td input.cell-check", ".pop .choice.current",
                        "border-spacing: 0; border-collapse: separate; }", "body.wide .pinned { position: sticky; top: 0;",
-                       "body.wide table.sheetlike th { top: var(--pinned-h, 0px); }",
+                       "body.wide table.grid th { top: var(--pinned-h, 0px); }",
                        "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: #d64545; }", ".tiles.audit-stats .tile.skipped",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".add-form", ".add-form .actions", ".add-form .span-6", "repeat(6, minmax(0, 1fr))", "tr.selected td", ".cards {", ".card ol.items",
@@ -1703,3 +1703,10 @@ class TestTheNavOrder:
         nav = body[body.index("<nav"):body.index("</nav>")]
         order = [nav.index(x) for x in (">Overview<", ">Activity<", ">Orders<", ">Audit<", ">Recon<", ">Taxes<", ">Tools")]
         assert order == sorted(order)
+
+
+class TestActivityLayout:
+    def test_activity_uses_the_orders_layout(self, client):
+        body = client.get("/activity").text
+        assert '<body class="wide">' in body
+        assert body.index("<h1>Activity</h1>") < body.index('<p class="muted lead">') < body.index('<div class="pinned">') < body.index('id="activity-filters"') < body.index('id="activity-table"')

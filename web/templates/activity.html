@@ -2,12 +2,15 @@
 {% from "_select.html" import choose %}
 {% block title %}Activity{% endblock %}
 {% block content %}
+{# The Orders layout: the title and this description scroll away, the filter
+   bar in .pinned sticks to the top, the table takes the whole page. #}
 <h1>Activity</h1>
-<p class="muted">Everything the app did, newest first: what each run scraped and wrote to the ledger,
+<p class="muted lead">Everything the app did, newest first: what each run scraped and wrote to the ledger,
 what the buying-group sync submitted, insured and read back, the emails it sent, every alert, every
 failure dossier (its report opens in place), and every change made from this dashboard.
 From <code>{{ activity_path }}</code> and the dossiers under <code>{{ failures_dir }}</code>.</p>
 
+<div class="pinned">
 <form id="activity-filters" class="filters" method="get" action="/activity"
       hx-get="/activity" hx-target="#activity-table" hx-indicator="#activity-table" hx-push-url="true"
       hx-trigger="change, keyup changed delay:300ms from:#aq, submit">
@@ -43,6 +46,7 @@ From <code>{{ activity_path }}</code> and the dossiers under <code>{{ failures_d
   <noscript><button type="submit">Apply</button></noscript>
   <a class="button small reset" href="/activity?reset=1" title="clear the type, window, search, run and order (hidden types stay)">Reset</a>
 </form>
+</div>
 
 <div id="activity-table">
   {% include "_activity_rows.html" %}

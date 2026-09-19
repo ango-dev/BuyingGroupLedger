@@ -895,7 +895,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                    "counts": activity_module.counts_by_kind(events),
                    "activity_path": str(activity_path), "failures_dir": str(failures_dir)}
         name = "_activity_rows.html" if request.headers.get("HX-Request") else "activity.html"
-        response = page_no_snapshot(request, name, **context)
+        response = page_no_snapshot(request, name, wide=True, **context)  # the Orders layout
         if filters.hide_set:
             if filters.hidden:
                 response.set_cookie(HIDE_COOKIE, ",".join(filters.hidden), max_age=365 * 24 * 3600,
