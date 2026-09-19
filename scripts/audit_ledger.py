@@ -1244,9 +1244,11 @@ MANDATORY_ALWAYS = ("Order Date", "Status", "Retailer", "Item Name", "Shipment",
 MANDATORY_COSTED = ("Quantity", "Cost Per Item", "Total Cost", "Profile")
 MANDATORY_BY_STAGE = {
     "shipped": ("Tracking Number",),
-    "delivered": ("Tracking Number", "Delivery Date"),
-    "paid": ("Tracking Number", "Actual Payout", "Payout Date"),
-    "return": ("Tracking Number", "Return Qty", "Return Date"),
+    # delivered: the retailer's receipt too -- from then on the order is a cost
+    # to substantiate, and the capture has had every chance to run
+    "delivered": ("Tracking Number", "Delivery Date", "Receipt Link"),
+    "paid": ("Tracking Number", "Actual Payout", "Payout Date", "Receipt Link"),
+    "return": ("Tracking Number", "Return Qty", "Return Date", "Receipt Link"),
 }
 #: Cells a stage should NOT have yet: a value there means the status is stale (WARN, not FAIL).
 UNEXPECTED_BY_STAGE = {
@@ -1258,8 +1260,9 @@ UNEXPECTED_BY_STAGE = {
 @check("mandatory_by_stage")
 def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
     """Every row carries its identity and, unless cancelled / superseded, its cost inputs and a
-    profile; each stage carries what that stage implies (a shipped row a tracking number, a paid
-    row an amount and a date, a return its quantity and date). A cell that should still be blank
+    profile; each stage carries what that stage implies (a shipped row a tracking number, a
+    delivered row a delivery date and the retailer's receipt, a paid row an amount and a date, a
+    return its quantity and date). A cell that should still be blank
     at a stage (a tracking number on an `ordered` row) is a stale status, a WARN. The one place a
     cell deleted by accident from the table is caught."""
     grid = sheet.grids.formatted

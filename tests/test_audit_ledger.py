@@ -138,6 +138,7 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
         "Tracking Number": Cell(f"1Z999AA{row_number:08d}"),
         "Shipment": Cell(1),
         "Delivery Date": Cell("2026-08-09"),
+        "Receipt Link": Cell("/receipts/bestbuy/2026-08/BBY01-1.pdf"),
         "Cost Per Item": Cell(399.0),
         "Shipping": Cell(0.0),
         "Total Cost": Cell(798.0),
@@ -1321,6 +1322,11 @@ class TestMandatoryByStage:
         assert result_for(paid_ok, "mandatory_by_stage").status == "PASS"
         returned = build(row_cells(2, Status=Cell("return"), **{"Return Qty": Cell(""), "Return Date": Cell("")}))
         assert "missing Return Qty, Return Date" in result_for(returned, "mandatory_by_stage").details[0]
+        # delivered (and beyond) needs the retailer's receipt as well
+        no_receipt = build(row_cells(2, **{"Receipt Link": Cell("")}))
+        assert "row 2 (delivered): missing Receipt Link" in result_for(no_receipt, "mandatory_by_stage").details[0]
+        shipped_no_receipt = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell(""), "Receipt Link": Cell("")}))
+        assert result_for(shipped_no_receipt, "mandatory_by_stage").status == "PASS"
 
     def test_a_cell_a_stage_should_not_have_yet_is_a_stale_status_warning(self):
         ordered = build(row_cells(2, Status=Cell("ordered"), **{"Delivery Date": Cell("")}))  # keeps its tracking number
