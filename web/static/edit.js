@@ -853,20 +853,6 @@
   document.addEventListener("rows:cleared", syncClasses);
 })();
 
-// The pinned bar's height, for the table header to stick just below it (the page scrolls as one;
-// the filter bar sticks). Measured on load, resize and every swap.
-(function () {
-  "use strict";
-  function measure() {
-    var bar = document.querySelector("body.wide .pinned");
-    document.documentElement.style.setProperty("--pinned-h", bar ? bar.offsetHeight + "px" : "0px");
-  }
-  document.addEventListener("DOMContentLoaded", measure);
-  window.addEventListener("resize", measure);
-  document.addEventListener("htmx:afterSwap", measure);
-  measure();
-})();
-
 // The # header is the select-all handle (the header checkbox is hidden, like the row ones).
 (function () {
   "use strict";

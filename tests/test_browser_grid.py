@@ -185,3 +185,22 @@ def test_a_phone_fits_the_pages_and_taps_edit(client, served, phone, tmp_path):
     phone.wait_for_selector("input.cell-input", timeout=3000)
     phone.keyboard.press("Escape")
     assert phone.errors == []
+
+
+def test_only_the_sheet_header_sticks_and_the_filter_bar_wraps_to_the_window(client, served, page):
+    """ "for iPad it is still really
+    unoptimised -- the app should detect the window size and optimise for it"."""
+    page.set_viewport_size({"width": 1600, "height": 900})
+    page.goto(f"{served}/orders")
+    assert page.evaluate("getComputedStyle(document.querySelector('body.wide .pinned')).position") != "sticky"
+    th = page.evaluate("(() => { const cs = getComputedStyle(document.querySelector('table.sheetlike th')); return [cs.position, cs.top]; })()")
+    assert th == ["sticky", "0px"]
+    ROWS = """(() => { const els = Array.from(document.querySelectorAll('#filters > *')).filter(e => e.offsetWidth);
+        let rows = 1; for (let i = 1; i < els.length; i++) if (els[i].getBoundingClientRect().left <= els[i - 1].getBoundingClientRect().left) rows++; return rows; })()"""
+    assert page.evaluate(ROWS) == 1  # a full-size window: the filter bar is one row, as before
+    page.set_viewport_size({"width": 820, "height": 1180})  # an iPad, portrait
+    page.goto(f"{served}/orders")
+    assert page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth") == 0
+    assert page.evaluate("Array.from(document.querySelectorAll('#filters > *')).every(e => e.getBoundingClientRect().right <= innerWidth + 1)")
+    assert page.evaluate(ROWS) > 1  # wrapped onto more rows instead of running off the edge
+    assert page.errors == []

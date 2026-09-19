@@ -689,6 +689,7 @@ class TestOverviewPage:
         assert 'matchMedia("(pointer: coarse)")' in js  # a tap shows a tip where there is no hover
         css = client.get("/static/style.css").text
         assert "@media (max-width: 760px)" in css and "@media (pointer: coarse)" in css and "100dvh" in css
+        assert "position: sticky; top: 0; left: 0; z-index: 6" not in css and "--pinned-h" not in css  # only the header sticks
         css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
         assert ".tip {" in css and ".tip.on" in css
 
@@ -1540,14 +1541,14 @@ class TestStaticAssetsCarryTheirBlocks:
         for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap", "td.sel-cell",
                        ".pop.cal", ".pop .choice", ".pop .cal-months .cal-month", "td .cell-upload", ".chip.virtual",
                        "td input.cell-check", ".pop .choice.current",
-                       "border-spacing: 0; border-collapse: separate; }", "body.wide .pinned { position: sticky; top: 0;",
-                       "body.wide table.grid th { top: var(--pinned-h, 0px); }",
+                       "border-spacing: 0; border-collapse: separate; }", "body.wide table.grid th { top: 0; }",
+                       "@media (max-width: 1024px) and (min-width: 761px)",
                        "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: #d64545; }", ".tiles.audit-stats .tile.skipped",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".add-form", ".add-form .actions", ".add-form .span-6", "repeat(6, minmax(0, 1fr))", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
                        "table.activity { width: 100%", ".dropzone.dragover",
-                       ".filters { display: flex; flex-wrap: nowrap", ".filters label.search {",
+                       ".filters { display: flex; flex-wrap: wrap", ".filters label.search {",
                        "@keyframes rise-in", ".just-in {", "prefers-reduced-motion"):
             assert needle in css, f"style.css lost its {needle!r} rules"
         # motion stays cheap: nothing transitions "all", and no layout property is ever animated
@@ -1571,7 +1572,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "if (thenDown) move(1, 0, false)", "paint(false)", "Picker.date(", "Picker.choices(",
                        'ctrl && e.key === ";"', "function fillToday()", "function toggleCheck(td)",
                        'contains("cell-check")', 'e.key === " " && td.getAttribute("data-kind") === "check"',
-                       "Picker.forget()", 'setProperty("--pinned-h"', 'getElementById("protect-edits")',
+                       "Picker.forget()", 'getElementById("protect-edits")',
                        "function undo()", "function redo()", 'getAttribute("data-cell-url")', 'getAttribute("data-entry-id")',
                        'getAttribute("data-confirm-many")', "details.dataset.narrow",
                        "function releaseSelection()", "function markSelection()", "function toggleHandSelection()",

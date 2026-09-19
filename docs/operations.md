@@ -221,8 +221,11 @@ any combination; *All* clears the others (and re-ticks itself when the last valu
 is unticked); with a dropdown open, typing narrows its list -- a "narrow: …" line shows what
 was typed (Backspace edits, Escape clears). The choice travels in the URL as repeated parameters, so links and bookmarks keep it.
 
-**On a phone or an iPad** (a window under 760px wide, or a touch screen) the header's links scroll
-sideways, the filter bar wraps, the forms stack, and the grids take touch: a tap selects a cell, a
+**Narrow windows.** The layout follows the window's width: the filter bar wraps as soon as one
+row is too narrow for it (an iPad, a shortened desktop window), a tablet-width window (761--1024px)
+tightens the gutters and stacks the expense form two-up, and **on a phone or an iPad** (under
+760px, or a touch screen) the header's links scroll sideways, the forms stack, and the grids take
+touch: a tap selects a cell, a
 second tap on the selected cell opens its editor, a long press opens the right-click menu, and a
 tap on a hint pill shows its tip. A full-size window is laid out as before. The cards view is the
 easier way to read the ledger on a phone; the table still scrolls in both directions.
@@ -460,7 +463,7 @@ Both are the **Orders view** — the same filter bar, table or cards, sort, sear
 — over a subset of rows, with a **Finding** column (table) or block (card) beside each.
 Neither writes anything.
 
-- **Audit** (`/audit`, `web/audit_view.py`; its description, tiles and checks panel sit under the title and scroll away with it, after which the filter bar sticks to the top, as on Orders; the four tiles filter the rows to the checks they count): every check of `scripts.audit_ledger` run against the
+- **Audit** (`/audit`, `web/audit_view.py`; its description, tiles and checks panel sit under the title and scroll away with it, after which only the table's header sticks -- the filter bar scrolls away too, as on Orders; the four tiles filter the rows to the checks they count): every check of `scripts.audit_ledger` run against the
   ledger the dashboard serves (through the worksheet adapter — the CLI's own read-only path), then
   every row a check named, mapped to its order. The lead shows the
   checks with their status and how many rows each flagged; the **Check** dropdown narrows the rows

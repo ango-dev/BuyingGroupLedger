@@ -7,9 +7,8 @@
    over their own rows, with a Finding column. `base` is the page's own URL,
    `scope` names it, both from the route. #}
 {# The page scrolls as one: the title, then the lead where the page has one
-   (Audit, Recon), scroll away, as do the add-row form and the count line; the filter bar in
-   .pinned sticks to the top once they have, and the table's header sticks just below (edit.js
-   measures --pinned-h). #}
+   (Audit, Recon), scroll away, as do the filter bar (.pinned, by name only now), the add-row form
+   and the count line; ONLY the table's header sticks. #}
 {% block heading %}<h1>Orders</h1>{% endblock %}
 {% block lead %}<p class="muted small lead">Every row of the ledger, as a table that edits like a spreadsheet or as one card per order. Filter, sort and search; add a row, select rows to delete, upload a receipt; a cell you type is kept by every run until you clear it.</p>{% endblock %}
 <div class="pinned">
