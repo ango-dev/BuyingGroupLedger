@@ -646,7 +646,7 @@ header nav details.nav-menu .menu a.current { color: var(--accent); font-weight:
    its header is a plain heading in the same type as the sort links beside it. */
 td.finding { white-space: nowrap; font-size: 0.85em; vertical-align: top; }
 td.finding div { padding: 1px 0; }
-table.sheetlike th.col-finding { font-weight: 500; }
+table.sheetlike th.col-finding { font-weight: 500; color: var(--accent); }  /* the same blue as the sort links beside it */
 td.finding b, .card .finding b { font-weight: 600; color: var(--warn); margin-right: 4px; }
 td.finding b.short, .card .finding b.short { color: var(--bad); }
 td.finding b.over, .card .finding b.over { color: var(--ok); }
