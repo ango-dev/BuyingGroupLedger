@@ -1,17 +1,16 @@
-"""DEPRECATION (2026-09-18): the Google Sheet is on its way out. With `ledger.backend` = `db`
-everything in this module runs against the SQLite ledger through ledger_db/worksheet.py (see
-_get_worksheet); the gspread paths below are live only while the flag says `sheet`, and go when
-the user decides to delete the Sheet. Until then nothing here is removed.
+"""The ledger upsert: how a scrape's rows land in the SQLite ledger.
+
+Every writer here addresses the ledger as a positional grid through the worksheet face
+ledger_db/worksheet.py puts on data/ledger.sqlite3 (`_get_worksheet` opens it; the buying-group
+sync, the BFMR auto-reply and the repair scripts open it through the same function). The
+Google Sheet the grid vocabulary came from was deleted 2026-09-18; the adapter's contract is
+what the sheet's was, down to the empty string.
 """
 
 import csv
 import logging
 import re
-import time
 from pathlib import Path
-
-import gspread
-from google.oauth2.service_account import Credentials
 
 from alerts.notifier import alert
 from config.settings import settings
@@ -21,8 +20,6 @@ from models.order import (
 )
 
 log = logging.getLogger(__name__)
-
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # A Shipment cell in either spelling: the current bare "2" or the pre-2026-08-12 "Shipment 2".
 _SHIPMENT_NUMBER = re.compile(r"(?:shipment\s*)?(\d+)", re.IGNORECASE)
@@ -374,27 +371,13 @@ def _collapse_records(records: list[dict]) -> list[dict]:
 
 
 def _get_worksheet():
-    """The ledger as a worksheet: the SQLite file behind a worksheet face when `ledger.backend`
-    is `db` (ledger_db/worksheet.py -- the cutover's second stage, 2026-09-18), else the Google
-    Sheet (DEPRECATED; kept until the user deletes it). Every writer in this module, the
-    buying-group sync, the BFMR auto-reply and the scripts open the ledger HERE, so the flag
-    routes all of them at once."""
-    if settings.ledger_is_db():
-        from ledger_db.store import LedgerDb
-        from ledger_db.worksheet import DbWorksheet
+    """The ledger file (`database.path`) behind a worksheet face (ledger_db/worksheet.py). Every
+    writer in this module, the buying-group sync, the BFMR auto-reply and the scripts open the
+    ledger HERE."""
+    from ledger_db.store import LedgerDb
+    from ledger_db.worksheet import DbWorksheet
 
-        return DbWorksheet(LedgerDb(settings.ledger_db_path))
-    creds = settings.google_credentials(SCOPES)
-    client = gspread.authorize(creds)
-    spreadsheet = client.open_by_key(settings.google_sheet_id)
-    try:
-        return spreadsheet.worksheet(settings.google_sheet_worksheet_name)
-    except gspread.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(
-            title=settings.google_sheet_worksheet_name, rows=1000, cols=len(HEADER)
-        )
-        worksheet.append_row(HEADER)
-        return worksheet
+    return DbWorksheet(LedgerDb(settings.ledger_db_path))
 
 
 def _parse_display_number(value: str):
@@ -552,7 +535,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     missing = [c for c in key_cols if c not in header]
     if missing:
         raise RuntimeError(
-            f"Worksheet '{settings.google_sheet_worksheet_name}' first row is not a recognized "
+            f"Worksheet '{getattr(worksheet, "title", "ledger")}' first row is not a recognized "
             f"header (missing {missing}). Clear the sheet, or set its header row to: {HEADER}"
         )
     # THE ORDER MUST MATCH EXACTLY, not merely contain the right names. Rows are written positionally
@@ -563,7 +546,7 @@ def sync_csv_to_sheet(csv_path: Path) -> None:
     # at the migration that rewrites the existing rows.
     if header != list(HEADER):
         raise RuntimeError(
-            f"Worksheet '{settings.google_sheet_worksheet_name}' has the ledger's columns in a "
+            f"Worksheet '{getattr(worksheet, "title", "ledger")}' has the ledger's columns in a "
             "different ORDER than the current schema, so writing to it positionally would scramble "
             "existing rows. Nothing was written. Run `python -m scripts.reorder_sheet` to preview the "
             "migration, then `python -m scripts.reorder_sheet --apply` to rewrite the sheet into the "
@@ -1145,7 +1128,7 @@ def sort_ledger_by_date_desc(worksheet=None) -> dict:
     # sheet whose columns are in a different order would be sorted on the wrong ones.
     if header != list(HEADER):
         raise RuntimeError(
-            f"Worksheet '{settings.google_sheet_worksheet_name}' has the ledger's columns in a "
+            f"Worksheet '{getattr(worksheet, "title", "ledger")}' has the ledger's columns in a "
             "different ORDER than the current schema, so sorting would target the wrong columns. "
             "Nothing was sorted. Run `python -m scripts.reorder_sheet` first."
         )
@@ -1416,38 +1399,6 @@ def _reprorate_order_level(worksheet, order_ids: set, raw_totals: dict) -> None:
 _STATUS_FIELD_IDX = FIELDNAMES.index("status")
 
 
-#: HTTP statuses worth trying again: Google being briefly unavailable or rate-limiting, never a 4xx
-#: telling us the request itself is wrong (a bad range or a missing sheet will fail identically twice).
-_TRANSIENT_STATUSES = (429, 500, 502, 503, 504)
-
-
-def _retry_transient(call, *, what: str, attempts: int = 3, base_delay: float = 1.0):
-    """Run `call`, retrying a TRANSIENT Google error with exponential backoff.
-
-    A single momentary 503 on the order-state read costs a whole cycle of re-check coverage — live 10:00Z it took Amazon from "fetching 1 order" to "fetching 0" — while every other sheet
-    call in that same run succeeded seconds later. So the failure was worth one more try, not a
-    skipped scrape.
-
-    Only 5xx/429 are retried. A 400 ("exceeds grid limits") or a 404 is deterministic: retrying it
-    just delays the same failure and hides it behind a longer run.
-    """
-    delay = base_delay
-    for attempt in range(1, attempts + 1):
-        try:
-            return call()
-        except Exception as exc:
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            if status is None:
-                status = (exc.args and isinstance(exc.args[0], dict)
-                          and exc.args[0].get("code")) or None
-            if status not in _TRANSIENT_STATUSES or attempt == attempts:
-                raise
-            log.warning("Sheets %s failed with %s (attempt %d/%d); retrying in %.1fs.",
-                        what, status, attempt, attempts, delay)
-            time.sleep(delay)
-            delay *= 2
-
-
 def _last_occupied_row(existing: list[list], checkbox_index: int | None = None) -> int:
     """The last row that really holds something — ignoring a row whose ONLY content is an unticked
     checkbox.
@@ -1527,13 +1478,10 @@ def _blank_to_none(row: list) -> list:
 
 def _read_unformatted(worksheet) -> list[list]:
     """The sheet's stored VALUES (real types), or [] if that read is unavailable."""
+    from ledger_db.worksheet import ValueRenderOption
+
     try:
-        from gspread.utils import ValueRenderOption
-        option = ValueRenderOption.unformatted
-    except Exception:  # noqa: BLE001 -- an older gspread: the string form is what the API takes
-        option = "UNFORMATTED_VALUE"
-    try:
-        return worksheet.get_values(value_render_option=option) or []
+        return worksheet.get_values(value_render_option=ValueRenderOption.unformatted) or []
     except Exception:  # noqa: BLE001 -- never let a second read stop the sync
         log.warning("Could not read the sheet unformatted; preserved cells will use display text.",
                     exc_info=True)
@@ -1744,8 +1692,8 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
     """
     empty: dict = {"delivered_ids": [], "cancelled_ids": [], "open_orders": []}
     try:
-        worksheet = _retry_transient(_get_worksheet, what="open the ledger worksheet")
-        existing = _retry_transient(worksheet.get_all_values, what="read order state")
+        worksheet = _get_worksheet()
+        existing = worksheet.get_all_values()
     except Exception:
         # NOT "treating all orders as new" — that wording reads as conservative OVER-fetching, and the
         # real effect is the opposite. The fetch set is (new-in-window + still-open re-checks), and the

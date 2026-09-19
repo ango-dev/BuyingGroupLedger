@@ -202,7 +202,7 @@ class TestTheCli:
         import config.settings as cs
         from scripts.hand_edits import main
 
-        monkeypatch.setattr(cs, "settings", dataclasses.replace(cs.settings, ledger_backend="db",
+        monkeypatch.setattr(cs, "settings", dataclasses.replace(cs.settings,
                                                                 ledger_db_path=str(db.path)))
         assert main([]) == 0 and "No hand-edited cells" in capsys.readouterr().out
         hand_edits.record(db, KEY, "cashback_rate", 0.06)

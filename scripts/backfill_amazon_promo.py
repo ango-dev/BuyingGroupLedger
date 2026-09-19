@@ -33,7 +33,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from gspread.utils import ValueInputOption, ValueRenderOption
+from ledger_db.worksheet import ValueInputOption, ValueRenderOption
 
 # This drives the cloud browser, and the Browser-Use SDK reads BROWSER_USE_API_KEY out of the
 # ENVIRONMENT itself. Importing config.settings is what puts the config.json value there. It

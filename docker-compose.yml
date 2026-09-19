@@ -47,8 +47,8 @@ services:
       # container (`docker compose up -d`).
       - "${WEB_PUBLISH_HOST:-127.0.0.1}:${WEB_PUBLISH_PORT:-8765}:8765"
     volumes:
-      # THE config file: profiles, warehouses, cards, credentials and the inlined Google service
-      # account. WRITABLE since 2026-09-17 for exactly one writer: the dashboard's Settings page
+      # THE config file: profiles, warehouses, cards and credentials. WRITABLE since 2026-09-17
+      # for exactly one writer: the dashboard's Settings page
       # (web/settings_form.py, through config.loader.save_config). Nothing in a scheduled run
       # rewrites it, as before. A bind mount whose host file is missing makes Docker create an
       # empty DIRECTORY here, which preflight reports as "config.json is missing" on start rather

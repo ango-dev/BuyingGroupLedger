@@ -70,9 +70,6 @@ ENV_TO_CONFIG = {
     "DEFAULT_CASHBACK_RATE": "scraping.default_cashback_rate",
     "AMAZON_PROMO_CASHBACK_ENABLED": "scraping.amazon_promo_cashback_enabled",
     "AMAZON_GIFT_CARD_NETTING_ENABLED": "scraping.amazon_gift_card_netting_enabled",
-    "GOOGLE_SERVICE_ACCOUNT_FILE": "google.service_account_file",
-    "GOOGLE_SHEET_ID": "google.sheet_id",
-    "GOOGLE_SHEET_WORKSHEET_NAME": "google.worksheet_name",
     "GMAIL_ADDRESS": "alerts.gmail_address",
     "GMAIL_APP_PASSWORD": "alerts.gmail_app_password",
     "ALERT_EMAIL_TO": "alerts.email_to",
@@ -109,14 +106,8 @@ ENV_TO_CONFIG = {
     # Where YOU open the dashboard from (e.g. over WireGuard): alerts link a failure dossier to its
     # Activity page through it. Blank = alerts name the local path only.
     "WEB_PUBLIC_URL": "web.public_url",
-    # WHERE THE LEDGER LIVES: "db" (the SQLite file; every writer and reader runs off it -- the
-    # default since 2026-09-18) or "sheet" (the Google Sheet -- DEPRECATED). See
-    # docs/operations.md, "Moving off the Sheet".
-    "LEDGER_BACKEND": "ledger.backend",
-    # The SQLite copy of the ledger (ledger_db/): a mirror while ledger.backend is "sheet", THE
-    # ledger once it is "db".
+    # THE LEDGER: the SQLite file (ledger_db/) every writer and reader runs off.
     "LEDGER_DB_PATH": "database.path",
-    "LEDGER_DB_MIRROR_AFTER_RUN": "database.mirror_after_run",
     # Scheduled backups (scripts/backup.py --scheduled, on the container's own cron): whether,
     # how often, when, on which days, and how many zips to keep. Read at container start.
     "BACKUP_ENABLED": "backups.enabled",
@@ -246,12 +237,6 @@ class Settings:
     amazon_gift_card_netting_enabled: bool = _get_bool(
         "AMAZON_GIFT_CARD_NETTING_ENABLED", True)
 
-    google_service_account_file: str = _get_str(
-        "GOOGLE_SERVICE_ACCOUNT_FILE", "")
-    google_sheet_id: str = _get_str("GOOGLE_SHEET_ID")
-    google_sheet_worksheet_name: str = _get_str(
-        "GOOGLE_SHEET_WORKSHEET_NAME", "Orders")
-
     gmail_address: str = _get_str("GMAIL_ADDRESS")
     gmail_app_password: str = field(
         default=_get_str("GMAIL_APP_PASSWORD"), repr=False)
@@ -367,30 +352,21 @@ class Settings:
     container_timezone: str = _get_str("TZ", "UTC")
 
     # --- the read-only web dashboard (web/; `python -m web` / the `web` compose profile) ----------
-    # Which backend web.ledger_reader serves: "snapshot" (a data/sheet_backup_*.csv -- the newest,
-    # or `web_snapshot_path`) or "sheet" (the live Sheet through the READONLY scope, cached). The
-    # scheduler never reads any of these. Anything else is refused at startup, not defaulted.
+    # Which backend web.ledger_reader serves: "db" (the ledger file, database.path) or "snapshot"
+    # (a data/sheet_backup_*.csv -- the newest, or `web_snapshot_path`). The scheduler never reads
+    # any of these. Anything else is refused at startup, not defaulted.
     # In the container, docker/entrypoint.sh starts the dashboard beside the scheduler when this is
     # true (and healthcheck.sh probes it). Off = the container is a pure scheduler, as before.
     web_enabled: bool = _get_bool("WEB_ENABLED", True)
-    # "snapshot" | "sheet" | "db" -- the third serves data/ledger.sqlite3, refreshed from the
-    # read-only Sheet on the cache interval below (or from `web_snapshot_path` when one is set).
-    web_ledger_source: str = _get_str("WEB_LEDGER_SOURCE", "snapshot")
+    # "db" | "snapshot" -- the first serves data/ledger.sqlite3 (the ledger), re-read from the
+    # file on the cache interval below; the second a CSV export, for offline work.
+    web_ledger_source: str = _get_str("WEB_LEDGER_SOURCE", "db")
     web_snapshot_path: str = _get_str("WEB_SNAPSHOT_PATH", "")
-    # The SQLite copy of the ledger (ledger_db/). Relative paths are under the repo root; in the
-    # container that is the mounted data/ volume, so the copy survives a rebuild.
+    # The ledger (ledger_db/). Relative paths are under the repo root; in the container that is
+    # the mounted data/ volume, so the file survives a rebuild.
     ledger_db_path: str = _get_str("LEDGER_DB_PATH", "data/ledger.sqlite3")
-    # main.run_db_mirror: after every scheduled run, read the Sheet back (read-only scope) into
-    # the SQLite copy. Spends nothing, submits nothing -- one Sheets read per run.
-    ledger_db_mirror_after_run: bool = _get_bool("LEDGER_DB_MIRROR_AFTER_RUN", True)
-    # "sheet" | "db". Under "db", sheets.ledger_sync._get_worksheet hands every writer the SQLite
-    # ledger behind a worksheet face (ledger_db/worksheet.py), the read-only opener the same
-    # read-only, the dashboard reads the file directly, and the Sheet is not touched by anything.
-    # The Sheet code stays (deprecated) until the user decides to delete it. Mirroring INTO the
-    # file is refused under "db": it would overwrite the ledger with the stale Sheet.
-    ledger_backend: str = _get_str("LEDGER_BACKEND", "db")
-    # How long a live-Sheet read is served from memory before the next request re-reads it. Every
-    # refresh is one Sheets API read; 300 s keeps a page reload from ever becoming an API call.
+    # How long the dashboard serves a ledger read from memory before the next request re-reads
+    # the file (a cheap local read; the name is a leftover of the Sheet era).
     web_sheet_cache_ttl_seconds: int = _get_int("WEB_SHEET_CACHE_TTL_SECONDS", 300)
     # Loopback by default: phase 1 has no authentication, so reaching it from another machine is
     # a deliberate choice (0.0.0.0 behind Tailscale, or the compose service's published port).
@@ -412,46 +388,6 @@ class Settings:
     backups_time: str = _get_str("BACKUP_TIME", "03:30")
     backups_days: str = _get_str("BACKUP_DAYS", "")
     backups_keep: int = _get_int("BACKUP_KEEP", 14)
-
-    def ledger_is_db(self) -> bool:
-        """True when the SQLite file is the ledger (`ledger.backend` = `db`), False for the
-        deprecated Sheet. Anything else is a LOUD error: a typo must not quietly mean "sheet"
-        and send a run's writes to the wrong ledger."""
-        backend = (self.ledger_backend or "sheet").strip().lower()
-        if backend not in ("sheet", "db"):
-            raise RuntimeError(
-                f"ledger.backend / LEDGER_BACKEND must be `sheet` or `db`, not {self.ledger_backend!r}"
-            )
-        return backend == "db"
-
-    def google_credentials(self, scopes):
-        """Google service-account credentials, from the config file or a standalone JSON file.
-
-        The credential is normally INLINED into config.json under `google.service_account` — it is
-        the one credential Google issues as a whole JSON object rather than a string, and keeping it
-        inline is what makes config.json genuinely self-contained.
-
-        `GOOGLE_SERVICE_ACCOUNT_FILE` still points at a standalone file and still WINS when set, so
-        an existing deployment keeps working and anyone who would rather mount the file Google hands
-        them can. Same override rule as every other setting.
-
-        Imported lazily: google.oauth2 is a heavy import, and this module is pulled in by nearly
-        everything — including offline paths that never touch a sheet.
-        """
-        from google.oauth2.service_account import Credentials
-
-        if self.google_service_account_file:
-            return Credentials.from_service_account_file(
-                self.google_service_account_file, scopes=scopes
-            )
-        info = config_value("google.service_account")
-        if isinstance(info, dict) and info:
-            return Credentials.from_service_account_info(info, scopes=scopes)
-        raise ValueError(
-            "No Google credentials. Put the service-account JSON object Google gave you under "
-            '`google.service_account` in config.json, or set GOOGLE_SERVICE_ACCOUNT_FILE to a path.'
-        )
-
 
 
 settings = Settings()

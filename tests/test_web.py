@@ -2,12 +2,11 @@
 
 Every view is driven through FastAPI's TestClient over a CSV written with the ledger's own HEADER
 (the same `row(**fields)` shape tests/test_ledger_sync.py uses), a temporary logs/ directory for
-the heartbeat and a temporary failures/ directory for the dossiers. The sheet backend is tested
-against a fake worksheet that refuses every method but the one read the reader is allowed.
+the heartbeat and a temporary failures/ directory for the dossiers (the db backend is exercised in
+tests/test_audit_db.py and tests/test_ledger_db.py).
 
-The read-only guarantee is pinned three ways: the worksheet fake raises on any write, the source of
-`web/` is scanned for the write methods and the write scope, and every route refuses every non-GET
-method.
+The read-only guarantee is pinned two ways: the source of `web/` is scanned for the write methods,
+and every route refuses every non-GET method.
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ from web.app import ROUTES, create_app, money, percent  # noqa: E402
 from web.failures import hosted_copies, list_dossiers, parse_name  # noqa: E402
 from web.heartbeat import read_heartbeat  # noqa: E402
 from web.ledger_reader import (  # noqa: E402
-    LedgerRow, SheetReader, SnapshotReader, cogs_of, newest_snapshot, profit_of,
+    LedgerRow, SnapshotReader, cogs_of, newest_snapshot, profit_of,
     reader_from_settings, rows_from_grid,
 )
 from web.queries import Filters, filter_rows, order_view, sort_rows  # noqa: E402
@@ -246,148 +245,14 @@ class TestSnapshotReader:
 
 
 # --------------------------------------------------------------------------------------------------
-# The adapter: sheet backend, and the read-only guarantee
+# The read-only guarantee
 # --------------------------------------------------------------------------------------------------
-
-
-class ReadOnlyWorksheet:
-    """A worksheet that allows exactly one method. Anything else -- update, batch_update,
-    append_row, sort, add_rows, clear, get_all_values -- is a test failure, not a silent no-op."""
-
-    title = "Orders"
-
-    def __init__(self, grid):
-        self.grid = grid
-        self.reads: list[str] = []
-
-    def get_values(self, range_name=None, value_render_option=None, **kwargs):
-        assert value_render_option is not None, "the read must say which render it wants"
-        self.reads.append(str(getattr(value_render_option, "value", value_render_option)))
-        return [list(r) for r in self.grid]
-
-    def __getattr__(self, name):
-        raise AssertionError(f"the web reader called worksheet.{name}() -- only get_values is allowed")
-
-
-class FakeClock:
-    def __init__(self, start=0.0):
-        self.now = start
-
-    def __call__(self):
-        return self.now
-
-
-class TestSheetReader:
-    def _reader(self, ttl=300.0):
-        grid = [list(HEADER), row(order_id="S1", order_date="2026-09-01", status="shipped",
-                                  item_name="Thing", shipment="1", total_cost="10")]
-        worksheet = ReadOnlyWorksheet(grid)
-        opens = []
-
-        def opener():
-            opens.append(1)
-            return worksheet, "Ledger 2026"
-
-        clock = FakeClock()
-        return SheetReader(ttl_seconds=ttl, opener=opener, clock=clock), worksheet, opens, clock
-
-    def test_reads_once_formatted_and_only_through_get_values(self):
-        reader, worksheet, opens, _ = self._reader()
-
-        snapshot = reader.load()
-
-        assert snapshot.backend == "sheet"
-        assert snapshot.source == "Ledger 2026 / Orders"
-        assert snapshot.rows[0].order_id == "S1"
-        # One formatted read (text, dates, keys) and one unformatted (the stored numbers).
-        assert worksheet.reads == ["FORMATTED_VALUE", "UNFORMATTED_VALUE"]
-        assert opens == [1]
-
-    def test_numbers_come_from_the_stored_values_not_the_displayed_cents(self):
-        """A cell holding 1299.9875 displays as $1,299.99; summing displays drifts from the
-        sheet's own SUM. Dates and keys still come from the formatted grid."""
-        formatted = [list(HEADER), row(order_id="S1", order_date="2026-09-01", status="paid",
-                                       item_name="Thing", shipment="1", total_cost="$1,299.99",
-                                       payout_amount="$0.00", payout_date="2026-09-02",
-                                       total_profit="-$1,299.99")]
-        stored = [list(HEADER), row(order_id="S1", order_date=46000, status="paid",
-                                    item_name="Thing", shipment=1, total_cost=1299.9875,
-                                    payout_amount=0, payout_date="2026-09-02",
-                                    total_profit=-1299.9875)]
-
-        class TwoGrids(ReadOnlyWorksheet):
-            def get_values(self, range_name=None, value_render_option=None, **kwargs):
-                mode = str(getattr(value_render_option, "value", value_render_option))
-                self.reads.append(mode)
-                return [list(r) for r in (formatted if "FORMATTED" == mode.split("_")[0] and mode == "FORMATTED_VALUE" else stored)]
-
-        reader = SheetReader(ttl_seconds=0, opener=lambda: (TwoGrids([]), "T"))
-        only = reader.load().rows[0]
-        assert only.total_cost == 1299.9875 and only.profit == -1299.9875
-        assert only.order_date == "2026-09-01"  # the formatted text, never the serial
-        assert only.text("total_cost") == "$1,299.99"  # the display is what the page shows
-        assert only.payout_amount == 0.0 and only.is_settled  # a $0.00 settlement counts
-
-    def test_the_cache_serves_reads_inside_the_ttl_and_refreshes_after(self):
-        reader, worksheet, opens, clock = self._reader(ttl=300)
-
-        first = reader.load()
-        clock.now = 299
-        assert reader.load() is first
-        assert opens == [1] and reader.cache_age() == 299
-        clock.now = 301
-        second = reader.load()
-
-        assert second is not first
-        assert opens == [1, 1]
-        assert worksheet.reads == ["FORMATTED_VALUE", "UNFORMATTED_VALUE"] * 2
-
-    def test_force_refreshes_inside_the_ttl(self):
-        reader, _, opens, clock = self._reader(ttl=300)
-
-        reader.load()
-        clock.now = 10
-        reader.load(force=True)
-
-        assert opens == [1, 1]
-
-    def test_health_reports_the_cache_age(self):
-        reader, _, _, clock = self._reader(ttl=300)
-
-        assert reader.health()["sheet_cache_age_seconds"] is None
-        reader.load()
-        clock.now = 42
-        health = reader.health()
-
-        assert health == {
-            "backend": "sheet", "sheet_cache_ttl_seconds": 300.0, "sheet_cache_age_seconds": 42.0,
-            "sheet_cache_loaded_at": health["sheet_cache_loaded_at"], "source": "Ledger 2026 / Orders",
-        }
-
-    def test_the_default_opener_is_the_audits_read_only_one(self, monkeypatch):
-        """The read-only scope is what makes the guarantee a capability rather than a promise, and
-        scripts.audit_sheet.open_worksheet_readonly is the one function that requests it."""
-        import scripts.audit_sheet as audit
-
-        calls = []
-
-        def fake_open():
-            calls.append(1)
-            return ReadOnlyWorksheet([list(HEADER)]), "T"
-
-        monkeypatch.setattr(audit, "open_worksheet_readonly", fake_open)
-
-        SheetReader().load()
-
-        assert calls == [1]
-        assert audit.READONLY_SCOPES == ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
 
 class TestReadOnlyGuarantee:
     WRITE_TOKENS = (
         "append_row", "batch_update", "add_rows", "add_cols", "delete_rows", "update_cell",
         "update_acell", "_get_worksheet", "sync_csv_to_sheet", "sort_ledger_by_date_desc",
-        "auth/spreadsheets\"]", "gspread.authorize", "open_by_key",
     )
     #: The only two things web/ may do with a worksheet handle: one read, and its title.
     WORKSHEET_USE = re.compile(r"\bworksheet\.(?!get_values\b|title\b)\w+")
@@ -1015,21 +880,6 @@ class TestHealth:
         assert body["heartbeat"]["present"] is True and body["heartbeat"]["stale"] is False
         assert body["heartbeat"]["age_seconds"] == 3 * 3600
 
-    def test_sheet_backend_reports_its_cache_age(self, logs_dir, failures_dir):
-        grid = [list(HEADER), row(order_id="S1", order_date="2026-09-01", status="shipped")]
-        clock = FakeClock()
-        reader = SheetReader(ttl_seconds=300, opener=lambda: (ReadOnlyWorksheet(grid), "T"),
-                             clock=clock)
-        app = create_app(reader, logs_dir=logs_dir, failures_dir=failures_dir,
-                         clock=lambda: NOW, settings=_settings())
-        test_client = TestClient(app)
-
-        body = test_client.get("/health").json()
-        assert body["backend"] == "sheet" and body["rows"] == 1
-        assert body["sheet_cache_age_seconds"] == 0.0
-        clock.now = 120
-        assert test_client.get("/health").json()["sheet_cache_age_seconds"] == 120.0
-
     def test_a_missing_snapshot_is_503_with_the_reason(self, tmp_path, logs_dir, failures_dir):
         app = create_app(SnapshotReader(data_dir=tmp_path), logs_dir=logs_dir,
                          failures_dir=failures_dir, clock=lambda: NOW, settings=_settings())
@@ -1047,28 +897,34 @@ class TestHealth:
 
 
 class TestReaderFromSettings:
-    def test_default_is_the_newest_snapshot(self):
-        reader = reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="snapshot", web_snapshot_path=""))
+    def test_default_is_the_ledger_file(self, tmp_path):
+        from web.ledger_reader import DbReader
+
+        reader = reader_from_settings(_settings(web_ledger_source="db", web_sheet_cache_ttl_seconds=42,
+                                                ledger_db_path=str(tmp_path / "l.sqlite3")))
+        assert isinstance(reader, DbReader) and reader.ttl_seconds == 42.0
+        assert reader.db.path == tmp_path / "l.sqlite3"
+        assert _settings().web_ledger_source == "db" or reader_from_settings(_settings()).backend in ("db", "snapshot")
+
+    def test_snapshot_when_asked(self):
+        reader = reader_from_settings(_settings(web_ledger_source="snapshot", web_snapshot_path=""))
         assert isinstance(reader, SnapshotReader) and reader._explicit is None
 
     def test_snapshot_path_from_config(self):
-        reader = reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="snapshot",
+        reader = reader_from_settings(_settings(web_ledger_source="snapshot",
                                                 web_snapshot_path="data/sheet_backup_x.csv"))
         assert reader.resolve().name == "sheet_backup_x.csv"
 
-    def test_sheet_with_its_ttl(self):
-        reader = reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="sheet",
-                                                web_sheet_cache_ttl_seconds=42))
-        assert isinstance(reader, SheetReader) and reader.ttl_seconds == 42.0
-
     def test_explicit_arguments_win(self):
-        reader = reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="sheet"), source="snapshot",
+        reader = reader_from_settings(_settings(web_ledger_source="db"), source="snapshot",
                                       snapshot_path="x.csv")
         assert isinstance(reader, SnapshotReader)
 
     def test_a_typo_is_refused_not_defaulted(self):
         with pytest.raises(ValueError, match="WEB_LEDGER_SOURCE"):
-            reader_from_settings(_settings(ledger_backend="sheet", web_ledger_source="sheets"))
+            reader_from_settings(_settings(web_ledger_source="sheets"))
+        with pytest.raises(ValueError, match="WEB_LEDGER_SOURCE"):
+            reader_from_settings(_settings(web_ledger_source="sheet"))
 
     def test_the_settings_have_their_config_home(self):
         from config.settings import ENV_TO_CONFIG
@@ -1131,7 +987,7 @@ class TestPackaging:
         doc = (self.ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
         assert "docker compose up -d --build" in doc
         assert "python -m web" in doc
-        assert "python -m scripts.backup" in doc and "python -m scripts.mirror_sheet_to_db" in doc
+        assert "python -m scripts.backup" in doc
         assert "read-only" in doc.lower()
 
     def test_backups_never_enter_git_or_an_image(self):
@@ -1632,9 +1488,8 @@ class TestAuditPage:
         # Row 8 has COGS but no Cashback Rate: cogs_inputs_complete names it.
         assert "111-0000002-0000002" in body and "no rate resolved" in body
         assert "<b>cogs_inputs_complete</b>" in body
-        # The summary lists every check with its status; the Sheet-only ones skip on a CSV.
+        # The summary lists every check with its status.
         assert 'class="tag fail"' in body and "cogs_inputs_complete" in body
-        assert "a Google Sheet check" in body
         # The check filter lists the checks that flagged rows.
         assert 'data-param="check"' in body and 'name="check" value="cogs_inputs_complete"' in body
         # No "Add a row" and no remembered-filter cookie on this page.

@@ -39,6 +39,7 @@ WHAT SHEETS DID THAT THIS MUST DO ITSELF:
 
 from __future__ import annotations
 
+import enum
 import re
 from typing import Any
 
@@ -46,6 +47,22 @@ from models.order import FIELDNAMES
 from sheets.ledger_sync import HEADER, _BOOL_FIELDS, _INT_FIELDS, _NUMERIC_FIELDS
 
 from ledger_db.store import FORMULA_FIELDS, LedgerDb
+
+class ValueInputOption(str, enum.Enum):
+    """How a write's values are taken: RAW as typed, USER_ENTERED parsed the way a hand edit is
+    (the two conventions the writers were written against; DbWorksheet reads `.value`)."""
+
+    raw = "RAW"
+    user_entered = "USER_ENTERED"
+
+
+class ValueRenderOption(str, enum.Enum):
+    """What a read hands back: FORMATTED text, the UNFORMATTED stored values, or a formula."""
+
+    formatted = "FORMATTED_VALUE"
+    unformatted = "UNFORMATTED_VALUE"
+    formula = "FORMULA"
+
 
 _A1 = re.compile(r"^(?:'[^']*'!|[^!]+!)?\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)?\$?(\d+)?)?$")
 _KEY_INDEX = FIELDNAMES.index("order_id")

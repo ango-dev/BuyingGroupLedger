@@ -125,7 +125,7 @@ class TestTheGrid:
         """gspread hands back "" for a blank cell whatever the render option; the readers do
         str(cell).strip(). The first run after the cutover (2026-09-18) read None here, turned it
         into the text "None", and handed six tracking-less rows to BFMR as the package "None"."""
-        from gspread.utils import ValueRenderOption
+        from ledger_db.worksheet import ValueRenderOption
 
         from sync_tracking import plan_tracking_submissions
 
@@ -252,7 +252,7 @@ class TestTheWritersRunOnIt:
         assert [r["order_id"] for r in db.fetch_rows()] == ["X2"]
 
     def test_the_tracking_sync_reads_typed_values(self, db):
-        from gspread.utils import ValueRenderOption
+        from ledger_db.worksheet import ValueRenderOption
 
         ws = DbWorksheet(db)
         ws.update(range_name="A2", values=[row(order_id="X1", order_date="2026-09-01",
@@ -266,23 +266,11 @@ class TestTheWritersRunOnIt:
 
 
 class TestTheFlag:
-    """`ledger.backend` = sheet (today's default, deprecated path) | db."""
-
-    def test_the_setting_exists_with_sheet_as_the_default(self):
-        from config.settings import ENV_TO_CONFIG
-
-        assert ENV_TO_CONFIG["LEDGER_BACKEND"] == "ledger.backend"
-        assert Settings().ledger_backend in ("sheet", "db")
-
-    def test_an_unknown_backend_is_a_loud_error_not_a_quiet_sheet(self):
-        with pytest.raises(RuntimeError, match="must be `sheet` or `db`"):
-            dataclasses.replace(Settings(), ledger_backend="sqlite").ledger_is_db()
-        assert dataclasses.replace(Settings(), ledger_backend="DB ").ledger_is_db() is True
-        assert dataclasses.replace(Settings(), ledger_backend="").ledger_is_db() is False
+    """Every opener hands out the adapter over `database.path` (the Sheet is gone, 2026-09-18)."""
 
     def test_get_worksheet_hands_out_the_adapter_under_db(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ledger_sync, "settings", dataclasses.replace(
-            ledger_sync.settings, ledger_backend="db", ledger_db_path=str(tmp_path / "l.sqlite3")))
+            ledger_sync.settings, ledger_db_path=str(tmp_path / "l.sqlite3")))
         ws = ledger_sync._get_worksheet()
         assert isinstance(ws, DbWorksheet) and not ws.read_only
         assert ws.db.path == tmp_path / "l.sqlite3"
@@ -292,52 +280,25 @@ class TestTheFlag:
         from config import settings as settings_module
 
         monkeypatch.setattr(settings_module, "settings", dataclasses.replace(
-            settings_module.settings, ledger_backend="db", ledger_db_path=str(tmp_path / "l.sqlite3")))
-        # conftest replaces open_worksheet_readonly itself (no test may reach the real Sheet), so
-        # the db branch is a function of its own; the source pins that the opener calls it first.
-        import inspect
-
+            settings_module.settings, ledger_db_path=str(tmp_path / "l.sqlite3")))
         ws, title = audit.open_ledger_readonly()
         assert isinstance(ws, DbWorksheet) and ws.read_only and title == "l.sqlite3"
-        source = inspect.getsource(audit).split("def open_worksheet_readonly")[1].split("import gspread")[0]
-        assert "settings.ledger_is_db()" in source and "open_ledger_readonly()" in source
+        ws2, title2 = audit.open_worksheet_readonly()
+        assert isinstance(ws2, DbWorksheet) and ws2.read_only and title2 == title
 
-    def test_the_dashboard_reads_the_database_with_no_upstream_under_db(self, tmp_path):
+    def test_the_dashboard_reads_the_database(self, tmp_path):
         from web.ledger_reader import DbReader, reader_from_settings
 
-        settings = dataclasses.replace(Settings(), ledger_backend="db", web_ledger_source="sheet",
+        settings = dataclasses.replace(Settings(), web_ledger_source="db",
                                        ledger_db_path=str(tmp_path / "l.sqlite3"))
         reader = reader_from_settings(settings)
-        assert isinstance(reader, DbReader) and reader.upstream is None
+        assert isinstance(reader, DbReader) and reader.db.path == tmp_path / "l.sqlite3"
 
     def test_the_dashboard_writer_opens_the_adapter_under_db(self, tmp_path, monkeypatch):
         from config import settings as settings_module
         from web import ledger_writer
 
         monkeypatch.setattr(settings_module, "settings", dataclasses.replace(
-            settings_module.settings, ledger_backend="db", ledger_db_path=str(tmp_path / "l.sqlite3")))
+            settings_module.settings, ledger_db_path=str(tmp_path / "l.sqlite3")))
         assert isinstance(ledger_writer._open_for_writing(), DbWorksheet)
 
-    def test_the_mirror_refuses_to_overwrite_the_ledger_under_db(self, tmp_path, monkeypatch, capsys):
-        """Mirroring the (stale) Sheet INTO the database would clobber the ledger."""
-        import main as main_module
-        from config import settings as settings_module
-        from scripts import mirror_sheet_to_db
-
-        patched = dataclasses.replace(settings_module.settings, ledger_backend="db",
-                                      ledger_db_path=str(tmp_path / "l.sqlite3"))
-        monkeypatch.setattr(settings_module, "settings", patched)
-        monkeypatch.setattr(main_module, "settings", patched)
-        assert mirror_sheet_to_db.main([]) == 2
-        assert "--force" in capsys.readouterr().err
-        calls = []
-        monkeypatch.setattr("ledger_db.mirror.mirror_snapshot", lambda *a, **k: calls.append(1))
-        main_module.run_db_mirror()
-        assert calls == []
-
-    def test_the_settings_page_knows_the_section(self):
-        from web import settings_form
-
-        assert settings_form.section_title("ledger")[0] == "Ledger"
-        by_env = {s.env: s for s in settings_form.schema()}
-        assert settings_form.restart_scope(by_env["LEDGER_BACKEND"]) == "dashboard"

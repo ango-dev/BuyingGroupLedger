@@ -68,7 +68,7 @@ import logging
 from datetime import datetime, timezone
 import re
 
-from gspread.utils import ValueInputOption, ValueRenderOption
+from ledger_db.worksheet import ValueInputOption, ValueRenderOption
 
 from alerts.notifier import alert
 from buying_groups.base import BuyingGroupError, PayoutRecord, TrackingSubmission

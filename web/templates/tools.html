@@ -58,7 +58,6 @@
     <span class="mono small muted">python -m {{ t.module }}</span>
     {% if t.writes %}<span class="tag stale">writes</span>{% endif %}
     {% if t.spends %}<span class="tag stale" title="{{ t.spends }}">spends</span>{% endif %}
-    {% if t.sheet_only %}<span class="tag">sheet only</span>{% endif %}
   </header>
   <p class="muted">{{ t.blurb }}</p>
   <form method="post" action="/tools/run/{{ t.key }}" class="tool-form" {% if t.writes %}data-confirm="Run {{ t.title }} with these settings?{% if t.spends %} It spends {{ t.spends }}.{% endif %}"{% endif %}>

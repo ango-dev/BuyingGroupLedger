@@ -64,13 +64,12 @@ def client(db, tmp_path):
 
 
 class TestAuditOverTheDatabase:
-    def test_the_data_checks_run_and_the_sheet_checks_skip(self, client):
+    def test_the_data_checks_run(self, client):
         body = client.get("/audit").text
         assert "<h1>Audit</h1>" in body
         assert "111-2" in body and "no rate resolved" in body and "<b>cogs_inputs_complete</b>" in body
         assert "BBY01-1" not in body.split('id="orders-table"')[1]  # a clean row is not listed
-        assert "a Google Sheet check; the ledger is the database" in body
-        assert "the ledger is the database" in body  # the lead says so
+        assert "Google Sheet" not in body and "profit_formula_literal" not in body
 
     def test_the_report_follows_a_write_through_the_adapter(self, client, db):
         assert "111-2" in client.get("/audit").text
@@ -88,11 +87,10 @@ class TestAuditOverTheDatabase:
         from scripts.audit_sheet import Options, Sheet, read_grids, run_checks
 
         ws = DbWorksheet(db, read_only=True)
-        results = {r.name: r for r in run_checks(Sheet(read_grids(ws, ws.title)), Options(),
-                                                 sheet_checks=False)}
+        results = {r.name: r for r in run_checks(Sheet(read_grids(ws, ws.title)), Options())}
         assert results["cogs_inputs_complete"].status == "FAIL"
-        assert results["profit_formula_literal"].status == "SKIP"
-        assert "the ledger is the database" in results["profit_formula_literal"].summary
+        assert "profit_formula_literal" not in results  # a Sheet check; gone with the Sheet
+        assert not [r for r in results.values() if "Google Sheet" in r.summary]
         assert results["header_matches_schema"].status == "PASS"
         assert results["duplicate_primary_keys"].status == "PASS"
 

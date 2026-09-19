@@ -283,12 +283,10 @@ def main(retailers: list[str]) -> None:
                       "That retailer was skipped; the rest of the run continued. Check logs/run.log.")
 
     # Deliberately outside the loop AND reached even if every retailer failed: the sync submits
-    # tracking for rows already on the sheet from earlier runs, so it has work to do regardless.
+    # tracking for rows already in the ledger from earlier runs, so it has work to do regardless.
     run_buying_group_sync()
-    # After the sync, so the sheet it resolves against is this run's freshest state.
+    # After the sync, so the ledger it resolves against is this run's freshest state.
     run_bfmr_email_autoreply()
-    # Last, so the SQLite copy holds everything this run wrote: the scrapes AND the sync's payouts.
-    run_db_mirror()
     activity.end_run()
 
 
@@ -380,48 +378,6 @@ def _record_sync(result) -> None:
         )
     except Exception:  # noqa: BLE001 -- the activity log must never fail the run
         log.warning("Could not record the buying-group sync in the activity log", exc_info=True)
-
-
-def run_db_mirror() -> None:
-    """Copy the Sheet into the SQLite file (ledger_db/) at the very end of the run.
-
-    THE FIRST STEP OF MOVING OFF THE SHEET. Today every writer still targets the Sheet, exactly as
-    before; this reads it back -- through the READ-ONLY scope, so it cannot touch it -- and REPLACES
-    the copy in data/ledger.sqlite3 with what the Sheet now says. Runs last so the copy carries this
-    run's scrapes and the sync's payouts alike.
-
-    Failures never fail the run: the ledger is already safe on the Sheet, the dashboard's `db`
-    backend re-mirrors on its own interval, and the next run tries again. Alerted, because a copy
-    that silently stops updating would be trusted while stale. Same isolation rule as the sync.
-
-    ON by default (database.mirror_after_run / LEDGER_DB_MIRROR_AFTER_RUN) -- it spends nothing and
-    submits nothing; one Sheets API read per run.
-    """
-    if settings.ledger_is_db():
-        log.info("Ledger DB mirror skipped: ledger.backend is `db`, the database is the ledger "
-                 "and every step of this run wrote it directly.")
-        return
-    if not settings.ledger_db_mirror_after_run:
-        log.info("Ledger DB mirror is disabled (database.mirror_after_run is false).")
-        return
-    try:
-        from ledger_db.mirror import mirror_snapshot  # local: keeps `import main` cheap
-        from ledger_db.store import LedgerDb
-        from web.ledger_reader import SheetReader
-
-        summary = mirror_snapshot(SheetReader(ttl_seconds=0).load(force=True),
-                                  LedgerDb(settings.ledger_db_path))
-        log.info("Ledger DB mirror: %d row(s) from %s into %s%s", summary["rows"],
-                 summary["source"], summary["db_path"],
-                 "" if summary["header_ok"] else " (NOTE: the sheet's header is not HEADER)")
-        activity.record("mirror", f"DB mirror: {summary['rows']} row(s) copied from the Sheet",
-                        {"source": summary["source"], "db_path": summary["db_path"],
-                         "skipped": summary["skipped"], "header_ok": summary["header_ok"]})
-    except Exception:
-        log.exception("Ledger DB mirror failed")
-        alert("Ledger DB mirror failed",
-              "data/ledger.sqlite3 was NOT refreshed this run; the Sheet itself is unaffected. "
-              "Check logs/run.log.")
 
 
 def run_bfmr_email_autoreply() -> None:

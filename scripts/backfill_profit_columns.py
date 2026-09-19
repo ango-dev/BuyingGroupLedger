@@ -28,7 +28,7 @@ Apply for real:
 import argparse
 import logging
 
-from gspread.utils import ValueInputOption, ValueRenderOption
+from ledger_db.worksheet import ValueInputOption, ValueRenderOption
 
 from config.cards import load_cards, resolve_card
 from models.card import normalize_last4, parse_rate

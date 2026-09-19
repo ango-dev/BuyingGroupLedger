@@ -7,7 +7,7 @@
 {% block lead %}
 {% set counts = audit.counts() %}
 <div class="lead">
-  <p class="muted small">Every check of <span class="mono">scripts.audit_sheet</span> run against the ledger this page serves{% if not audit.sheet_checks %} (the Google Sheet checks — formulas, formats — are skipped: {{ 'the ledger is the database' if backend == 'db' else 'a CSV snapshot has no formulas or formats' }}){% endif %}. Below: every row a check named, with the finding beside it. Pick checks to narrow the rows; the filters, sort and search work as on Orders.</p>
+  <p class="muted small">Every check of <span class="mono">scripts.audit_sheet</span> run against the ledger this page serves. Below: every row a check named, with the finding beside it. Pick checks to narrow the rows; the filters, sort and search work as on Orders.</p>
   <section class="tiles stats">
     <div class="tile {{ 'warn' if counts.FAIL }}"><div class="label">Failing checks</div><div class="value">{{ counts.FAIL }}</div><div class="hint">of {{ audit.results | length }}</div></div>
     <div class="tile"><div class="label">Warnings</div><div class="value">{{ counts.WARN }}</div><div class="hint">worth a look</div></div>

@@ -6,7 +6,7 @@ WHAT IS HERE AND WHAT IS NOT. Every tool below is `python -m <module> <args>` (s
 main for the run itself) with the
 arguments its own argparse declares, run from the repo root exactly as the operator would run it;
 nothing is re-implemented. The RECON probes (capture / signin / paginate probes) and the one-off
-migrations (migrate_config, reorder_sheet, apply_sheet_formats) are developer tools and stay on
+migrations (migrate_config) are developer tools and stay on
 the command line, as do the ones that take a local file (import_history, restore_cells).
 
 WHAT IS GUARDED. A tool marked `writes` changes the ledger (or a third party), so its form asks
@@ -64,7 +64,6 @@ class Tool:
     fields: tuple[Field, ...] = ()
     writes: bool = False  # changes the ledger / a third party: confirmed, run-lock gated
     spends: str = ""      # what it costs, if anything ("a cloud browser session")
-    sheet_only: bool = False  # meaningful only while ledger.backend is sheet
     #: Stamp logs/.last_run when the job ends, as docker/run_once.sh does after the scheduled run.
     #: Only for a tool that IS the run: it holds the same run lock the schedule checks, so a hand
     #: run and a scheduled one are one and the same event to the heartbeat.
@@ -171,13 +170,9 @@ TOOLS: tuple[Tool, ...] = (
     Tool("sort_ledger", "scripts.sort_ledger", "Sort the ledger",
          "Sort newest-first and re-stamp the formulas (the run does this itself after an append).",
          "Ledger Fixes", (APPLY,), writes=True),
-    Tool("mirror_sheet_to_db", "scripts.mirror_sheet_to_db", "Mirror the Sheet into the database",
-         "Copy the (deprecated) Google Sheet into data/ledger.sqlite3. Under the db backend this REPLACES the ledger and needs Force.",
-         "Google Sheet", (Field("--force", "Force", "flag", "replace the ledger with the Sheet's copy"),),
-         writes=True, sheet_only=False),
     Tool("audit_sheet", "scripts.audit_sheet", "Audit the ledger",
-         "The read-only invariant audit: keys, money, missing mandatory cells, staleness. Under the database "
-         "backend the Google Sheet checks (formulas, formats) are skipped. The Audit page shows the same findings by row.",
+         "The read-only invariant audit: keys, money, missing mandatory cells, staleness. The Audit page "
+         "shows the same findings by row.",
          "Checks", (Field("--stale-days", "Stale after (days)", "int", default="3"),
                     Field("--strict", "Strict", "flag"))),
     Tool("migrate_receipts_local", "scripts.migrate_receipts_local", "Bring receipts home from OCI",
@@ -196,7 +191,7 @@ TOOLS: tuple[Tool, ...] = (
          "Ledger Fixes", (APPLY,), writes=True),
 )
 
-GROUPS = ("Run", "Accounts", "Checks", "Ledger Fixes", "Google Sheet")
+GROUPS = ("Run", "Accounts", "Checks", "Ledger Fixes")
 
 
 def tool(key: str) -> Tool:

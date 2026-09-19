@@ -72,34 +72,11 @@ def _receipts_inert_by_default(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
-def _block_real_sheet_reads(monkeypatch):
-    """Safety net: no test may open the REAL Google Sheet, even read-only.
-
-    The dashboard's sheet backend, the DB mirror script and the end-of-run mirror
-    (main.run_db_mirror, 2026-09-17) all reach the live worksheet through one function,
-    scripts.audit_sheet.open_worksheet_readonly. `settings` is built from the developer's own .env,
-    so a test that reaches it un-stubbed would issue a genuine Sheets API read from a unit test.
-    Same rule as the alerts and browsers above: block at the boundary, automatically. Tests of
-    those readers inject their own `opener`, or patch this same name with a fake (a later patch in
-    the test wins).
-    """
-    def _refuse():
-        raise AssertionError(
-            "A test tried to open the real Google Sheet. Inject a fake opener (see SheetReader's "
-            "`opener` argument), patch scripts.audit_sheet.open_worksheet_readonly, or patch "
-            "main.run_db_mirror."
-        )
-
-    monkeypatch.setattr("scripts.audit_sheet.open_worksheet_readonly", _refuse)
-
-
-@pytest.fixture(autouse=True)
 def _isolate_ledger_db(tmp_path_factory, monkeypatch):
     """Safety net: no test may touch the REAL data/ledger.sqlite3.
 
-    `ledger.backend` defaults to `db` (2026-09-18), so an un-fixtured call into anything that opens
-    the ledger -- sheets.ledger_sync._get_worksheet, the dashboard's writer, the read-only opener --
-    lands on the SQLite file, and every settings object names it by the RELATIVE path
+    An un-fixtured call into anything that opens the ledger -- sheets.ledger_sync._get_worksheet,
+    the dashboard's writer, the read-only opener -- lands on the SQLite file, and every settings object names it by the RELATIVE path
     `data/ledger.sqlite3`, resolved against ledger_db.store.ROOT. Pointing that root at a per-test
     temp directory sends every such path into it, whichever settings reference the caller holds.
     """

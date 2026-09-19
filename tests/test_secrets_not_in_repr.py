@@ -56,7 +56,7 @@ class TestSettings:
 
     def test_non_secret_settings_are_still_shown(self):
         """Over-masking would make a traceback useless for diagnosing a real misconfiguration."""
-        text = repr(dataclasses.replace(settings, google_sheet_worksheet_name="Orders"))
+        text = repr(dataclasses.replace(settings, web_bind_host="Orders"))
 
         assert "Orders" in text
 

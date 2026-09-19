@@ -1,11 +1,8 @@
 """The ONE way the web dashboard reads the ledger. Two backends, one shape, no write path.
 
+    DbReader        the ledger itself, data/ledger.sqlite3 (ledger_db), read fresh on every load.
     SnapshotReader  a CSV under data/sheet_backup_*.csv (the backups every --apply script writes),
                     newest by default. Development and tests run on this: no credentials, no network.
-    SheetReader     the live Sheet through scripts.audit_sheet.open_worksheet_readonly -- the
-                    spreadsheets.READONLY scope, so "read-only" is a capability Google enforces, not a
-                    promise this module makes -- with an in-process cache (default 300 s) so a page
-                    reload never becomes a Sheets API call.
 
 Both hand back the same `Snapshot`: a list of `LedgerRow`s keyed by FIELDNAMES, read BY HEADER NAME
 rather than by position. That matters more than it looks: a backup written before a column moved
@@ -429,81 +426,7 @@ class SnapshotReader:
 
 
 # --------------------------------------------------------------------------------------------------
-# Backend (b): the live Sheet, read-only, cached
-# --------------------------------------------------------------------------------------------------
-
-
-def _open_readonly():
-    """scripts.audit_sheet.open_worksheet_readonly -- the READONLY scope. Imported lazily so the
-    snapshot backend never touches gspread's auth path."""
-    from scripts.audit_sheet import open_worksheet_readonly
-
-    return open_worksheet_readonly()
-
-
-class SheetReader:
-    """The live worksheet through the read-only scope, cached for `ttl_seconds`.
-
-    One FORMATTED read per refresh (`get_values(value_render_option=formatted)`): every cell comes
-    back as the text the sheet displays, which is exactly what the upsert keys rows on and what
-    _parse_display_number was written for, and a formula cell shows its RESULT rather than its
-    text. The worksheet is re-opened on every refresh rather than held, so a revoked credential or
-    a renamed tab surfaces at the next refresh instead of on a stale handle.
-
-    `opener` and `clock` are injection points for tests; the defaults are the real ones.
-    """
-
-    backend = "sheet"
-
-    def __init__(self, ttl_seconds: float = 300.0,
-                 opener: Callable[[], tuple] | None = None,
-                 clock: Callable[[], float] = time.monotonic):
-        self.ttl_seconds = float(ttl_seconds)
-        self._opener = opener or _open_readonly
-        self._clock = clock
-        self._lock = threading.Lock()
-        self._cached: Snapshot | None = None
-        self._cached_at: float | None = None
-
-    def cache_age(self) -> float | None:
-        if self._cached_at is None:
-            return None
-        return max(0.0, self._clock() - self._cached_at)
-
-    def load(self, force: bool = False) -> Snapshot:
-        with self._lock:
-            age = self.cache_age()
-            if not force and self._cached is not None and age is not None and age < self.ttl_seconds:
-                return self._cached
-            from gspread.utils import ValueRenderOption
-
-            worksheet, spreadsheet_title = self._opener()
-            grid = worksheet.get_values(value_render_option=ValueRenderOption.formatted)
-            # A second, UNFORMATTED read for the numeric cells' stored values (LedgerRow.numbers):
-            # the displayed cents drift from the sheet's own SUM. Dates and keys still come from
-            # the formatted grid, so a date column formatted as a Date can never turn into a serial.
-            stored = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
-            source = f"{spreadsheet_title} / {getattr(worksheet, 'title', '')}".strip(" /")
-            snapshot = rows_from_grid(grid, backend=self.backend, source=source, unformatted=stored)
-            snapshot.meta = {"spreadsheet": spreadsheet_title,
-                             "worksheet": getattr(worksheet, "title", "")}
-            self._cached, self._cached_at = snapshot, self._clock()
-            return snapshot
-
-    def health(self) -> dict:
-        age = self.cache_age()
-        return {
-            "backend": self.backend,
-            "sheet_cache_ttl_seconds": self.ttl_seconds,
-            "sheet_cache_age_seconds": None if age is None else round(age, 1),
-            "sheet_cache_loaded_at": (self._cached.loaded_at.isoformat()
-                                      if self._cached is not None else None),
-            "source": self._cached.source if self._cached is not None else None,
-        }
-
-
-# --------------------------------------------------------------------------------------------------
-# Backend (c): the SQLite copy, refreshed from an upstream reader on the cache interval
+# Backend (b): the ledger file
 # --------------------------------------------------------------------------------------------------
 
 
@@ -518,64 +441,29 @@ def _as_text(value) -> str:
 
 
 class DbReader:
-    """Serve the ledger from data/ledger.sqlite3 (ledger_db), refreshing it from `upstream` -- the
-    read-only Sheet, or a CSV snapshot -- whenever the copy is older than `ttl_seconds`.
-
-    The DB persists across restarts, so a page loads instantly on a cold start and the Sheet is
-    read at most once per interval however many pages are opened. With no upstream the DB is served
-    as it is (a host that only ever mirrors by script). The mirror is the ONLY writer of the file;
-    it never touches the Sheet.
+    """Serve the ledger from data/ledger.sqlite3 (ledger_db). Every load reads the file: it is
+    local and a few hundred rows, and a scheduled run or a dashboard edit may have changed it
+    since the last page. `ttl_seconds` is reported by health() only.
     """
 
     backend = "db"
 
-    def __init__(self, db, upstream: LedgerReader | None = None, ttl_seconds: float = 300.0,
+    def __init__(self, db, ttl_seconds: float = 300.0,
                  clock: Callable[[], float] = time.monotonic):
         from ledger_db.store import LedgerDb
 
         self.db = db if isinstance(db, LedgerDb) else LedgerDb(db)
-        self.upstream = upstream
         self.ttl_seconds = float(ttl_seconds)
         self._clock = clock
         self._lock = threading.Lock()
-        self._mirrored_at: float | None = None
-        self.last_mirror: dict | None = None
-
-    def mirror_age(self) -> float | None:
-        if self._mirrored_at is None:
-            return None
-        return max(0.0, self._clock() - self._mirrored_at)
+        self._loaded_at: float | None = None
 
     def refresh(self, force: bool = False) -> bool:
-        """Mirror from upstream if due. Returns True when a mirror ran."""
-        if self.upstream is None:
-            return False
-        age = self.mirror_age()
-        due = force or age is None or age >= self.ttl_seconds
-        if not due:
-            return False
-        from ledger_db.mirror import mirror_snapshot
-
-        snapshot = self.upstream.load(force=True)
-        self.last_mirror = mirror_snapshot(snapshot, self.db)
-        self._mirrored_at = self._clock()
-        return True
+        """Nothing to pull from anywhere: the file IS the ledger, and load() reads it fresh."""
+        return False
 
     def load(self, force: bool = False) -> Snapshot:
         with self._lock:
-            # On a cold start with a populated file, serve it as it is until the interval passes:
-            # the copy's own age (from its mirror_runs log) decides, not this process's uptime.
-            if self._mirrored_at is None and not force and self.upstream is not None:
-                last = self.db.last_mirror() if self.db.path.is_file() else None
-                if last is not None:
-                    try:
-                        at = datetime.fromisoformat(last["at"])
-                        age = (datetime.now(timezone.utc) - at).total_seconds()
-                        if 0 <= age < self.ttl_seconds:
-                            self._mirrored_at = self._clock() - age
-                    except (KeyError, ValueError):
-                        pass
-            self.refresh(force=force)
             records = self.db.fetch_rows()
             try:
                 from ledger_db.hand_edits import protected
@@ -595,57 +483,38 @@ class DbReader:
                 key = tuple(cells.get(f, "").strip() for f in ("order_id", "order_date", "item_name", "shipment"))
                 rows.append(LedgerRow(cells=cells, row_number=int(rec.get("sheet_row") or 0),
                                       hand_edited=frozenset(hand.get(key, ()))))
-            last = self.db.last_mirror() if self.db.path.is_file() else None
+            self._loaded_at = self._clock()
             snapshot = Snapshot(
                 rows=rows, header=list(HEADER), backend=self.backend,
-                source=f"{self.db.path}" + (f" (mirrored from {last['source']})"
-                                            if last and self.upstream is not None else ""),
-                loaded_at=datetime.now(timezone.utc),
+                source=str(self.db.path), loaded_at=datetime.now(timezone.utc),
             )
-            snapshot.meta = {"db_path": str(self.db.path), "last_mirror": last}
+            snapshot.meta = {"db_path": str(self.db.path)}
             return snapshot
 
     def health(self) -> dict:
-        info = {"backend": self.backend, "db_mirror_ttl_seconds": self.ttl_seconds,
-                "db_mirror_upstream": self.upstream.backend if self.upstream else None,
+        return {"backend": self.backend, "db_cache_ttl_seconds": self.ttl_seconds,
                 **self.db.health()}
-        age = self.mirror_age()
-        info["db_mirror_age_seconds"] = None if age is None else round(age, 1)
-        return info
 
 
 # --------------------------------------------------------------------------------------------------
 # Choosing a backend
 # --------------------------------------------------------------------------------------------------
 
-BACKENDS = ("snapshot", "sheet", "db")
+BACKENDS = ("db", "snapshot")
 
 
 def reader_from_settings(settings, *, source: str | None = None,
                          snapshot_path: str | None = None) -> LedgerReader:
-    """The backend `config.json`'s `web` section (or WEB_LEDGER_SOURCE) asks for. Explicit
-    arguments -- the CLI flags of `python -m web` -- win over both. Anything but the known names
-    is refused loudly rather than defaulting: a typo must not quietly serve stale data.
-
-    `db` mirrors from the live Sheet, or from a snapshot when one is named (development: a DB
-    filled from a CSV, no credentials)."""
-    chosen = (source or settings.web_ledger_source or "snapshot").strip().lower()
+    """The backend `config.json`'s `web` section (or WEB_LEDGER_SOURCE) asks for: `db` (the
+    ledger file, the default) or `snapshot` (a CSV export, for offline work). Explicit arguments
+    -- the CLI flags of `python -m web` -- win over both. Anything but the known names is refused
+    loudly rather than defaulting: a typo must not quietly serve stale data."""
+    chosen = (source or settings.web_ledger_source or "db").strip().lower()
     snapshot_path = snapshot_path or settings.web_snapshot_path or None
-    if settings.ledger_is_db() and source is None:
-        # The database IS the ledger: serve it as it is, and never mirror anything INTO it (a
-        # mirror from the deprecated Sheet would overwrite the ledger). web.ledger_source is
-        # moot under this flag; an explicit CLI --source still wins for development.
-        return DbReader(settings.ledger_db_path, upstream=None,
-                        ttl_seconds=settings.web_sheet_cache_ttl_seconds)
+    if chosen == "db":
+        return DbReader(settings.ledger_db_path, ttl_seconds=settings.web_sheet_cache_ttl_seconds)
     if chosen == "snapshot":
         return SnapshotReader(snapshot_path)
-    if chosen == "sheet":
-        return SheetReader(ttl_seconds=settings.web_sheet_cache_ttl_seconds)
-    if chosen == "db":
-        upstream = (SnapshotReader(snapshot_path) if snapshot_path
-                    else SheetReader(ttl_seconds=0))
-        return DbReader(settings.ledger_db_path, upstream=upstream,
-                        ttl_seconds=settings.web_sheet_cache_ttl_seconds)
     raise ValueError(
         f"web.ledger_source / WEB_LEDGER_SOURCE must be one of {BACKENDS}, not {chosen!r}"
     )

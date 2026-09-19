@@ -41,12 +41,11 @@ here, so keep the dashboard on loopback or your own network.</p>
 <div class="settings-layout">
   <nav class="settings-nav" aria-label="settings sections">
     <div class="group">Settings</div>
-    {% for section in sections if not (section == 'google' and not sheet_mode) %}<a href="#s-{{ section }}">{{ section_title(section)[0] }}</a>{% endfor %}
+    {% for section in sections %}<a href="#s-{{ section }}">{{ section_title(section)[0] }}</a>{% endfor %}
     <div class="group">Lists</div>
     <a href="#s-profiles">Profiles</a>
     <a href="#s-warehouses">Warehouses</a>
     <a href="#s-cards">Cards</a>
-    {% if sheet_mode %}<a href="#s-google.service_account">Service Account</a>{% endif %}
     <div class="group">Maintenance</div>
     <a href="#s-backup">Backup &amp; Restore</a>
     <a href="#s-apply">Restart</a>
@@ -55,13 +54,10 @@ here, so keep the dashboard on loopback or your own network.</p>
   <div class="settings-main">
     {# ---- every scalar setting, derived from config/settings.py (see web/settings_form.py) ---- #}
     <form method="post" action="/settings" class="settings" id="scalar-form">
-      {% for section in sections if not (section == 'google' and not sheet_mode) %}
+      {% for section in sections %}
       {% set title, blurb = section_title(section) %}
-      <section class="panel {{ 'deprecated' if section == 'google' }}" id="s-{{ section }}">
-        <header><h2>{{ title }}</h2>{% if blurb %}<p class="muted">{{ blurb }}</p>{% endif %}
-          {% if section == 'google' %}<div class="banner warn deprecation"><strong>Deprecated.</strong> The Google Sheet is on its way out: these settings matter only while <em>Ledger → backend</em> is <code>sheet</code>. Set it to <code>db</code> (after one last <code>python -m scripts.mirror_sheet_to_db</code>) and this section disappears.</div>{% endif %}
-          {% if section == 'ledger' and not sheet_mode %}<p class="muted small">The Google Sheet settings (the sheet, the service account, the dashboard's Sheet source and cache, the end-of-run mirror) are hidden while the backend is <code>db</code>; set <code>sheet</code> and save to see them again — deprecated.</p>{% endif %}
-        </header>
+      <section class="panel" id="s-{{ section }}">
+        <header><h2>{{ title }}</h2>{% if blurb %}<p class="muted">{{ blurb }}</p>{% endif %}</header>
         <div class="fields">
           {% for row in rows if row.setting.section == section and row.setting.env not in hidden_envs %}
           {% set s = row.setting %}
@@ -74,7 +70,6 @@ here, so keep the dashboard on loopback or your own network.</p>
                 {% if row.overridden %}<span class="tag stale" title="exported in the environment; the file value is saved but does not reach the running process">env override</span>{% endif %}
                 {% if row.defaulted %}<span class="tag" title="config.json does not set this key; this is the value the code applies, and saving writes it to the file">default</span>{% endif %}
                 {% if row.placeholder %}<span class="tag" title="blank here means the value shown greyed in the box is used; type one to give this its own">falls back</span>{% endif %}
-                {% if row.sheet_only %}<span class="tag stale" title="matters only while the ledger backend is sheet; the Google Sheet is deprecated">deprecated</span>{% endif %}
                 {% if row.restart == 'container' %}<span class="tag" title="the container reads this once at start: docker compose restart to apply">container restart</span>
                 {% elif row.restart == 'dashboard' %}<span class="tag" title="the dashboard reads this once at start: Restart dashboard to apply">dashboard restart</span>{% endif %}
               </div>
@@ -283,19 +278,6 @@ here, so keep the dashboard on loopback or your own network.</p>
     {{ entry_section('profiles', 'profile', entries['profiles'], profile_fields) }}
     {{ entry_section('warehouses', 'warehouse', entries['warehouses'], warehouse_fields) }}
     {{ entry_section('cards', 'card', entries['cards'], card_fields) }}
-
-    {% for path, shape, help, text in section_forms if path == 'google.service_account' and sheet_mode %}
-    {% set title, blurb = section_title(path) %}
-    <section class="panel deprecated" id="s-{{ path }}">
-      <header><h2>{{ title }}</h2><p class="muted">{{ blurb }}</p>
-        <div class="banner warn deprecation"><strong>Deprecated.</strong> Used only while <em>Ledger → backend</em> is <code>sheet</code>.</div></header>
-      <p>{% if service_account_email %}Share the sheet with <code>{{ service_account_email }}</code>.{% else %}<span class="muted">No service account yet — paste the JSON key Google issued.</span>{% endif %}</p>
-      <form method="post" action="/settings/section/{{ path }}" class="settings-section">
-        <textarea name="text" rows="8" class="mono json" spellcheck="false">{{ text }}</textarea>
-        <div class="inline-form"><button type="submit" class="small">Save service account</button></div>
-      </form>
-    </section>
-    {% endfor %}
 
     {% include "_backup_panel.html" %}
 

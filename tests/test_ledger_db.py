@@ -1,6 +1,6 @@
-"""The SQLite copy of the ledger (ledger_db/): schema derived from the ledger's own definitions,
-the mirror's typing, the replace-in-one-transaction rule, and the two writers (the script and the
-dashboard's `db` backend). All offline, over CSV snapshots and temporary files."""
+"""The SQLite ledger (ledger_db/): schema derived from the ledger's own definitions, the
+replace-in-one-transaction rule, and the dashboard's reader over it. All offline, over temporary
+files; rows are seeded through the worksheet adapter, as every writer seeds them."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ import pytest
 
 from models.order import FIELDNAMES
 from sheets.ledger_sync import HEADER, _cogs_formula, _profit_formula
-from ledger_db.mirror import mirror_snapshot, typed_record
 from ledger_db.store import KEY_FIELDS, LedgerDb, columns, ledger_rows_ddl, sql_type
-from web.ledger_reader import DbReader, LedgerRow, SnapshotReader
+from ledger_db.worksheet import DbWorksheet
+from web.ledger_reader import DbReader
 
 
 def row(**values) -> list[str]:
@@ -45,15 +45,21 @@ ROWS = [
 ]
 
 
-@pytest.fixture
-def snapshot_path(tmp_path):
-    return write_snapshot(tmp_path / "sheet_backup_20260917T000000Z.csv", *ROWS,
-                          row(item_name="a note with no Order ID"))
+def seed(db: LedgerDb, *rows: list[str]) -> None:
+    """Write `rows` through the worksheet adapter, exactly as the upsert would (a row without an
+    Order ID is not a ledger row and is dropped on the way)."""
+    DbWorksheet(db).update(range_name="A2", values=[list(r) for r in rows])
 
 
 @pytest.fixture
 def db(tmp_path):
     return LedgerDb(tmp_path / "ledger.sqlite3")
+
+
+@pytest.fixture
+def seeded(db):
+    seed(db, *ROWS, row(item_name="a note with no Order ID"))
+    return db
 
 
 class TestSchema:
@@ -138,71 +144,39 @@ class TestSchema:
         assert LedgerDb("data/x.sqlite3").path == ROOT / "data" / "x.sqlite3"
 
 
-class TestTyping:
-    def test_typed_record_uses_the_upserts_own_coercion(self):
-        r = LedgerRow(cells=dict(zip(FIELDNAMES, ROWS[0])), row_number=2)
-        rec = typed_record(r)
-        assert rec["total_cost"] == 1000.0 and rec["cost_per_item"] == 1000.0
-        assert rec["cashback_rate"] == 0.04
-        assert rec["quantity"] == 1 and isinstance(rec["quantity"], int)
-        assert rec["shipment"] == 1
-        assert rec["tracking_submitted"] is True
-        assert rec["package_id"] == "00009999990206101794"
-        assert rec["sheet_row"] == 2
-
-    def test_formula_columns_store_the_computed_number(self):
-        r = LedgerRow(cells=dict(zip(FIELDNAMES, ROWS[0])), row_number=2)
-        rec = typed_record(r)
-        assert rec["cogs"] == 960.0
-        assert rec["total_profit"] == round(1230 - 960 - 6.4, 2)
-
-    def test_blank_and_money_free_cells_store_null(self):
-        r = LedgerRow(cells=dict(zip(FIELDNAMES, ROWS[2])), row_number=4)
-        rec = typed_record(r)
-        assert rec["total_cost"] is None and rec["cogs"] is None and rec["total_profit"] is None
-        assert rec["tracking_submitted"] is None
 
 
-class TestMirror:
-    def test_mirror_replaces_everything_in_one_go_and_logs_the_run(self, snapshot_path, db):
-        snapshot = SnapshotReader(snapshot_path).load()
-        summary = mirror_snapshot(snapshot, db)
+class TestStore:
+    def test_a_write_replaces_everything_in_one_go(self, seeded):
+        assert seeded.row_count() == 3
+        rows = seeded.fetch_rows()
+        assert [r["order_id"] for r in rows] == ["BBY01-1", "1399000017", "1399000019"]
+        # A second write of a smaller grid leaves nothing from the first behind.
+        ws = DbWorksheet(seeded)
+        ws.delete_rows(3, 4)
+        ws.update(range_name="A2", values=[ROWS[1]])
+        assert [r["order_id"] for r in seeded.fetch_rows()] == ["1399000017"]
 
-        assert summary["rows"] == 3 and summary["skipped"] == 1 and summary["header_ok"] is True
-        assert db.row_count() == 3
-        last = db.last_mirror()
-        assert last["rows"] == 3 and last["backend"] == "snapshot" and last["skipped"] == 1
-        assert last["source"] == str(snapshot_path)
-
-        # A second mirror of a smaller source leaves nothing from the first behind.
-        smaller = SnapshotReader(write_snapshot(snapshot_path.parent / "s2.csv", ROWS[1])).load()
-        mirror_snapshot(smaller, db)
-        rows = db.fetch_rows()
-        assert [r["order_id"] for r in rows] == ["1399000017"]
-        assert db.last_mirror()["id"] == 2
-
-    def test_a_failed_write_leaves_the_previous_copy_intact(self, snapshot_path, db):
-        mirror_snapshot(SnapshotReader(snapshot_path).load(), db)
+    def test_a_failed_write_leaves_the_previous_copy_intact(self, seeded):
         # Two records with the same primary key violate the constraint mid-transaction.
         bad = [{"order_id": "dup", "order_date": "d", "item_name": "i", "shipment": 1}] * 2
         with pytest.raises(sqlite3.IntegrityError):
-            db.replace_rows(bad, backend="test", source="test")
-        assert db.row_count() == 3
+            seeded.replace_rows(bad, backend="test", source="test")
+        assert seeded.row_count() == 3
 
-    def test_fetch_returns_typed_values_in_sheet_order(self, snapshot_path, db):
-        mirror_snapshot(SnapshotReader(snapshot_path).load(), db)
-        rows = db.fetch_rows()
+    def test_fetch_returns_typed_values_in_sheet_order(self, seeded):
+        rows = seeded.fetch_rows()
         assert [r["sheet_row"] for r in rows] == [2, 3, 4]
         assert rows[0]["total_cost"] == 1000.0 and rows[0]["tracking_submitted"] == 1
+        assert rows[0]["cashback_rate"] == 0.04 and rows[0]["quantity"] == 1
         assert rows[0]["package_id"] == "00009999990206101794"
         assert rows[2]["total_cost"] is None
 
-    def test_health(self, snapshot_path, db):
+    def test_health(self, db):
         assert db.health()["db_exists"] is False
-        mirror_snapshot(SnapshotReader(snapshot_path).load(), db)
+        seed(db, *ROWS)
         health = db.health()
         assert health["db_exists"] is True and health["db_rows"] == 3
-        assert health["db_last_mirror"]["rows"] == 3
 
 
 class TestDbReader:
@@ -213,106 +187,47 @@ class TestDbReader:
         def __call__(self):
             return self.now
 
-    def test_serves_the_db_and_refreshes_from_upstream_on_the_interval(self, snapshot_path, db):
-        upstream = SnapshotReader(snapshot_path)
-        loads = []
-        original = upstream.load
-        upstream.load = lambda force=False: (loads.append(force), original(force))[1]
-        clock = self.Clock()
-        reader = DbReader(db, upstream=upstream, ttl_seconds=300, clock=clock)
-
+    def test_serves_the_file_typed_and_computed(self, seeded):
+        reader = DbReader(seeded, ttl_seconds=300, clock=self.Clock())
         snapshot = reader.load()
         assert snapshot.backend == "db" and len(snapshot.rows) == 3
-        assert loads == [True]
+        assert snapshot.source == str(seeded.path)
         assert snapshot.rows[0].total_cost == 1000.0
         assert snapshot.rows[0].tracking_submitted is True
         assert snapshot.rows[0].cogs == 960.0 and snapshot.rows[0].is_committed
         assert snapshot.rows[1].is_settled and snapshot.rows[1].profit == 136.0
         assert snapshot.rows[2].is_money_free and snapshot.rows[2].cogs is None
         assert snapshot.rows[0].text("package_id") == "00009999990206101794"
-        assert "mirrored from" in snapshot.source
 
-        clock.now = 100
-        reader.load()
-        assert loads == [True]  # inside the interval: served from the file
-        clock.now = 301
-        reader.load()
-        assert loads == [True, True]
-        reader.load(force=True)
-        assert loads == [True, True, True]
-
-    def test_a_fresh_copy_on_disk_is_served_without_re_mirroring(self, snapshot_path, db):
-        mirror_snapshot(SnapshotReader(snapshot_path).load(), db)  # "another process" filled it
-        upstream = SnapshotReader(snapshot_path)
-        loads = []
-        upstream.load = lambda force=False: loads.append(force)
-        reader = DbReader(db, upstream=upstream, ttl_seconds=300)
-
-        snapshot = reader.load()
-        assert len(snapshot.rows) == 3 and loads == []
-
-    def test_a_stale_copy_on_disk_is_re_mirrored(self, snapshot_path, db):
-        mirror_snapshot(SnapshotReader(snapshot_path).load(), db)
-        old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
-        with db.connect() as conn:
-            conn.execute('UPDATE "mirror_runs" SET "at" = ?', (old,))
-        upstream = SnapshotReader(snapshot_path)
-        reader = DbReader(db, upstream=upstream, ttl_seconds=300)
-
-        reader.load()
-        assert db.last_mirror()["id"] == 2
-
-    def test_no_upstream_serves_the_file_as_is(self, snapshot_path, db):
-        mirror_snapshot(SnapshotReader(snapshot_path).load(), db)
-        reader = DbReader(db, upstream=None)
+    def test_every_load_sees_the_latest_write(self, seeded):
+        reader = DbReader(seeded, ttl_seconds=300, clock=self.Clock())
         assert len(reader.load().rows) == 3
-        assert reader.health()["db_mirror_upstream"] is None
+        ws = DbWorksheet(seeded)
+        ws.delete_rows(3, 4)
+        ws.update(range_name="A2", values=[ROWS[1]])
+        assert [r.order_id for r in reader.load().rows] == ["1399000017"]
+        assert reader.refresh() is False  # nothing upstream to pull from
 
-    def test_health(self, snapshot_path, db):
-        reader = DbReader(db, upstream=SnapshotReader(snapshot_path), ttl_seconds=300,
-                          clock=self.Clock())
+    def test_health(self, seeded):
+        reader = DbReader(seeded, ttl_seconds=300, clock=self.Clock())
         health = reader.health()
-        assert health["backend"] == "db" and health["db_exists"] is False
-        reader.load()
-        health = reader.health()
-        assert health["db_rows"] == 3 and health["db_mirror_age_seconds"] == 0.0
-        assert health["db_mirror_upstream"] == "snapshot"
-
-
-class TestMirrorScript:
-    def test_from_snapshot_into_a_named_db(self, snapshot_path, tmp_path, capsys):
-        from scripts.mirror_sheet_to_db import main
-
-        target = tmp_path / "out.sqlite3"
-        assert main(["--from-snapshot", str(snapshot_path), "--db", str(target), "--force"]) == 0
-        assert LedgerDb(target).row_count() == 3
-        assert "Mirrored 3 row(s) from snapshot" in capsys.readouterr().err
-
-    def test_default_path_comes_from_settings(self, monkeypatch, snapshot_path, tmp_path):
-        import dataclasses
-
-        import scripts.mirror_sheet_to_db as script
-        from config import settings as settings_module
-
-        monkeypatch.setattr(settings_module, "settings", dataclasses.replace(
-            settings_module.settings, ledger_db_path=str(tmp_path / "from_settings.sqlite3")))
-        assert script.main(["--from-snapshot", str(snapshot_path), "--force"]) == 0
-        assert (tmp_path / "from_settings.sqlite3").is_file()
+        assert health["backend"] == "db" and health["db_exists"] is True
+        assert health["db_rows"] == 3 and health["db_cache_ttl_seconds"] == 300.0
 
 
 class TestFactory:
-    def test_db_source_mirrors_from_the_sheet_unless_a_snapshot_is_named(self, tmp_path):
+    def test_db_source_serves_the_file_named_by_settings(self, tmp_path):
         import dataclasses
 
         from config.settings import settings
-        from web.ledger_reader import SheetReader, reader_from_settings
+        from web.ledger_reader import SnapshotReader, reader_from_settings
 
-        base = dataclasses.replace(settings, web_ledger_source="db", ledger_backend="sheet",
+        base = dataclasses.replace(settings, web_ledger_source="db",
                                    ledger_db_path=str(tmp_path / "x.sqlite3"),
                                    web_sheet_cache_ttl_seconds=120)
         reader = reader_from_settings(base)
-        assert isinstance(reader, DbReader) and isinstance(reader.upstream, SheetReader)
+        assert isinstance(reader, DbReader)
         assert reader.ttl_seconds == 120.0 and reader.db.path == tmp_path / "x.sqlite3"
 
-        dev = reader_from_settings(base, snapshot_path="data/sheet_backup_x.csv")
-        assert isinstance(dev.upstream, SnapshotReader)
+        dev = reader_from_settings(base, source="snapshot", snapshot_path="data/sheet_backup_x.csv")
+        assert isinstance(dev, SnapshotReader)

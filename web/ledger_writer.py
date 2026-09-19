@@ -1,11 +1,10 @@
-"""THE ONE PLACE THE DASHBOARD WRITES THE SHEET, because you asked it to on the Orders page:
+"""THE ONE PLACE THE DASHBOARD WRITES THE LEDGER, because you asked it to on the Orders page:
 one cell, the same cell across selected rows, a new row, or the deletion of selected rows. Nothing
 automatic passes through here.
 
-The Sheet is still the source of truth (the SQLite file is a mirror -- see ledger_db/), so an edit
-made in the browser has to land on the Sheet, exactly as if it had been typed there, and the mirror
-picks it up on the next read. When the cutover happens this module targets the database instead
-and the page does not change.
+The ledger is the SQLite file (ledger_db/), addressed through the same worksheet face every other
+writer uses, so an edit made in the browser lands exactly as if the upsert had written it -- and
+is then PROTECTED (ledger_db/hand_edits) from the next run's merge.
 
 WHAT MAY BE EDITED. Everything except: the four UPSERT KEY columns (Order ID, Order Date, Item Name,
 Shipment -- changing one turns the row into a different row, and the next re-check appends a
@@ -42,7 +41,7 @@ from typing import Callable
 
 from models.order import FIELDNAMES, STATUSES, normalize_shipment
 from sheets.ledger_sync import (
-    HEADER, SCOPES, _BOOL_FIELDS, _COL, _NUMERIC_FIELDS, _blank_to_none, _coerce,
+    HEADER, _BOOL_FIELDS, _COL, _NUMERIC_FIELDS, _blank_to_none, _coerce,
     _ensure_grid_rows, _last_occupied_row, _parse_checkbox, _write_profit_formulas,
 )
 
@@ -92,25 +91,13 @@ def run_in_progress(logs_dir: Path | None = None, *, now: float | None = None) -
 
 
 def _open_for_writing():
-    """The worksheet with the WRITE scope. Deliberately not ledger_sync._get_worksheet, which
-    creates a missing tab -- an edit must never create anything."""
+    """The ledger file behind its worksheet face (the same object ledger_sync._get_worksheet hands
+    out; an edit never creates anything)."""
     from config.settings import settings
+    from ledger_db.store import LedgerDb
+    from ledger_db.worksheet import DbWorksheet
 
-    if settings.ledger_is_db():
-        from ledger_db.store import LedgerDb
-        from ledger_db.worksheet import DbWorksheet
-
-        return DbWorksheet(LedgerDb(settings.ledger_db_path))
-
-    import gspread
-
-    client = gspread.authorize(settings.google_credentials(SCOPES))
-    spreadsheet = client.open_by_key(settings.google_sheet_id)
-    name = settings.google_sheet_worksheet_name
-    try:
-        return spreadsheet.worksheet(name)
-    except gspread.WorksheetNotFound as exc:
-        raise EditError(f"no worksheet named {name!r}; nothing was written") from exc
+    return DbWorksheet(LedgerDb(settings.ledger_db_path))
 
 
 def _display(value) -> str:
@@ -172,7 +159,7 @@ class _Grid:
     """One fresh formatted read of the sheet, with key lookup."""
 
     def __init__(self, worksheet):
-        from gspread.utils import ValueRenderOption
+        from ledger_db.worksheet import ValueRenderOption
 
         self.rows = worksheet.get_values(value_render_option=ValueRenderOption.formatted)
         if not self.rows or [str(c).strip() for c in self.rows[0]] != list(HEADER):
@@ -204,8 +191,8 @@ class _Grid:
 
 
 def _protect(worksheet, key: dict, field: str, value) -> None:
-    """Record a hand edit (ledger_db/hand_edits) when the ledger is the database; a Sheet has no
-    such record and a test fake needs none. CLEARING a cell releases it instead. Never fails the
+    """Record a hand edit (ledger_db/hand_edits); a test fake has no database and needs no
+    record. CLEARING a cell releases it instead. Never fails the
     edit that succeeded."""
     from ledger_db.hand_edits import ledger_db_of
 

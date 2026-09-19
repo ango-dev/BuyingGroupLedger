@@ -154,7 +154,7 @@ class TestRecordedAtTheSource:
     def test_main_opens_and_closes_a_run(self, monkeypatch):
         import main as main_module
 
-        for step in ("run_buying_group_sync", "run_bfmr_email_autoreply", "run_db_mirror"):
+        for step in ("run_buying_group_sync", "run_bfmr_email_autoreply"):
             monkeypatch.setattr(main_module, step, lambda: None)
         main_module.main([])
         events = activity.read()

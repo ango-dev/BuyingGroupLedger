@@ -12,7 +12,7 @@ So adding a setting the documented way -- the table, a `Settings` field, a key i
 config.example.json -- puts it on the page with the right widget and no further work, and
 tests/test_web_settings.py fails if any ENV_TO_CONFIG entry does not resolve to a field here. The ONE
 thing that must be added by hand is a NEW STRUCTURED SECTION (a list of objects like `profiles`,
-`warehouses`, `cards`, or an object like `google.service_account`): those are edited as JSON, each
+`warehouses`, `cards`): those are edited as JSON, each
 validated by its own model, and `SECTIONS` below is their list. A new one goes there, with its model.
 
 Saving writes config.json through config.loader.save_config, exactly as scripts/create_profile does,
@@ -56,8 +56,6 @@ SECTIONS: tuple[tuple[str, str, Any, str], ...] = (
      "Buying-group warehouses and the address jigs that classify a Delivery Address."),
     ("cards", "list", Card,
      "Cards by last 4: name, cashback rate, per-retailer overrides."),
-    ("google.service_account", "object", None,
-     "The whole service-account JSON object Google issued (share the sheet with its client_email)."),
 )
 
 
@@ -167,7 +165,7 @@ def restart_scope(setting: Setting) -> str:
     "next run"   nothing -- every scheduled run is a fresh process that reads the file"""
     if setting.env in container_restart_envs():
         return "container"
-    if setting.section in ("web", "database", "ledger"):
+    if setting.section in ("web", "database"):
         return "dashboard"
     return "next run"
 
@@ -254,16 +252,20 @@ def view(settings: list[Setting], environ: Mapping[str, str]) -> list[dict]:
             "restart": restart_scope(s),
             "defaulted": defaulted,
             "placeholder": placeholder,
-            "sheet_only": is_sheet_only(s),
         })
     return rows
+
+
+def shape_of(path: str) -> str:
+    """"list" or "object" for a structured section (list when unknown)."""
+    return next((spec[1] for spec in SECTIONS if spec[0] == path), "list")
 
 
 def section_text(path: str) -> str:
     """A structured section as pretty JSON for its textarea ("[]" / "{}" when absent)."""
     value = config_value(path)
     if value in (None, ""):
-        value = {} if path == "google.service_account" else []
+        value = {} if shape_of(path) == "object" else []
     return json.dumps(value, indent=2)
 
 
@@ -427,10 +429,6 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
     "container": ("Schedule", "How often the container runs, and whether it runs at start. "
                   "Read once at container start."),
     "scraping": ("Scraping", "How far back each run looks, and the money rules the ledger applies."),
-    "ledger": ("Ledger", "Where the ledger lives: the SQLite database (db, the default) or the "
-               "Google Sheet (sheet, deprecated). See docs/operations.md, \"Moving off the Sheet\"."),
-    "google": ("Google Sheet", "DEPRECATED -- used only while the ledger backend is `sheet`: the "
-               "spreadsheet and the service account that reads and writes it."),
     "alerts": ("Alerts", "Where a failed run, a logged-out session or a stale heartbeat is reported."),
     "buying_groups": ("Buying groups", "BFMR and MaxOutDeals: API access, insurance, and the "
                       "combined-package auto-reply."),
@@ -438,7 +436,7 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
                  "the ledger and served by this dashboard."),
     "web": ("Dashboard", "This web dashboard: its ledger source, bind address and port. "
             "Read once at dashboard start."),
-    "database": ("Database", "The SQLite mirror of the ledger. Read once at dashboard start."),
+    "database": ("Database", "The SQLite file that is the ledger. Read once at dashboard start."),
     "backups": ("Backups", "Scheduled backups of config.json, .state.json, .env and data/ (the "
                 "ledger) into backups/, on the container's clock, and how many to keep. Read once "
                 "at container start; the Backup & Restore panel below shows the schedule."),
@@ -448,41 +446,14 @@ SECTION_TITLES: dict[str, tuple[str, str]] = {
                    "it. An order matching no jig is tagged Unclassified."),
     "cards": ("Cards", "Cards by their last 4 digits, with the cashback rate the profit formula "
               "nets from COGS -- overall, and per retailer."),
-    "google.service_account": ("Service Account", "The JSON key Google issued for the service "
-                               "account; share the sheet with its client_email."),
 }
 
 
-#: Settings that only mean anything while the ledger is the Google Sheet (besides the whole
-#: `google` section): the dashboard's Sheet source / cache, and the end-of-run mirror FROM the
-#: Sheet. Hidden while `ledger.backend` is `db`; shown with a *deprecated* tag under `sheet`.
-#:
-SHEET_ONLY_ENVS = frozenset({"WEB_LEDGER_SOURCE", "WEB_SNAPSHOT_PATH", "WEB_SHEET_CACHE_TTL_SECONDS",
-                             "LEDGER_DB_MIRROR_AFTER_RUN"})
-
-
-def is_sheet_only(setting: Setting) -> bool:
-    return setting.section == "google" or setting.env in SHEET_ONLY_ENVS
-
-
-def effective_backend() -> str:
-    """`ledger.backend` as the FILE has it, else the code's default -- what the page edits, not
-    what the running process was started with."""
-    value = config_value("ledger.backend")
-    if value in (None, ""):
-        value = code_defaults().get("LEDGER_BACKEND", "db")
-    return str(value).strip().lower()
-
-
-def sheet_mode() -> bool:
-    return effective_backend() == "sheet"
-
-
 def hidden_envs() -> set[str]:
-    """The settings the page does not render (and a save must leave alone)."""
-    if sheet_mode():
-        return set()
-    return {s.env for s in schema() if is_sheet_only(s)}
+    """The settings the page does not render (and a save must leave alone). Nothing, since the
+    Sheet-only settings went with the Sheet (2026-09-18); kept as the one place to hide a
+    setting from the page should one need it."""
+    return set()
 
 
 def section_title(section: str) -> tuple[str, str]:

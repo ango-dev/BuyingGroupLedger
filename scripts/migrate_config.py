@@ -118,28 +118,6 @@ def build_config() -> tuple[dict, dict, list[str]]:
             f"(expected for ops/test hooks): {', '.join(unmapped)}"
         )
 
-    # The Google credential is the one thing Google issues as a whole JSON object, so it is inlined
-    # rather than referenced by path — that is what makes config.json self-contained.
-    sa_name = (os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
-               or env.get("GOOGLE_SERVICE_ACCOUNT_FILE") or "service_account.json")
-    sa_path = ROOT / sa_name
-    service_account = _read_json(sa_path)
-    if isinstance(service_account, dict):
-        _assign(config, "google.service_account", service_account)
-        # Drop the path setting: it OVERRIDES the inlined block in settings.google_credentials, so
-        # migrating both would quietly keep reading the standalone file this just inlined.
-        config.get("google", {}).pop("service_account_file", None)
-        notes.append(f"inlined {sa_path.name} into google.service_account")
-        if os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE") or env.get("GOOGLE_SERVICE_ACCOUNT_FILE"):
-            notes.append(
-                "WARNING: GOOGLE_SERVICE_ACCOUNT_FILE is set in your environment/.env, and it "
-                "OVERRIDES the credential just inlined. Remove that line once you have migrated, or "
-                f"config.json only LOOKS self-contained and deleting {sa_path.name} would break the "
-                "run."
-            )
-    else:
-        notes.append(f"NO service account found at {sa_path} - set google.service_account by hand")
-
     for key, path in (("profiles", LEGACY_PROFILES), ("warehouses", LEGACY_WAREHOUSES),
                       ("cards", LEGACY_CARDS)):
         data = _read_json(path)
@@ -164,9 +142,7 @@ def preview(config: dict, prefix: str = "") -> list[str]:
     lines: list[str] = []
     for key, value in config.items():
         path = f"{prefix}.{key}" if prefix else key
-        if key == "service_account":
-            lines.append(f"  {path}: <inlined Google credential, {len(value)} keys>")
-        elif isinstance(value, dict):
+        if isinstance(value, dict):
             lines += preview(value, path)
         elif isinstance(value, list):
             lines.append(f"  {path}: [{len(value)} entries]")

@@ -22,7 +22,7 @@ from models.order import FIELDNAMES  # noqa: E402
 from sheets.ledger_sync import HEADER, _COL, _cogs_formula, _profit_formula  # noqa: E402
 from web import ledger_writer  # noqa: E402
 from web.app import create_app  # noqa: E402
-from web.ledger_reader import SheetReader, SnapshotReader  # noqa: E402
+from web.ledger_reader import SnapshotReader, rows_from_grid  # noqa: E402
 from web.ledger_writer import (  # noqa: E402
     ConflictError, EditError, RunInProgress, SheetCellWriter, run_in_progress, validate,
 )
@@ -92,6 +92,23 @@ class SheetFake:
 
     def __getattr__(self, name):
         raise AssertionError(f"the writer called worksheet.{name}() -- not allowed")
+
+
+class GridReader:
+    """A dashboard reader over a SheetFake: one formatted read per load, as the db reader does
+    over the file. The routes under test never write through it."""
+
+    backend = "grid"
+
+    def __init__(self, sheet):
+        self.sheet = sheet
+
+    def load(self, force: bool = False):
+        grid = self.sheet.get_values(value_render_option="FORMATTED_VALUE")
+        return rows_from_grid(grid, backend=self.backend, source="Ledger / Orders")
+
+    def health(self) -> dict:
+        return {"backend": self.backend}
 
 
 KEY = {"order_id": "BBY01-1", "order_date": "2026-09-08", "item_name": "MacBook", "shipment": "1"}
@@ -325,7 +342,7 @@ class TestOrdersRoutes:
     def _client(self, sheet, tmp_path, logs_dir, writer=None):
         from config.settings import settings
 
-        reader = SheetReader(ttl_seconds=300, opener=lambda: (sheet, "Ledger"))
+        reader = GridReader(sheet)
         app = create_app(reader, logs_dir=logs_dir, failures_dir=tmp_path,
                          backup_dir=tmp_path / "b", repo_root_dir=tmp_path, clock=lambda: NOW,
                          settings=dataclasses.replace(settings, container_run_interval_hours=6),
@@ -464,12 +481,12 @@ class TestTheWritePathIsSingular:
         """web/ may write the Sheet in exactly one file. Everything else in web/ is scanned by
         tests/test_web.py's read-only guarantee; this pins the exemption to that one file and
         what it may do: locate, update, batch-update, delete rows -- never create a tab, never
-        gspread's append_row (rows land where the upsert's own append would)."""
+        append_row (rows land where the upsert's own append would)."""
         root = Path(__file__).resolve().parents[1] / "web"
         for path in root.rglob("*.py"):
             text = path.read_text(encoding="utf-8")
             if path.name == "ledger_writer.py":
-                assert "SCOPES" in text and "worksheet.update(" in text
+                assert "worksheet.update(" in text
                 assert "worksheet.delete_rows(" in text and "worksheet.batch_update(" in text
                 assert "append_row(" not in text.replace("def append_row(", "").replace(
                     "writer.add_row(", "")

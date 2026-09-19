@@ -23,11 +23,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     from config.settings import settings
-
-    if not settings.ledger_is_db():
-        print("ledger.backend is `sheet`: hand edits are recorded for the database ledger only.",
-              file=sys.stderr)
-        return 2
     from ledger_db.hand_edits import entries, forget_order
     from ledger_db.store import LedgerDb
 

@@ -10,7 +10,6 @@ config.json
 .state.json
 .env
 .env.*
-service_account.json
 profiles.json
 warehouses.json
 cards.json

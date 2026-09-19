@@ -35,7 +35,6 @@ def config(config_file):
     config_file(
         scraping={"lookback_days": 3, "default_cashback_rate": "2%",
                   "amazon_promo_cashback_enabled": True},
-        google={"sheet_id": "SHEET", "service_account": {"client_email": "x@y"}},
         alerts={"gmail_address": "me@example.com", "gmail_app_password": "hunter2"},
         buying_groups={"sync_enabled": False, "bfmr": {"api_key": "K", "api_secret": "S"}},
         web={"port": 8765},
@@ -88,14 +87,14 @@ class TestDerivation:
         assert by_env["LOOKBACK_DAYS"].kind == "int"
         assert by_env["BFMR_MIN_INSURANCE_VALUE"].kind == "float"
         assert by_env["DEFAULT_CASHBACK_RATE"].kind == "rate"
-        assert by_env["GOOGLE_SHEET_ID"].kind == "str"
+        assert by_env["GMAIL_ADDRESS"].kind == "str"
 
     def test_secrets_are_the_fields_with_repr_false(self):
         secrets = {s.env for s in settings_form.schema() if s.secret}
         for env in ("GMAIL_APP_PASSWORD", "BFMR_API_KEY", "BFMR_API_SECRET", "MAXOUTDEALS_API_KEY",
                     "DISCORD_WEBHOOK_URL"):
             assert env in secrets, env
-        assert "GOOGLE_SHEET_ID" not in secrets and "LOOKBACK_DAYS" not in secrets
+        assert "GMAIL_ADDRESS" not in secrets and "LOOKBACK_DAYS" not in secrets
 
     def test_help_text_comes_from_the_example_files_comments(self):
         by_env = {s.env: s for s in settings_form.schema()}
@@ -132,14 +131,14 @@ class TestApplyScalars:
         form = {s.env: "" for s in settings_form.schema()}
         form.update({"LOOKBACK_DAYS": "7", "DEFAULT_CASHBACK_RATE": "3%",
                      "BFMR_MIN_INSURANCE_VALUE": "450.5", "AMAZON_PROMO_CASHBACK_ENABLED": "on",
-                     "GOOGLE_SHEET_ID": "NEW-SHEET", "RUN_INTERVAL_HOURS": "4"})
+                     "WEB_PUBLIC_URL": "http://192.0.2.10:8765", "RUN_INTERVAL_HOURS": "4"})
 
         changes = settings_form.apply_scalars(form)
 
         assert changes["scraping.lookback_days"] == 7
         assert changes["scraping.default_cashback_rate"] == "3%"
         assert changes["buying_groups.bfmr.min_insurance_value"] == 450.5
-        assert changes["google.sheet_id"] == "NEW-SHEET"
+        assert changes["web.public_url"] == "http://192.0.2.10:8765"
         assert config_value("scraping.lookback_days") == 7
         assert config_value("scraping.amazon_promo_cashback_enabled") is True
         # An unticked box is false, and a flag that was true flips.
@@ -164,12 +163,12 @@ class TestApplyScalars:
 
         with pytest.raises(settings_form.SettingsError) as info:
             settings_form.apply_scalars({**form, "LOOKBACK_DAYS": "three",
-                                         "DEFAULT_CASHBACK_RATE": "2", "GOOGLE_SHEET_ID": "X"})
+                                         "DEFAULT_CASHBACK_RATE": "2", "WEB_PUBLIC_URL": "X"})
 
         assert any(e.startswith("LOOKBACK_DAYS:") for e in info.value.errors)
         assert any(e.startswith("DEFAULT_CASHBACK_RATE:") and "0-1" in e for e in info.value.errors)
         assert loader.CONFIG_FILE.read_text(encoding="utf-8") == before
-        assert config_value("google.sheet_id") == "SHEET"  # the cache was discarded too
+        assert config_value("scraping.lookback_days") == 3  # the cache was discarded too
 
 
 class TestApplySection:
@@ -192,14 +191,6 @@ class TestApplySection:
             settings_form.apply_section("alerts", "[]")
         assert [c["last4"] for c in config_value("cards")] == ["0315"]
 
-    def test_an_object_section(self, config):
-        assert settings_form.apply_section("google.service_account",
-                                           '{"client_email": "new@y", "private_key": "k"}') == 2
-        assert config_value("google.service_account")["client_email"] == "new@y"
-        with pytest.raises(settings_form.SettingsError, match="must be a JSON object"):
-            settings_form.apply_section("google.service_account", "[]")
-
-
 # --------------------------------------------------------------------------------------------------
 # The page
 # --------------------------------------------------------------------------------------------------
@@ -210,13 +201,9 @@ class TestSettingsPage:
         response = client.get("/settings")
         assert response.status_code == 200
         body = response.text
-        hidden = settings_form.hidden_envs()  # the Sheet-only settings, since the backend is db
-        assert hidden and all(env in ENV_TO_CONFIG for env in hidden)
+        assert settings_form.hidden_envs() == set()  # nothing is Sheet-only any more
         for env in ENV_TO_CONFIG:
-            if env in hidden:
-                assert f'name="{env}"' not in body, f"{env} is Sheet-only and the backend is db"
-            else:
-                assert f'name="{env}"' in body, f"{env} is not on the Settings page"
+            assert f'name="{env}"' in body, f"{env} is not on the Settings page"
         for secret in ("hunter2", '"K"', '"S"'):
             assert secret not in body
         assert 'type="password"' in body and "blank keeps it" in body
@@ -379,58 +366,18 @@ class TestRestartPrompts:
 # --------------------------------------------------------------------------------------------------
 
 
-class TestTheSheetIsDeprecated:
-    """`ledger.backend` defaults to db: the Sheet settings are hidden; under `sheet` they show,
-    tagged and bannered as deprecated."""
+class TestTheSheetIsGone:
+    """The Google Sheet was deleted 2026-09-18: no Google section, no service-account panel, no
+    backend switch; the dashboard's own ledger-source settings render like any other."""
 
-    def test_under_db_the_sheet_settings_are_hidden_and_a_save_leaves_them_alone(self, client):
+    def test_no_google_or_ledger_backend_settings_remain(self, client):
         body = client.get("/settings").text
-        assert settings_form.effective_backend() == "db" and settings_form.sheet_mode() is False
-        assert 'id="s-google"' not in body and 'id="s-google.service_account"' not in body
-        assert 'href="#s-google"' not in body and "Service Account" not in body
-        assert 'name="WEB_LEDGER_SOURCE"' not in body and 'name="LEDGER_DB_MIRROR_AFTER_RUN"' not in body
-        assert "are hidden while the backend is" in body
-        assert 'value="db"' in body  # the Ledger section shows the (defaulted) backend
-        # a full save with the hidden fields absent must not blank / untick them
-        form = {}
-        for row in settings_form.view(settings_form.schema(), {}):
-            s = row["setting"]
-            if s.env in settings_form.hidden_envs():
-                continue
-            if s.kind == "bool":
-                if row["value"] is True:
-                    form[s.env] = "on"
-            elif not s.secret:
-                form[s.env] = str(row["value"])
-        response = client.post("/settings", data=form, follow_redirects=False)
-        assert response.status_code == 303
-        assert config_value("google.sheet_id") == "SHEET"
-        assert config_value("google.service_account") == {"client_email": "x@y"}
-        assert config_value("database.mirror_after_run") in (None, True)
-
-    def test_under_sheet_they_show_with_a_deprecation_warning(self, client, config):
-        config(scraping={"lookback_days": 3}, ledger={"backend": "sheet"},
-               google={"sheet_id": "SHEET", "service_account": {"client_email": "x@y"}})
-        body = client.get("/settings").text
-        assert settings_form.sheet_mode() is True and settings_form.hidden_envs() == set()
-        assert 'id="s-google"' in body and 'id="s-google.service_account"' in body
-        assert body.count("Deprecated.") >= 2  # the Google Sheet panel and the service-account panel
-        assert '<section class="panel deprecated" id="s-google">' in body
-        google = body[body.index('id="s-google"'):body.index('id="s-alerts"')]
-        assert ">deprecated<" in google
-        for env in ("WEB_LEDGER_SOURCE", "WEB_SHEET_CACHE_TTL_SECONDS", "LEDGER_DB_MIRROR_AFTER_RUN"):
-            field = body[body.index(f'for="f-{env}"'):]
-            assert ">deprecated<" in field[:field.index("</div>\n            </div>")]
-        # switching back to db from the page hides them again
-        form = {s.env: "" for s in settings_form.schema() if not s.secret and s.kind != "bool"}
-        form.update({"LOOKBACK_DAYS": "3", "LEDGER_BACKEND": "db"})
-        client.post("/settings", data=form)
-        assert config_value("ledger.backend") == "db"
-        assert 'id="s-google"' not in client.get("/settings").text
-
-    def test_the_default_is_db(self):
-        assert settings_form.code_defaults()["LEDGER_BACKEND"] == "db"
-        assert Settings().ledger_backend == "db"
+        assert 'id="s-google"' not in body and "Service Account" not in body
+        assert "Deprecated" not in body and 'name="LEDGER_BACKEND"' not in body
+        assert 'name="WEB_LEDGER_SOURCE"' in body and 'name="LEDGER_DB_PATH"' in body
+        assert settings_form.hidden_envs() == set()
+        assert not [s for s in settings_form.schema() if s.section in ("google", "ledger")]
+        assert not [spec for spec in settings_form.SECTIONS if spec[0].startswith("google")]
 
 
 class TestEntryCards:
@@ -477,7 +424,7 @@ class TestEntryCards:
         assert ">default<" not in lookback
         defaults = settings_form.code_defaults()
         assert defaults["RUN_INTERVAL_HOURS"] == 6 and defaults["WEB_ENABLED"] is True
-        assert defaults["GOOGLE_SHEET_WORKSHEET_NAME"] == "Orders" and defaults["GOOGLE_SHEET_ID"] is None
+        assert defaults["WEB_LEDGER_SOURCE"] == "db" and defaults["WEB_PUBLIC_URL"] == ""
 
     def test_the_combined_package_account_shows_the_alerts_account_as_its_fallback(self, client, config):
         # the fixture sets alerts.gmail_address / gmail_app_password and no combined-package pair

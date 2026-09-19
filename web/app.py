@@ -307,15 +307,13 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         from scripts.audit_sheet import Sheet
         from scripts.tax_report import build_report
 
-        grids, _sheet_checks = audit_grids(reader, snapshot)
-        return build_report(Sheet(grids), year)
+        return build_report(Sheet(audit_grids(reader, snapshot)), year)
     audit_cache = AuditCache()
     app.state.audit_cache = audit_cache
 
     def audit_report(snapshot):
         def build():
-            grids, sheet_checks = audit_grids(reader, snapshot)
-            return run_audit(grids, sheet_checks=sheet_checks)
+            return run_audit(audit_grids(reader, snapshot))
 
         return audit_cache.get(audit_key(reader, snapshot), build)
 
@@ -683,14 +681,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     def nav_tools() -> list[tuple[str, list[tuple[str, str]]]]:
         """The header's Tools menu: every tool this backend shows, grouped in GROUPS order."""
-        try:
-            sheet_mode = not settings.ledger_is_db()
-        except RuntimeError:
-            sheet_mode = False
         out = []
         for group in tools_module.GROUPS:
-            items = [(t.key, t.title) for t in tools_module.TOOLS
-                     if t.group == group and (sheet_mode or not t.sheet_only)]
+            items = [(t.key, t.title) for t in tools_module.TOOLS if t.group == group]
             if group == "Accounts":
                 # The profile login is a page of its own, not a script; it belongs with the
                 # account tools.
@@ -719,11 +712,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         jobs = {}
         for job in sorted(runner.jobs.values(), key=lambda j: j.started_at):
             jobs[job.tool_key] = job  # the newest per tool
-        try:
-            sheet_mode = not settings.ledger_is_db()
-        except RuntimeError:
-            sheet_mode = False
-        shown = [t for t in tools_module.TOOLS if sheet_mode or not t.sheet_only]
+        shown = list(tools_module.TOOLS)
         session = sessions.current()
         # One tool at a time, picked from a dropdown
         options = [("profile", "Accounts · Log a profile in")] + [
@@ -1004,7 +993,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             request, "settings.html", message=message, errors=errors or [],
             rows=settings_form.view(rows_schema, os.environ),
             sections=settings_form.sections_in_order(rows_schema), section_forms=forms,
-            hidden_envs=settings_form.hidden_envs(), sheet_mode=settings_form.sheet_mode(),
+            hidden_envs=settings_form.hidden_envs(),
             in_container=in_container,
             open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE),
             restart=restart if restart in ("container", "dashboard") else "",
@@ -1014,8 +1003,6 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             retailer_keys=settings_form.RETAILER_KEYS,
             auth_retailers=settings_form.AUTH_RETAILERS,
             profile_labels=settings_form.profile_labels(),
-            service_account_email=str(settings_form.config_value(
-                "google.service_account.client_email") or ""),
             **backup_context())
         response.status_code = status
         return response
@@ -1130,13 +1117,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             if not schema:
                 info["missing_columns"] = list(snapshot.missing_columns)
                 info["extra_columns"] = list(snapshot.extra_columns)
-            info.update(reader.health())  # the cache / mirror state AFTER the load above
+            info.update(reader.health())  # the cache state AFTER the load above
         except Exception as exc:  # noqa: BLE001 -- /health must answer, and say what is wrong
             error = f"{type(exc).__name__}: {exc}"
         body = {
             "ok": error is None,
             "read_only": True,
-            "ledger_backend": getattr(settings, "ledger_backend", "sheet"),
             "rows": rows,
             "schema_matches": schema,
             "heartbeat": heartbeat(),

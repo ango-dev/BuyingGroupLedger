@@ -1,16 +1,16 @@
 """Upsert and order-state logic, exercised against an in-memory fake worksheet.
 
-_get_worksheet() is the single seam where this module talks to Google Sheets, so patching it is
-enough to test everything else offline — no credentials, no network, no live sheet.
+_get_worksheet() is the single seam where this module opens the ledger, so patching it is enough
+to test everything else offline. FakeWorksheet is the CONTRACT the SQLite adapter
+(ledger_db/worksheet.py) is pinned against in tests/test_db_worksheet.py: it models what the
+Google Sheet used to hand back, down to the empty string.
 """
 
 import csv
 
-import gspread
-
 import pytest
 
-from models.order import FIELDNAMES
+from models.order import FIELDNAMES, OrderItem, normalize_shipment, shipment_label
 from models.warehouse import Jig, Warehouse
 from sheets import ledger_sync
 from sheets.ledger_sync import (
@@ -1649,64 +1649,6 @@ class TestAppendAnchorAndGridLimits:
         assert sheet.added_rows > 0, "the sheet must be grown before writing past its last row"
 
 
-class TestTransientRetry:
-    """A single momentary 503 on the order-state read cost a whole cycle of re-check coverage on
-    2026-08-15, while every other sheet call in that same run succeeded seconds later."""
-
-    def test_a_transient_error_is_retried_and_succeeds(self, monkeypatch):
-        monkeypatch.setattr(ledger_sync.time, "sleep", lambda s: None)
-        calls = []
-
-        def flaky():
-            calls.append(1)
-            if len(calls) < 3:
-                raise gspread.exceptions.APIError(_FakeResponse(503))
-            return "ok"
-
-        assert ledger_sync._retry_transient(flaky, what="read") == "ok"
-        assert len(calls) == 3
-
-    def test_a_deterministic_error_is_NOT_retried(self, monkeypatch):
-        """A 400 ("exceeds grid limits") fails identically twice -- retrying only delays it and hides
-        it behind a longer run."""
-        monkeypatch.setattr(ledger_sync.time, "sleep", lambda s: None)
-        calls = []
-
-        def bad_request():
-            calls.append(1)
-            raise gspread.exceptions.APIError(_FakeResponse(400))
-
-        with pytest.raises(gspread.exceptions.APIError):
-            ledger_sync._retry_transient(bad_request, what="write")
-        assert len(calls) == 1, "a 4xx must fail immediately"
-
-    def test_it_gives_up_after_the_attempt_budget(self, monkeypatch):
-        monkeypatch.setattr(ledger_sync.time, "sleep", lambda s: None)
-        calls = []
-
-        def always_503():
-            calls.append(1)
-            raise gspread.exceptions.APIError(_FakeResponse(503))
-
-        with pytest.raises(gspread.exceptions.APIError):
-            ledger_sync._retry_transient(always_503, what="read", attempts=3)
-        assert len(calls) == 3, "bounded -- a sustained outage must not stall the run forever"
-
-
-class _FakeResponse:
-    """Minimal stand-in for the requests.Response gspread wraps in an APIError."""
-
-    def __init__(self, status_code):
-        self.status_code = status_code
-
-    def json(self):
-        return {"error": {"code": self.status_code, "message": "test", "status": "TEST"}}
-
-    @property
-    def text(self):
-        return "test"
-
-
 class TestCancelledRowsCarryNoMoney:
     """A cancelled order was refunded, so no money ever moved.
 
@@ -2664,3 +2606,112 @@ class TestCostcoRenamesLinesWhenAnOrderIsCancelled:
         sync_csv_to_sheet(path)
 
         assert len(sheet.data_rows()) == 4
+
+
+# --------------------------------------------------------------------------------------------------
+# The 2026-08-12 column reorder: the guard that stops a mis-ordered grid being scrambled, and the
+# Shipment relabelling. Rows are written POSITIONALLY from column A, so a grid whose columns are in
+# a different order than FIELDNAMES would be overwritten with values in the wrong cells -- no
+# exception, no log, just silently wrong money. (Moved from tests/test_reorder_sheet.py when the
+# Sheet migration script went, 2026-09-18.)
+# --------------------------------------------------------------------------------------------------
+
+# The pre-reorder column order, as the live sheet actually held it before 2026-08-12.
+OLD_HEADER = [
+    "Retailer", "Profile", "Order ID", "Order Date", "Status", "Order Link", "Tracking Number",
+    "Tracking Link", "Delivery Date", "Delivery Address", "Item Name", "Quantity", "Cost Per Item",
+    "Shipping", "Total Cost", "Card Last 4", "Last Scraped At", "Shipment", "Buying Group",
+    "Card", "Cashback Rate", "Insurance", "Payout Date", "Actual Payout", "Total Profit",
+]
+
+
+def old_row(**values):
+    return [str(values.get(name, "")) for name in OLD_HEADER]
+
+
+class TestShipmentLabel:
+    def test_label_is_a_bare_number(self):
+        assert shipment_label(1) == "1"
+        assert shipment_label(12) == "12"
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [("Shipment 1", "1"), ("shipment 2", "2"), ("Shipment  3", "3"), ("SHIPMENT 4", "4"),
+         ("5", "5"), ("", ""), ("  ", "")],
+    )
+    def test_normalize_strips_the_redundant_word(self, raw, expected):
+        assert normalize_shipment(raw) == expected
+
+    def test_unrecognized_label_is_kept_not_discarded(self):
+        # An odd label is still a usable upsert key; dropping it would merge two shipments into one row.
+        assert normalize_shipment("Box A") == "Box A"
+
+    def test_order_item_normalizes_whatever_a_producer_sends(self):
+        # Shipment is part of the upsert key, so a re-check must not create a second row for a
+        # shipment the API recorded as "1".
+        item = OrderItem(retailer="Amazon", order_id="A1", order_date="2026-08-12",
+                         item_name="W", shipment="Shipment 2")
+        assert item.shipment == "2"
+
+
+class TestOrderMismatchGuard:
+    def test_sheet_in_the_old_order_is_refused_not_scrambled(self, sheet, tmp_path):
+        sheet.rows = [
+            list(OLD_HEADER),
+            old_row(**{"Order ID": "A1", "Order Date": "2026-08-08", "Item Name": "Widget",
+                       "Shipment": "1", "Total Cost": "199.99"}),
+        ]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1",
+                 status="shipped"),
+        )
+
+        with pytest.raises(RuntimeError, match="different ORDER"):
+            sync_csv_to_sheet(path)
+
+        # The point of raising: the existing row is untouched, not overwritten with shuffled values.
+        assert sheet.data_rows()[0][OLD_HEADER.index("Total Cost")] == "199.99"
+
+    def test_correctly_ordered_sheet_still_syncs(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER)]
+        path = write_csv_file(
+            tmp_path,
+            dict(order_id="A1", order_date="2026-08-08", item_name="Widget", shipment="1"),
+        )
+
+        sync_csv_to_sheet(path)
+
+        assert sheet.data_rows()[0][FIELDNAMES.index("order_id")] == "A1"
+
+
+class TestLastOccupiedRowAndTheCheckbox:
+    def test_the_checkbox_is_located_in_the_grids_header_not_the_codes(self):
+        """`Tracking Submitted` materialises a real False in every empty row it covers, and
+        _last_occupied_row skips rows whose only content is that False. Looked up via FIELDNAMES
+        on a grid in another order it lands on the wrong column -- so the padding is not
+        recognised and every grid row counts as occupied (live, 983 rows on a 42-row ledger)."""
+        from sheets.ledger_sync import _last_occupied_row
+
+        old_header = [h for h in HEADER if h != "Tracking Submitted"] + ["Tracking Submitted"]
+        checkbox_i = old_header.index("Tracking Submitted")
+        real_row = [""] * len(old_header)
+        real_row[old_header.index("Order ID")] = "A1"
+        padding = [""] * len(old_header)
+        padding[checkbox_i] = "FALSE"
+        grid = [old_header, real_row] + [list(padding) for _ in range(50)]
+
+        assert _last_occupied_row(grid, checkbox_i) == 2, "padding rows must not count as occupied"
+        assert _last_occupied_row(grid) == len(grid), \
+            "looked up via FIELDNAMES the checkbox is missed and the whole grid reads as occupied"
+
+    def test_a_grid_already_in_the_current_order_still_works_without_the_hint(self):
+        from sheets.ledger_sync import _last_occupied_row
+
+        checkbox_i = FIELDNAMES.index("tracking_submitted")
+        real_row = [""] * len(HEADER)
+        real_row[HEADER.index("Order ID")] = "A1"
+        padding = [""] * len(HEADER)
+        padding[checkbox_i] = "FALSE"
+
+        assert _last_occupied_row([list(HEADER), real_row, padding, list(padding)]) == 2

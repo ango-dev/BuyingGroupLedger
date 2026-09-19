@@ -82,7 +82,7 @@ def apply_migration(worksheet, moves: list[tuple[int, str, float]]) -> None:
     run plans as a move again (idempotent), never as a loss."""
     if not moves:
         return
-    from gspread.utils import ValueInputOption
+    from ledger_db.worksheet import ValueInputOption
 
     column = _col_letter(HEADER.index(EXPECTED_COL))
     worksheet.batch_update(

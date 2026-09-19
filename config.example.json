@@ -7,15 +7,6 @@
     "api_key": ""
   },
 
-  "google": {
-    "// sheet_id": "GOOGLE_SHEET_ID — required. The id from the sheet's URL.",
-    "sheet_id": "",
-    "// worksheet_name": "GOOGLE_SHEET_WORKSHEET_NAME — the tab. Created if absent.",
-    "worksheet_name": "Orders",
-    "// service_account": "Paste the WHOLE JSON object Google gave you here, then share the sheet with its client_email. GOOGLE_SERVICE_ACCOUNT_FILE still points at a standalone file instead, and wins when set.",
-    "service_account": {}
-  },
-
   "alerts": {
     "// ": "Configure at least one channel. With neither, an unattended host reports a logged-out session or a failed run to nobody. Test with `python -m alerts.notifier`.",
     "// gmail_app_password": "GMAIL_APP_PASSWORD — a Google APP PASSWORD, not your account password.",
@@ -90,11 +81,11 @@
   "web": {
     "// enabled": "WEB_ENABLED — in the container, start the dashboard beside the scheduler (and probe it in the healthcheck). false = a pure scheduler container, as before.",
     "enabled": true,
-    "// ledger_source": "WEB_LEDGER_SOURCE — `db` serves the SQLite copy (database.path), refreshed from the live Sheet every sheet_cache_ttl_seconds (or from snapshot_path when set); `sheet` serves the live Sheet through the read-only scope with the same cache; `snapshot` serves a data/sheet_backup_*.csv. Anything else is refused at startup. Use `db` on the host.",
+    "// ledger_source": "WEB_LEDGER_SOURCE — `db` (the default) serves the ledger, the SQLite file in database.path; `snapshot` serves a data/sheet_backup_*.csv export instead (offline work; snapshot_path picks one). Anything else is refused at startup.",
     "ledger_source": "db",
     "// snapshot_path": "WEB_SNAPSHOT_PATH — a specific CSV for the snapshot backend. Blank = the newest data/sheet_backup_*.csv.",
     "snapshot_path": "",
-    "// sheet_cache_ttl_seconds": "WEB_SHEET_CACHE_TTL_SECONDS — how long a live-Sheet read is served from memory before the next request re-reads it (one Sheets API read per refresh).",
+    "// sheet_cache_ttl_seconds": "WEB_SHEET_CACHE_TTL_SECONDS — the dashboard's ledger read cache interval, in seconds (reported by /health; the name is the Sheet era's).",
     "sheet_cache_ttl_seconds": 300,
     "// bind_host": "WEB_BIND_HOST — loopback by default; there is no authentication, so bind wider (0.0.0.0 behind Tailscale) deliberately. The compose service publishes on 127.0.0.1 unless WEB_PUBLISH_HOST says otherwise.",
     "bind_host": "127.0.0.1",
@@ -106,18 +97,10 @@
     "public_url": ""
   },
 
-  "// ledger": "Where the ledger lives. `db` (the default) = the SQLite file in `database.path`: the scrapers' upsert, the sort, the buying-group sync, the BFMR auto-reply, the dashboard's editor and every script write and read it, and nothing touches the Sheet. `sheet` = the Google Sheet, DEPRECATED: every writer targets the Sheet and the file is a mirror of it. A host coming from `sheet` needs its file current first (the end-of-run mirror keeps it so; `python -m scripts.mirror_sheet_to_db` does it by hand) before it starts on `db`. The Sheet code stays until you delete it.",
-  "ledger": {
-    "// backend": "LEDGER_BACKEND — db | sheet.",
-    "backend": "db"
-  },
-
-  "// database": "The SQLite ledger (ledger_db/). A MIRROR of the Sheet while `ledger.backend` is `sheet` (the scheduled run reads the Sheet back into this file at the end, as do `python -m scripts.mirror_sheet_to_db` and the dashboard's `db` backend); THE LEDGER once it is `db`. Included in `python -m scripts.backup`.",
+  "// database": "THE LEDGER: the SQLite file (ledger_db/) the scrapers' upsert, the sort, the buying-group sync, the BFMR auto-reply, the dashboard's editor and every script write and read. Included in `python -m scripts.backup`.",
   "database": {
     "// path": "LEDGER_DB_PATH — relative to the repo root (in Docker, the mounted data/ volume).",
-    "path": "data/ledger.sqlite3",
-    "// mirror_after_run": "LEDGER_DB_MIRROR_AFTER_RUN — refresh the copy at the end of every scheduled run (one Sheets read; spends nothing, submits nothing). A failure alerts and never fails the run.",
-    "mirror_after_run": true
+    "path": "data/ledger.sqlite3"
   },
 
   "// backups": "Scheduled backups: a zip of config.json, .state.json, .env and data/ (the ledger) into backups/, made by the container's own cron (`python -m scripts.backup --scheduled`). The Settings page's Backup & Restore panel shows the schedule and the zips; the oldest are deleted once more than `keep` exist. Read once at container start. Copy backups/ off the Pi too -- one card is one point of failure.",

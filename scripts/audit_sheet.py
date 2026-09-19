@@ -1,34 +1,28 @@
-"""Read-only audit of the live Google Sheet ledger. WRITES NOTHING, EVER.
+"""Read-only audit of the ledger (data/ledger.sqlite3). WRITES NOTHING, EVER.
 
 Why this exists: every schema change ended with the same manual ritual -- check the row count, look for duplicate upsert
-keys, confirm the Total Profit formulas are intact, spot-check that Shipment is still an int and
-Card Last 4 still has its leading zeros. Those results were written up as PROSE in the design notes and the
-audit itself was thrown away each time. This is that ritual as a runnable artifact.
+keys, spot-check that Shipment is still an int and Card Last 4 still has its leading zeros. Those
+results were written up as PROSE in the design notes and the audit itself was thrown away each time. This is
+that ritual as a runnable artifact.
 
-    python -m scripts.audit_sheet                        # audit the live sheet
+    python -m scripts.audit_sheet                        # audit the ledger
     python -m scripts.audit_sheet --expect-rows 23       # ... and assert the row count
     python -m scripts.audit_sheet --save-snapshot before.json   # lands in data/ (gitignored: it holds PII)
-    python -m scripts.audit_sheet --from-snapshot before.json   # re-audit offline, zero API calls
+    python -m scripts.audit_sheet --from-snapshot before.json   # re-audit offline
     python -m scripts.audit_sheet --json                 # machine-readable, for before/after diffs
 
-READ-ONLY IS ENFORCED IN THREE LAYERS, because an auditor that can mutate what it audits is worse
+READ-ONLY IS ENFORCED IN TWO LAYERS, because an auditor that can mutate what it audits is worse
 than no auditor at all:
-  1. It does NOT call sheets.ledger_sync._get_worksheet(). That function swallows WorksheetNotFound
-     and CREATES the tab (ledger_sync.py:172-178) -- so a typo in GOOGLE_SHEET_WORKSHEET_NAME would
-     make a fresh empty tab and this script would cheerfully report "0 rows, header OK" against a
-     sheet it had just invented. `open_worksheet_readonly` below is that function minus the except.
-  2. It authenticates with the READ-ONLY OAuth scope, so the capability simply isn't granted: even a
-     future edit that reaches a write path gets a 403 from Google rather than changing the ledger.
-  3. The checks never receive a worksheet -- only the frozen `Grids` value read once up front. No
+  1. It opens the ledger through the READ-ONLY worksheet adapter (ledger_db/worksheet.py,
+     read_only=True): every write method raises, so the capability simply isn't there. It never
+     calls sheets.ledger_sync._get_worksheet(), the writers' opener.
+  2. The checks never receive a worksheet -- only the frozen `Grids` value read once up front. No
      check *can* call a mutator because no check holds anything mutable.
 
-ON READING FORMATTED VALUES: the design notes tells new sheet readers never to use the formatted render
-mode, because that's how display formatting corrupts data on a write-back round trip. That rule is
-for WRITERS. An auditor is the one place that must read all three modes, because the whole bug class
-lives in the DISAGREEMENT between them -- `sync_csv_to_sheet` builds its upsert key from the formatted
-read (ledger_sync.py:319), so to answer "will the next run duplicate a row?" the audit has to see
-exactly the strings the writer will see, and compare them against what the cell actually stores.
-That comparison is `check_key_is_format_independent`, the single most valuable check here.
+ON READING FORMATTED VALUES: the adapter renders the grid the way the Sheet used to (formatted
+text, the stored values, and the formula view), and the checks read all of them -- the upsert
+builds its key from the formatted read, so to answer "will the next run duplicate a row?" the audit
+has to see exactly the strings the writer will see.
 """
 
 import argparse
@@ -52,14 +46,8 @@ from sheets.ledger_sync import (
     _STATUS_RANK,
     _SUPERSEDED_BLANK_FIELDS,
     _coerce,
-    _cogs_formula,
     _parse_display_number,
-    _profit_formula,
 )
-
-# Read-only counterpart to ledger_sync.SCOPES. This is the layer that makes "read-only" a capability
-# rather than a promise -- see the module docstring.
-READONLY_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
 # Sheets' date epoch, for reporting what day a stray date serial actually means.
 _SHEETS_EPOCH = date(1899, 12, 30)
@@ -146,9 +134,8 @@ class Grids:
 
 
 def open_ledger_readonly():
-    """The SQLite ledger as a READ-ONLY worksheet (ledger_db/worksheet.py) -- what
-    open_worksheet_readonly hands out under `ledger.backend` = `db`: the same view, no
-    credentials, nothing to create, every write refused."""
+    """The ledger as a READ-ONLY worksheet (ledger_db/worksheet.py): no credentials, nothing to
+    create, every write refused."""
     from config.settings import settings
     from ledger_db.store import LedgerDb
     from ledger_db.worksheet import DbWorksheet
@@ -158,55 +145,17 @@ def open_ledger_readonly():
 
 
 def open_worksheet_readonly():
-    """Open the ledger worksheet with read-only credentials.
+    """Open the ledger read-only (open_ledger_readonly; the name is the Sheet era's).
 
-    Deliberately NOT sheets.ledger_sync._get_worksheet(): that one creates the worksheet when it's
-    missing (ledger_sync.py:172-178), which would let this script audit a tab it had just fabricated.
-    Here a missing tab is a hard stop, and nothing is created.
+    Deliberately NOT sheets.ledger_sync._get_worksheet(): the audit must never hold a writable
+    handle on what it audits.
     """
-    from config.settings import settings
-
-    if settings.ledger_is_db():
-        return open_ledger_readonly()
-
-    import gspread
-    from google.oauth2.service_account import Credentials
-
-    creds = settings.google_credentials(READONLY_SCOPES)
-    client = gspread.authorize(creds)
-    spreadsheet = client.open_by_key(settings.google_sheet_id)
-    name = settings.google_sheet_worksheet_name
-    try:
-        worksheet = spreadsheet.worksheet(name)
-    except gspread.WorksheetNotFound:
-        raise SystemExit(
-            f"No worksheet named {name!r} in spreadsheet {settings.google_sheet_id!r}. "
-            "Nothing was created -- check GOOGLE_SHEET_WORKSHEET_NAME."
-        )
-    return worksheet, spreadsheet.title
-
-
-def _read_merges(worksheet):
-    """Merged ranges on this worksheet, or None if they couldn't be determined.
-
-    Captured here rather than inside a check so the checks keep operating on frozen data only, and so
-    a saved snapshot carries the information with it. Best-effort: a metadata failure degrades the
-    merge check to SKIP rather than taking the whole audit down over its lowest-priority item.
-    """
-    try:
-        metadata = worksheet.spreadsheet.fetch_sheet_metadata()
-        sheet_id = worksheet.id
-        for entry in metadata.get("sheets", []):
-            if entry.get("properties", {}).get("sheetId") == sheet_id:
-                return entry.get("merges", [])
-        return []
-    except Exception:
-        return None
+    return open_ledger_readonly()
 
 
 def read_grids(worksheet, spreadsheet_title: str = "") -> Grids:
-    """Read the worksheet once per render mode. The ONLY function that touches the live sheet."""
-    from gspread.utils import ValueRenderOption
+    """Read the worksheet once per render mode. The ONLY function that touches the ledger."""
+    from ledger_db.worksheet import ValueRenderOption
 
     formatted = worksheet.get_values(value_render_option=ValueRenderOption.formatted)
     unformatted = worksheet.get_values(value_render_option=ValueRenderOption.unformatted)
@@ -220,7 +169,6 @@ def read_grids(worksheet, spreadsheet_title: str = "") -> Grids:
             "worksheet": getattr(worksheet, "title", ""),
             "rows": max(0, len(formatted) - 1),
             "cols": len(formatted[0]) if formatted else 0,
-            "merges": _read_merges(worksheet),
         },
     )
 
@@ -351,19 +299,6 @@ class Options:
 
 CHECKS: list[tuple[str, bool, Callable]] = []
 
-#: Checks about the Google Sheet as a spreadsheet -- live formulas, display formats, merged
-#: cells, the formatted/stored disagreement -- which have nothing to say about the SQLite ledger
-#: (its two formula columns are computed on every read, its values are typed). Under
-#: `ledger.backend` = `db` they report SKIP; every DATA check (keys, money invariants, missing
-#: mandatory cells, staleness) runs against the database exactly as it ran against the Sheet.
-SHEET_ONLY_CHECKS = frozenset({
-    "key_is_format_independent", "profit_formula_coverage", "profit_formula_literal",
-    "cogs_formula_coverage", "cogs_formula_literal", "no_stray_formulas",
-    "display_round_trips_to_stored", "no_formula_errors", "no_merged_cells",
-    "profit_blank_despite_payout", "profit_value_matches_inputs",
-})
-
-
 def check(name: str, requires_schema: bool = True):
     """Register a check.
 
@@ -459,41 +394,6 @@ def check_duplicate_primary_keys(sheet: Sheet, opts: Options) -> Result:
         )
     details = [f"rows {v}: {k}" for k, v in dupes.items()]
     return Result("duplicate_primary_keys", "FAIL", f"{len(dupes)} duplicated key(s)", _truncate(details, opts.max_detail))
-
-
-@check("key_is_format_independent")
-def check_key_is_format_independent(sheet: Sheet, opts: Options) -> Result:
-    """Does each row's upsert key depend on how its cells are FORMATTED?
-
-    This is the generic form of the entire §8/§9 bug family, in one invariant. sync_csv_to_sheet keys
-    rows on the FORMATTED read, so if a key cell holds anything other than plain text, the string the
-    writer sees can change when the user changes a number format -- and a key that changes means the
-    next re-check APPENDS a duplicate instead of updating.
-
-    It fires on a date column re-formatted as a real Date (formatted "8/6/2026" vs the stored serial
-    46610), on a Shipment stored as 2.0, and on anything else non-textual that landed in a key column.
-    the design notes removed the code that defended against this, so this check is now the only thing
-    standing between the user and that regression.
-    """
-    offenders = []
-    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-        shown = sheet.primary_key(sheet.grids.formatted, row_number)
-        stored = tuple(_text(v) for v in sheet.primary_key(sheet.grids.unformatted, row_number))
-        if shown != stored:
-            differing = [
-                f"{c}: displays {s!r} but stores {t!r}"
-                for c, s, t in zip(("Order ID", "Order Date", "Item Name", "Shipment"), shown, stored)
-                if s != t
-            ]
-            offenders.append(f"row {row_number}: " + "; ".join(differing))
-    if not offenders:
-        return Result("key_is_format_independent", "PASS", "every key cell is plain text")
-    return Result(
-        "key_is_format_independent", "FAIL",
-        f"{len(offenders)} row(s) whose identity depends on cell formatting -- "
-        "re-formatting will make the next re-check append a duplicate",
-        _truncate(offenders, opts.max_detail),
-    )
 
 
 @check("duplicate_shipment_lines")
@@ -650,116 +550,6 @@ def check_blank_order_id_rows(sheet: Sheet, opts: Options) -> Result:
 # --------------------------------------------------------------------------------------------------
 
 
-# The columns sheets.ledger_sync owns as LIVE FORMULAS, and the function that produces each. Driving
-# the three checks below off one map is what keeps them honest: adding a formula column without
-# teaching the auditor about it would otherwise make no_stray_formulas fail it as a hand edit while
-# nothing checked it was correct.
-_FORMULA_COLUMNS = {"COGS": _cogs_formula, "Total Profit": _profit_formula}
-
-
-def _formula_coverage(sheet: Sheet, opts: Options, column: str, name: str) -> Result:
-    """"23/23 formulas intact" -- a frozen cell looks normal and just stops updating.
-
-    A FORMATTED read carries the formula's evaluated NUMBER forward, and the RAW row write freezes it
-    into place. Only the FORMULA render mode can tell the difference.
-    """
-    missing, total = [], 0
-    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-        total += 1
-        value = sheet.cell(sheet.grids.formula, row_number, column)
-        if not (isinstance(value, str) and value.startswith("=")):
-            missing.append(f"row {row_number}: holds {value!r} instead of a formula")
-    if not missing:
-        return Result(name, "PASS", f"{total}/{total} rows carry a formula")
-    return Result(name, "FAIL", f"{total - len(missing)}/{total} rows carry a formula",
-                  _truncate(missing, opts.max_detail))
-
-
-def _canonical_formula(text: str) -> str:
-    """A formula as Sheets might re-serialise it, reduced to what actually matters: the cells it reads.
-
-    Sheets rewrites a formula in the spreadsheet's LOCALE -- a European locale separates arguments
-    with `;` -- and may re-space it. Neither changes which cells it points at, which is the only thing
-    the literal check exists to catch (a stale formula after a reorder). Without this, changing the
-    spreadsheet locale would fail every row at once and bury a real stale formula in the noise.
-    Whitespace and case inside string literals are collapsed too; the builder's own literals are
-    lower-case single words, so nothing is lost.
-    """
-    return re.sub(r"\s+", "", str(text)).replace(";", ",").upper()
-
-
-def _formula_literal(sheet: Sheet, opts: Options, column: str, builder, name: str) -> Result:
-    """Nothing else in the repo can catch a STALE formula after a column reorder.
-
-    These formulas address columns by LETTER, and the design notes records those letters moving twice in one
-    day. A stale formula still evaluates and still shows a plausible dollar figure -- it's just
-    silently pointed at the wrong cells. Deriving the expectation from the builder rather than
-    hardcoding it means this follows any future reorder automatically.
-    """
-    wrong, total = [], 0
-    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-        value = sheet.cell(sheet.grids.formula, row_number, column)
-        if not (isinstance(value, str) and value.startswith("=")):
-            continue  # the coverage check owns that failure
-        total += 1
-        expected = builder(row_number)
-        if _canonical_formula(value) != _canonical_formula(expected):
-            wrong.append(
-                f"row {row_number}:\n"
-                f"      is:        {value}\n"
-                f"      should be: {expected}"
-            )
-    if not wrong:
-        return Result(name, "PASS", f"{total}/{total} match {builder.__name__}(row)")
-    return Result(name, "FAIL",
-                  f"{len(wrong)}/{total} formula(s) differ from the current schema -- likely stale "
-                  "after a reorder",
-                  _truncate(wrong, min(opts.max_detail, 4)))
-
-
-@check("profit_formula_coverage")
-def check_profit_formula_coverage(sheet: Sheet, opts: Options) -> Result:
-    return _formula_coverage(sheet, opts, "Total Profit", "profit_formula_coverage")
-
-
-@check("profit_formula_literal")
-def check_profit_formula_literal(sheet: Sheet, opts: Options) -> Result:
-    return _formula_literal(sheet, opts, "Total Profit", _profit_formula, "profit_formula_literal")
-
-
-@check("cogs_formula_coverage")
-def check_cogs_formula_coverage(sheet: Sheet, opts: Options) -> Result:
-    return _formula_coverage(sheet, opts, "COGS", "cogs_formula_coverage")
-
-
-@check("cogs_formula_literal")
-def check_cogs_formula_literal(sheet: Sheet, opts: Options) -> Result:
-    """COGS is the year-end cost figure, so a stale one misreports taxes rather than just a cell."""
-    return _formula_literal(sheet, opts, "COGS", _cogs_formula, "cogs_formula_literal")
-
-
-@check("no_stray_formulas")
-def check_no_stray_formulas(sheet: Sheet, opts: Options) -> Result:
-    """A hand-written formula anywhere but the derived columns gets flattened to text by the next
-    RAW write."""
-    owned = {sheet.col(name) for name in _FORMULA_COLUMNS}
-    offenders = []
-    for row_number, row in sheet.rows(sheet.grids.formula):
-        for index, value in enumerate(row):
-            if index in owned:
-                continue
-            if isinstance(value, str) and value.startswith("="):
-                name = sheet.header[index] if index < len(sheet.header) else f"col {index + 1}"
-                offenders.append(f"row {row_number}, {name}: {value}")
-    if not offenders:
-        return Result("no_stray_formulas", "PASS",
-                      f"no hand-written formulas outside {'/'.join(_FORMULA_COLUMNS)}")
-    return Result("no_stray_formulas", "FAIL",
-                  f"{len(offenders)} formula(s) outside {'/'.join(_FORMULA_COLUMNS)} -- the next "
-                  "sync flattens them to text",
-                  _truncate(offenders, opts.max_detail))
-
-
 # --------------------------------------------------------------------------------------------------
 # Type integrity -- the reason the unformatted grid is read
 # --------------------------------------------------------------------------------------------------
@@ -809,51 +599,6 @@ def check_shipment_is_int(sheet: Sheet, opts: Options) -> Result:
     return Result("shipment_is_int", "FAIL", summary, _truncate(offenders, opts.max_detail))
 
 
-@check("display_round_trips_to_stored")
-def check_display_round_trips_to_stored(sheet: Sheet, opts: Options) -> Result:
-    """For every numeric cell: does the DISPLAYED text read back as the STORED number?
-
-    The generic form of the §8 invariant, which key_is_format_independent applies only to the four
-    key columns. In the other numeric columns the same disagreement corrupts MONEY instead of
-    identity: sync_csv_to_sheet reads the sheet FORMATTED (get_all_values), and _merge_row writes a
-    preserved cell straight back -- so a 0-dp currency format turns a stored 1300.45 into 1300 on the
-    next re-check, a 0-dp percent turns 0.0375 into 0.04, and a format that renders a number as BLANK
-    is the worst case: blank-new + blank-old and the hand-typed Actual Payout is ERASED. This check
-    is read-only; it names the cells so the FORMAT gets fixed before a run touches them.
-    """
-    offenders, checked = [], 0
-    for field in sorted(_NUMERIC_FIELDS):
-        column = _HEADER_FOR_FIELD.get(field)
-        if column is None or sheet.col(column) is None:
-            continue
-        for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-            stored = sheet.cell(sheet.grids.unformatted, row_number, column)
-            if isinstance(stored, bool) or not isinstance(stored, (int, float)):
-                continue  # blanks and text are other checks' business (numeric_columns_are_numeric)
-            checked += 1
-            shown = str(sheet.cell(sheet.grids.formatted, row_number, column))
-            if shown.strip() == "":
-                offenders.append(f"row {row_number}, {column}: stores {stored!r} but DISPLAYS BLANK -- "
-                                 "a re-check would erase it")
-                continue
-            back = _coerce(field, shown)
-            if not isinstance(back, (int, float)) or isinstance(back, bool):
-                offenders.append(f"row {row_number}, {column}: displays {shown!r}, which does not read "
-                                 f"back as a number (stored {stored!r})")
-            elif abs(float(back) - float(stored)) > 1e-9:
-                offenders.append(f"row {row_number}, {column}: displays {shown!r} -> reads back as "
-                                 f"{back!r}, but stores {stored!r} -- the format loses precision")
-    if not offenders:
-        return Result("display_round_trips_to_stored", "PASS",
-                      f"{checked} numeric cell(s) read back exactly from their display text")
-    return Result(
-        "display_round_trips_to_stored", "FAIL",
-        f"{len(offenders)} numeric cell(s) would be corrupted on the next re-check -- fix the column "
-        "FORMAT (not the values) before a run touches them",
-        _truncate(offenders, opts.max_detail),
-    )
-
-
 @check("shipment_numbers_contiguous")
 def check_shipment_numbers_contiguous(sheet: Sheet, opts: Options) -> Result:
     """Every producer numbers an order's boxes 1..N, so a gap means a row went missing or an order was
@@ -888,115 +633,6 @@ def check_shipment_numbers_contiguous(sheet: Sheet, opts: Options) -> Result:
         f"{len(offenders)} order(s) have a gap in their shipment numbers -- a lost row or a renumbered split",
         _truncate(offenders, opts.max_detail),
     )
-
-
-@check("profit_value_matches_inputs")
-def check_profit_value_matches_inputs(sheet: Sheet, opts: Options) -> Result:
-    """Recompute Total Profit = Actual Payout - COGS - Insurance in Python and compare to the cell.
-
-    The literal check compares formula TEXT, and text can be right while the number is wrong (a
-    formula that survives a reorder syntactically but reads a neighbouring column) or wrong while the
-    number is right (a locale re-serialisation). This is the number itself, from the same unformatted
-    cells the formula reads. Rows without a payout, and cancelled rows, are skipped: the formula
-    deliberately renders "" there, and profit_blank_despite_payout owns the blank-with-payout case.
-    """
-    wrong, checked = [], 0
-    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-        status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
-        payout = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Actual Payout"))
-        if status in MONEY_FREE_STATUSES or payout is None:
-            continue
-        shown = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Total Profit"))
-        if shown is None:
-            continue  # profit_blank_despite_payout reports that
-        cogs = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "COGS")) or 0.0
-        insurance = _parse_display_number(sheet.cell(sheet.grids.unformatted, row_number, "Insurance")) or 0.0
-        expected = payout - cogs - insurance
-        checked += 1
-        if abs(float(shown) - expected) > 0.005:
-            wrong.append(
-                f"row {row_number}: Total Profit is {float(shown):.2f}, but "
-                f"{payout:.2f} - {cogs:.2f} - {insurance:.2f} = {expected:.2f}"
-            )
-    if not wrong:
-        return Result("profit_value_matches_inputs", "PASS",
-                      f"{checked} paid-out row(s) recomputed from their own cells")
-    return Result(
-        "profit_value_matches_inputs", "FAIL",
-        f"{len(wrong)}/{checked} Total Profit value(s) disagree with Payout - COGS - Insurance -- "
-        "the formula reads the wrong cells",
-        _truncate(wrong, opts.max_detail),
-    )
-
-
-def _configured_scopes() -> tuple[list[tuple[str, str]], set[str]]:
-    """(profile label, retailer NAME) for every configured profile x retailer, plus every retailer
-    name a scraper exists for. Isolated so the check can be tested without a config.json."""
-    from config.profiles import load_profiles
-    from main import SCRAPERS
-
-    names = {cls.retailer_key: cls.retailer_name for cls in SCRAPERS.values()}
-    scopes = [(p.label, names[key]) for p in load_profiles() if p.profile_id
-              for key in (p.retailers or []) if key in names]
-    return scopes, set(names.values())
-
-
-@check("state_visibility")
-def check_state_visibility(sheet: Sheet, opts: Options) -> Result:
-    """What each scheduled run would SEE -- and which rows no run can see at all.
-
-    Runs the same pure classifier a scrape starts with (ledger_sync.classify_order_state) once per
-    configured profile x retailer, on the FORMATTED grid a real run reads. Per scope it reports
-    terminal / open / needs-re-check counts -- the last one is the next run's browser bill. Then
-    the finding no other check makes: a row whose (Profile, Retailer) matches no configured scope
-    is invisible to every run forever. For a retailer a scraper exists for that is a FAIL (a typo'd
-    or retired profile label); for one nothing scrapes (a hand-entered Newegg row) it is INFO.
-    """
-    from sheets.ledger_sync import classify_order_state
-
-    try:
-        scopes, scraped = _configured_scopes()
-    except Exception as exc:  # noqa: BLE001 -- no config on this host is a SKIP, not a crash
-        return Result("state_visibility", "SKIP", f"could not load the configured profiles ({exc})")
-
-    if not scopes:
-        return Result("state_visibility", "SKIP",
-                      "no configured profile x retailer on this host -- nothing to compare the rows against")
-    grid = sheet.grids.formatted
-    lines = []
-    for label, name in scopes:
-        st = classify_order_state(grid, label, None, name)
-        need = sum(1 for o in st["open_orders"] if o.get("needs_agent"))
-        lines.append(f"{label}/{name}: {len(st['delivered_ids']) + len(st['cancelled_ids'])} terminal, "
-                     f"{len(st['open_orders'])} open ({need} need a re-read)")
-
-    configured = set(scopes)
-    invisible, hand_entered = [], []
-    for row_number, _ in sheet.ledger_rows(grid):
-        profile = str(sheet.cell(grid, row_number, "Profile")).strip()
-        retailer = str(sheet.cell(grid, row_number, "Retailer")).strip()
-        if (profile, retailer) in configured:
-            continue
-        status = str(sheet.cell(grid, row_number, "Status")).strip().lower()
-        where = f"row {row_number}: Profile {profile!r} / Retailer {retailer!r} [{status}]"
-        # A TERMINAL row never needs a run again -- an imported delivered/paid order under a
-        # profile that does not scrape that retailer is fine (INFO). An OPEN one is the finding:
-        # nothing will ever re-check or close it.
-        if retailer in scraped and status not in TERMINAL_STATUSES:
-            invisible.append(where)
-        else:
-            hand_entered.append(where)
-
-    summary = " | ".join(lines) if lines else "no configured profile x retailer"
-    if invisible:
-        return Result("state_visibility", "FAIL",
-                      f"{len(invisible)} row(s) visible to NO configured run -- their orders can never be "
-                      "re-checked or closed", _truncate(invisible + [f"scopes: {summary}"], opts.max_detail))
-    if hand_entered:
-        return Result("state_visibility", "INFO",
-                      f"{summary}; {len(hand_entered)} terminal / hand-entered row(s) outside every configured run",
-                      _truncate(hand_entered, opts.max_detail))
-    return Result("state_visibility", "PASS", summary)
 
 
 @check("return_columns_consistent")
@@ -1530,30 +1166,6 @@ def check_content_outside_the_schema(sheet: Sheet, opts: Options) -> Result:
     return Result("content_outside_the_schema", "PASS", f"nothing outside the {width}-column data block")
 
 
-@check("no_formula_errors", requires_schema=False)
-def check_no_formula_errors(sheet: Sheet, opts: Options) -> Result:
-    """Spreadsheet error values anywhere on the sheet.
-
-    A `#REF!` is exactly what deleting a column leaves behind, and `profit_formula_coverage` would
-    still see a formula there and pass. Matched as the WHOLE cell value, never as a prefix: Costco
-    item names legitimately contain "#" (the mapping appends "(Item #1847785)" to disambiguate
-    truncated descriptions), so a "starts with #" rule would flag real data on every Costco row.
-    """
-    offenders = []
-    for row_number, row in sheet.rows(sheet.grids.unformatted):
-        for index, value in enumerate(row):
-            if isinstance(value, str) and value.strip() in _SHEET_ERRORS:
-                name = sheet.header[index] if index < len(sheet.header) else f"col {index + 1}"
-                offenders.append(f"row {row_number}, {name}: {value.strip()}")
-    if not offenders:
-        return Result("no_formula_errors", "PASS", "no #REF!/#VALUE!/#N/A cells")
-    return Result(
-        "no_formula_errors", "FAIL",
-        f"{len(offenders)} cell(s) hold a spreadsheet error value",
-        _truncate(offenders, opts.max_detail),
-    )
-
-
 @check("payout_is_cost_weighted")
 def check_payout_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
     """A payout arrives per PACKAGE, but the ledger is one row per (shipment x item).
@@ -1644,37 +1256,6 @@ def check_paid_rows_have_a_payout(sheet: Sheet, opts: Options) -> Result:
             f"{len(blanks)} paid row(s) have no payout yet", _truncate(blanks, opts.max_detail),
         )
     return Result("paid_rows_have_a_payout", "PASS", "every paid row carries its payout")
-
-
-@check("profit_blank_despite_payout")
-def check_profit_blank_despite_payout(sheet: Sheet, opts: Options) -> Result:
-    """A paid-out row whose Total Profit renders BLANK — the real signature of a broken formula.
-
-    Scanning for `#REF!` mostly WON'T catch a broken profit formula, because `_profit_formula` wraps
-    its body in `IFERROR(..., "")`. An error raised inside is swallowed and the cell renders blank —
-    indistinguishable, to the eye, from the deliberate blank of a not-yet-paid-out row. So the whole
-    profit column can silently go blank and an error scan sees nothing.
-
-    The distinguishing signal is the pairing: `_profit_formula` returns "" only when Actual Payout is
-    empty. Blank profit + non-blank payout therefore means the formula failed, and money that should
-    be reported isn't.
-    """
-    offenders = []
-    for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
-        payout = sheet.cell(sheet.grids.unformatted, row_number, "Actual Payout")
-        profit = sheet.cell(sheet.grids.unformatted, row_number, "Total Profit")
-        if payout == "" or payout is None:
-            continue
-        if profit == "" or profit is None:
-            order_id = sheet.cell(sheet.grids.formatted, row_number, "Order ID")
-            offenders.append(f"row {row_number}: order {order_id} has a payout of {payout!r} but no profit")
-    if not offenders:
-        return Result("profit_blank_despite_payout", "PASS", "every paid-out row reports a profit")
-    return Result(
-        "profit_blank_despite_payout", "FAIL",
-        f"{len(offenders)} paid-out row(s) render a blank profit -- the formula is failing silently",
-        _truncate(offenders, opts.max_detail),
-    )
 
 
 @check("status_is_present")
@@ -1906,46 +1487,15 @@ def check_open_row_staleness(sheet: Sheet, opts: Options) -> Result:
     )
 
 
-@check("no_merged_cells", requires_schema=False)
-def check_no_merged_cells(sheet: Sheet, opts: Options) -> Result:
-    """A merged cell reads as its top-left value and BLANKS its neighbours.
-
-    That's uniquely nasty here: _merge_row's blank-never-overwrites rule would then preserve the old
-    values as though the data were legitimately absent, so a merge quietly freezes those cells forever
-    instead of erroring. Read from the sheet metadata captured at read time (see read_grids), so an
-    older snapshot without it degrades to SKIP rather than a false PASS.
-    """
-    merges = sheet.grids.meta.get("merges")
-    if merges is None:
-        return Result("no_merged_cells", "SKIP", "snapshot predates merge capture")
-    if not merges:
-        return Result("no_merged_cells", "PASS", "no merged cells")
-    details = [
-        f"rows {m.get('startRowIndex', '?')}-{m.get('endRowIndex', '?')}, "
-        f"cols {m.get('startColumnIndex', '?')}-{m.get('endColumnIndex', '?')}"
-        for m in merges
-    ]
-    return Result(
-        "no_merged_cells", "FAIL",
-        f"{len(merges)} merged range(s) -- merged cells blank their neighbours on read",
-        _truncate(details, opts.max_detail),
-    )
-
-
 # --------------------------------------------------------------------------------------------------
 # Running and rendering
 # --------------------------------------------------------------------------------------------------
 
 
-def run_checks(sheet: Sheet, opts: Options, *, sheet_checks: bool = True) -> list[Result]:
-    """Every check, in registration order. `sheet_checks=False` (the ledger is the database)
-    reports the SHEET_ONLY_CHECKS as SKIP instead of running them against a grid that has no
-    formulas or formats to inspect."""
+def run_checks(sheet: Sheet, opts: Options) -> list[Result]:
+    """Every check, in registration order."""
     results = []
     for name, requires_schema, fn in CHECKS:
-        if not sheet_checks and name in SHEET_ONLY_CHECKS:
-            results.append(Result(name, "SKIP", "a Google Sheet check; the ledger is the database"))
-            continue
         if requires_schema and not sheet.schema_ok:
             results.append(Result(name, "SKIP", "header doesn't match the schema -- indices would be wrong"))
             continue
@@ -2225,26 +1775,17 @@ def render_json(results: list[Result], meta: dict, strict: bool, diff: dict | No
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Read-only audit of the Google Sheet ledger. Writes nothing, ever.",
+        description="Read-only audit of the ledger. Writes nothing, ever.",
     )
     parser.add_argument("--json", action="store_true", help="machine-readable output (for before/after diffs)")
     parser.add_argument("--strict", action="store_true", help="treat warnings as failures in the exit code")
     parser.add_argument("--expect-rows", type=int, default=None, help="fail unless the sheet has exactly N data rows")
     parser.add_argument("-v", "--verbose", action="store_true", help="show detail lines for passing checks too")
     parser.add_argument("--save-snapshot", metavar="PATH", help="also write the raw grids to a local JSON file (a bare name lands under data/, which is gitignored)")
-    parser.add_argument("--from-snapshot", metavar="PATH", help="audit a saved snapshot offline (no credentials, no API calls; bare names resolve under data/)")
+    parser.add_argument("--from-snapshot", metavar="PATH", help="audit a saved snapshot offline (bare names resolve under data/)")
     parser.add_argument("--compare", metavar="PATH", help="also report what changed vs an earlier --save-snapshot (added/removed/changed rows; bare names resolve under data/)")
     parser.add_argument("--stale-days", type=int, default=3, help="warn when an OPEN row hasn't been re-scraped in this many days (default 3)")
     args = parser.parse_args()
-
-    sheet_checks = True
-    if not args.from_snapshot:
-        from config.settings import settings
-
-        if settings.ledger_is_db():
-            # The ledger is data/ledger.sqlite3: the data checks run against it through the
-            # worksheet adapter; the Sheet-only checks (formulas, formats, merges) report SKIP.
-            sheet_checks = False
 
     if args.from_snapshot:
         from_path = _snapshot_path(args.from_snapshot)
@@ -2269,7 +1810,7 @@ def main() -> None:
 
     sheet = Sheet(grids)
     opts = Options(expect_rows=args.expect_rows, strict=args.strict, stale_days=args.stale_days)
-    results = run_checks(sheet, opts, sheet_checks=sheet_checks)
+    results = run_checks(sheet, opts)
 
     diff = None
     compare_path = _snapshot_path(args.compare) if args.compare else None

@@ -18,9 +18,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable
 
-from scripts.audit_sheet import (
-    SHEET_ONLY_CHECKS, Grids, Options, Result, Sheet, read_grids, run_checks,
-)
+from scripts.audit_sheet import Grids, Options, Result, Sheet, read_grids, run_checks
 
 #: The row numbers a detail line names: "row 157: ...", "row 157, Card: ...", "rows [2, 3]: ...".
 _ROWS = re.compile(r"^rows?\s+([\d,\s\[\]]+)")
@@ -52,7 +50,6 @@ class Finding:
 @dataclass
 class AuditReport:
     results: list[Result]
-    sheet_checks: bool
     #: Every finding that names a row, by that row's upsert key.
     by_key: dict[RowKey, list[Finding]] = field(default_factory=dict)
     #: The keys each check flagged, in first-seen order.
@@ -86,13 +83,12 @@ class AuditReport:
         return out
 
 
-def run_audit(grids: Grids, *, sheet_checks: bool, stale_days: int = 3) -> AuditReport:
+def run_audit(grids: Grids, *, stale_days: int = 3) -> AuditReport:
     """Every check over `grids`, its row-level findings keyed by the rows' upsert keys."""
     sheet = Sheet(grids)
     # No truncation: the page shows every affected row, not the CLI's first eight.
-    results = run_checks(sheet, Options(max_detail=10_000_000, stale_days=stale_days),
-                         sheet_checks=sheet_checks)
-    report = AuditReport(results=results, sheet_checks=sheet_checks)
+    results = run_checks(sheet, Options(max_detail=10_000_000, stale_days=stale_days))
+    report = AuditReport(results=results)
     grid = grids.formatted
     for r in results:
         if r.status not in FINDING_STATUSES:
@@ -158,29 +154,21 @@ def grids_from_snapshot(snapshot) -> Grids:
                        "merges": None})
 
 
-def audit_grids(reader, snapshot) -> tuple[Grids, bool]:
-    """(the grids to audit, whether the Sheet-only checks apply) for the dashboard's backend."""
-    backend = getattr(reader, "backend", "")
-    if backend == "db":
+def audit_grids(reader, snapshot) -> Grids:
+    """The grids to audit for the dashboard's backend: the ledger file through the read-only
+    worksheet adapter, or the CSV snapshot's rows."""
+    if getattr(reader, "backend", "") == "db":
         from ledger_db.worksheet import DbWorksheet
 
         worksheet = DbWorksheet(reader.db, read_only=True)
-        return read_grids(worksheet, worksheet.title), False
-    if backend == "sheet":
-        opener = getattr(reader, "_opener", None)
-        if opener is None:
-            from scripts.audit_sheet import open_worksheet_readonly
-
-            opener = open_worksheet_readonly
-        worksheet, title = opener()
-        return read_grids(worksheet, title), True
-    return grids_from_snapshot(snapshot), False
+        return read_grids(worksheet, worksheet.title)
+    return grids_from_snapshot(snapshot)
 
 
 def audit_key(reader, snapshot) -> tuple:
     """What the cached report is keyed on: a digest of the rows the dashboard just loaded, so a
-    cell edit, a sync or a fresh mirror rebuilds the report and a page load plus its htmx swap
-    share one. (Not the file's timestamp: NTFS updates it lazily, and a Sheet has none.)"""
+    cell edit or a sync rebuilds the report and a page load plus its htmx swap share one. (Not the
+    file's timestamp: NTFS updates it lazily.)"""
     digest = hashlib.blake2b(digest_size=16)
     for row in snapshot.rows:
         digest.update(str(row.row_number).encode())

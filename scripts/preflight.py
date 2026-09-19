@@ -166,34 +166,6 @@ def check_config_files(root: Path = ROOT) -> list[Result]:
     except Exception as exc:  # noqa: BLE001 — a malformed section is already a FAIL above
         out.append(Result(FAIL, "config.json sections", f"could not be read ({exc})."))
 
-    # Google credentials: inlined in config.json, unless a standalone file is pointed at.
-    #
-    # Resolved through the helper, not os.getenv: `google.service_account_file` is a config key like
-    # any other now, so reading only the environment would skip the existence check entirely for
-    # anyone who set the path in the file — and a missing file there fails every run at sync.
-    from config.settings import _get_str as _resolve
-    sa = _resolve("GOOGLE_SERVICE_ACCOUNT_FILE")
-    if sa:
-        sa_path = Path(sa) if Path(sa).is_absolute() else root / sa
-        out.append(_check_path(sa_path, required=True, parses_json=True,
-                               what="the Sheet cannot be read or written; every run fails at sync."))
-        from config.loader import config_value
-        if isinstance(config_value("google.service_account"), dict):
-            out.append(Result(
-                WARN, "google credentials",
-                f"GOOGLE_SERVICE_ACCOUNT_FILE is set, so {sa_path.name} OVERRIDES the credential "
-                f"inlined in config.json — which is then dead weight, and deleting that file would "
-                f"break the run even though config.json looks complete. Unset the variable to use "
-                f"the inlined one.",
-            ))
-    else:
-        from config.loader import config_value
-        info = config_value("google.service_account")
-        out.append(Result(OK, "google credentials", "inlined in config.json")
-                   if isinstance(info, dict) and info.get("private_key")
-                   else Result(FAIL, "google credentials",
-                               "config.json has no `google.service_account` block and "
-                               "GOOGLE_SERVICE_ACCOUNT_FILE is unset — every run fails at sync."))
     return out
 
 
@@ -271,7 +243,6 @@ def check_costco_tokens(root: Path = ROOT) -> list[Result]:
 # Env vars with no safe default: without them a run either cannot start or cannot record anything.
 REQUIRED_ENV = {
     "BROWSER_USE_API_KEY": "no cloud browser can be created, so no retailer can be read.",
-    "GOOGLE_SHEET_ID": "there is no ledger to write to; every run fails at sync.",
 }
 
 
@@ -293,7 +264,6 @@ def check_env() -> list[Result]:
 
     resolved = {
         "BROWSER_USE_API_KEY": os.getenv("BROWSER_USE_API_KEY", ""),
-        "GOOGLE_SHEET_ID": _get_str("GOOGLE_SHEET_ID"),
     }
     out = [
         Result(FAIL, name, f"is unset — {why}") if not str(resolved.get(name, "")).strip()

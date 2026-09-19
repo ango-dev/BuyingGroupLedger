@@ -172,24 +172,13 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
     return [base[name] for name in HEADER]
 
 
-def build(*rows: list[Cell], merges=None) -> Sheet:
-    return Sheet(grids_for(*rows, merges=merges))
+def build(*rows: list[Cell]) -> Sheet:
+    return Sheet(grids_for(*rows))
 
 
-def grids_for(*rows: list[Cell], merges=None) -> Grids:
-    """The Grids a fake worksheet holding these rows would produce.
-
-    `merges` is threaded through meta the way read_grids captures it live, so the merge check can be
-    exercised without the fake needing to imitate the whole spreadsheet-metadata API.
-    """
-    worksheet = RenderedFakeWorksheet([header_cells(), *rows])
-    grids = audit_sheet.read_grids(worksheet)
-    return Grids(
-        formatted=grids.formatted,
-        unformatted=grids.unformatted,
-        formula=grids.formula,
-        meta={**grids.meta, "merges": merges},
-    )
+def grids_for(*rows: list[Cell]) -> Grids:
+    """The Grids a fake worksheet holding these rows would produce."""
+    return audit_sheet.read_grids(RenderedFakeWorksheet([header_cells(), *rows]))
 
 
 def result_for(sheet: Sheet, name: str, opts: Options | None = None):
@@ -330,14 +319,6 @@ def test_an_order_date_formatted_as_a_real_date_is_caught_twice():
     dates = result_for(sheet, "dates_are_iso_text")
     assert dates.status == "FAIL"
     assert "SERIAL" in dates.details[0] and "2026-08-06" in dates.details[0]
-    # ... and the generic invariant catches the same thing without knowing about dates at all.
-    assert result_for(sheet, "key_is_format_independent").status == "FAIL"
-
-
-def test_a_percent_formatted_rate_is_fine_because_formatting_is_the_users_call():
-    sheet = build(row_cells(2, **{"Cashback Rate": Cell(0.04, fmt="percent")}))
-    assert result_for(sheet, "numeric_columns_are_numeric").status == "PASS"
-    assert result_for(sheet, "key_is_format_independent").status == "PASS"
 
 
 def test_a_currency_string_written_back_as_text_is_the_section_8_signature():
@@ -369,48 +350,6 @@ def test_card_last4_stored_as_an_int_loses_its_leading_zero():
 def test_leading_zeros_are_reported_when_intact():
     sheet = build(row_cells(2), row_cells(3))
     assert "0315" in result_for(sheet, "card_last4_is_text").summary
-
-
-def test_a_frozen_profit_formula_is_caught():
-    """ledger_sync.py:520-524 — a formatted read carries the evaluated number forward and the RAW row
-    write freezes it. The frozen cell looks completely normal; it just stops updating."""
-    sheet = build(row_cells(2, **{"Total Profit": Cell(41.99)}))
-    assert result_for(sheet, "profit_formula_coverage").status == "FAIL"
-
-
-def test_a_stale_formula_from_before_a_reorder_is_caught():
-    """A stale formula still evaluates and still shows a plausible dollar figure.
-
-    The perturbed column is derived from _COL rather than written as a literal letter: this test used
-    to say .replace("Q2", "X2"), and when the 2026-08-13 reorder moved Actual Payout off Q that became
-    a silent no-op — the formula was left untouched, the check passed, and the test still "passed"
-    while asserting nothing at all.
-    """
-    stale = _profit_formula(2).replace(f'{_COL["payout_amount"]}2', "X2")
-    assert stale != _profit_formula(2), "the perturbation must actually change the formula"
-    sheet = build(row_cells(2, **{"Total Profit": Cell("", formula=stale)}))
-    result = result_for(sheet, "profit_formula_literal")
-    assert result.status == "FAIL"
-    assert result_for(sheet, "profit_formula_coverage").status == "PASS"
-
-
-def test_a_stale_cogs_formula_is_caught():
-    """COGS is the year-end cost figure, so a stale one misreports taxes, not just a cell."""
-    stale = _cogs_formula(2).replace(f'{_COL["total_cost"]}2', "X2")
-    assert stale != _cogs_formula(2)
-    sheet = build(row_cells(2, **{"COGS": Cell(798.0, formula=stale)}))
-    assert result_for(sheet, "cogs_formula_literal").status == "FAIL"
-    assert result_for(sheet, "cogs_formula_coverage").status == "PASS"
-
-
-def test_a_frozen_cogs_formula_is_caught():
-    sheet = build(row_cells(2, **{"COGS": Cell(798.0)}))
-    assert result_for(sheet, "cogs_formula_coverage").status == "FAIL"
-
-
-def test_a_hand_written_formula_elsewhere_is_caught():
-    sheet = build(row_cells(2, **{"Total Cost": Cell(798.0, formula="=C2*2")}))
-    assert result_for(sheet, "no_stray_formulas").status == "FAIL"
 
 
 def test_a_newline_in_item_name_fails_but_elsewhere_only_warns():
@@ -625,19 +564,6 @@ class TestContentOutsideTheSchema:
         assert result_for(build(row_cells(2), row_cells(3)), "content_outside_the_schema").status == "PASS"
 
 
-class TestNoFormulaErrors:
-    def test_a_ref_error_is_caught(self):
-        """What a column delete leaves behind -- and profit_formula_coverage would still see a formula."""
-        sheet = build(row_cells(2, **{"Total Profit": Cell("#REF!", formula="=IF(#REF!,1,2)")}))
-        assert result_for(sheet, "no_formula_errors").status == "FAIL"
-
-    def test_a_costco_item_number_is_not_an_error(self):
-        """THE false positive to avoid: costco_mapping appends "(Item #N)" to disambiguate Costco's
-        truncated descriptions, so a 'starts with #' rule would flag real data on every Costco row."""
-        sheet = build(row_cells(2, **{"Item Name": Cell("KIRKLAND SIGNATURE (Item #1847785)")}))
-        assert result_for(sheet, "no_formula_errors").status == "PASS"
-
-
 class TestCashbackRateSane:
     def test_a_rate_of_4_meaning_4_percent_is_caught(self):
         """It multiplies straight into the profit formula -- 100x overstatement, plausible-looking."""
@@ -716,37 +642,8 @@ class TestSupersededRowsCarryNoMoney:
         assert result_for(sheet, "shipment_numbers_contiguous").status == "PASS"
 
 
-class TestMergedCells:
-    def test_a_merge_is_a_failure(self):
-        """A merged cell reads as its top-left value and blanks its neighbours -- which _merge_row
-        then PRESERVES as though the data were legitimately absent, freezing those cells forever."""
-        merges = [{"startRowIndex": 1, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": 2}]
-        assert result_for(build(row_cells(2), merges=merges), "no_merged_cells").status == "FAIL"
-
-    def test_no_merges_passes(self):
-        assert result_for(build(row_cells(2), merges=[]), "no_merged_cells").status == "PASS"
-
-    def test_a_snapshot_without_merge_data_skips_rather_than_passing(self):
-        """An older snapshot must not report a confident PASS about something it never captured."""
-        assert result_for(build(row_cells(2), merges=None), "no_merged_cells").status == "SKIP"
-
-
 class TestReviewFindings:
     """Bugs an adversarial review found in the checks themselves, and the checks it prompted."""
-
-    def test_a_broken_formula_renders_blank_and_only_the_payout_pairing_catches_it(self):
-        """_profit_formula wraps its body in IFERROR(..., ""), so an error inside is SWALLOWED and the
-        cell renders blank -- identical to a not-yet-paid-out row. An error-string scan sees nothing;
-        the blank-profit-with-a-payout pairing is what actually catches it."""
-        sheet = build(row_cells(2, **{
-            "Actual Payout": Cell(1500.0, fmt="currency"),
-            "Total Profit": Cell("", formula=_profit_formula(2)),
-        }))
-        assert result_for(sheet, "profit_blank_despite_payout").status == "FAIL"
-        assert result_for(sheet, "no_formula_errors").status == "PASS"  # the scan is blind to it
-
-    def test_an_unpaid_row_with_a_blank_profit_is_correct_not_a_failure(self):
-        assert result_for(build(row_cells(2)), "profit_blank_despite_payout").status == "PASS"
 
     def test_a_blank_status_keeps_an_order_open_and_billable_forever(self):
         """column_shape guards with `if status and ...`, so blank slipped through; load_order_state
@@ -1136,62 +1033,6 @@ class TestShipmentNumbersContiguous:
         assert result_for(sheet, "shipment_numbers_contiguous").status == "PASS"
 
 
-class TestFormulaLocale:
-    """Sheets re-serialises formulas in the spreadsheet's locale; that must not read as 'stale'."""
-
-    def test_a_semicolon_locale_still_matches(self):
-        european = _profit_formula(2).replace(",", "; ")
-        assert european != _profit_formula(2)
-        sheet = build(row_cells(2, **{"Total Profit": Cell("", formula=european)}))
-        assert result_for(sheet, "profit_formula_literal").status == "PASS"
-
-    def test_a_respaced_cogs_formula_still_matches(self):
-        respaced = _cogs_formula(2).replace("(", "( ").replace(")", " )")
-        sheet = build(row_cells(2, **{"COGS": Cell(798.0, formula=respaced)}))
-        assert result_for(sheet, "cogs_formula_literal").status == "PASS"
-
-    def test_a_changed_column_letter_is_still_caught_after_canonicalising(self):
-        stale = _profit_formula(2).replace(f'{_COL["payout_amount"]}2', "X2").replace(",", ";")
-        sheet = build(row_cells(2, **{"Total Profit": Cell("", formula=stale)}))
-        assert result_for(sheet, "profit_formula_literal").status == "FAIL"
-
-
-class TestProfitValueMatchesInputs:
-    """The number itself, recomputed in Python from the same cells the formula reads."""
-
-    def _row(self, profit, payout=900.0, cogs=798.0, insurance=7.4, status="paid"):
-        return row_cells(2, **{
-            "Status": Cell(status),
-            "Actual Payout": Cell(payout, fmt="currency"),
-            "COGS": Cell(cogs, fmt="currency", formula=_cogs_formula(2)),
-            "Insurance": Cell(insurance, fmt="currency"),
-            "Total Profit": Cell(profit, formula=_profit_formula(2)),
-        })
-
-    def test_a_consistent_row_passes(self):
-        assert result_for(build(self._row(94.6)), "profit_value_matches_inputs").status == "PASS"
-
-    def test_a_blank_insurance_counts_as_zero(self):
-        sheet = build(self._row(102.0, insurance=""))
-        assert result_for(sheet, "profit_value_matches_inputs").status == "PASS"
-
-    def test_a_disagreeing_number_fails_and_shows_the_arithmetic(self):
-        result = result_for(build(self._row(50.0)), "profit_value_matches_inputs")
-        assert result.status == "FAIL"
-        assert "900.00 - 798.00 - 7.40 = 94.60" in result.details[0]
-
-    def test_rows_without_a_payout_or_cancelled_are_skipped(self):
-        no_payout = build(self._row(50.0, payout=""))
-        cancelled = build(self._row(50.0, status="cancelled"))
-        assert result_for(no_payout, "profit_value_matches_inputs").status == "PASS"
-        assert result_for(cancelled, "profit_value_matches_inputs").status == "PASS"
-
-    def test_a_blank_profit_is_left_to_the_payout_pairing_check(self):
-        sheet = build(self._row(""))
-        assert result_for(sheet, "profit_value_matches_inputs").status == "PASS"
-        assert result_for(sheet, "profit_blank_despite_payout").status != "PASS"
-
-
 class TestOrderLevelCellsAgree:
     """Retailer / Profile / Order Date are per-ORDER facts; a row that disagrees is invisible to its run."""
 
@@ -1225,31 +1066,6 @@ class TestOrderLevelCellsAgree:
             row_cells(3, **{"Order ID": Cell("B2"), "Profile": Cell("profile-bravo")}),
         )
         assert result_for(sheet, "order_level_cells_agree").status == "PASS"
-
-
-class TestDisplayRoundTripsToStored:
-    """The generic §8 invariant: every numeric cell's display text must read back as its stored value."""
-
-    def test_the_default_formats_all_round_trip(self):
-        assert result_for(build(row_cells(2)), "display_round_trips_to_stored").status == "PASS"
-
-    def test_a_zero_decimal_currency_loses_cents(self):
-        sheet = build(row_cells(2, **{"Total Cost": Cell(1300.45, fmt="currency0")}))
-        r = result_for(sheet, "display_round_trips_to_stored")
-        assert r.status == "FAIL" and "loses precision" in r.details[0] and "Total Cost" in r.details[0]
-
-    def test_a_zero_decimal_percent_rounds_the_rate(self):
-        sheet = build(row_cells(2, **{"Cashback Rate": Cell(0.0375, fmt="percent0")}))
-        assert result_for(sheet, "display_round_trips_to_stored").status == "FAIL"
-
-    def test_a_format_that_hides_the_number_is_the_erase_case(self):
-        sheet = build(row_cells(2, **{"Actual Payout": Cell(631.0, fmt="hidden")}))
-        r = result_for(sheet, "display_round_trips_to_stored")
-        assert r.status == "FAIL" and "DISPLAYS BLANK" in r.details[0] and "erase" in r.details[0]
-
-    def test_blank_and_text_cells_are_left_to_other_checks(self):
-        sheet = build(row_cells(2, **{"Insurance": Cell(""), "Shipping": Cell("n/a")}))
-        assert result_for(sheet, "display_round_trips_to_stored").status == "PASS"
 
 
 class TestCompareEmitsResults:
@@ -1340,50 +1156,6 @@ class TestCompareEmitsResults:
         diff = audit_sheet.diff_snapshots(grids_for(*before), grids_for(*after))
         results = audit_sheet.classify_diff(diff, Options())
         assert audit_sheet.exit_code(results, strict=False) == 1
-
-
-class TestStateVisibility:
-    """What each run would see, and the rows no run can see."""
-
-    def _scopes(self, monkeypatch, scopes, scraped=("Best Buy", "Amazon", "Amazon Business", "Costco")):
-        monkeypatch.setattr(audit_sheet, "_configured_scopes", lambda: (scopes, set(scraped)))
-
-    def test_every_row_in_a_configured_scope_passes_with_counts(self, monkeypatch):
-        self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
-        sheet = build(
-            row_cells(2, Status=Cell("delivered")),
-            row_cells(3, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Order ID": Cell("BBY01-2")}),
-        )
-        r = result_for(sheet, "state_visibility")
-        assert r.status == "PASS"
-        assert "profile-alpha/Best Buy: 1 terminal, 1 open (1 need a re-read)" in r.summary
-
-    def test_an_open_row_no_configured_run_can_see_fails(self, monkeypatch):
-        self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
-        sheet = build(row_cells(2, Profile=Cell("profile-bravo"), Status=Cell("shipped")))
-        r = result_for(sheet, "state_visibility")
-        assert r.status == "FAIL" and "row 2: Profile 'profile-bravo' / Retailer 'Best Buy' [shipped]" in r.details[0]
-
-    def test_a_terminal_row_outside_every_run_is_only_info(self, monkeypatch):
-        """An imported delivered/paid order never needs a run again -- it must not fail the audit."""
-        self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
-        sheet = build(row_cells(2, Profile=Cell("profile-bravo"), Status=Cell("paid")))
-        assert result_for(sheet, "state_visibility").status == "INFO"
-
-    def test_a_hand_entered_retailer_is_info_not_fail(self, monkeypatch):
-        self._scopes(monkeypatch, [("profile-alpha", "Best Buy")])
-        sheet = build(row_cells(2), row_cells(3, Retailer=Cell("Newegg"), Profile=Cell("")))
-        r = result_for(sheet, "state_visibility")
-        assert r.status == "INFO" and "1 terminal / hand-entered row(s)" in r.summary
-
-    def test_no_config_is_a_skip(self, monkeypatch):
-        monkeypatch.setattr(audit_sheet, "_configured_scopes", lambda: (_ for _ in ()).throw(FileNotFoundError("config.json")))
-        assert result_for(build(row_cells(2)), "state_visibility").status == "SKIP"
-
-    def test_no_scopes_at_all_is_a_skip_not_every_row_invisible(self, monkeypatch):
-        self._scopes(monkeypatch, [])
-        assert result_for(build(row_cells(2)), "state_visibility").status == "SKIP"
-
 
 
 class TestImportedShapesAreNotFailures:

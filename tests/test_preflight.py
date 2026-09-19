@@ -100,8 +100,8 @@ class TestConfigFiles:
     ):
         """Same severity split as before, on sections rather than files: no profiles means nothing
         is scraped at all, while no cards only misstates profit."""
-        self._write(tmp_path, google={"service_account": {"private_key": "x"}})
-        config_file(google={"service_account": {"private_key": "x"}})
+        self._write(tmp_path, web={"port": 8765})
+        config_file(web={"port": 8765})
 
         results = preflight.check_config_files(root=tmp_path)
 
@@ -130,37 +130,13 @@ class TestConfigFiles:
         assert result.level == WARN
         assert "NO LONGER READ" in result.detail
 
-    def test_the_inlined_google_credential_satisfies_the_check(
-        self, tmp_path, monkeypatch, config_file
-    ):
-        monkeypatch.delenv("GOOGLE_SERVICE_ACCOUNT_FILE", raising=False)
-        self._write(tmp_path, google={"service_account": {"private_key": "x"}})
-        config_file(google={"service_account": {"private_key": "x"}})
-
-        assert _by_name(preflight.check_config_files(root=tmp_path),
-                        "google credentials").level == OK
-
-    def test_service_account_path_still_follows_the_env_var(self, tmp_path, monkeypatch, config_file):
-        """The standalone file remains supported and still overrides the inlined block."""
-        self._write(tmp_path, profiles=[{"label": "p", "retailers": ["amazon"]}])
-        config_file(profiles=[{"label": "p", "retailers": ["amazon"]}])
-        key = tmp_path / "nested" / "key.json"
-        key.parent.mkdir()
-        key.write_text(json.dumps({"type": "service_account"}), encoding="utf-8")
-        monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_FILE", str(key))
-
-        assert _by_name(preflight.check_config_files(root=tmp_path), "key.json").level == OK
-
-
 class TestEnv:
     def test_unset_required_env_fails_with_its_consequence(self, monkeypatch):
         monkeypatch.setenv("BROWSER_USE_API_KEY", "")
-        monkeypatch.setenv("GOOGLE_SHEET_ID", "sheet-123")
 
         results = preflight.check_env()
 
         assert _by_name(results, "BROWSER_USE_API_KEY").level == FAIL
-        assert _by_name(results, "GOOGLE_SHEET_ID").level == OK
 
     def test_no_alert_channel_warns_because_nothing_could_report_a_failure(
         self, monkeypatch, config_file

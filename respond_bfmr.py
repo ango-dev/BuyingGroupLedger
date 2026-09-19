@@ -41,7 +41,7 @@ import logging
 import urllib.request
 from datetime import datetime, timezone
 
-from gspread.utils import ValueRenderOption
+from ledger_db.worksheet import ValueRenderOption
 
 from alerts import notifier
 from alerts.notifier import alert
