@@ -427,6 +427,17 @@ class TestOrdersRoutes:
         formula = client.post("/orders/cell", data={**KEY, "field": "cogs", "value": "1"})
         assert "not editable" in formula.text
 
+    def test_the_keep_my_edits_switch_is_on_for_orders_and_off_for_audit_and_rides_the_write(self, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        assert 'id="protect-edits" checked' in client.get("/orders").text
+        audit = client.get("/audit").text
+        assert 'id="protect-edits">' in audit and 'id="protect-edits" checked' not in audit
+        # the route passes `protect` through: the write lands, and the activity log says it was a correction
+        response = client.post("/orders/cell", data={**KEY, "field": "insurance", "value": "2", "expected": "6.4", "protect": "0"})
+        assert response.status_code == 200 and "data-error" not in response.text
+        events = (logs_dir / "activity.jsonl").read_text(encoding="utf-8")
+        assert "a correction; runs may overwrite it" in events
+
     def test_a_choice_cell_write_refreshes_the_dropdown_out_of_band(self, sheet, tmp_path, logs_dir):
         """a value typed and then changed back must not linger in the dropdown --
         the list is re-rendered from the ledger with every choice-cell write; a text column's write

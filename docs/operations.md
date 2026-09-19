@@ -168,7 +168,9 @@ narrow each other by the pairings the ledger and the settings' cards know. Track
 checkbox: a click, Space or Enter toggles it. The Receipt Link cell carries an upload button
 (⤒): pick a file and the link lands on every row of the order, the table re-rendering in place.
 Every write is one conflict-checked cell write, run one after another. **A cell you edit is protected from then
-on**: the scheduled
+on** while the count line's *keep my edits from runs* switch is on (it is, on Orders; off on Audit
+and Recon, where an edit usually fixes a finding the run should then own -- switched off, a write
+is a correction the runs may overwrite, and it releases any protection the cell had): the scheduled
 run's upsert, its order-level reproration and the buying-group sync all keep a hand-typed value
 (`ledger_db/hand_edits`, a table in the ledger file that the dashboard's writer fills; the cell
 shows a coloured left edge and says so in its tooltip). Clearing the cell puts back what the run had

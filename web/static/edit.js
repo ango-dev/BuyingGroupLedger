@@ -123,7 +123,9 @@
       shipment: td.getAttribute("data-shipment"),
       field: td.getAttribute("data-field"),
       value: value,
-      expected: raw
+      expected: raw,
+      // the count line's switch: on = a hand edit the runs keep; off = a correction they may overwrite
+      protect: (function () { var box = document.getElementById("protect-edits"); return box && !box.checked ? "0" : "1"; })()
     };
     td.classList.add("saving");
     queue = queue.then(function () {

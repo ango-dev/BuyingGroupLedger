@@ -1515,7 +1515,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "if (thenDown) move(1, 0, false)", "paint(false)", "Picker.date(", "Picker.choices(",
                        'ctrl && e.key === ";"', "function fillToday()", "function toggleCheck(td)",
                        'contains("cell-check")', 'e.key === " " && td.getAttribute("data-kind") === "check"',
-                       "Picker.forget()", 'setProperty("--pinned-h"',
+                       "Picker.forget()", 'setProperty("--pinned-h"', 'getElementById("protect-edits")',
                        "function choicesFor(field, td)", "Picker.choicesFor(field,",
                        '".cell-upload"', 'name="next" value="table"',
                        'hx-encoding", "multipart/form-data"',

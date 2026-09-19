@@ -1430,7 +1430,10 @@ def check_impossible_values(sheet: Sheet, opts: Options) -> Result:
                 bad.append(f"Order Link points at another site than {cell('Retailer')}")
             if receipt.startswith("/receipts/") and not receipt.startswith(f"/receipts/{slug}/"):
                 bad.append(f"Receipt Link is filed under another retailer than {cell('Retailer')}")
-        if cell("Tracking Link") and not cell("Tracking Number"):
+        # On Amazon (both) the Tracking Link is the package-tracking page the scraper hops to FOR
+        # the number, so a link with no number yet is the normal shape of an open Amazon row;
+        #elsewhere the link is derived from the number.
+        if cell("Tracking Link") and not cell("Tracking Number") and not retailer.startswith("amazon"):
             bad.append("a Tracking Link with no Tracking Number")
         last4 = cell("Card Last 4")
         if last4 and not (last4.isdigit() and len(last4) == 4):

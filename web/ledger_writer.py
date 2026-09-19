@@ -263,9 +263,13 @@ class LedgerCellWriter:
                                 "numbers are in use -- try again in a few minutes")
 
     # --- one cell -------------------------------------------------------------------------------
-    def write_cell(self, key: dict, field: str, value: str, expected: str | None = None) -> dict:
+    def write_cell(self, key: dict, field: str, value: str, expected: str | None = None,
+                   protect: bool = True) -> dict:
         """Locate the row by `key` ({order_id, order_date, item_name, shipment}), check the cell
-        still shows `expected`, write. Returns {"row_number", "field", "value"}."""
+        still shows `expected`, write. With `protect` the cell is recorded as hand-edited, so no
+        run overwrites it; without it the write is a CORRECTION the runs may overwrite later, and
+        any protection the cell had is released. Returns
+        {"row_number", "field", "value", "restored"}."""
         coerced = validate(field, value)
         self._guard()
         worksheet = self._opener()
@@ -284,8 +288,10 @@ class LedgerCellWriter:
             worksheet.update(a1, [[""]], value_input_option="USER_ENTERED")
         else:
             worksheet.update(a1, [[coerced]], value_input_option="RAW")
-            if not restored:
+            if not restored and protect:
                 _protect(worksheet, key, field, coerced, previous=_text(current))
+            elif not restored:
+                _release(worksheet, key, field)  # a correction: the run may write here again
         return {"row_number": row_number, "field": field, "value": coerced, "restored": restored}
 
     # --- the same cell across rows (bulk edit) --------------------------------------------------

@@ -135,6 +135,13 @@ class TestTheWriterRecords:
         assert hand_edits.protected(db) == {}
         assert ws.get_all_values()[1][FIELDNAMES.index("cashback_rate")] == "0.04"
         writer.write_cell(KEY, "cashback_rate", "0.05")
+        # a CORRECTION (protect=False) is written but not protected, and releases a protection
+        assert hand_edits.protected(db) == {KEYT: {"cashback_rate"}}
+        writer.write_cell(KEY, "cashback_rate", "0.055", expected="0.05", protect=False)
+        assert hand_edits.protected(db) == {}
+        assert ws.get_all_values()[1][FIELDNAMES.index("cashback_rate")] == "0.055"
+        writer.write_cell(KEY, "insurance", "3", protect=False)
+        assert hand_edits.protected(db) == {}
         writer.remove_rows([KEY])
         assert hand_edits.protected(db) == {}
 

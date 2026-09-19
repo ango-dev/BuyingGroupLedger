@@ -194,6 +194,8 @@ table.sheetlike tr.status-superseded td { background: #666666; color: #f4f4f4; t
 table.sheetlike tr[class*="status-"] td a { color: #1d4ed8; }
 table.sheetlike tr.status-superseded td a { color: #cfe0ff; }
 table.sheetlike tr[class*="status-"] td.rownum { background: var(--bg); color: var(--muted); text-decoration: none; }
+.count label.protect { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; cursor: pointer; }
+.count label.protect input { margin: 0; accent-color: var(--accent); }
 td input.cell-check { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: var(--accent); cursor: pointer; }
 td input.cell-check:disabled { cursor: default; opacity: 0.7; }
 /* editing */

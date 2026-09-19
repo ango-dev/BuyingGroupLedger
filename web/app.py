@@ -631,6 +631,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         field = str(form.get("field", ""))
         value = str(form.get("value", ""))
         expected = form.get("expected")
+        protect = str(form.get("protect", "1")).strip().lower() not in ("0", "false", "off", "no")
         error = ""
         if writer is None:
             error = "editing is off: this backend is a CSV snapshot"
@@ -639,11 +640,13 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         else:
             try:
                 writer.write_cell(key, field, value,
-                                  None if expected is None else str(expected))
+                                  None if expected is None else str(expected), protect=protect)
                 act("edit", f"{FIELD_TO_HEADER.get(field, field)} on {key['order_id']} "
-                            f"(shipment {key['shipment']}): {expected!r} → {value!r}",
+                            f"(shipment {key['shipment']}): {expected!r} → {value!r}"
+                            + ("" if protect else " (a correction; runs may overwrite it)"),
                     {"order_id": key["order_id"], "item_name": key["item_name"],
-                     "shipment": key["shipment"], "field": field, "was": expected, "now": value})
+                     "shipment": key["shipment"], "field": field, "was": expected, "now": value,
+                     "protect": protect})
             except EditError as exc:
                 error = str(exc)
             except Exception as exc:  # noqa: BLE001 -- the page must show why, not a 500

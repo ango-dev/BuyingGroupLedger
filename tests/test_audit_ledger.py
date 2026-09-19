@@ -1432,6 +1432,12 @@ class TestImpossibleValues:
         assert "Order Link points at another site than Best Buy" in self._fails(**{"Order Link": Cell("https://www.amazon.com/gp/order/1")})
         assert "Receipt Link is filed under another retailer than Best Buy" in self._fails(**{"Receipt Link": Cell("/receipts/costco/2026-08/1.pdf")})
         assert "a Tracking Link with no Tracking Number" in self._fails(**{"Tracking Number": Cell(""), "Tracking Submitted": Cell(False), "Tracking Link": Cell("https://ups.com/t/1")})
+        # Amazon's tracking link is the page the scraper visits FOR the number: a link alone is normal there
+        amazon_link = build(row_cells(2, Retailer=Cell("Amazon"), Status=Cell("shipped"), **{"Order ID": Cell("111-1234567-1234567"),
+                                                                                             "Order Link": Cell("https://www.amazon.com/gp/css/order-details?orderID=111-1234567-1234567"),
+                                                                                             "Receipt Link": Cell(""), "Delivery Date": Cell(""), "Tracking Number": Cell(""),
+                                                                                             "Tracking Submitted": Cell(False), "Tracking Link": Cell("https://www.amazon.com/progress-tracker/package/ref=x")}))
+        assert result_for(amazon_link, "impossible_values").status == "PASS"
         assert "Card Last 4 '76' is not four digits" in self._fails(**{"Card Last 4": Cell("76")})
         amazon = build(row_cells(2, Retailer=Cell("Amazon"), **{"Order ID": Cell("111-1234567-1234567"), "Order Link": Cell("https://www.amazon.com/gp/your-account/order-details?orderID=111-1234567-1234567"),
                                                                  "Receipt Link": Cell("/receipts/amazon/2026-08/111-1234567-1234567.pdf")}))
