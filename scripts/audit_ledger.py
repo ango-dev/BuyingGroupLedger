@@ -1241,13 +1241,16 @@ def check_payout_is_cost_weighted(sheet: Sheet, opts: Options) -> Result:
 #: What every row must carry, and what each stage must (or must not) carry on top. A cancelled / superseded row carries no money by design, so only its identity
 #: is mandatory there.
 MANDATORY_ALWAYS = ("Order Date", "Status", "Retailer", "Item Name", "Shipment", "Order ID")
-MANDATORY_COSTED = ("Quantity", "Cost Per Item", "Total Cost", "Profile")
+# ordered onward: the order link, where it ships to, which card paid and its
+# last 4, and COGS (computed from the cost inputs -- blank only when they are)
+MANDATORY_COSTED = ("Quantity", "Cost Per Item", "Total Cost", "Profile", "Order Link", "Delivery Address",
+                    "Card", "Card Last 4", "COGS")
 MANDATORY_BY_STAGE = {
     "shipped": ("Tracking Number",),
     # delivered: the retailer's receipt too -- from then on the order is a cost
     # to substantiate, and the capture has had every chance to run
     "delivered": ("Tracking Number", "Delivery Date", "Receipt Link"),
-    "paid": ("Tracking Number", "Actual Payout", "Payout Date", "Receipt Link"),
+    "paid": ("Tracking Number", "Actual Payout", "Payout Date", "Receipt Link", "Insurance"),
     "return": ("Tracking Number", "Return Qty", "Return Date", "Receipt Link"),
 }
 #: Cells a stage should NOT have yet: a value there means the status is stale (WARN, not FAIL).
@@ -1259,9 +1262,9 @@ UNEXPECTED_BY_STAGE = {
 
 @check("mandatory_by_stage")
 def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
-    """Every row carries its identity and, unless cancelled / superseded, its cost inputs and a
-    profile; each stage carries what that stage implies (a shipped row a tracking number, a
-    delivered row a delivery date and the retailer's receipt, a paid row an amount and a date, a
+    """Every row carries its identity and, unless cancelled / superseded, its cost inputs, profile,
+    order link, delivery address, card, card last 4 and COGS; each stage carries what that stage implies (a shipped row a tracking number, a
+    delivered row a delivery date and the retailer's receipt, a paid row an amount, a date and its insurance, a
     return its quantity and date). A cell that should still be blank
     at a stage (a tracking number on an `ordered` row) is a stale status, a WARN. The one place a
     cell deleted by accident from the table is caught."""

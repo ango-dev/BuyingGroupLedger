@@ -1318,8 +1318,10 @@ class TestMandatoryByStage:
         assert "missing Tracking Number" in result_for(shipped, "mandatory_by_stage").details[0]
         paid = build(row_cells(2, Status=Cell("paid"), **{"Actual Payout": Cell(100.0, fmt="currency"), "Payout Date": Cell("")}))
         assert "missing Payout Date" in result_for(paid, "mandatory_by_stage").details[0]
-        paid_ok = build(row_cells(2, Status=Cell("paid"), **{"Actual Payout": Cell(100.0, fmt="currency"), "Payout Date": Cell("2026-09-01")}))
+        paid_ok = build(row_cells(2, Status=Cell("paid"), **{"Actual Payout": Cell(100.0, fmt="currency"), "Payout Date": Cell("2026-09-01"),
+                                                             "Insurance": Cell(1.5, fmt="currency")}))
         assert result_for(paid_ok, "mandatory_by_stage").status == "PASS"
+        assert "Insurance" in result_for(paid, "mandatory_by_stage").details[0]  # paid needs its insurance too
         returned = build(row_cells(2, Status=Cell("return"), **{"Return Qty": Cell(""), "Return Date": Cell("")}))
         assert "missing Return Qty, Return Date" in result_for(returned, "mandatory_by_stage").details[0]
         # delivered (and beyond) needs the retailer's receipt as well
@@ -1327,6 +1329,10 @@ class TestMandatoryByStage:
         assert "row 2 (delivered): missing Receipt Link" in result_for(no_receipt, "mandatory_by_stage").details[0]
         shipped_no_receipt = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell(""), "Receipt Link": Cell("")}))
         assert result_for(shipped_no_receipt, "mandatory_by_stage").status == "PASS"
+        # from ordered on: the order link, the delivery address, the card and its last 4, and COGS
+        for name in ("Order Link", "Delivery Address", "Card", "Card Last 4"):
+            bare = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Number": Cell(""), "Delivery Date": Cell(""), name: Cell("")}))
+            assert f"row 2 (ordered): missing {name}" in result_for(bare, "mandatory_by_stage").details[0], name
 
     def test_a_cell_a_stage_should_not_have_yet_is_a_stale_status_warning(self):
         ordered = build(row_cells(2, Status=Cell("ordered"), **{"Delivery Date": Cell("")}))  # keeps its tracking number
