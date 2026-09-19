@@ -1542,6 +1542,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        ".pop.cal", ".pop .choice", ".pop .cal-months .cal-month", "td .cell-upload", ".chip.virtual",
                        "td input.cell-check", ".pop .choice.current",
                        "border-spacing: 0; border-collapse: separate; }", "body.wide table.grid th { top: 0; }",
+                       "body.wide h1, body.wide .lead, body.wide .pinned, body.wide .add-row, body.wide .count,",
                        "@media (max-width: 1024px) and (min-width: 761px)",
                        "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: #d64545; }", ".tiles.audit-stats .tile.skipped",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",

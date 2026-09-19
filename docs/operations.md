@@ -230,6 +230,9 @@ second tap on the selected cell opens its editor, a long press opens the right-c
 tap on a hint pill shows its tip. A full-size window is laid out as before. The cards view is the
 easier way to read the ledger on a phone; the table still scrolls in both directions.
 
+**Sideways.** A wide table scrolls sideways on its own: the title, lead, filter bar, add-row
+form and count line stay put at the left edge while the columns move under them.
+
 **Sorting.** Every table opens on its date, newest first, with no arrow; a header name cycles
 ascending, descending, then clear (back to that default). The cards view's *Sort by* and *Order*
 controls name a sort explicitly.
@@ -281,7 +284,8 @@ rows in FULL: every ledger column through the same editable cell as the Orders t
 edits there edits here; its status badges are the cards' filled ones.
 
 **The Activity page** is the app's own account of what it did, newest first (the last seven days by
-default; the *Last* control widens it): for every scheduled
+default; the *Last* control widens it; the search box matches any text in an event's summary or
+details): for every scheduled
 run, what each retailer's scrape found and what the ledger write updated or added (split boxes,
 ignored tracking numbers, key conflicts named), what the buying-group sync submitted, insured and
 read back and how many rows it updated, the emails the BFMR auto-reply sent; every alert (with

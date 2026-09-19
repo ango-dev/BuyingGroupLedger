@@ -192,7 +192,7 @@ def test_only_the_sheet_header_sticks_and_the_filter_bar_wraps_to_the_window(cli
     unoptimised -- the app should detect the window size and optimise for it"."""
     page.set_viewport_size({"width": 1600, "height": 900})
     page.goto(f"{served}/orders")
-    assert page.evaluate("getComputedStyle(document.querySelector('body.wide .pinned')).position") != "sticky"
+    assert page.evaluate("getComputedStyle(document.querySelector('body.wide .pinned')).top") == "auto"  # sticky LEFT only: it scrolls away vertically
     th = page.evaluate("(() => { const cs = getComputedStyle(document.querySelector('table.sheetlike th')); return [cs.position, cs.top]; })()")
     assert th == ["sticky", "0px"]
     ROWS = """(() => { const els = Array.from(document.querySelectorAll('#filters > *')).filter(e => e.offsetWidth);
@@ -203,4 +203,17 @@ def test_only_the_sheet_header_sticks_and_the_filter_bar_wraps_to_the_window(cli
     assert page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth") == 0
     assert page.evaluate("Array.from(document.querySelectorAll('#filters > *')).every(e => e.getBoundingClientRect().right <= innerWidth + 1)")
     assert page.evaluate(ROWS) > 1  # wrapped onto more rows instead of running off the edge
+    assert page.errors == []
+
+
+def test_a_sideways_scroll_moves_only_the_table(client, served, page):
+    page.set_viewport_size({"width": 900, "height": 700})
+    page.goto(f"{served}/orders")
+    page.evaluate("document.querySelector('main').scrollLeft = 600")
+    page.wait_for_timeout(100)
+    assert page.evaluate("document.querySelector('main').scrollLeft") >= 500  # the table is wider than the window
+    lefts = page.evaluate("""() => ['h1', '.lead', '.pinned', '.count', 'details.add-row'].map(s => { const el = document.querySelector('body.wide ' + s); return el ? [s, Math.round(el.getBoundingClientRect().left)] : [s, null]; })""")
+    for selector, left in lefts:
+        assert left is None or left >= 0, f"{selector} slid off the left edge: {left}"
+    assert page.evaluate("document.querySelector('table.sheetlike th.col-order_date').getBoundingClientRect().left") < 0  # the table did move
     assert page.errors == []

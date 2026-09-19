@@ -189,6 +189,9 @@ class TestTaxesPage:
     def test_the_summary_and_the_prompts(self, client):
         body = client.get("/taxes", params={"year": "2026"}).text
         assert "<h1>Taxes</h1>" in body and "Schedule C Summary — 2026" in body
+        # every panel folds, open by default
+        assert body.count('<details class="panel"') == 6 and body.count('<details class="panel" id="s-') == 6
+        assert 'id="s-expenses" open>' in body and "<summary><h2>Expenses" in body and "<section" not in body
         assert "Gross receipts or sales" in body and "$500.00" in body  # row 5: a dated payout in 2026
         assert "Costco Executive Cashback — alpha" in body and "Prime Business Rewards — alpha" in body
         assert "cashback the program paid this year" not in body

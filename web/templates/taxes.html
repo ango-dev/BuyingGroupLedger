@@ -6,6 +6,7 @@
    cashback-site amounts; an open list. Stored per year in data/tax_inputs.json. #}
 {% block title %}Taxes{% endblock %}
 {% block content %}
+{#- Every panel is a <details>, open by default, so a section can be folded away. -#}
 <h1>Taxes</h1>
 {% if notice %}<div class="banner ok">{{ notice }}</div>{% endif %}
 {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
@@ -14,8 +15,8 @@
   {% for y in years %}<a class="button small {{ 'primary' if y == year }}" href="/taxes?year={{ y }}">{{ y }}</a> {% endfor %}
 </p>
 
-<section class="panel" id="s-schedule-c">
-  <header><h2>Schedule C Summary — {{ year }}</h2>
+<details class="panel" id="s-schedule-c" open>
+  <summary><h2>Schedule C Summary — {{ year }}</h2></summary><header>
     <p class="muted">Cash basis: receipts by Payout Date; cost of goods and insurance by Order Date; cancelled and superseded rows carry nothing. The hand-entered items below sit on the lines they most plausibly belong to — a summary for your preparer, not tax advice.</p></header>
   <table class="grid compact schedule">
     <thead><tr><th>Part</th><th>Line</th><th>Item</th><th class="num">Amount</th><th>What it holds</th></tr></thead>
@@ -35,10 +36,10 @@
     {{ s.paid_this_year_for_orders_from_other_years.rows }} paid this year for orders from other years ({{ s.paid_this_year_for_orders_from_other_years.payouts | money }});
     {{ s.gift_card_purchases_never_paid.rows }} gift-card purchase row(s) ({{ s.gift_card_purchases_never_paid.cogs | money }}), funding orders rather than paid out themselves.
   </p>
-</section>
+</details>
 
-<section class="panel" id="s-expenses">
-  <header><h2>Expenses — {{ year }}</h2>
+<details class="panel" id="s-expenses" open>
+  <summary><h2>Expenses — {{ year }}</h2></summary><header>
     <p class="muted">Everything spent for the business in {{ year }} beyond the ledger's purchases: supplies, memberships, card annual fees. Every entry needs its date, amount, who paid (the profile, or the email of the account), and a receipt — uploaded (kept under <code>data/expenses/</code>, inside every backup) or linked. Counted under Other expenses (line 27a).</p></header>
   {#- Above the list, folded like Orders' "Add a row": closed by default, open
       when a refused add re-renders with what was typed. -#}
@@ -93,13 +94,13 @@
   {% else %}
   <p class="muted">No expenses entered for {{ year }} yet.</p>
   {% endif %}
-</section>
+</details>
 
 <form method="post" action="/taxes/save" class="tax-form">
   <input type="hidden" name="year" value="{{ year }}">
 
-  <section class="panel" id="s-programs">
-    <header><h2>Program Cashback</h2><p class="muted">Prime (young adult cashback), Prime Business (rewards) and Costco Executive (cashback) pay cashback of their own, separate from any card or portal. One row per retailer login in your profiles: what the program paid in {{ year }}. Blank = none. Counted under Other income (line 6).</p></header>
+  <details class="panel" id="s-programs" open>
+    <summary><h2>Program Cashback</h2></summary><header><p class="muted">Prime (young adult cashback), Prime Business (rewards) and Costco Executive (cashback) pay cashback of their own, separate from any card or portal. One row per retailer login in your profiles: what the program paid in {{ year }}. Blank = none. Counted under Other income (line 6).</p></header>
     {% if program_prompts %}
     <table class="entry-table"><thead><tr><th>Program</th><th>Cashback</th></tr></thead><tbody>
       {% for p in program_prompts %}
@@ -108,10 +109,10 @@
       {% endfor %}
     </tbody></table>
     {% else %}<p class="muted small">No profiles with a Costco, Amazon or Amazon Business login in config.json, so nothing to ask.</p>{% endif %}
-  </section>
+  </details>
 
-  <section class="panel" id="s-cards">
-    <header><h2>Cards</h2><p class="muted">One row per card used on an order placed in {{ year }} — every Card Last 4 on the year's rows, whether or not the Cards settings list it, minus any marked <em>virtual</em> there. The sign-up bonus received in {{ year }} counts under Other income (line 6). Blank = none. A card's <strong>annual fee is an expense</strong>: add it to the Expenses list above with its receipt (category <em>annual fee</em>).</p></header>
+  <details class="panel" id="s-cards" open>
+    <summary><h2>Cards</h2></summary><header><p class="muted">One row per card used on an order placed in {{ year }} — every Card Last 4 on the year's rows, whether or not the Cards settings list it, minus any marked <em>virtual</em> there. The sign-up bonus received in {{ year }} counts under Other income (line 6). Blank = none. A card's <strong>annual fee is an expense</strong>: add it to the Expenses list above with its receipt (category <em>annual fee</em>).</p></header>
     {% if card_prompts %}
     <table class="entry-table"><thead><tr><th>Card</th><th>Sign-up Bonus</th></tr></thead><tbody>
       {% for p in card_prompts %}
@@ -120,10 +121,10 @@
       {% endfor %}
     </tbody></table>
     {% else %}<p class="muted small">No card appears on an order placed in {{ year }}.</p>{% endif %}
-  </section>
+  </details>
 
-  <section class="panel" id="s-sites">
-    <header><h2>Cashback Sites</h2><p class="muted">Cashback paid out by the portals in {{ year }} (TopCashback, Rakuten, ShopBack, RetailMeNot, Capital One Shopping, …). Add a site in the empty row; blank a name to drop it. Counted under Other income (line 6).</p></header>
+  <details class="panel" id="s-sites" open>
+    <summary><h2>Cashback Sites</h2></summary><header><p class="muted">Cashback paid out by the portals in {{ year }} (TopCashback, Rakuten, ShopBack, RetailMeNot, Capital One Shopping, …). Add a site in the empty row; blank a name to drop it. Counted under Other income (line 6).</p></header>
     <table class="entry-table"><thead><tr><th>Site</th><th>Cashback</th></tr></thead><tbody>
       {% for name in site_names %}
       <tr><td><input type="text" name="site.{{ loop.index0 }}.name" value="{{ name }}"></td>
@@ -132,10 +133,10 @@
       <tr class="new-row"><td><input type="text" name="site.{{ site_names | length }}.name" placeholder="another site"></td>
           <td class="narrow"><input type="text" name="site.{{ site_names | length }}.amount" placeholder="0.00" inputmode="decimal"></td></tr>
     </tbody></table>
-  </section>
+  </details>
 
-  <section class="panel" id="s-other">
-    <header><h2>Other Income</h2><p class="muted">Any other income of the business for {{ year }} that fits nowhere above: a label and the amount. Blank a label to drop the row. Expenses do not go here — every expense goes in the Expenses list above, with its receipt.</p></header>
+  <details class="panel" id="s-other" open>
+    <summary><h2>Other Income</h2></summary><header><p class="muted">Any other income of the business for {{ year }} that fits nowhere above: a label and the amount. Blank a label to drop the row. Expenses do not go here — every expense goes in the Expenses list above, with its receipt.</p></header>
     <table class="entry-table"><thead><tr><th>What</th><th>Amount</th></tr></thead><tbody>
       {% for o in inputs.other %}
       <tr><td><input type="text" name="other.{{ loop.index0 }}.label" value="{{ o.label }}"></td>
@@ -146,7 +147,7 @@
           <td class="narrow"><input type="text" name="other.{{ n }}.amount" placeholder="0.00" inputmode="decimal"></td></tr>
     </tbody></table>
     <label class="field-block">Notes for the preparer <textarea name="notes" rows="3" class="json">{{ inputs.notes }}</textarea></label>
-  </section>
+  </details>
 
   <div class="inline-form">
     <button type="submit" class="primary">Save {{ year }}</button>
