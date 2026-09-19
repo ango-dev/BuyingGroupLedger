@@ -161,9 +161,10 @@ Esc cancels; Delete clears the selection; Ctrl+C copies the selection as tab-sep
 cell by cell from the top-left; the arrow keys move, with Shift they extend. A date cell opens the page's own calendar (so
 does every date field on a form, and the Placed in / Paid in filters open a month grid; the month
 name and the year in the calendar's head are buttons, so any month or year is a click away; Ctrl+;
-puts today's date into a date cell or field, as in Sheets); Status, Retailer, Buying Group, Card Name, Card Last 4, Profile
-and Tracking Submitted offer the column's previous answers as you type, most used first, and a new
-answer typed in is a previous answer from then on. The Receipt Link cell carries an upload button
+puts today's date into a date cell or field, as in Sheets); Status, Retailer, Buying Group, Card Name, Card Last 4 and Profile
+open the column's every previous answer (most used first, the current one marked), typing narrows
+the list, and a new answer typed in is a previous answer from then on. Tracking Submitted is a
+checkbox: a click, Space or Enter toggles it. The Receipt Link cell carries an upload button
 (⤒): pick a file and the link lands on every row of the order, the table re-rendering in place.
 Every write is one conflict-checked cell write, run one after another. **A cell you edit is protected from then
 on**: the scheduled

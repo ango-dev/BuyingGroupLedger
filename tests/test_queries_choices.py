@@ -17,7 +17,7 @@ def test_most_used_first_then_alphabetical_and_blanks_skipped():
     assert set(values) == set(CHOICE_FIELDS)
     assert values["profile_label"] == ["a", "b"]
     assert values["retailer"] == ["Costco", "Best Buy"]
-    assert values["status"] == [] and values["tracking_submitted"] == []
+    assert values["status"] == [] and "tracking_submitted" not in values
 
 
 def test_the_choice_columns_are_editable_text_columns():

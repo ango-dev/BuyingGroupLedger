@@ -7,9 +7,10 @@
 //            One click on a day picks it; Today / Clear at the foot.
 //   month    the same without the days: a grid of months under a year (the filters' Placed in /
 //            Paid in); a pick is YYYY-MM.
-//   choices  the column's previous answers, filtered by what is typed; arrows move the highlight,
-//            Enter takes the highlighted one, and Enter with nothing highlighted keeps what was
-//            typed (a new answer, which becomes a previous one once saved)
+//   choices  EVERY previous answer of the column, the current one marked;
+//            typing narrows the list; arrows move the highlight, Enter takes the highlighted one,
+//            and Enter with nothing highlighted keeps what was typed (a new answer, which becomes
+//            a previous one once saved)
 //
 // Forms: <input data-date> opens the calendar on focus, <input data-month> the month grid; a pick
 // fires `input` and `change` so a filter form that submits on change follows. Cells: static/edit.js
@@ -147,13 +148,16 @@
     });
   }
   function renderChoices() {
-    var typed = (owner.value || "").trim().toLowerCase();
+    // `state.filter` is what the user TYPED, not the cell's current value: on opening, the whole
+    // list shows with the current value marked; typing narrows it.
+    var typed = (state.filter || "").trim().toLowerCase();
+    var current = (owner.value || "").trim();
     var values = state.values.filter(function (v) { return !typed || v.toLowerCase().indexOf(typed) >= 0; });
     state.shown = values;
     if (state.hi >= values.length) state.hi = values.length ? values.length - 1 : -1;
     var html = "";
-    values.slice(0, 40).forEach(function (v, i) {
-      html += '<button type="button" class="choice' + (i === state.hi ? " hi" : "") +
+    values.slice(0, 60).forEach(function (v, i) {
+      html += '<button type="button" class="choice' + (i === state.hi ? " hi" : "") + (v === current ? " current" : "") +
         '" data-pick="' + escapeHtml(v) + '">' + escapeHtml(v) + "</button>";
     });
     if (!values.length) {
@@ -203,7 +207,7 @@
     }
   }, true);
   document.addEventListener("input", function (e) {
-    if (owner && e.target === owner && kind === "choices" && state) { state.hi = -1; render(); }
+    if (owner && e.target === owner && kind === "choices" && state) { state.filter = owner.value; state.hi = -1; render(); }
   });
   document.addEventListener("focusout", function (e) { if (owner && e.target === owner) close(); });
   document.addEventListener("mousedown", function (e) {
@@ -241,8 +245,8 @@
   window.Picker = {
     date: function (input, pickFn) { state = null; open(input, "cal", pickFn); },
     month: function (input, pickFn) { state = null; open(input, "month", pickFn); },
-    choices: function (input, values, pickFn) {
-      state = { values: values || [], hi: -1, shown: [] };
+    choices: function (input, values, pickFn, typed) {  // `typed`: what opened the editor, if a keystroke
+      state = { values: values || [], hi: -1, shown: [], filter: typed || "" };
       open(input, "choices", pickFn);
     },
     close: close

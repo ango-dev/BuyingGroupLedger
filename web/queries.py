@@ -18,8 +18,7 @@ TABLE_COLUMNS = tuple(FIELDNAMES)
 LINK_FIELDS = ("order_url", "tracking_url", "receipt_url")
 #: Columns whose cell editor offers the ledger's previous answers -- and takes a new one, which
 #: is a previous answer from then on.
-CHOICE_FIELDS = ("status", "retailer", "buying_group", "card_name", "card_last4", "profile_label",
-                 "tracking_submitted")
+CHOICE_FIELDS = ("status", "retailer", "buying_group", "card_name", "card_last4", "profile_label")
 
 
 def choice_values(rows) -> dict[str, list[str]]:

@@ -373,6 +373,9 @@ class TestOrdersRoutes:
         assert re.search(r'data-field="payout_date"[^>]*data-kind="date"', body)
         assert re.search(r'data-field="profile_label"[^>]*data-kind="choice"', body)
         assert re.search(r'data-field="insurance"[^>]*data-kind="text"', body)
+        # Tracking Submitted is a real checkbox, and a check cell, never a text editor
+        assert re.search(r'data-field="tracking_submitted"[^>]*data-kind="check"', body)
+        assert 'type="checkbox" class="cell-check"' in body and "☑" not in body and "☐" not in body
         choices = re.search(r'<script type="application/json" id="cell-choices">(.*?)</script>', body, re.S)
         assert choices and "Costco" in json.loads(choices.group(1))["retailer"]
         assert 'class="cell-upload" data-order-id="BBY01-1"' in body

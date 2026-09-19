@@ -8,6 +8,7 @@
 //   Esc              cancels the editor, or clears the selection (cells and rows both)
 //   Delete/Backspace clears every editable selected cell
 //   Ctrl+;           puts today's date into every selected date cell (as in Sheets)
+//   Space            toggles a Tracking Submitted checkbox cell (click does too)
 //   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
 //                    pastes a single value into every selected cell, or a block cell by cell from
 //                    the top-left of the selection (through a hidden textarea, so it works on http)
@@ -165,8 +166,23 @@
     if (!td.getAttribute("data-original-html")) td.setAttribute("data-original-html", td.innerHTML);
     return td;
   }
+  // Tracking Submitted is a real checkbox: a click, Space or Enter toggles it and
+  // the cell writes TRUE / FALSE; there is no text editor to open on it.
+  function toggleCheck(td) {
+    var box = td.querySelector("input.cell-check");
+    if (!box || !editable(td)) return false;
+    writeCell(td, box.checked ? "FALSE" : "TRUE");
+    return true;
+  }
+  document.addEventListener("change", function (e) {
+    var box = e.target;
+    if (!box || !box.classList || !box.classList.contains("cell-check")) return;
+    var td = box.closest("td");
+    if (td && editable(td)) writeCell(td, box.checked ? "TRUE" : "FALSE");
+  });
   function startEdit(td, initial) {
-    if (td.querySelector("input")) return;
+    if (td.querySelector("input.cell-input")) return;
+    if (td.getAttribute("data-kind") === "check") { toggleCheck(td); return; }
     armed(td);
     var raw = td.getAttribute("data-raw") || "";
     var field = td.getAttribute("data-field");
@@ -175,7 +191,6 @@
     input.value = initial !== undefined ? initial : raw;
     input.className = "cell-input";
     input.setAttribute("aria-label", "edit " + field);
-    if (field === "tracking_submitted") input.placeholder = "TRUE / FALSE";
     if (field === "status") input.placeholder = "ordered, shipped, delivered, cancelled, paid, return, superseded";
     td.setAttribute("data-editing", "1");
     td.innerHTML = "";
@@ -186,7 +201,7 @@
     // column's previous answers on a choice cell. A pick saves the cell, as Enter would.
     var kind = td.getAttribute("data-kind");
     if (window.Picker && kind === "date") Picker.date(input, function () { save(false); });
-    else if (window.Picker && kind === "choice") Picker.choices(input, choicesFor(field), function () { save(false); });
+    else if (window.Picker && kind === "choice") Picker.choices(input, choicesFor(field), function () { save(false); }, initial);
 
     var done = false;
     function restore() {
@@ -347,6 +362,7 @@
     else if (e.key === "ArrowRight") { e.preventDefault(); move(0, 1, e.shiftKey); }
     else if (e.key === "Tab") { e.preventDefault(); move(0, e.shiftKey ? -1 : 1, false); }
     else if (e.key === "Enter") { e.preventDefault(); if (editable(td)) startEdit(td); }
+    else if (e.key === " " && td.getAttribute("data-kind") === "check") { e.preventDefault(); toggleCheck(td); }
     else if (e.key === "Escape") { e.preventDefault(); clearSelection(); }
     else if ((e.key === "Delete" || e.key === "Backspace") && rowsChecked()) { /* the row selection owns them: see below */ }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); fillSelection(""); }

@@ -1451,6 +1451,7 @@ class TestStaticAssetsCarryTheirBlocks:
         js = (self.ROOT / "picker.js").read_text(encoding="utf-8")
         for needle in ("window.Picker", "function renderDays", "function renderMonths", "function renderYears",
                        "function renderChoices", 'data-pick="', 'matches("input[data-month]")', "month: function",
+                       "state.filter = owner.value", 'v === current ? " current"',
                        "stopImmediatePropagation", 'matches("input[data-date]")', 'addEventListener("mousedown", function (e) { e.preventDefault(); })'):
             assert needle in js, f"picker.js lost its {needle!r} block"
         base = (self.ROOT.parent / "templates" / "base.html").read_text(encoding="utf-8")
@@ -1460,6 +1461,8 @@ class TestStaticAssetsCarryTheirBlocks:
         css = (self.ROOT / "style.css").read_text(encoding="utf-8")
         for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap", "td.sel-cell",
                        ".pop.cal", ".pop .choice", ".pop .cal-months .cal-month", "td .cell-upload", ".chip.virtual",
+                       "td input.cell-check", ".pop .choice.current",
+                       "border-spacing: 0; border-collapse: separate; }",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".add-form", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
@@ -1486,7 +1489,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        'matches(\'[hx-trigger*="every"]\')', "sel-cell", 'execCommand("copy")',
                        'addEventListener("paste"', 'e.key === "Delete"', "fillSelection(", "all.checked = !any",
                        "if (thenDown) move(1, 0, false)", "paint(false)", "Picker.date(", "Picker.choices(",
-                       'ctrl && e.key === ";"', "function fillToday()",
+                       'ctrl && e.key === ";"', "function fillToday()", "function toggleCheck(td)",
+                       'contains("cell-check")', 'e.key === " " && td.getAttribute("data-kind") === "check"',
                        'getElementById("cell-choices")', '".cell-upload"', 'name="next" value="table"',
                        'hx-encoding", "multipart/form-data"',
                        '(e.key === "Delete" || e.key === "Backspace") && rowsChecked()', 'getElementById("delete-selected")',

@@ -172,7 +172,9 @@ body.wide #bulk { display: flex; flex-direction: column; flex: 1 1 auto; min-hei
 body.wide #orders-table { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 body.wide .count { margin: 4px 8px; flex: 0 0 auto; }
 body.wide .sheet { overflow: auto; flex: 1 1 auto; min-height: 0; background: var(--card); border-top: 1px solid var(--line); }
-table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: collapse; }
+/* SEPARATE borders (spacing 0): with collapsed borders a sticky <th> leaves its borders behind as
+   it scrolls, and the row underneath shows through the 1px gaps between the headers. */
+table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: separate; }
 /* Grid lines are TRANSLUCENT so they take the row's own colour, as a spreadsheet's do over a coloured
    row -- an opaque grey line reads as a gap between rows. */
 table.sheetlike th, table.sheetlike td { border: 0; border-right: 1px solid rgba(0, 0, 0, 0.12); border-bottom: 1px solid rgba(0, 0, 0, 0.12); padding: 3px 6px; }
@@ -191,7 +193,8 @@ table.sheetlike tr.status-superseded td { background: #666666; color: #f4f4f4; t
 table.sheetlike tr[class*="status-"] td a { color: #1d4ed8; }
 table.sheetlike tr.status-superseded td a { color: #cfe0ff; }
 table.sheetlike tr[class*="status-"] td.rownum { background: var(--bg); color: var(--muted); text-decoration: none; }
-table.sheetlike td .check { font-size: 1.1em; }
+td input.cell-check { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: var(--accent); cursor: pointer; }
+td input.cell-check:disabled { cursor: default; opacity: 0.7; }
 /* editing */
 table.sheetlike td.edit { cursor: cell; }
 table.sheetlike td.edit:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
@@ -536,6 +539,8 @@ td:hover .cell-empty { opacity: 0.8; }
 .pop.choices { min-width: 160px; max-width: 320px; max-height: 260px; overflow: auto; }
 .pop.choices.on { display: flex; flex-direction: column; }
 .pop .choice { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pop .choice.current { font-weight: 600; }
+.pop .choice.current::after { content: " ✓"; color: var(--accent); }
 .entry-card .chip.virtual { border-style: dashed; }
 
 /* ---- the Settings gear (top right) and the Activity page ---- */
