@@ -301,14 +301,14 @@ def _inpage_fetch(page, paths: list[str]) -> dict:
 
 
 def _order_ids_from_page(page) -> list[str]:
-    """Distinct bare Best Buy order ids (BBY01-<digits>, group suffix stripped) present anywhere in
+    """Distinct bare Best Buy order ids (BBY0N-<digits>, group suffix stripped) present anywhere in
     the page — the orders are embedded in the Next.js flight data, so a content regex finds them."""
     import re
     try:
         html = page.content()
     except Exception:
         return []
-    ids = re.findall(r"BBY01-\d+", html)
+    ids = re.findall(r"BBY0\d-\d+", html)  # BBY01 usually, BBY03 exists live (2026-09-04)
     seen: dict[str, None] = {}
     for i in ids:
         seen.setdefault(i, None)
@@ -337,10 +337,10 @@ def _first_order_id(captured: list, page) -> str | None:
 
 
 def _search_order_id(obj) -> str | None:
-    """Walk a JSON structure looking for a BBY01-... order id or an obvious order-number field."""
+    """Walk a JSON structure looking for a BBY0N-... order id or an obvious order-number field."""
     if isinstance(obj, dict):
         for key, value in obj.items():
-            if isinstance(value, str) and value.startswith("BBY01-"):
+            if isinstance(value, str) and re.match(r"BBY0\d-", value):
                 # Strip any trailing -group_N so we get the bare order id.
                 return value.split("-group")[0]
             if key.lower() in ("ordernumber", "orderid", "order_number", "customerorderid") and value:
