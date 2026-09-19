@@ -12,9 +12,10 @@ WHAT THE PAGE ASKS FOR, AND WHY EACH IS DERIVED OR TYPED.
   receipt, like every other expense; an older year file's `fees` section is ignored.
 - **Cashback sites**: the usual portals plus any the user adds.
 - **Expenses**: the user's own list of everything spent for the business in the year beyond the
-  ledger's purchases -- each with a date, a description, an amount, the profile and the email of
-  the account that paid, and a receipt (an uploaded file, kept under data/expenses/, or a link).
-  All of those are REQUIRED.
+  ledger's purchases -- each with a date, a description, an amount, who paid (the profile OR the
+  email of the account: one or the other, user 2026-09-18), and a receipt (an uploaded file, kept
+  under data/expenses/, or a link). All of those are REQUIRED. An entry can be edited in place; its receipt stays unless a
+  new file or link replaces it.
 - **Other income**: an open list of income lines for what fits nowhere above. It is income
   ONLY: every expense goes through the expense list, with its receipt.
 
@@ -42,10 +43,10 @@ from typing import Iterable, Mapping
 DEFAULT_SITES = ("TopCashback", "Rakuten", "ShopBack", "RetailMeNot", "Capital One Shopping")
 
 #: The cashback program a retailer login implies.
-PROGRAMS = {
-    "costco": "Costco Executive",
-    "amazon": "Prime",
-    "amazon-business": "Prime Business",
+PROGRAMS = {  # the programs' own names for what they pay
+    "costco": "Costco Executive Cashback",
+    "amazon": "Prime Young Adult Cashback",
+    "amazon-business": "Prime Business Rewards",
 }
 
 FILE_NAME = "tax_inputs.json"
@@ -158,8 +159,7 @@ def program_prompts(profiles: Iterable) -> list[Prompt]:
             name = PROGRAMS.get(str(retailer).strip().lower())
             if name is None:
                 continue
-            out.append(Prompt("program", f"program:{profile.label}:{retailer}",
-                              f"{name} — {profile.label}", "cashback the program paid this year"))
+            out.append(Prompt("program", f"program:{profile.label}:{retailer}", f"{name} — {profile.label}"))
     return out
 
 
@@ -313,10 +313,9 @@ def safe_filename(name: str) -> str:
     return name[:80]
 
 
-def add_expense(inputs: YearInputs, fields: Mapping[str, str], *, year: int, data_dir: Path,
-                receipt_file: tuple[str, bytes] | None = None) -> dict:
-    """Validate and append one expense. `receipt_file` = (filename, bytes) from the upload, or
-    None when a link was given. Raises ValueError naming what is missing."""
+def _expense_fields(fields: Mapping[str, str], *, year: int) -> tuple[dict, list[str]]:
+    """The cleaned fields of the expense form and what is wrong with them (add and edit share
+    it). Who paid is the profile OR the email of the account -- one is enough."""
     errors = []
     when = str(fields.get("date") or "").strip()
     if not _ISO_DATE.match(when):
@@ -340,33 +339,83 @@ def add_expense(inputs: YearInputs, fields: Mapping[str, str], *, year: int, dat
     if amount is None:
         errors.append("Amount is required")
     profile = str(fields.get("profile") or "").strip()
-    if not profile:
-        errors.append("Profile is required")
     email = str(fields.get("email") or "").strip()
-    if not _EMAIL.match(email):
-        errors.append("Email is required (the account that paid)")
-    link = str(fields.get("receipt_url") or "").strip()
-    if not receipt_file and not link:
+    if not profile and not email:
+        errors.append("Who paid is required: the profile, or the email of the account")
+    if email and not _EMAIL.match(email):
+        errors.append("Email is not an address")
+    clean = {"date": when, "description": description, "amount": amount,
+             "category": str(fields.get("category") or "").strip(), "profile": profile, "email": email,
+             "link": str(fields.get("receipt_url") or "").strip()}
+    return clean, errors
+
+
+def _store_receipt(receipt_file: tuple[str, bytes], *, year: int, entry_id: str, data_dir: Path) -> dict:
+    filename, payload = receipt_file
+    rel = Path(EXPENSES_DIR) / str(year) / f"{entry_id}_{safe_filename(filename)}"
+    target = Path(data_dir) / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+    return {"file": rel.as_posix(), "name": safe_filename(filename)}
+
+
+def _unlink_receipt(receipt: Mapping, *, data_dir: Path) -> None:
+    rel = (receipt or {}).get("file")
+    if rel:
+        try:
+            (Path(data_dir) / rel).unlink()
+        except OSError:
+            pass
+
+
+def add_expense(inputs: YearInputs, fields: Mapping[str, str], *, year: int, data_dir: Path,
+                receipt_file: tuple[str, bytes] | None = None) -> dict:
+    """Validate and append one expense. `receipt_file` = (filename, bytes) from the upload, or
+    None when a link was given. Raises ValueError naming what is missing."""
+    clean, errors = _expense_fields(fields, year=year)
+    if not receipt_file and not clean["link"]:
         errors.append("A receipt is required: upload the file or give its link")
     if errors:
         raise ValueError("; ".join(errors))
-
     entry_id = uuid.uuid4().hex[:10]
-    if receipt_file:
-        filename, payload = receipt_file
-        rel = Path(EXPENSES_DIR) / str(year) / f"{entry_id}_{safe_filename(filename)}"
-        target = Path(data_dir) / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(payload)
-        receipt = {"file": rel.as_posix(), "name": safe_filename(filename)}
-    else:
-        receipt = {"url": link}
+    receipt = (_store_receipt(receipt_file, year=year, entry_id=entry_id, data_dir=data_dir) if receipt_file
+               else {"url": clean["link"]})
     entry = {
-        "id": entry_id, "date": when, "description": description, "amount": amount,
-        "category": str(fields.get("category") or "").strip(), "profile": profile, "email": email,
+        "id": entry_id, "date": clean["date"], "description": clean["description"], "amount": clean["amount"],
+        "category": clean["category"], "profile": clean["profile"], "email": clean["email"],
         "receipt": receipt, "added_at": date.today().isoformat(),
     }
     inputs.expenses.append(entry)
+    inputs.expenses.sort(key=lambda e: (e["date"], e["added_at"]))
+    return entry
+
+
+def update_expense(inputs: YearInputs, entry_id: str, fields: Mapping[str, str], *, year: int,
+                   data_dir: Path, receipt_file: tuple[str, bytes] | None = None) -> dict:
+    """Edit one expense in place: the
+    fields are validated as on add; the receipt it has stays unless a new file or a different
+    link replaces it (a replaced uploaded file is deleted). Returns the entry. ValueError names
+    what is wrong; KeyError when no entry has the id."""
+    entry = next((e for e in inputs.expenses if e["id"] == entry_id), None)
+    if entry is None:
+        raise KeyError(entry_id)
+    clean, errors = _expense_fields(fields, year=year)
+    current = dict(entry.get("receipt") or {})
+    if not receipt_file and not clean["link"] and not (current.get("file") or current.get("url")):
+        errors.append("A receipt is required: upload the file or give its link")
+    if errors:
+        raise ValueError("; ".join(errors))
+    if receipt_file:
+        _unlink_receipt(current, data_dir=data_dir)
+        receipt = _store_receipt(receipt_file, year=year, entry_id=entry_id, data_dir=data_dir)
+    elif clean["link"] and clean["link"] != current.get("url"):
+        _unlink_receipt(current, data_dir=data_dir)
+        receipt = {"url": clean["link"]}
+    else:
+        receipt = current
+    entry.update({"date": clean["date"], "description": clean["description"], "amount": clean["amount"],
+                  "category": clean["category"], "profile": clean["profile"], "email": clean["email"],
+                  "receipt": receipt})
     inputs.expenses.sort(key=lambda e: (e["date"], e["added_at"]))
     return entry
 
@@ -376,12 +425,7 @@ def remove_expense(inputs: YearInputs, entry_id: str, *, data_dir: Path) -> dict
     for entry in inputs.expenses:
         if entry["id"] == entry_id:
             inputs.expenses.remove(entry)
-            rel = (entry.get("receipt") or {}).get("file")
-            if rel:
-                try:
-                    (Path(data_dir) / rel).unlink()
-                except OSError:
-                    pass
+            _unlink_receipt(entry.get("receipt") or {}, data_dir=data_dir)
             return entry
     return None
 

@@ -36,8 +36,9 @@ class TestPrompts:
         profiles = [ProfileConfig(label="alpha", retailers=["costco", "amazon-business", "bestbuy"]),
                     ProfileConfig(label="charlie", retailers=["amazon"])]
         prompts = program_prompts(profiles)
-        assert [p.label for p in prompts] == ["Costco Executive — alpha", "Prime Business — alpha",
-                                              "Prime — charlie"]
+        assert [p.label for p in prompts] == ["Costco Executive Cashback — alpha", "Prime Business Rewards — alpha",
+                                              "Prime Young Adult Cashback — charlie"]  # the programs' own names
+        assert all(p.hint == "" for p in prompts)  # no "cashback the program paid this year" beside the row
         assert prompts[0].key == "program:alpha:costco" and prompts[0].kind == "program"
 
     def test_bonuses_are_every_card_used_in_the_year_minus_virtual_ones(self):
@@ -112,7 +113,7 @@ class TestExpenses:
             add_expense(inputs, {}, year=2026, data_dir=tmp_path)
         text = str(exc.value)
         for needle in ("Date must be written", "Description is required", "Amount is required",
-                       "Profile is required", "Email is required", "A receipt is required"):
+                       "Who paid is required: the profile, or the email of the account", "A receipt is required"):
             assert needle in text
         with pytest.raises(ValueError, match="fall in 2026"):
             add_expense(inputs, {**self.FIELDS, "date": "2025-03-04", "receipt_url": "https://x"},
@@ -189,7 +190,8 @@ class TestTaxesPage:
         body = client.get("/taxes", params={"year": "2026"}).text
         assert "<h1>Taxes</h1>" in body and "Schedule C Summary — 2026" in body
         assert "Gross receipts or sales" in body and "$500.00" in body  # row 5: a dated payout in 2026
-        assert "Costco Executive — alpha" in body and "Prime Business — alpha" in body
+        assert "Costco Executive Cashback — alpha" in body and "Prime Business Rewards — alpha" in body
+        assert "cashback the program paid this year" not in body
         # the year's cards: 0315 (rows 2, 9), 4331 (rows 3, 4); 4351 is virtual in the settings; row 8 has none
         assert "USB Prime Business …0315" in body and "Amex Business Gold …4331" in body
         assert 'name="bonus:0315"' in body and "Sign-up Bonus" in body
@@ -217,7 +219,7 @@ class TestTaxesPage:
         assert "$280.50" in body   # line 6: 30 + 40 + 2.5 + 200 + 8
         assert "$95.00" not in body and "fees" not in saved  # fee:4331 was ignored: a fee is an expense
         bad = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "lots"})
-        assert bad.status_code == 200 and "Costco Executive — alpha: not a number" in bad.text
+        assert bad.status_code == 200 and "Costco Executive Cashback — alpha: not a number" in bad.text
         assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["programs"] == {"program:alpha:costco": 30.0}
 
     def test_an_expense_with_an_uploaded_receipt(self, client, tmp_path):
@@ -244,13 +246,61 @@ class TestTaxesPage:
         assert not list((tmp_path / "data" / "expenses" / "2026").glob("*"))
         assert client.get(f"/taxes/receipt/{entry_id}", params={"year": "2026"}).status_code == 404
 
-    def test_an_expense_missing_its_receipt_or_email_is_refused_with_the_draft_kept(self, client):
+    def test_an_expense_missing_its_receipt_or_payer_is_refused_with_the_draft_kept(self, client):
         response = client.post("/taxes/expense", params={"year": "2026"},
                                data={"date": "2026-03-04", "description": "boxes", "amount": "12.50",
                                      "profile": "alpha", "email": "not-an-email"})
         assert response.status_code == 200
-        assert "A receipt is required" in response.text and "Email is required" in response.text
+        assert "A receipt is required" in response.text and "Email is not an address" in response.text
         assert 'value="boxes"' in response.text  # the draft survives
+        # who paid: the profile OR the email, one is enough
+        neither = client.post("/taxes/expense", params={"year": "2026"},
+                              data={"date": "2026-03-04", "description": "boxes", "amount": "1", "receipt_url": "https://x/r"})
+        assert "Who paid is required: the profile, or the email of the account" in neither.text
+        email_only = client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                                 data={"date": "2026-03-04", "description": "tape", "amount": "1", "email": "a@b.co",
+                                       "receipt_url": "https://x/r"})
+        assert email_only.status_code == 303
+        assert ">Paid by<" in client.get("/taxes", params={"year": "2026"}).text
+
+    def test_an_expense_is_edited_in_place_and_keeps_its_receipt_unless_replaced(self, client, tmp_path):
+        client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                    data={"date": "2026-03-04", "description": "boxes", "amount": "12.50", "profile": "alpha",
+                          "receipt_url": "https://x/receipt"})
+        store = tmp_path / "data" / "tax_inputs.json"
+        entry_id = json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"][0]["id"]
+        # the row's edit button opens the form on the entry
+        body = client.get("/taxes", params={"year": "2026"}).text
+        assert f'href="/taxes?year=2026&edit={entry_id}#expense-form"' in body
+        form = client.get("/taxes", params={"year": "2026", "edit": entry_id}).text
+        assert "Edit Expense" in form and f'action="/taxes/expense/{entry_id}?year=2026"' in form
+        assert 'value="boxes"' in form and 'value="https://x/receipt"' in form and ">Save changes<" in form
+        assert 'href="/taxes?year=2026#s-expenses">Cancel</a>' in form and '<tr class="editing">' in form
+        # saving with no new receipt keeps the link
+        saved = client.post(f"/taxes/expense/{entry_id}", params={"year": "2026"}, follow_redirects=False,
+                            data={"date": "2026-03-05", "description": "bigger boxes", "amount": "13", "profile": "alpha",
+                                  "receipt_url": "https://x/receipt"})
+        assert saved.status_code == 303 and "Saved" in saved.headers["location"]
+        entry = json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"][0]
+        assert entry["id"] == entry_id and entry["description"] == "bigger boxes" and entry["amount"] == 13.0
+        assert entry["date"] == "2026-03-05" and entry["receipt"] == {"url": "https://x/receipt"}
+        # a refused edit re-renders the form on the entry with the draft
+        bad = client.post(f"/taxes/expense/{entry_id}", params={"year": "2026"},
+                          data={"date": "2026-03-05", "description": "", "amount": "13", "profile": "alpha"})
+        assert bad.status_code == 200 and "Description is required" in bad.text and "Edit Expense" in bad.text
+        # an uploaded file replaces the link; a second upload replaces the file (the old one is deleted)
+        client.post(f"/taxes/expense/{entry_id}", params={"year": "2026"}, follow_redirects=False,
+                    data={"date": "2026-03-05", "description": "bigger boxes", "amount": "13", "profile": "alpha"},
+                    files={"receipt_file": ("one.pdf", b"%PDF-1", "application/pdf")})
+        entry = json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"][0]
+        assert entry["receipt"]["name"] == "one.pdf" and "url" not in entry["receipt"]
+        assert "now <a" in client.get("/taxes", params={"year": "2026", "edit": entry_id}).text
+        client.post(f"/taxes/expense/{entry_id}", params={"year": "2026"}, follow_redirects=False,
+                    data={"date": "2026-03-05", "description": "bigger boxes", "amount": "13", "profile": "alpha"},
+                    files={"receipt_file": ("two.pdf", b"%PDF-2", "application/pdf")})
+        files = sorted(p.name for p in (tmp_path / "data" / "expenses" / "2026").glob("*"))
+        assert files == [f"{entry_id}_two.pdf"]
+        assert client.post("/taxes/expense/nope", params={"year": "2026"}, data={"description": "x"}).status_code == 404
 
     def test_it_refuses_the_wrong_methods(self, client):
         assert client.put("/taxes").status_code == 405

@@ -464,9 +464,13 @@ holds what the ledger cannot know:
 - **Expenses** — your own list of everything spent for the business in the year beyond the
   ledger's purchases. Every entry requires its date (in the year), amount, the profile and the
   email of the account that paid, and a receipt: an uploaded file (kept under `data/expenses/`,
-  inside every backup, served back from the page) or a link. Deleting an entry deletes its file.
+  inside every backup, served back from the page) or a link. Who paid is the profile OR the
+  email of the account -- one is enough. A row's *edit* button opens it in the form and saves it
+  in place (the receipt stays unless a new file or a different link is given). Deleting an entry
+  deletes its file.
   Counted under line 27a.
-- **Program cashback** — Prime, Prime Business and Costco Executive pay cashback of their own,
+- **Program cashback** — Prime (young adult cashback), Prime Business (rewards) and Costco
+  Executive (cashback) pay cashback of their own,
   separate from any card or portal: one row per retailer login in your profiles. Line 6.
 - **Cards** — one row per card used on an order placed in the year (every Card Last 4 on the
   year's rows, whether or not the Cards settings list it), minus any the settings mark `virtual`:

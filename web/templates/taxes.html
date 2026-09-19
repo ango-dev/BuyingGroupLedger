@@ -39,41 +39,43 @@
 
 <section class="panel" id="s-expenses">
   <header><h2>Expenses — {{ year }}</h2>
-    <p class="muted">Everything spent for the business in {{ year }} beyond the ledger's purchases: supplies, memberships, card annual fees. Every entry needs its date, amount, the profile and email of the account that paid, and a receipt — uploaded (kept under <code>data/expenses/</code>, inside every backup) or linked. Counted under Other expenses (line 27a).</p></header>
+    <p class="muted">Everything spent for the business in {{ year }} beyond the ledger's purchases: supplies, memberships, card annual fees. Every entry needs its date, amount, who paid (the profile, or the email of the account), and a receipt — uploaded (kept under <code>data/expenses/</code>, inside every backup) or linked. Counted under Other expenses (line 27a).</p></header>
   {% if inputs.expenses %}
   <table class="grid compact expenses">
-    <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Profile</th><th>Email</th><th>Receipt</th><th class="num">Amount</th><th></th></tr></thead>
+    <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Paid by</th><th>Receipt</th><th class="num">Amount</th><th></th></tr></thead>
     <tbody>
       {% for e in inputs.expenses %}
-      <tr>
+      <tr{% if edit_entry and edit_entry.id == e.id %} class="editing"{% endif %}>
         <td class="mono">{{ e.date }}</td><td>{{ e.description }}</td><td class="muted">{{ e.category }}</td>
-        <td>{{ e.profile }}</td><td class="muted small">{{ e.email }}</td>
+        <td>{{ e.profile }}{% if e.profile and e.email %} <span class="muted">·</span> {% endif %}<span class="muted small">{{ e.email }}</span></td>
         <td>{% if e.receipt.file %}<a href="/taxes/receipt/{{ e.id }}?year={{ year }}" rel="noopener">{{ e.receipt.name }}</a>{% elif e.receipt.url %}<a href="{{ e.receipt.url }}" rel="noopener">receipt ↗</a>{% endif %}</td>
         <td class="num">{{ e.amount | money }}</td>
-        <td class="num"><button type="submit" form="del-expense-{{ e.id }}" class="danger small" title="remove this expense">✕</button></td>
+        <td class="num actions"><a class="button small" href="/taxes?year={{ year }}&edit={{ e.id }}#expense-form" title="edit this expense">edit</a> <button type="submit" form="del-expense-{{ e.id }}" class="danger small" title="remove this expense">✕</button></td>
       </tr>
       {% endfor %}
-      <tr class="total"><td colspan="6">Total</td><td class="num">{{ inputs.expense_total | money }}</td><td></td></tr>
+      <tr class="total"><td colspan="5">Total</td><td class="num">{{ inputs.expense_total | money }}</td><td></td></tr>
     </tbody>
   </table>
   {% for e in inputs.expenses %}<form method="post" id="del-expense-{{ e.id }}" action="/taxes/expense/{{ e.id }}/delete?year={{ year }}" class="entry-delete" hidden data-confirm="Remove the expense {{ e.description }} ({{ e.amount | money }}) from {{ year }}? Its uploaded receipt is deleted too."></form>{% endfor %}
   {% else %}
   <p class="muted">No expenses entered for {{ year }} yet.</p>
   {% endif %}
-  <h3>Add an Expense</h3>
-  {#- One four-column grid, every field filling its cell, the wide ones spanning two. -#}
-  <form method="post" action="/taxes/expense?year={{ year }}" enctype="multipart/form-data" class="expense-form">
+  {#- One four-column grid, every field filling its cell, the wide ones spanning two. The same form adds an
+      expense or, opened from a row's edit button (?edit=<id>), saves that entry in place: the
+      receipt it has stays unless a new one is given. -#}
+  <h3 id="expense-form">{{ 'Edit Expense' if edit_entry else 'Add an Expense' }}</h3>
+  <form method="post" action="{{ '/taxes/expense/' ~ edit_entry.id if edit_entry else '/taxes/expense' }}?year={{ year }}" enctype="multipart/form-data" class="expense-form">
     <div class="egrid">
       <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
       <label>Amount <input type="text" name="amount" value="{{ draft.get('amount', '') }}" placeholder="0.00" inputmode="decimal" required></label>
-      <span class="lbl">Profile {{ choose('profile', [('', '— choose —')] + (profile_labels | list), draft.get('profile', ''), '', 'field') }}</span>
-      <label>Email of the account that paid <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com" required></label>
+      <span class="lbl">Paid by — profile {{ choose('profile', [('', '— none —')] + (profile_labels | list), draft.get('profile', ''), '', 'field') }}</span>
+      <label>or the email of the account that paid <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com"></label>
       <label class="span-2">Description <input type="text" name="description" value="{{ draft.get('description', '') }}" placeholder="what it was" required></label>
       <label class="span-2">Category <input type="text" name="category" value="{{ draft.get('category', '') }}" placeholder="optional: supplies, membership, annual fee…"></label>
-      <span class="lbl span-2">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
+      <span class="lbl span-2">Receipt{% if edit_entry and edit_entry.receipt.file %} <span class="muted">(now <a href="/taxes/receipt/{{ edit_entry.id }}?year={{ year }}" rel="noopener">{{ edit_entry.receipt.name }}</a>; upload to replace it)</span>{% endif %} {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
       <label class="span-2">or a link to it <input type="text" name="receipt_url" value="{{ draft.get('receipt_url', '') }}" placeholder="https://…"></label>
     </div>
-    <div class="inline-form"><button type="submit" class="primary">Add expense</button></div>
+    <div class="inline-form"><button type="submit" class="primary">{{ 'Save changes' if edit_entry else 'Add expense' }}</button>{% if edit_entry %} <a class="button" href="/taxes?year={{ year }}#s-expenses">Cancel</a>{% endif %}</div>
   </form>
 </section>
 
@@ -81,11 +83,11 @@
   <input type="hidden" name="year" value="{{ year }}">
 
   <section class="panel" id="s-programs">
-    <header><h2>Program Cashback</h2><p class="muted">Prime, Prime Business and Costco Executive pay cashback of their own, separate from any card or portal. One row per retailer login in your profiles: what the program paid in {{ year }}. Blank = none. Counted under Other income (line 6).</p></header>
+    <header><h2>Program Cashback</h2><p class="muted">Prime (young adult cashback), Prime Business (rewards) and Costco Executive (cashback) pay cashback of their own, separate from any card or portal. One row per retailer login in your profiles: what the program paid in {{ year }}. Blank = none. Counted under Other income (line 6).</p></header>
     {% if program_prompts %}
     <table class="entry-table"><thead><tr><th>Program</th><th>Cashback</th></tr></thead><tbody>
       {% for p in program_prompts %}
-      <tr><td>{{ p.label }} <span class="muted small">— {{ p.hint }}</span></td>
+      <tr><td>{{ p.label }}</td>
           <td class="narrow"><input type="text" name="{{ p.key }}" value="{{ inputs.programs.get(p.key, '') }}" placeholder="0.00" inputmode="decimal"></td></tr>
       {% endfor %}
     </tbody></table>
