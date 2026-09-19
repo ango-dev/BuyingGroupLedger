@@ -1438,7 +1438,8 @@ class TestStaticAssetsCarryTheirBlocks:
 
     def test_the_picker_script_has_both_pickers(self):
         js = (self.ROOT / "picker.js").read_text(encoding="utf-8")
-        for needle in ("window.Picker", "function renderCalendar", "function renderChoices", 'data-pick="',
+        for needle in ("window.Picker", "function renderDays", "function renderMonths", "function renderYears",
+                       "function renderChoices", 'data-pick="', 'matches("input[data-month]")', "month: function",
                        "stopImmediatePropagation", 'matches("input[data-date]")', 'addEventListener("mousedown", function (e) { e.preventDefault(); })'):
             assert needle in js, f"picker.js lost its {needle!r} block"
         base = (self.ROOT.parent / "templates" / "base.html").read_text(encoding="utf-8")

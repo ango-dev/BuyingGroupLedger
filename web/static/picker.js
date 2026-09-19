@@ -1,13 +1,19 @@
-// In-page pickers. ONE popover element, placed under the input
-// it serves, with one of two contents:
+// In-page pickers. ONE popover
+// element, placed under the input it serves, with one of three contents:
 //
-//   cal      a month calendar: ‹ › move months, a day is picked with one click, Today / Clear
+//   cal      a calendar: the days of a month; the month name and the year in its head are
+//            buttons -- the month name opens a grid of the twelve months, the year a grid of
+//            years -- so any date is three clicks away. ‹ › step a month (or twelve years).
+//            One click on a day picks it; Today / Clear at the foot.
+//   month    the same without the days: a grid of months under a year (the filters' Placed in /
+//            Paid in); a pick is YYYY-MM.
 //   choices  the column's previous answers, filtered by what is typed; arrows move the highlight,
 //            Enter takes the highlighted one, and Enter with nothing highlighted keeps what was
 //            typed (a new answer, which becomes a previous one once saved)
 //
-// Forms: any <input data-date> opens the calendar on focus. Cells: static/edit.js opens either
-// on the editor input by the cell's data-kind, and a pick saves the cell.
+// Forms: <input data-date> opens the calendar on focus, <input data-month> the month grid; a pick
+// fires `input` and `change` so a filter form that submits on change follows. Cells: static/edit.js
+// opens the calendar or the choices on the editor input by the cell's data-kind; a pick saves.
 (function () {
   "use strict";
   var pop = null, owner = null, onPick = null, kind = null, state = null, suppress = false;
@@ -55,40 +61,83 @@
     input.dispatchEvent(new Event("input", { bubbles: true }));
     var done = onPick;
     close();
-    if (done) done(value);
-    else { suppress = true; input.focus(); }
+    if (done) { done(value); return; }
+    input.dispatchEvent(new Event("change", { bubbles: true }));  // a filter form submits on it
+    suppress = true;
+    input.focus();
   }
 
-  // ---- the calendar ------------------------------------------------------------------------------
+  // ---- dates: days / months / years ----------------------------------------------------------------
   var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
                 "September", "October", "November", "December"];
+  var SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var DOW = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
   function pad(n) { return (n < 10 ? "0" : "") + n; }
   function iso(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
   function parseIso(s) {
-    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((s || "").trim());
-    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+    var m = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec((s || "").trim());
+    return m ? new Date(+m[1], +m[2] - 1, m[3] ? +m[3] : 1) : null;
   }
-  function renderCalendar() {
+  function dateState() {
+    if (state) return state;
+    var base = parseIso(owner.value) || new Date();
+    state = { y: base.getFullYear(), m: base.getMonth(), view: kind === "month" ? "months" : "days" };
+    return state;
+  }
+  function head(prevAttr, nextAttr, middle) {
+    return '<div class="cal-head"><button type="button" ' + prevAttr + ' aria-label="previous">‹</button>' +
+      "<span>" + middle + '</span><button type="button" ' + nextAttr + ' aria-label="next">›</button></div>';
+  }
+  function renderDays(s) {
     var chosen = parseIso(owner.value);
-    if (!state) { var base = chosen || new Date(); state = { y: base.getFullYear(), m: base.getMonth() }; }
-    var first = new Date(state.y, state.m, 1);
-    var lead = (first.getDay() + 6) % 7;  // Monday first
-    var days = new Date(state.y, state.m + 1, 0).getDate();
+    var lead = (new Date(s.y, s.m, 1).getDay() + 6) % 7;  // Monday first
+    var days = new Date(s.y, s.m + 1, 0).getDate();
     var today = iso(new Date());
-    var html = '<div class="cal-head"><button type="button" data-nav="-1" aria-label="previous month">‹</button>' +
-      "<span>" + MONTHS[state.m] + " " + state.y + "</span>" +
-      '<button type="button" data-nav="1" aria-label="next month">›</button></div><div class="cal-grid">';
+    var html = head('data-nav="-1"', 'data-nav="1"',
+      '<button type="button" data-view="months" title="pick a month">' + MONTHS[s.m] + "</button> " +
+      '<button type="button" data-view="years" title="pick a year">' + s.y + "</button>") + '<div class="cal-grid">';
     DOW.forEach(function (d) { html += '<span class="cal-dow">' + d + "</span>"; });
     for (var i = 0; i < lead; i++) html += "<span></span>";
     for (var d = 1; d <= days; d++) {
-      var v = state.y + "-" + pad(state.m + 1) + "-" + pad(d);
+      var v = s.y + "-" + pad(s.m + 1) + "-" + pad(d);
       var cls = "cal-day" + (v === today ? " today" : "") + (chosen && v === iso(chosen) ? " chosen" : "");
       html += '<button type="button" class="' + cls + '" data-pick="' + v + '">' + d + "</button>";
     }
     html += '</div><div class="cal-foot"><button type="button" data-pick="' + today + '">Today</button>' +
       '<button type="button" data-pick="">Clear</button></div>';
-    pop.innerHTML = html;
+    return html;
+  }
+  function renderMonths(s) {
+    var chosen = parseIso(owner.value);
+    var now = new Date();
+    var html = head('data-year="-1"', 'data-year="1"',
+      '<button type="button" data-view="years" title="pick a year">' + s.y + "</button>") + '<div class="cal-months">';
+    SHORT.forEach(function (name, i) {
+      var cls = "cal-month" + (s.y === now.getFullYear() && i === now.getMonth() ? " today" : "") +
+        (chosen && chosen.getFullYear() === s.y && chosen.getMonth() === i ? " chosen" : "");
+      html += '<button type="button" class="' + cls + '" data-month="' + i + '">' + name + "</button>";
+    });
+    html += "</div>";
+    if (kind === "month") {
+      var thisMonth = now.getFullYear() + "-" + pad(now.getMonth() + 1);
+      html += '<div class="cal-foot"><button type="button" data-pick="' + thisMonth + '">This month</button>' +
+        '<button type="button" data-pick="">Clear</button></div>';
+    }
+    return html;
+  }
+  function renderYears(s) {
+    var chosen = parseIso(owner.value);
+    var first = s.y - 6;
+    var html = head('data-years="-12"', 'data-years="12"', first + " – " + (first + 11)) + '<div class="cal-months">';
+    for (var y = first; y < first + 12; y++) {
+      var cls = "cal-month" + (y === new Date().getFullYear() ? " today" : "") + (chosen && chosen.getFullYear() === y ? " chosen" : "");
+      html += '<button type="button" class="' + cls + '" data-year-pick="' + y + '">' + y + "</button>";
+    }
+    return html + "</div>";
+  }
+  function renderDate() {
+    var s = dateState();
+    pop.innerHTML = s.view === "days" ? renderDays(s) : s.view === "months" ? renderMonths(s) : renderYears(s);
   }
 
   // ---- the choices -------------------------------------------------------------------------------
@@ -112,20 +161,30 @@
     }
     pop.innerHTML = html;
   }
-  function render() { if (kind === "cal") renderCalendar(); else renderChoices(); }
+  function render() { if (kind === "choices") renderChoices(); else renderDate(); }
 
   function onClick(e) {
-    var nav = e.target.closest ? e.target.closest("[data-nav]") : null;
-    if (nav && state) {
-      state.m += parseInt(nav.getAttribute("data-nav"), 10);
-      if (state.m < 0) { state.m = 11; state.y -= 1; }
-      if (state.m > 11) { state.m = 0; state.y += 1; }
-      render();
-      if (owner) place(owner);
-      return;
+    var t = function (sel) { return e.target.closest ? e.target.closest(sel) : null; };
+    var el;
+    if ((el = t("[data-nav]"))) {  // a month either way
+      var s = dateState();
+      s.m += parseInt(el.getAttribute("data-nav"), 10);
+      if (s.m < 0) { s.m = 11; s.y -= 1; }
+      if (s.m > 11) { s.m = 0; s.y += 1; }
+    } else if ((el = t("[data-year]"))) { dateState().y += parseInt(el.getAttribute("data-year"), 10); }
+    else if ((el = t("[data-years]"))) { dateState().y += parseInt(el.getAttribute("data-years"), 10); }
+    else if ((el = t("[data-view]"))) { dateState().view = el.getAttribute("data-view"); }
+    else if ((el = t("[data-year-pick]"))) { dateState().y = parseInt(el.getAttribute("data-year-pick"), 10); dateState().view = "months"; }
+    else if ((el = t("[data-month]"))) {
+      var st = dateState();
+      st.m = parseInt(el.getAttribute("data-month"), 10);
+      if (kind === "month") { pick(st.y + "-" + pad(st.m + 1)); return; }
+      st.view = "days";
     }
-    var b = e.target.closest ? e.target.closest("[data-pick]") : null;
-    if (b) pick(b.getAttribute("data-pick"));
+    else if ((el = t("[data-pick]"))) { pick(el.getAttribute("data-pick")); return; }
+    else return;
+    render();
+    if (owner) place(owner);
   }
 
   // Keys on the owning input, in the CAPTURE phase so the popover acts before the input's own
@@ -153,20 +212,25 @@
   window.addEventListener("scroll", close, true);
   window.addEventListener("resize", close);
 
-  // Forms: an <input data-date> is a date field; the calendar opens on focus (and on a click
-  // when it was closed with Esc).
+  // Forms: <input data-date> is a date field, <input data-month> a month field; the picker opens
+  // on focus (and on a click when it was closed with Esc).
+  function formKind(el) {
+    if (!el || !el.matches) return null;
+    return el.matches("input[data-date]") ? "cal" : el.matches("input[data-month]") ? "month" : null;
+  }
   document.addEventListener("focusin", function (e) {
-    var el = e.target;
-    if (el && el.matches && el.matches("input[data-date]") && !suppress) { state = null; open(el, "cal", null); }
+    var k = formKind(e.target);
+    if (k && !suppress) { state = null; open(e.target, k, null); }
     suppress = false;
   });
   document.addEventListener("click", function (e) {
-    var el = e.target;
-    if (el && el.matches && el.matches("input[data-date]") && owner !== el) { state = null; open(el, "cal", null); }
+    var k = formKind(e.target);
+    if (k && owner !== e.target) { state = null; open(e.target, k, null); }
   });
 
   window.Picker = {
     date: function (input, pickFn) { state = null; open(input, "cal", pickFn); },
+    month: function (input, pickFn) { state = null; open(input, "month", pickFn); },
     choices: function (input, values, pickFn) {
       state = { values: values || [], hi: -1, shown: [] };
       open(input, "choices", pickFn);
