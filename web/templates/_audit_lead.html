@@ -1,5 +1,5 @@
-{#- The page's lead (its description, tiles and panel), rendered FIRST on the page (orders.html's lead block)
-    so it scrolls away, after which the heading and the filter bar stick to the top. -#}
+{#- The page's lead (its description, tiles and panel), rendered under the title (orders.html's lead block); the
+    title and the lead scroll away, then the filter bar sticks to the top. -#}
 {% set counts = audit.counts() %}
 <div class="lead">
   <p class="muted small">Every check of <span class="mono">scripts.audit_ledger</span> run against the ledger this page serves. Below: every row a check named, with the finding beside it. Pick checks to narrow the rows; the filters, sort and search work as on Orders.</p>

@@ -74,10 +74,11 @@ class TestAuditOverTheDatabase:
     def test_the_report_follows_a_write_through_the_adapter(self, client, db):
         assert "111-2" in client.get("/audit").text
         page = client.get("/audit").text
-        assert '<body class="wide scoped">' in page and '<body class="wide">' in client.get("/orders").text
-        # the lead (description, tiles, checks) comes FIRST and scrolls away; the heading and the
-        # filter bar sit in the pinned wrapper that sticks once it has
-        assert page.index('<div class="lead">') < page.index('<div class="pinned">') < page.index("<h1>Audit</h1>") < page.index('id="filters"')
+        # the title first, then the lead (description, tiles, checks), both scrolling away; then the
+        # pinned wrapper with the filter bar that sticks once they have
+        assert page.index("<h1>Audit</h1>") < page.index('<div class="lead">') < page.index('<div class="pinned">') < page.index('id="filters"')
+        orders = client.get("/orders").text
+        assert orders.index("<h1>Orders</h1>") < orders.index('<div class="pinned">') < orders.index('id="filters"') < orders.index('<details class="add-row"')
         assert '<details class="audit-results">' in page and 'class="audit-results" open' not in page  # starts closed
         # the four tiles are links that filter the rows: Fail / Warning to their checks, Pass / Flagged to all
         assert page.count('<a class="tile link') == 4 and 'href="/audit?check=' in page and 'href="/audit"' in page

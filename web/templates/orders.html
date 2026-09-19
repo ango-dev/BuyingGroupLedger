@@ -6,11 +6,12 @@
 {# The Audit and Reconciliation pages extend this template: the same filter bar, table and cards
    over their own rows, with a Finding column. `base` is the page's own URL,
    `scope` names it, both from the route. #}
-{# On the Audit / Recon pages the lead (description, tiles, panel) comes FIRST and scrolls away,
-   while the heading and the filter bar in .pinned stick to the top once it has. On Orders .pinned is display: contents. #}
+{# The page scrolls as one: the title, then the lead where the page has one
+   (Audit, Recon), scroll away; the filter bar (and the add-row form) in .pinned stick to the top
+   once they have, and the table's header sticks just below (edit.js measures --pinned-h). #}
+{% block heading %}<h1>Orders</h1>{% endblock %}
 {% block lead %}{% endblock %}
 <div class="pinned">
-{% block heading %}<h1>Orders</h1>{% endblock %}
 <form id="filters" class="filters" method="get" action="{{ base }}"
       hx-get="{{ base }}" hx-target="#orders-table" hx-indicator="#orders-table" hx-push-url="true"
       hx-trigger="change, keyup changed delay:300ms from:#q, submit">
@@ -52,22 +53,8 @@
   <noscript><button type="submit">Apply</button></noscript>
   <a class="button small reset" href="{{ base }}?reset=1" title="clear the filters, search and sort (the view and page size stay)">Reset</a>
 </form>
-</div>
-
-{# The in-page confirmation. htmx's hx-confirm question is routed here (static/edit.js listens
-   for htmx:confirm), so the browser's own dialog is never shown. #}
-<dialog id="confirm" class="confirm">
-  <form method="dialog">
-    <p id="confirm-text"></p>
-    <div class="inline-form">
-      <button type="button" id="confirm-cancel" value="cancel">Cancel</button>
-      <button type="button" id="confirm-ok" class="danger">Confirm</button>
-    </div>
-  </form>
-</dialog>
-
 {% if editable and not scope %}
-  {# Outside the filter form: a form cannot nest inside another. #}
+  {# Outside the filter form (a form cannot nest inside another), inside the pinned bar. #}
   {# The previous answers per choice column and the Card Name / Card Last 4 pairings, for the
      table's cell editor and the form below (static/picker.js reads it; a choice-cell write
      re-renders it out of band). #}
@@ -101,6 +88,19 @@
     </form>
   </details>
 {% endif %}
+</div>
+
+{# The in-page confirmation. htmx's hx-confirm question is routed here (static/edit.js listens
+   for htmx:confirm), so the browser's own dialog is never shown. #}
+<dialog id="confirm" class="confirm">
+  <form method="dialog">
+    <p id="confirm-text"></p>
+    <div class="inline-form">
+      <button type="button" id="confirm-cancel" value="cancel">Cancel</button>
+      <button type="button" id="confirm-ok" class="danger">Confirm</button>
+    </div>
+  </form>
+</dialog>
 
 {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
 {# The selection (hidden checkboxes in the row-number cells) and the buttons that act on it are

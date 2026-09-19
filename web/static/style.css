@@ -156,33 +156,22 @@ table.ledger td { white-space: nowrap; }
    status colours: whole-row background by Status, strikethrough on cancelled / superseded, in the
    exact RGB the old conditional formats used (read 2026-09-17); the text stays dark on them in
    both themes. */
-/* ONE scroll region, like Sheets -- and it is the TABLE. body.wide is the viewport, nothing on
-   the page itself scrolls; <main> is a column, the filter bar / add-row / bulk bar / banners /
-   count are static above, and .sheet (the table's wrapper) is the single element that scrolls, in
-   both directions. The column header sticks to .sheet's top and the row numbers to its left, and
-   nothing above the table can ever be dragged sideways. */
+/* The page scrolls as one (main), the filter bar sticking to the top as the title scrolls away;
+   the table's header row and its row-number column stick within it. */
 body.wide { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 body.wide header.top { flex: 0 0 auto; }
-body.wide main { flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%; margin: 0; overflow: hidden;
-  max-width: none; padding: 0; display: flex; flex-direction: column; }
-body.wide .filters { margin: 0; border-radius: 0; border-width: 0 0 1px; flex: 0 0 auto; }
-body.wide h1 { margin: 8px 8px 6px; flex: 0 0 auto; }
-body.wide .add-row { flex: 0 0 auto; }
-body.wide #bulk { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-body.wide #orders-table { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-body.wide .count { margin: 4px 8px; flex: 0 0 auto; }
-body.wide .sheet { overflow: auto; flex: 1 1 auto; min-height: 0; background: var(--card); border-top: 1px solid var(--line); }
-/* Orders: .pinned is transparent to the flex column (heading and filter bar are its children).
-   Audit / Recon (body.scoped): the page scrolls as one -- the lead first, then .pinned sticks to the
-   top of main once the lead has scrolled away, and the table's header sticks just below it
-   (--pinned-h is measured by edit.js). */
-body.wide .pinned { display: contents; }
-body.wide.scoped main { display: block; overflow: auto; }
-body.wide.scoped .pinned { display: block; position: sticky; top: 0; left: 0; z-index: 6; background: var(--bg); max-width: 100vw; }
-body.wide.scoped #bulk, body.wide.scoped #orders-table { display: block; }
-body.wide.scoped .sheet { overflow: visible; flex: none; }
-body.wide.scoped table.sheetlike th { top: var(--pinned-h, 0px); }
-body.wide.scoped table.sheetlike th.rownum { z-index: 4; }
+body.wide main { flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%; margin: 0; overflow: auto;
+  max-width: none; padding: 0; display: block; }
+body.wide .filters { margin: 0; border-radius: 0; border-width: 0 0 1px; }
+body.wide h1 { margin: 8px 8px 6px; }
+body.wide .count { margin: 4px 8px; }
+body.wide .sheet { background: var(--card); border-top: 1px solid var(--line); }
+/* The page scrolls as ONE (main is the scroll region, both axes): the title and any lead scroll
+   away, then .pinned (the filter bar, the add-row form) sticks to the top and the table's header
+   sticks just below it at --pinned-h, which edit.js measures on load, resize and every swap. */
+body.wide .pinned { position: sticky; top: 0; left: 0; z-index: 6; background: var(--bg); max-width: 100vw; }
+body.wide table.sheetlike th { top: var(--pinned-h, 0px); }
+body.wide table.sheetlike th.rownum { z-index: 4; }
 /* SEPARATE borders (spacing 0): with collapsed borders a sticky <th> leaves its borders behind as
    it scrolls, and the row underneath shows through the 1px gaps between the headers. */
 table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: separate; }
@@ -240,7 +229,7 @@ table.sheetlike td.error { outline: 2px solid var(--bad); outline-offset: -2px; 
 .hidden { display: none !important; }
 
 /* --- The cards view: one card per order, paginated; the wrapper is the scroll region ----------- */
-body.wide .cards-wrap { overflow: auto; flex: 1 1 auto; min-height: 0; padding: 10px 12px 24px; }
+body.wide .cards-wrap { padding: 10px 12px 24px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
 .card { background: var(--card); border: 1px solid var(--line); border-left-width: 6px; border-radius: 8px;
   padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
