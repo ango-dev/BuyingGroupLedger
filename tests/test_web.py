@@ -1448,7 +1448,7 @@ class TestStaticAssetsCarryTheirBlocks:
     def test_the_stylesheet_has_every_feature_block(self):
         css = (self.ROOT / "style.css").read_text(encoding="utf-8")
         for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap", "td.sel-cell",
-                       ".pop.cal", ".pop .choice", "td .cell-upload", ".chip.virtual",
+                       ".pop.cal", ".pop .choice", ".pop .cal-months .cal-month", "td .cell-upload", ".chip.virtual",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".add-form", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",

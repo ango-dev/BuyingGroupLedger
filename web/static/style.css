@@ -521,6 +521,14 @@ td:hover .cell-empty { opacity: 0.8; }
 .pop button { font: inherit; color: var(--fg); background: transparent; border: 0; border-radius: 6px; cursor: pointer; padding: 4px 6px; }
 .pop button:hover, .pop .choice.hi { background: var(--bg); }
 .pop .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+/* the month and year grids: four even columns, every cell a box */
+.pop .cal-months { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; padding: 2px; }
+.pop .cal-months .cal-month { display: block; width: 100%; box-sizing: border-box; padding: 9px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+.pop .cal-months .cal-month:hover { border-color: var(--accent); background: var(--bg); }
+.pop .cal-month.today { outline: 1px solid var(--accent); outline-offset: -1px; }
+.pop .cal-month.chosen { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pop .cal-head > span > button { font-weight: 600; padding: 2px 6px; }
+.pop.month { width: 252px; }
 .pop .cal-dow { color: var(--muted); font-size: 0.8em; padding: 2px 0; }
 .pop .cal-day.today { outline: 1px solid var(--accent); outline-offset: -1px; }
 .pop .cal-day.chosen { background: var(--accent); color: #fff; }
