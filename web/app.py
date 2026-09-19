@@ -207,12 +207,58 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         }
         return templates.TemplateResponse(request=request, name=name, context={**base, **context})
 
+    def needs_attention(snapshot) -> list[dict]:
+        """What the overview should shout about, or nothing: alerts and dossiers from the last seven
+        days of the activity log, the audit's failing and warning checks, and the reconciliation's
+        short- and over-paid orders. Each card links where it is dealt with."""
+        from datetime import timedelta
+
+        cards: list[dict] = []
+        try:
+            since = (clock() - timedelta(days=7)).isoformat(timespec="seconds")
+            loud = [e for e in activity_module.read(activity_path)
+                    if e.get("kind") in ("alert", "dossier") and str(e.get("at", "")) >= since]
+            alerts = sum(1 for e in loud if e.get("kind") == "alert")
+            dossiers = sum(1 for e in loud if e.get("kind") == "dossier")
+            if alerts:
+                cards.append({"tone": "bad", "label": "Alerts", "count": alerts,
+                              "text": "sent in the last 7 days", "href": "/activity?type=alert&days=7"})
+            if dossiers:
+                cards.append({"tone": "bad", "label": "Failure dossiers", "count": dossiers,
+                              "text": "runs that recorded nothing; open one to see which selector broke",
+                              "href": "/activity?type=dossier&days=7"})
+        except Exception:  # noqa: BLE001 -- the overview must render even if the log is unreadable
+            log.exception("could not read the activity log for the overview")
+        try:
+            report = audit_report(snapshot)
+            counts = report.counts()
+            if counts.get("FAIL"):
+                cards.append({"tone": "bad", "label": "Audit failures", "count": counts["FAIL"],
+                              "text": f"check(s) failing, {len(report.by_key)} row(s) flagged", "href": "/audit"})
+            if counts.get("WARN"):
+                cards.append({"tone": "warn", "label": "Audit warnings", "count": counts["WARN"],
+                              "text": "check(s) worth a look", "href": "/audit"})
+        except Exception:  # noqa: BLE001
+            log.exception("could not audit the ledger for the overview")
+        try:
+            recon = reconcile(snapshot.rows)
+            if recon.short:
+                cards.append({"tone": "bad", "label": "Short-paid", "count": len(recon.short),
+                              "text": f"order(s), {money(recon.short_total)} under the commitment", "href": "/recon?kind=short"})
+            if recon.over:
+                cards.append({"tone": "warn", "label": "Over-paid", "count": len(recon.over),
+                              "text": f"order(s), {money(recon.over_total)} over the commitment", "href": "/recon?kind=over"})
+        except Exception:  # noqa: BLE001
+            log.exception("could not reconcile the ledger for the overview")
+        return cards
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         snapshot = load(request)
         month = str(request.query_params.get("month") or "")
         return page(request, "overview.html", snapshot=snapshot,
-                    summary=overview(snapshot, month=month, today=clock().date()))
+                    summary=overview(snapshot, month=month, today=clock().date()),
+                    attention=needs_attention(snapshot))
 
     # The ledger writer: cell edits on the Orders page. The snapshot backend is a CSV, so there is
     # nothing to write to and the page stays view-only there.

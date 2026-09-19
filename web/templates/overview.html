@@ -2,6 +2,20 @@
 {% block title %}Overview{% endblock %}
 {% block content %}
 <h1>Overview</h1>
+{% if attention %}
+{# Only when something needs a hand: alerts and dossiers from Activity, the audit's failures and
+   warnings, the reconciliation's short- and over-paid orders -- each a link to where it is dealt
+   with. Nothing to show means nothing is shown. #}
+<section class="tiles stats attention" aria-label="needs attention">
+  {% for c in attention %}
+  <a class="tile link {{ c.tone }}" href="{{ c.href }}">
+    <div class="label">{{ c.label }}</div>
+    <div class="value">{{ c.count }}</div>
+    <div class="hint">{{ c.text }}</div>
+  </a>
+  {% endfor %}
+</section>
+{% endif %}
 
 {#- A stat tile is a LINK: it opens the Orders page filtered the same way the number was counted.
    -#}

@@ -1738,3 +1738,40 @@ class TestActivityLayout:
         body = client.get("/activity").text
         assert '<body class="wide">' in body
         assert body.index("<h1>Activity</h1>") < body.index('<p class="muted small lead">') < body.index('<div class="pinned">') < body.index('id="activity-filters"') < body.index('id="activity-table"')
+
+
+class TestOverviewAttention:
+    def test_cards_appear_only_for_what_needs_a_hand(self, client, logs_dir):
+        from diagnostics import activity
+
+        body = client.get("/").text
+        # the fixture ledger fails a check (cogs_inputs_complete) and short-pays an order
+        assert 'aria-label="needs attention"' in body
+        assert ">Audit failures<" in body and 'href="/audit"' in body
+        assert ">Short-paid<" in body and 'href="/recon?kind=short"' in body
+        assert ">Alerts<" not in body and ">Failure dossiers<" not in body  # nothing loud yet
+        activity.record("alert", "Costco [p]: deterministic path failed", {}, path=logs_dir / "activity.jsonl",
+                        at=NOW)
+        body = client.get("/").text
+        assert ">Alerts<" in body and 'href="/activity?type=alert&amp;days=7"' in body or 'href="/activity?type=alert&days=7"' in body
+
+    def test_nothing_is_shown_when_nothing_is_wrong(self, tmp_path, logs_dir):
+        from web.ledger_reader import LedgerRow
+        from web.app import create_app
+        from config.settings import settings
+
+        class Clean:
+            backend = "snapshot"
+
+            def load(self, force=False):
+                from web.ledger_reader import Snapshot
+                return Snapshot(rows=[], header=list(HEADER), backend="snapshot", source="x", loaded_at=NOW)
+
+            def health(self):
+                return {}
+
+        app = create_app(Clean(), logs_dir=logs_dir, failures_dir=tmp_path / "f", backup_dir=tmp_path / "b",
+                         repo_root_dir=tmp_path, clock=lambda: NOW,
+                         settings=dataclasses.replace(settings, container_run_interval_hours=6))
+        body = TestClient(app).get("/").text
+        assert 'aria-label="needs attention"' not in body
