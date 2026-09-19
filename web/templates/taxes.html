@@ -63,7 +63,7 @@
   <h3>Add an Expense</h3>
   <form method="post" action="/taxes/expense?year={{ year }}" enctype="multipart/form-data" class="expense-form">
     <div class="fgrid four">
-      <label>Date <input type="text" name="date" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
+      <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
       <label>Amount <input type="text" name="amount" value="{{ draft.get('amount', '') }}" placeholder="0.00" inputmode="decimal" required></label>
       <span class="lbl">Profile {{ choose('profile', [('', '— choose —')] + (profile_labels | list), draft.get('profile', ''), '', 'field') }}</span>
       <label>Email of the account that paid <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com" required></label>

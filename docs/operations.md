@@ -156,8 +156,12 @@ or drag for a range; double-click, Enter or just start typing to
 edit (the keystroke replaces the value); Enter saves, and fills every cell of a selected range;
 Esc cancels; Delete clears the selection; Ctrl+C copies the selection as tab-separated values
 (it pastes into Sheets or Excel) and Ctrl+V pastes a value into every selected cell or a block
-cell by cell from the top-left; the arrow keys move, with Shift they extend. Every write is one
-conflict-checked cell write, run one after another. **A cell you edit is protected from then
+cell by cell from the top-left; the arrow keys move, with Shift they extend. A date cell opens the page's own calendar (so
+does every date field on a form); Status, Retailer, Buying Group, Card Name, Card Last 4, Profile
+and Tracking Submitted offer the column's previous answers as you type, most used first, and a new
+answer typed in is a previous answer from then on. The Receipt Link cell carries an upload button
+(⤒): pick a file and the link lands on every row of the order, the table re-rendering in place.
+Every write is one conflict-checked cell write, run one after another. **A cell you edit is protected from then
 on**: the scheduled
 run's upsert, its order-level reproration and the buying-group sync all keep a hand-typed value
 (`ledger_db/hand_edits`, a table in the ledger file that the dashboard's writer fills; the cell

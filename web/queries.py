@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from models.order import FIELDNAMES
@@ -15,6 +16,22 @@ TABLE_COLUMNS = tuple(FIELDNAMES)
 
 #: Rendered as anchors rather than text.
 LINK_FIELDS = ("order_url", "tracking_url", "receipt_url")
+#: Columns whose cell editor offers the ledger's previous answers -- and takes a new one, which
+#: is a previous answer from then on.
+CHOICE_FIELDS = ("status", "retailer", "buying_group", "card_name", "card_last4", "profile_label",
+                 "tracking_submitted")
+
+
+def choice_values(rows) -> dict[str, list[str]]:
+    """Every distinct non-blank value per CHOICE_FIELDS column, most used first, then A-Z."""
+    counts: dict[str, Counter] = {f: Counter() for f in CHOICE_FIELDS}
+    for row in rows:
+        for field in CHOICE_FIELDS:
+            value = row.text(field).strip()
+            if value:
+                counts[field][value] += 1
+    return {f: [v for v, _ in sorted(c.items(), key=lambda kv: (-kv[1], kv[0].lower()))]
+            for f, c in counts.items()}
 #: Right-aligned, money-formatted.
 MONEY_FIELDS = ("cost_per_item", "total_cost", "shipping", "sales_tax", "gift_card", "rewards_used",
                 "cogs", "insurance", "payout_amount", "total_profit", "expected_payout")

@@ -69,7 +69,7 @@
     <summary>Add a row</summary>
     <form method="post" action="/orders/add" class="add-form" enctype="multipart/form-data">
       {% set af = add_form or {} %}
-      <label>Order Date <input name="order_date" value="{{ af.get('order_date', '') }}" placeholder="YYYY-MM-DD" required></label>
+      <label>Order Date <input name="order_date" data-date value="{{ af.get('order_date', '') }}" placeholder="YYYY-MM-DD" required autocomplete="off"></label>
       <label>Order ID <input name="order_id" value="{{ af.get('order_id', '') }}" required></label>
       <label>Item Name <input name="item_name" value="{{ af.get('item_name', '') }}" required class="wide"></label>
       <label>Shipment <input name="shipment" value="{{ af.get('shipment', '1') }}" size="3"></label>

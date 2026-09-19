@@ -172,9 +172,18 @@ class TestApplyScalars:
 
 
 class TestApplySection:
+    def test_a_virtual_card_wears_a_badge(self, client):
+        settings_form.apply_section("cards", json.dumps([
+            {"last4": "1234", "name": "Virtual One", "cashback_rate": "2%", "virtual": True},
+            {"last4": "5678", "name": "Real One", "cashback_rate": 0.01},
+        ]))
+        body = client.get("/settings").text
+        virtual, real = body.index("Virtual One"), body.index("Real One")
+        assert 'class="chip virtual"' in body[virtual:real] and 'class="chip virtual"' not in body[real:]
+
     def test_a_valid_list_is_validated_by_its_model_and_saved(self, config):
         count = settings_form.apply_section("cards", json.dumps([
-            {"last4": "1234", "name": "New Card", "cashback_rate": "2%"},
+            {"last4": "1234", "name": "New Card", "cashback_rate": "2%", "virtual": True},
             {"last4": "5678", "name": "Other", "cashback_rate": 0.01},
         ]))
         assert count == 2

@@ -1436,9 +1436,18 @@ class TestStaticAssetsCarryTheirBlocks:
 
     ROOT = Path(__file__).resolve().parents[1] / "web" / "static"
 
+    def test_the_picker_script_has_both_pickers(self):
+        js = (self.ROOT / "picker.js").read_text(encoding="utf-8")
+        for needle in ("window.Picker", "function renderCalendar", "function renderChoices", 'data-pick="',
+                       "stopImmediatePropagation", 'matches("input[data-date]")', 'addEventListener("mousedown", function (e) { e.preventDefault(); })'):
+            assert needle in js, f"picker.js lost its {needle!r} block"
+        base = (self.ROOT.parent / "templates" / "base.html").read_text(encoding="utf-8")
+        assert 'src="/static/picker.js' in base
+
     def test_the_stylesheet_has_every_feature_block(self):
         css = (self.ROOT / "style.css").read_text(encoding="utf-8")
         for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap", "td.sel-cell",
+                       ".pop.cal", ".pop .choice", "td .cell-upload", ".chip.virtual",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".add-form", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
@@ -1464,7 +1473,9 @@ class TestStaticAssetsCarryTheirBlocks:
                        'closest(".dropzone")', "data-autosubmit", 'classList.add("just-in")',
                        'matches(\'[hx-trigger*="every"]\')', "sel-cell", 'execCommand("copy")',
                        'addEventListener("paste"', 'e.key === "Delete"', "fillSelection(", "all.checked = !any",
-                       "if (thenDown) move(1, 0, false)", "paint(false)",
+                       "if (thenDown) move(1, 0, false)", "paint(false)", "Picker.date(", "Picker.choices(",
+                       'getElementById("cell-choices")', '".cell-upload"', 'name="next" value="table"',
+                       'hx-encoding", "multipart/form-data"',
                        '(e.key === "Delete" || e.key === "Backspace") && rowsChecked()', 'getElementById("delete-selected")',
                        "selected rows from the ledger?", 'if (e.key === "Escape") { if (clearRows())',
                        '"rows:cleared"', "press.on = press.on.filter(", "function toggleOne(td)",

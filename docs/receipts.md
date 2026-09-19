@@ -35,8 +35,8 @@ show the previous order's render; two Amazon Business invoices can be near-ident
 
 ## By hand
 
-The Orders page's add form takes a photo or PDF, and an order's page has an *Upload receipt*
-button: the file is stored under the same key the capture uses and the link becomes Receipt Link
+The Orders page's add form takes a photo or PDF, the Receipt Link cell in the table has an
+upload button (⤒), and an order's page has an *Upload receipt* button: the file is stored under the same key the capture uses and the link becomes Receipt Link
 on every row of the order. Accepted: pdf, png, jpg, webp, up to 25 MB.
 
 ## Checking what is stored

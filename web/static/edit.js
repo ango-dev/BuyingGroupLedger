@@ -124,6 +124,7 @@
       expected: raw
     };
     td.classList.add("saving");
+    if (td.getAttribute("data-kind") === "choice") learn(td.getAttribute("data-field"), value);
     queue = queue.then(function () {
       return htmx.ajax("POST", "/orders/cell", { target: td, swap: "outerHTML", values: values });
     }).catch(function () {});
@@ -135,6 +136,20 @@
   }
 
   // ---- the editor --------------------------------------------------------------------------------
+  // The previous answers per choice column: rendered into #cell-choices with the table, read once
+  // per table, and a value just saved joins its column at once (it is a previous answer now).
+  var choicesCache = null;
+  function choicesFor(field) {
+    if (!choicesCache) {
+      var node = document.getElementById("cell-choices");
+      try { choicesCache = node ? JSON.parse(node.textContent) : {}; } catch (err) { choicesCache = {}; }
+    }
+    return choicesCache[field] || [];
+  }
+  function learn(field, value) {
+    if (!value || !choicesCache || !choicesCache[field]) return;
+    if (choicesCache[field].indexOf(value) < 0) choicesCache[field].unshift(value);
+  }
   function armed(td) {
     if (!td.getAttribute("data-original-html")) td.setAttribute("data-original-html", td.innerHTML);
     return td;
@@ -156,6 +171,11 @@
     td.appendChild(input);
     input.focus();
     if (initial === undefined) input.select();
+    // The in-page picker for the cell's kind (static/picker.js): a calendar on a date cell, the
+    // column's previous answers on a choice cell. A pick saves the cell, as Enter would.
+    var kind = td.getAttribute("data-kind");
+    if (window.Picker && kind === "date") Picker.date(input, function () { save(false); });
+    else if (window.Picker && kind === "choice") Picker.choices(input, choicesFor(field), function () { save(false); });
 
     var done = false;
     function restore() {
@@ -330,8 +350,37 @@
   document.addEventListener("htmx:afterSwap", function (e) {
     var td = e.target && e.target.matches && e.target.matches("td[data-error]") ? e.target : null;
     if (td) { td.focus(); }
-    if (e.target && e.target.id === "orders-table") { ranges = []; anchor = null; active = null; }
+    if (e.target && e.target.id === "orders-table") { ranges = []; anchor = null; active = null; choicesCache = null; }
     paint(false);
+  });
+
+  // ---- a receipt uploaded from the table ---------------------------------------
+  // The receipt cell's ⤒ opens the file dialog; the chosen file posts to the order's upload route
+  // through a hidden htmx form (multipart, with the page's filters), which answers with the table
+  // re-rendered and a notice, exactly as a cell edit does.
+  document.addEventListener("click", function (e) {
+    var button = e.target.closest ? e.target.closest(".cell-upload") : null;
+    if (!button) return;
+    e.preventDefault();
+    var orderId = button.getAttribute("data-order-id");
+    var form = document.createElement("form");
+    form.hidden = true;
+    form.setAttribute("hx-post", "/orders/" + encodeURIComponent(orderId) + "/receipt");
+    form.setAttribute("hx-target", "#orders-table");
+    form.setAttribute("hx-swap", "outerHTML");
+    form.setAttribute("hx-encoding", "multipart/form-data");
+    form.setAttribute("hx-include", "#filters");
+    form.innerHTML = '<input type="hidden" name="next" value="table">' +
+      '<input type="file" name="receipt_file" accept=".pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf">';
+    document.body.appendChild(form);
+    var file = form.querySelector("input[type=file]");
+    file.addEventListener("change", function () {
+      if (!file.files.length) { form.remove(); return; }
+      htmx.process(form);
+      form.addEventListener("htmx:afterRequest", function () { form.remove(); });
+      htmx.trigger(form, "submit");
+    });
+    file.click();
   });
 })();
 

@@ -7,7 +7,7 @@
 {%- set hand = row and col in row.hand_edited -%}
 <td class="{{ 'num' if col in MONEY_FIELDS or col in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }}{{ ' mono' if col in ('order_id', 'tracking_number', 'package_id', 'card_last4') }}{{ ' item' if col == 'item_name' }}{{ ' edit' if editable_cell }}{{ ' error' if error }}{{ ' hand' if hand }}"
     data-field="{{ col }}"
-    {%- if editable_cell %} data-raw="{{ raw }}" data-order-id="{{ key.order_id }}" data-order-date="{{ key.order_date }}" data-item-name="{{ key.item_name }}" data-shipment="{{ key.shipment }}" tabindex="0" title="{{ 'typed by hand: runs keep this value; ' if hand }}double-click or press Enter to edit"{% elif hand %} title="typed by hand: runs keep this value"{% endif %}
+    {%- if editable_cell %} data-raw="{{ raw }}" data-order-id="{{ key.order_id }}" data-order-date="{{ key.order_date }}" data-item-name="{{ key.item_name }}" data-shipment="{{ key.shipment }}" tabindex="0" data-kind="{{ 'date' if col in DATE_FIELDS else 'choice' if col in CHOICE_FIELDS else 'text' }}" title="{{ 'typed by hand: runs keep this value; ' if hand }}double-click or press Enter to edit{{ ' (a calendar opens)' if col in DATE_FIELDS else ' (previous answers are offered)' if col in CHOICE_FIELDS }}"{% elif hand %} title="typed by hand: runs keep this value"{% endif %}
     {%- if error %} data-error="{{ error }}"{% endif %}>
   {%- if error %}<span class="cell-error" title="{{ error }}">⚠ {{ error }}</span> {% endif -%}
   {%- if row -%}
@@ -18,7 +18,7 @@
     {%- elif col == 'tracking_number' -%}
       {%- if row.tracking_number and row.text('tracking_url') -%}<a href="{{ row.text('tracking_url') }}" rel="noopener">{{ row.tracking_number }}</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the tracking number" aria-label="edit tracking number">✎</button>{% endif %}{%- else -%}{{ row.tracking_number }}{%- endif -%}
     {%- elif col in LINK_FIELDS -%}
-      {%- if raw -%}<a href="{{ raw }}" rel="noopener" title="{{ raw }}">{{ 'receipt' if col == 'receipt_url' else 'tracking' if col == 'tracking_url' else 'order' }} ↗</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the link" aria-label="edit {{ col }}">✎</button>{% endif %}{%- elif editable_cell -%}<span class="muted cell-empty">add ↗</span>{%- endif -%}
+      {%- if raw -%}<a href="{{ raw }}" rel="noopener" title="{{ raw }}">{{ 'receipt' if col == 'receipt_url' else 'tracking' if col == 'tracking_url' else 'order' }} ↗</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the link" aria-label="edit {{ col }}">✎</button>{% endif %}{%- elif editable_cell -%}<span class="muted cell-empty">add ↗</span>{%- endif -%}{%- if col == 'receipt_url' and editable_cell -%}<button type="button" class="cell-upload" data-order-id="{{ key.order_id }}" title="upload a receipt file for this order (the link goes on every row of it)" aria-label="upload a receipt for {{ key.order_id }}">⤒</button>{%- endif -%}
     {%- elif col == 'tracking_submitted' -%}
       <span class="check">{{ '☑' if row.tracking_submitted else '☐' }}</span>
     {%- elif col == 'payout_amount' -%}

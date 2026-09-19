@@ -499,9 +499,9 @@ details.advanced textarea { margin-top: 8px; }
 .card ol.items .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card ol.items .meta { flex: 0 0 auto; color: var(--muted); font-size: 0.85em; font-variant-numeric: tabular-nums; }
 /* ---- link cells: the pencil that opens the editor, the "add" affordance of a blank one ---- */
-td .cell-edit { margin-left: 6px; padding: 0 4px; font-size: 0.85em; line-height: 1.2; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; opacity: 0.55; }
-td:hover .cell-edit { opacity: 1; }
-td .cell-edit:hover { color: var(--accent); border-color: var(--accent); }
+td .cell-edit, td .cell-upload { margin-left: 6px; padding: 0 4px; font-size: 0.85em; line-height: 1.2; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; opacity: 0.55; }
+td:hover .cell-edit, td:hover .cell-upload { opacity: 1; }
+td .cell-edit:hover, td .cell-upload:hover { color: var(--accent); border-color: var(--accent); }
 td .cell-empty { font-size: 0.85em; cursor: text; opacity: 0; }
 td:hover .cell-empty { opacity: 0.8; }
 /* ---- in-page tooltips (static/tooltip.js): one small panel, never in the way ---- */
@@ -509,6 +509,24 @@ td:hover .cell-empty { opacity: 0.8; }
   color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 6px;
   box-shadow: 0 4px 14px rgba(0,0,0,0.12); pointer-events: none; opacity: 0; transition: opacity .12s; white-space: normal; }
 .tip.on { opacity: 1; }
+
+/* ---- in-page pickers (static/picker.js): a calendar, or a column's previous answers ---- */
+.pop { position: fixed; z-index: 1001; display: none; padding: 6px; font-size: 0.9em; color: var(--fg);
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.16); }
+.pop.on { display: block; }
+.pop.cal { width: 236px; }
+.pop .cal-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px 6px; font-weight: 600; }
+.pop button { font: inherit; color: var(--fg); background: transparent; border: 0; border-radius: 6px; cursor: pointer; padding: 4px 6px; }
+.pop button:hover, .pop .choice.hi { background: var(--bg); }
+.pop .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.pop .cal-dow { color: var(--muted); font-size: 0.8em; padding: 2px 0; }
+.pop .cal-day.today { outline: 1px solid var(--accent); outline-offset: -1px; }
+.pop .cal-day.chosen { background: var(--accent); color: #fff; }
+.pop .cal-foot { display: flex; justify-content: space-between; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.pop.choices { min-width: 160px; max-width: 320px; max-height: 260px; overflow: auto; }
+.pop.choices.on { display: flex; flex-direction: column; }
+.pop .choice { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.entry-card .chip.virtual { border-style: dashed; }
 
 /* ---- the Settings gear (top right) and the Activity page ---- */
 header .meta .gear { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px;

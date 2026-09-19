@@ -369,6 +369,14 @@ class TestOrdersRoutes:
         assert 'hx-post="/orders/bulk"' not in body and 'id="delete-selected" class="danger" hidden' in body
         assert 'id="bulkbar"' not in body  # no bar: the count line carries the counter and the hint
         assert 'id="sel-count">0</span> selected' in body and "Delete removes them (asked once)" in body
+        # the editor's kind per cell: a calendar on dates, previous answers on choice columns
+        assert re.search(r'data-field="payout_date"[^>]*data-kind="date"', body)
+        assert re.search(r'data-field="profile_label"[^>]*data-kind="choice"', body)
+        assert re.search(r'data-field="insurance"[^>]*data-kind="text"', body)
+        choices = re.search(r'<script type="application/json" id="cell-choices">(.*?)</script>', body, re.S)
+        assert choices and "Costco" in json.loads(choices.group(1))["retailer"]
+        assert 'class="cell-upload" data-order-id="BBY01-1"' in body
+        assert 'name="order_date" data-date' in body
         # The buttons live INSIDE the form that owns the selection (live: "no rows selected").
         bulk_form = body[body.index('<form id="bulk"'):body.index("</form>", body.index('<form id="bulk"'))]
         assert 'hx-post="/orders/delete"' in bulk_form and 'name="sel"' in bulk_form
@@ -580,6 +588,16 @@ class TestReceiptUpload:
         after = client.get(response.headers["location"]).text
         assert "Receipt stored and linked on 2 row(s)" in after
         assert "receipts/bestbuy/2026-09/BBY01-1.pdf" in after
+
+    def test_upload_from_the_table_answers_with_the_table(self, storage, sheet, tmp_path, logs_dir):
+        client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/BBY01-1/receipt", data={"next": "table", "retailer": "Best Buy"},
+                               files={"receipt_file": ("r.pdf", b"%PDF", "application/pdf")})
+        assert response.status_code == 200 and "Receipt stored and linked on 1 row(s)" in response.text
+        assert 'class="sheet"' in response.text and "<html" not in response.text
+        assert response.text.count('<tr class="status-') == 1  # the posted filter still applies
+        failed = client.post("/orders/BBY01-1/receipt", data={"next": "table"})
+        assert failed.status_code == 200 and "choose a file first" in failed.text and 'class="sheet"' in failed.text
 
     def test_upload_without_a_file_or_for_an_unknown_order(self, storage, sheet, tmp_path, logs_dir):
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)

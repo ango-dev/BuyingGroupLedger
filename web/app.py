@@ -29,7 +29,7 @@ from web import failures as failures_module
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
 from web.audit_view import AuditCache, audit_grids, audit_key, key_of, run_audit
-from web.queries import (Filters, _values as query_values, column_headings, facets, filter_rows,
+from web.queries import (Filters, _values as query_values, choice_values, column_headings, facets, filter_rows,
                          order_view, sort_rows)
 from web.recon_view import findings_for as recon_findings, reconcile
 from web import tax_inputs
@@ -227,6 +227,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     from web.queries import LINK_FIELDS, MONEY_FIELDS
 
     templates.env.globals["EDITABLE_FIELDS"] = EDITABLE_FIELDS
+    from web.ledger_writer import DATE_FIELDS
+    from web.queries import CHOICE_FIELDS
+
+    templates.env.globals["DATE_FIELDS"] = DATE_FIELDS
+    templates.env.globals["CHOICE_FIELDS"] = CHOICE_FIELDS
     templates.env.globals["LINK_FIELDS"] = LINK_FIELDS
     templates.env.globals["MONEY_FIELDS"] = MONEY_FIELDS
 
@@ -359,6 +364,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             "snapshot": snapshot, "filters": filters, "rows": rows, "total": len(snapshot.rows),
             "facets": facets(snapshot.rows), "columns": column_headings(),
             "editable": writer is not None, "wide": True,
+            "choices": choice_values(snapshot.rows) if writer is not None else {},
             "scope": scope, "base": SCOPES[scope], "findings": findings,
             "findings_by_order": by_order, **extra,
         }
@@ -646,8 +652,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.post("/orders/{order_id}/receipt")
     async def order_receipt(request: Request, order_id: str):
         """Upload a receipt for an EXISTING order: store it, then write the link into Receipt Link
-        on every row of that order (the link is per order -- docs/data-model.md)."""
+        on every row of that order (the link is per order -- docs/data-model.md). From the order
+        page the answer is a redirect back to it; from the Orders table (`next=table`, the cell's
+        upload button) it is the table re-rendered with a notice, as a cell edit answers."""
         form = await request.form()
+        to_table = str(form.get("next", "")) == "table"
         snapshot = reader.load()
         rows = snapshot.by_order(order_id)
         if not rows:
@@ -666,10 +675,14 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             act("edit", f"Receipt uploaded for {order_id}: linked on {result['written']} row(s)",
                 {"order_id": order_id, "link": link, "rows": result["written"]})
         except (receipts_upload.UploadError, EditError) as exc:
+            if to_table:
+                return table_after(request, form, error=str(exc))
             return RedirectResponse(url=f"/orders/{order_id}?" + urlencode({"error": str(exc)}),
                                     status_code=303)
         reader.load(force=True)
         notice = f"Receipt stored and linked on {result['written']} row(s)"
+        if to_table:
+            return table_after(request, form, notice=notice)
         return RedirectResponse(url=f"/orders/{order_id}?" + urlencode({"notice": notice}),
                                 status_code=303)
 
