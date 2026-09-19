@@ -80,6 +80,9 @@ class AmazonScraper(BaseRetailerScraper):
     # 2026-09-04): before Amazon has a delivery estimate the pt page has NO pt-* elements, just
     # this container reading "Order received".
     preship_promise_selector = ".promise-container-inner"
+    # The same legacy layout once the package has SHIPPED: still no pt-* elements; the carrier card is a "Shipped
+    # with Amazon" widget whose h4 reads "Tracking ID: <number>". Twin in the other Amazon scraper.
+    legacy_tracking_number_selector = ".carrierRelatedInfo-trackingId-text"
 
     # Audited against the captured page by the failure dossier (see BaseRetailerScraper).
     diagnostic_selectors = {
@@ -88,6 +91,7 @@ class AmazonScraper(BaseRetailerScraper):
         "pt_delivery_card": delivery_card_selector,
         "pt_tracking_number": tracking_number_selector,
         "pt_preship_promise": preship_promise_selector,
+        "pt_legacy_tracking_number": legacy_tracking_number_selector,
         "signin_email": "#ap_email",
         "signin_password": "#ap_password",
         "signin_claim": "#ap-claim",
@@ -95,17 +99,45 @@ class AmazonScraper(BaseRetailerScraper):
         "signin_link": "a[href*='/ap/signin']",
     }
 
-    def _read_tracking_number(self, page) -> str:
+    def _read_tracking_number(self, page, selector: str | None = None) -> str:
         """The carrier number from the delivery card, or "" if that element isn't present.
 
         The element's text reads like "Tracking ID: TBA999000000001"; strip the label and keep the
         number. Kept separate so read_tracking_page can tell "no number element" from "no number".
+        `selector` defaults to the pt card's; the legacy layout passes its own.
         """
-        el = page.query_selector(self.tracking_number_selector)
+        el = page.query_selector(selector or self.tracking_number_selector)
         if el is None:
             return ""
         raw = el.inner_text().strip()
         return raw.split(":", 1)[1].strip() if ":" in raw else raw
+
+    def _read_legacy_layout(self, page) -> dict | None:
+        """The LEGACY tracking layout — none of the pt-* elements, the promise in
+        `.promise-container-inner` — in the two states seen live, each gated on the evidence that
+        names it. Any other layout still returns None and fails loudly (a shipped order must never
+        quietly read as unshipped). Twin of the other Amazon scraper.
+
+        SHIPPED: the
+        promise reads "Estimated to arrive by <date>" and a "Shipped with Amazon" widget carries
+        "Tracking ID: <number>" — the number itself is the proof it shipped. Delivered is stated by
+        the promise, as on the pt layout.
+
+        PRE-ESTIMATE: before Amazon has a delivery
+        estimate the container reads "Order received" and there is no carrier card — a legitimate
+        'ordered', on that exact wording only.
+        """
+        early = page.query_selector(self.preship_promise_selector)
+        if early is None:
+            return None  # unexpected layout / not the tracking page → dossier problem
+        promise = early.inner_text().strip()
+        tracking_number = self._read_tracking_number(page, self.legacy_tracking_number_selector)
+        if tracking_number:
+            status = "delivered" if "delivered" in promise.lower() else "shipped"
+            return {"status": status, "tracking_number": tracking_number, "delivery_promise": promise}
+        if "order received" in promise.lower():
+            return {"status": "ordered", "tracking_number": "", "delivery_promise": promise}
+        return None  # an estimate with no number, or a carrier card with an empty one → loud
 
     def read_tracking_page(self, page) -> dict | None:
         """Read status/tracking#/delivery-promise from a loaded Amazon tracking page via selectors.
@@ -123,13 +155,7 @@ class AmazonScraper(BaseRetailerScraper):
         """
         promise_el = page.query_selector(self.promise_selector)
         if promise_el is None:
-            # PRE-ESTIMATE state — twin of scrapers/amazon_business.py, see the note there. Gated
-            # on the exact "Order received" wording so any other unknown layout still fails loudly.
-            early = page.query_selector(self.preship_promise_selector)
-            if early is not None and "order received" in early.inner_text().strip().lower():
-                return {"status": "ordered", "tracking_number": "",
-                        "delivery_promise": early.inner_text().strip()}
-            return None  # unexpected layout / not the tracking page → dossier problem
+            return self._read_legacy_layout(page)
         promise = promise_el.inner_text().strip()
         lowered = promise.lower()
 
