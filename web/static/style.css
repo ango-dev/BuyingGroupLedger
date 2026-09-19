@@ -214,7 +214,11 @@ h2.with-hint .hint-mark { font-size: 0.68em; }
 td input.cell-check { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: var(--accent); cursor: pointer; }
 td input.cell-check:disabled { cursor: default; opacity: 0.7; }
 /* editing */
-table.sheetlike th:not(.rownum), table.order-rows th { cursor: s-resize; }  /* the header cell selects its column */
+/* The header cell selects its column: room to click BESIDE the name (which sorts) on every column --
+   a fixed margin past the name, so a narrow column gains it and a wide one, whose values set the
+   width, gains nothing. */
+table.sheetlike th:not(.rownum), table.order-rows th { cursor: s-resize; padding-right: 28px; min-width: 64px; box-sizing: border-box; }
+table.sheetlike th:not(.rownum) a, table.order-rows th a { cursor: pointer; }
 table.sheetlike td.edit { cursor: cell; }
 table.sheetlike td.edit:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 table.sheetlike td.edit:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
