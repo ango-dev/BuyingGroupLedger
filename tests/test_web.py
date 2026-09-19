@@ -1611,7 +1611,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        "if (thenDown) move(1, 0, false)", "paint(false)",
                        '(e.key === "Delete" || e.key === "Backspace") && rowsChecked()', 'getElementById("delete-selected")',
                        "selected rows from the ledger?", 'if (e.key === "Escape") { if (clearRows())',
-                       '"rows:cleared"', "press.on = press.on.filter(", "if (!press.moved && press.wasOn)",
+                       '"rows:cleared"', "press.on = press.on.filter(", "function toggleOne(td)",
+                       'addEventListener("cells:clear"', 'addEventListener("rows:clear"', "e.ctrlKey || e.metaKey",
                        'GRID_TD = "table.sheetlike td, table.order-rows td"'):
             assert needle in js, f"edit.js lost its {needle!r} block"
 

@@ -147,7 +147,8 @@ local files only.
 coloured by the Sheet's own status rules (read from its conditional formats: ordered red, shipped
 orange, delivered yellow, paid green, return terracotta, cancelled grey and superseded dark grey
 with strikethrough), a frozen header, full page width. It edits like a spreadsheet: click a
-cell to select it, shift-click or drag for a range; double-click, Enter or just start typing to
+cell to select it, Ctrl-click to add one to the selection (or take a selected one out), shift-click
+or drag for a range; double-click, Enter or just start typing to
 edit (the keystroke replaces the value); Enter saves, and fills every cell of a selected range;
 Esc cancels; Delete clears the selection; Ctrl+C copies the selection as tab-separated values
 (it pastes into Sheets or Excel) and Ctrl+V pastes a value into every selected cell or a block
@@ -174,8 +175,9 @@ Total Profit) and Last Scraped At. Status must be one of the ledger's words; dat
 writes the Sheet and re-mirrors, so the copy follows.
 
 **Rows: select, add, delete.** Selection is Sheets-style: click a row number to select that row
-(it tints blue), drag down the numbers or shift-click for a range, click the `#` header for every
-row shown (or, with anything selected, to clear); Esc clears. The counter sits on the table's count line. With rows
+and nothing else (it tints blue; a plain click on a cell likewise drops the row selection), Ctrl-click
+to add a row (or take one out), drag down the numbers or shift-click for a range, click the `#`
+header for every row shown (or, with anything selected, to clear); Esc clears. The counter sits on the table's count line. With rows
 selected, the Delete or Backspace key removes them after ONE confirmation that names the count (rows are
 removed bottom-up so the located numbers stay valid; all-or-nothing); there is no bar or button. Setting one value on many rows is the grid's range
 fill: select the cells, type the value, Enter — the field/value bar that did this is gone

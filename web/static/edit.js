@@ -1,6 +1,7 @@
 // The Orders table edits like a spreadsheet. No build step, no framework.
 //
-//   click            selects a cell (the active cell, outlined); shift-click or drag selects a range
+//   click            selects a cell (the active cell, outlined); shift-click or drag selects a range;
+//                    Ctrl-click adds a cell (or takes a selected one out) and keeps the rest selected
 //   double-click     opens the editor (or press Enter, or just start typing: the keystroke replaces
 //                    the value, as in Sheets)
 //   Enter            saves; with a RANGE selected, fills every editable cell in it with the value
@@ -40,19 +41,27 @@
   function rowsChecked() { return !!document.querySelector('input[name="sel"]:checked'); }
   function editable(td) { return !!td && td.classList.contains("edit") && !td.hasAttribute("data-editing"); }
 
-  var sel = null;      // {r1, c1, r2, c2} or null
+  var ranges = [];     // [{r1, c1, r2, c2}, ...]: the selection; the LAST one is what shift / drag extend
   var active = null;   // {r, c} or null
   var anchor = null;   // {r, c}: where a shift-click / drag range starts
   var dragging = false;
 
+  function rect(a, b) {
+    return { r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
+  }
+  function lastRange() { return ranges.length ? ranges[ranges.length - 1] : null; }
   function forEachSelected(fn) {
-    if (!sel) return;
-    for (var r = sel.r1; r <= sel.r2; r++) {
-      for (var c = sel.c1; c <= sel.c2; c++) {
-        var td = cellAt(r, c);
-        if (selectable(td)) fn(td, r, c);
+    var seen = {};
+    ranges.forEach(function (range) {
+      for (var r = range.r1; r <= range.r2; r++) {
+        for (var c = range.c1; c <= range.c2; c++) {
+          if (seen[r + "," + c]) continue;
+          seen[r + "," + c] = true;
+          var td = cellAt(r, c);
+          if (selectable(td)) fn(td, r, c);
+        }
       }
-    }
+    });
   }
   // Repaint the selection; `takeFocus` moves keyboard focus to the active cell. A repaint after an
   // unrelated swap never steals focus from a field the user is typing in, and a drag in progress
@@ -65,18 +74,39 @@
     var free = document.activeElement === document.body || inGrid(document.activeElement);
     if (takeFocus || free) td.focus({ preventScroll: true });
   }
-  function rangeCount() { return sel ? (sel.r2 - sel.r1 + 1) * (sel.c2 - sel.c1 + 1) : 0; }
-  function setSelection(a, b) {
-    sel = { r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
+  function rangeCount() { var n = 0; forEachSelected(function () { n++; }); return n; }
+  function setSelection(a, b) {  // the last range becomes a..b (a first one is made)
+    if (ranges.length) ranges[ranges.length - 1] = rect(a, b); else ranges.push(rect(a, b));
     paint(true);
   }
-  function selectOne(td) {
-    grid = td.closest(GRID);
+  // A plain click starts over with this cell; with `add` (Ctrl) the cell joins the selection.
+  function selectOne(td, add) {
+    var t = td.closest(GRID);
+    if (!add || t !== grid) ranges = [];
+    grid = t;
     var p = coordsOf(td);
     anchor = p; active = p;
-    setSelection(p, p);
+    ranges.push(rect(p, p));
+    paint(true);
   }
-  function clearSelection() { sel = null; anchor = null; paint(false); }
+  // Ctrl-click: a selected single cell comes out of the selection; anything else joins it.
+  // Returns whether a range was added (a drag can then extend it).
+  function toggleOne(td) {
+    var p = coordsOf(td);
+    for (var i = 0; i < ranges.length; i++) {
+      var g = ranges[i];
+      if (g.r1 === p.r && g.r2 === p.r && g.c1 === p.c && g.c2 === p.c) {
+        ranges.splice(i, 1);
+        anchor = p; active = p;
+        paint(true);
+        return false;
+      }
+    }
+    selectOne(td, true);
+    return true;
+  }
+  function clearSelection() { ranges = []; anchor = null; paint(false); }
+  document.addEventListener("cells:clear", clearSelection);  // a plain click on a row number
 
   // ---- writes, one after another ----------------------------------------------------------------
   var queue = Promise.resolve();
@@ -167,9 +197,12 @@
     if (td.hasAttribute("data-editing")) return;
     var open = document.querySelector("input.cell-input");
     if (open) open.blur();  // commits or cancels the open editor first
-    if (e.shiftKey && anchor && td.closest(GRID) === table()) { active = coordsOf(td); setSelection(anchor, active); }
-    else selectOne(td);
-    dragging = true;  // set after the first paint, which focuses the clicked cell
+    var same = td.closest(GRID) === table();
+    var added = true;
+    if (e.shiftKey && anchor && same) { active = coordsOf(td); setSelection(anchor, active); }
+    else if ((e.ctrlKey || e.metaKey) && same) { added = toggleOne(td); }
+    else { selectOne(td, false); document.dispatchEvent(new Event("rows:clear")); }
+    dragging = added;  // set after the first paint, which focuses the clicked cell
     e.preventDefault();  // no text selection while dragging a range
   });
   document.addEventListener("mousemove", function (e) {
@@ -189,7 +222,7 @@
   document.addEventListener("click", function (e) {
     var handle = e.target.closest ? e.target.closest(".cell-edit, .cell-empty") : null;
     var td = handle ? handle.closest("td.edit") : null;
-    if (td && !td.hasAttribute("data-editing")) { e.preventDefault(); selectOne(td); startEdit(td); }
+    if (td && !td.hasAttribute("data-editing")) { e.preventDefault(); selectOne(td, false); startEdit(td); }
   });
 
   // ---- keyboard ----------------------------------------------------------------------------------
@@ -200,27 +233,29 @@
     if (!selectable(td)) return;
     active = { r: r, c: c };
     if (extend && anchor) setSelection(anchor, active);
-    else { anchor = active; setSelection(active, active); }
+    else { anchor = active; ranges = []; setSelection(active, active); }
     td.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
-  function selectionTsv() {
+  function selectionTsv() {  // each range as a block of lines; several ranges one after another
     var lines = [];
-    if (!sel) return "";
-    for (var r = sel.r1; r <= sel.r2; r++) {
-      var cells = [];
-      for (var c = sel.c1; c <= sel.c2; c++) {
-        var td = cellAt(r, c);
-        cells.push(td ? (td.hasAttribute("data-raw") ? td.getAttribute("data-raw") : td.textContent.trim()) : "");
+    ranges.forEach(function (range) {
+      for (var r = range.r1; r <= range.r2; r++) {
+        var cells = [];
+        for (var c = range.c1; c <= range.c2; c++) {
+          var td = cellAt(r, c);
+          cells.push(td ? (td.hasAttribute("data-raw") ? td.getAttribute("data-raw") : td.textContent.trim()) : "");
+        }
+        lines.push(cells.join("\t"));
       }
-      lines.push(cells.join("\t"));
-    }
+    });
     return lines.join("\n");
   }
   function pasteText(text) {
+    var sel = lastRange();
     if (!sel || !text) return;
     var rows = text.replace(/\r/g, "").replace(/\n$/, "").split("\n").map(function (l) { return l.split("\t"); });
     if (rows.length === 1 && rows[0].length === 1) { fillSelection(rows[0][0]); return; }
-    // A block: cell by cell from the top-left of the selection, as far as the table goes.
+    // A block: cell by cell from the top-left of the last range, as far as the table goes.
     rows.forEach(function (line, dr) {
       line.forEach(function (value, dc) {
         var td = cellAt(sel.r1 + dr, sel.c1 + dc);
@@ -295,7 +330,7 @@
   document.addEventListener("htmx:afterSwap", function (e) {
     var td = e.target && e.target.matches && e.target.matches("td[data-error]") ? e.target : null;
     if (td) { td.focus(); }
-    if (e.target && e.target.id === "orders-table") { sel = null; anchor = null; active = null; }
+    if (e.target && e.target.id === "orders-table") { ranges = []; anchor = null; active = null; }
     paint(false);
   });
 })();
@@ -341,17 +376,19 @@
     }
     if (e.target && (e.target.id === "sel-all" || e.target.name === "sel")) count();
   });
+  document.addEventListener("rows:clear", clearRows);  // a plain click on a cell
   document.addEventListener("htmx:afterSwap", count);
   document.addEventListener("DOMContentLoaded", count);
 })();
 
 // Sheets-style row selection: press a row number to select that row (its checkbox ticks and the
-// row tints), press it again to unselect, shift-click to select the range from the last press, or
-// drag down the numbers to select every row the pointer crosses.
+// row tints) and nothing else; Ctrl-press adds it (or takes a selected one out) and keeps the rest;
+// shift-press selects the range from the last press; a drag down the numbers selects every row the
+// pointer crosses.
 (function () {
   "use strict";
   var last = null;
-  var press = null;  // the drag in progress: {tr, wasOn, moved, rows, on: [rows this drag turned on]}
+  var press = null;  // the drag in progress: {tr, moved, rows, on: [rows this drag turned on]}
   function rowsShown() { return Array.prototype.slice.call(document.querySelectorAll("table.sheetlike tbody tr")); }
   function setRow(tr, on) {
     var box = tr.querySelector('input[name="sel"]');
@@ -383,11 +420,14 @@
       var from = Math.min(a, b), to = Math.max(a, b);
       for (var i = from; i <= to; i++) setRow(rows[i], true);
       press = null;
+    } else if (e.ctrlKey || e.metaKey) {
+      setRow(tr, !box.checked);  // joins, or leaves, the selection; the rest stays
+      press = box.checked ? { tr: tr, moved: false, rows: rows, on: [tr] } : null;
     } else {
-      // A press selects; a press on a selected row that does not turn into a drag unselects it
-      // on release (the toggle), so a drag can start from a selected row too.
-      press = { tr: tr, wasOn: box.checked, moved: false, rows: rows, on: [] };
-      if (!box.checked) { setRow(tr, true); press.on.push(tr); }
+      document.dispatchEvent(new Event("rows:clear"));   // this row, and nothing else --
+      document.dispatchEvent(new Event("cells:clear"));  // not the cells either, as in Sheets
+      setRow(tr, true);
+      press = { tr: tr, moved: false, rows: rows, on: [tr] };
     }
     last = tr;
     changed(tr);
@@ -416,11 +456,7 @@
     last = tr;
     changed(tr);
   });
-  document.addEventListener("mouseup", function () {
-    if (!press) return;
-    if (!press.moved && press.wasOn) { setRow(press.tr, false); changed(press.tr); }
-    press = null;
-  });
+  document.addEventListener("mouseup", function () { press = null; });
   document.addEventListener("change", function (e) {
     if (e.target && (e.target.name === "sel" || e.target.id === "sel-all")) syncClasses();
   });
