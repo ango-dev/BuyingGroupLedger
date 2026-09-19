@@ -1609,9 +1609,9 @@ class TestStaticAssetsCarryTheirBlocks:
                        'matches(\'[hx-trigger*="every"]\')', "sel-cell", 'execCommand("copy")',
                        'addEventListener("paste"', 'e.key === "Delete"', "fillSelection(", "all.checked = !any",
                        "if (thenDown) move(1, 0, false)", "paint(false)",
-                       'e.key === "Delete" && rowsChecked()', 'getElementById("delete-selected")',
+                       '(e.key === "Delete" || e.key === "Backspace") && rowsChecked()', 'getElementById("delete-selected")',
                        "selected rows from the ledger?", 'if (e.key === "Escape") { if (clearRows())',
-                       '"rows:cleared"',
+                       '"rows:cleared"', "press.on = press.on.filter(", "if (!press.moved && press.wasOn)",
                        'GRID_TD = "table.sheetlike td, table.order-rows td"'):
             assert needle in js, f"edit.js lost its {needle!r} block"
 

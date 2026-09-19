@@ -281,7 +281,7 @@
     else if (e.key === "Tab") { e.preventDefault(); move(0, e.shiftKey ? -1 : 1, false); }
     else if (e.key === "Enter") { e.preventDefault(); if (editable(td)) startEdit(td); }
     else if (e.key === "Escape") { e.preventDefault(); clearSelection(); }
-    else if (e.key === "Delete" && rowsChecked()) { /* the row selection owns Delete: see below */ }
+    else if ((e.key === "Delete" || e.key === "Backspace") && rowsChecked()) { /* the row selection owns them: see below */ }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); fillSelection(""); }
     else if (ctrl && (e.key === "c" || e.key === "C")) { e.preventDefault(); copySelection(); }
     else if (ctrl && (e.key === "v" || e.key === "V")) { armPaste(); }  // not prevented: the paste must happen
@@ -329,7 +329,7 @@
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
     if (e.key === "Escape") { if (clearRows()) e.preventDefault(); return; }
-    if (e.key !== "Delete") return;
+    if (e.key !== "Delete" && e.key !== "Backspace") return;
     var button = document.getElementById("delete-selected");
     if (!button || !document.querySelector('input[name="sel"]:checked')) return;
     e.preventDefault();
@@ -345,11 +345,13 @@
   document.addEventListener("DOMContentLoaded", count);
 })();
 
-// Sheets-style row selection: click a row number to select that row (its checkbox ticks and the
-// row tints), click again to unselect, shift-click to select the range from the last click.
+// Sheets-style row selection: press a row number to select that row (its checkbox ticks and the
+// row tints), press it again to unselect, shift-click to select the range from the last press, or
+// drag down the numbers to select every row the pointer crosses.
 (function () {
   "use strict";
   var last = null;
+  var press = null;  // the drag in progress: {tr, wasOn, moved, rows, on: [rows this drag turned on]}
   function rowsShown() { return Array.prototype.slice.call(document.querySelectorAll("table.sheetlike tbody tr")); }
   function setRow(tr, on) {
     var box = tr.querySelector('input[name="sel"]');
@@ -363,24 +365,61 @@
       tr.classList.toggle("selected", !!(box && box.checked));
     });
   }
-  document.addEventListener("click", function (e) {
+  function changed(tr) {
+    var box = tr.querySelector('input[name="sel"]');
+    if (box) box.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  document.addEventListener("mousedown", function (e) {
+    if (e.button !== 0) return;
     var td = e.target.closest ? e.target.closest("td.rownum") : null;
     if (!td) return;
     var tr = td.parentElement;
     var box = tr.querySelector('input[name="sel"]');
     if (!box) return;
-    e.preventDefault();
+    e.preventDefault();  // no text selection while dragging down the numbers
     var rows = rowsShown();
     if (e.shiftKey && last && rows.indexOf(last) >= 0) {
       var a = rows.indexOf(last), b = rows.indexOf(tr);
       var from = Math.min(a, b), to = Math.max(a, b);
       for (var i = from; i <= to; i++) setRow(rows[i], true);
+      press = null;
     } else {
-      setRow(tr, !box.checked);
+      // A press selects; a press on a selected row that does not turn into a drag unselects it
+      // on release (the toggle), so a drag can start from a selected row too.
+      press = { tr: tr, wasOn: box.checked, moved: false, rows: rows, on: [] };
+      if (!box.checked) { setRow(tr, true); press.on.push(tr); }
     }
     last = tr;
-    box.dispatchEvent(new Event("change", { bubbles: true }));
-    window.getSelection && window.getSelection().removeAllRanges();
+    changed(tr);
+  });
+  document.addEventListener("mousemove", function (e) {
+    if (!press) return;
+    var td = e.target.closest ? e.target.closest("td.rownum") : null;
+    var tr = td ? td.parentElement : null;
+    if (!tr || tr === press.tr && !press.moved) return;
+    var rows = press.rows;
+    var a = rows.indexOf(press.tr), b = rows.indexOf(tr);
+    if (a < 0 || b < 0) return;
+    press.moved = true;
+    var from = Math.min(a, b), to = Math.max(a, b);
+    // Rows this drag turned on that the pointer has left go back off; the range comes on.
+    press.on = press.on.filter(function (row) {
+      var i = rows.indexOf(row);
+      if (i >= from && i <= to) return true;
+      setRow(row, false);
+      return false;
+    });
+    for (var i = from; i <= to; i++) {
+      var box = rows[i].querySelector('input[name="sel"]');
+      if (box && !box.checked) { setRow(rows[i], true); press.on.push(rows[i]); }
+    }
+    last = tr;
+    changed(tr);
+  });
+  document.addEventListener("mouseup", function () {
+    if (!press) return;
+    if (!press.moved && press.wasOn) { setRow(press.tr, false); changed(press.tr); }
+    press = null;
   });
   document.addEventListener("change", function (e) {
     if (e.target && (e.target.name === "sel" || e.target.id === "sel-all")) syncClasses();
