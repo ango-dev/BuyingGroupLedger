@@ -1464,7 +1464,7 @@ class TestStaticAssetsCarryTheirBlocks:
         for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap", "td.sel-cell",
                        ".pop.cal", ".pop .choice", ".pop .cal-months .cal-month", "td .cell-upload", ".chip.virtual",
                        "td input.cell-check", ".pop .choice.current",
-                       "border-spacing: 0; border-collapse: separate; }", ".audit-results > .checks-scroll",
+                       "border-spacing: 0; border-collapse: separate; }", ".sheet > .lead { position: sticky; left: 0;",
                        "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: #d64545; }",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".add-form", ".add-form .actions", ".add-form .span-6", "repeat(6, minmax(0, 1fr))", "tr.selected td", ".cards {", ".card ol.items",

@@ -658,9 +658,10 @@ td.finding b.over, .card .finding b.over { color: var(--ok); }
 .lead details.audit-results > summary::-webkit-details-marker { display: none; }
 .lead details.audit-results > summary::before { content: "\25B8"; margin-right: 6px; }
 .lead details.audit-results[open] > summary::before { content: "\25BE"; }
-/* The top section stays pinned as on Orders (the table is the one scroll region); the checks panel
-   scrolls inside itself so it can be read in full while open. */
-.lead details.audit-results > .checks-scroll { max-height: 42vh; overflow: auto; }
+/* The lead renders INSIDE the scroll region (see _audit_lead.html): it scrolls away with the rows
+   while the filter bar stays pinned, exactly as Orders behaves; sticky left so a sideways scroll of
+   the wide table does not drag it off screen. */
+.sheet > .lead { position: sticky; left: 0; margin: 8px 8px 4px; max-width: calc(100vw - 16px); box-sizing: border-box; }
 .lead .tiles.stats a.tile.link.current { border-width: 2px; }
 table.audit { width: 100%; font-size: 0.85em; border-top: 1px solid var(--line); }
 table.audit th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 12px 4px; }

@@ -74,8 +74,11 @@ class TestAuditOverTheDatabase:
     def test_the_report_follows_a_write_through_the_adapter(self, client, db):
         assert "111-2" in client.get("/audit").text
         page = client.get("/audit").text
-        assert '<body class="wide">' in page  # the top section pins as on Orders; the checks panel scrolls inside
-        assert '<div class="checks-scroll">' in page
+        assert '<body class="wide">' in page
+        # the lead (description, tiles, checks) sits INSIDE the scroll region, after the sheet opens,
+        # so it scrolls away with the rows while the filter bar stays pinned, as on Orders
+        assert page.index('<div class="sheet" id="sheet">') < page.index('<div class="lead">') < page.index('<table class="grid ledger sheetlike">')
+        assert page.index('id="filters"') < page.index('<div class="lead">')
         assert '<details class="audit-results">' in page and 'class="audit-results" open' not in page  # starts closed
         # the four tiles are links that filter the rows: Fail / Warning to their checks, Pass / Flagged to all
         assert page.count('<a class="tile link') == 4 and 'href="/audit?check=' in page and 'href="/audit"' in page

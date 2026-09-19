@@ -2,6 +2,7 @@
    #orders-table exactly like the table partial; the same filters, sort and search apply. A card's
    Delete posts EVERY row key of the order to /orders/delete (the same route the table's bulk
    delete uses), through the in-page confirmation dialog. #}
+{% if scope == "audit" %}{% include "_audit_lead.html" %}{% elif scope == "recon" %}{% include "_recon_lead.html" %}{% endif %}
 {% if notice %}<div class="banner ok">{{ notice }}</div>{% endif %}
 {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
 <p class="muted count">{{ pager.start }}–{{ pager.end }} of {{ pager.total }} order(s) ({{ rows | length }} row(s))

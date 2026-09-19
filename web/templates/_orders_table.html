@@ -10,6 +10,7 @@
   <span class="muted" title="click a row number to select the row (and nothing else), Ctrl-click to add one (or take one out), drag down the numbers or shift-click for a range, click # for every row shown (or, with any selected, to clear); Esc clears; with rows selected, Delete or Backspace removes them from the ledger after one confirmation">· <span id="sel-count">0</span> selected: row numbers select rows (drag for a range), <b>#</b> all / clear, Delete removes them (asked once)</span>{% else %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
 </p>
 <div class="sheet" id="sheet">
+{% if scope == "audit" %}{% include "_audit_lead.html" %}{% elif scope == "recon" %}{% include "_recon_lead.html" %}{% endif %}
 <table class="grid ledger sheetlike">
   <thead>
     <tr>

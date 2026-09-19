@@ -4,41 +4,7 @@
    filter picks which checks' rows to show. #}
 {% block title %}Audit{% endblock %}
 {% block heading %}<h1>Audit</h1>{% endblock %}
-{% block lead %}
-{% set counts = audit.counts() %}
-<div class="lead">
-  <p class="muted small">Every check of <span class="mono">scripts.audit_ledger</span> run against the ledger this page serves. Below: every row a check named, with the finding beside it. Pick checks to narrow the rows; the filters, sort and search work as on Orders.</p>
-  {# FAIL, WARNING, PASS, FLAGGED -- the first three edged red, yellow and green in every theme;
-     each tile is a link that filters the rows to the checks it counts. #}
-  {% set fail_checks = audit.checks | selectattr('status', 'equalto', 'FAIL') | selectattr('rows') | map(attribute='name') | list %}
-  {% set warn_checks = audit.checks | selectattr('status', 'equalto', 'WARN') | selectattr('rows') | map(attribute='name') | list %}
-  {% macro check_href(names) %}/audit{% if names %}?{% for n in names %}check={{ n | urlencode }}{{ '&' if not loop.last }}{% endfor %}{% endif %}{% endmacro %}
-  <section class="tiles stats audit-stats">
-    <a class="tile link fail {{ 'current' if checks and checks | list == fail_checks }}" href="{{ check_href(fail_checks) }}" title="{{ 'the rows the failing checks name' if fail_checks else 'no failing check names a row' }}"><div class="label">Fail</div><div class="value">{{ counts.FAIL }}</div><div class="hint">of {{ audit.results | length }} checks</div></a>
-    <a class="tile link warning {{ 'current' if checks and checks | list == warn_checks }}" href="{{ check_href(warn_checks) }}" title="{{ 'the rows the warning checks name' if warn_checks else 'no warning names a row' }}"><div class="label">Warning</div><div class="value">{{ counts.WARN }}</div><div class="hint">worth a look</div></a>
-    <a class="tile link pass" href="/audit" title="every check, in the panel below"><div class="label">Pass</div><div class="value">{{ counts.PASS }}</div><div class="hint">{{ counts.SKIP }} skipped</div></a>
-    <a class="tile link {{ 'current' if not checks }}" href="/audit" title="every flagged row"><div class="label">Flagged</div><div class="value">{{ audit.by_key | length }}</div><div class="hint">row(s), by {{ audit.flagged_checks | length }} check(s)</div></a>
-  </section>
-  <details class="audit-results">{# starts closed; the tiles above say what is in it #}
-    <summary>All checks — {{ counts.FAIL }} fail, {{ counts.WARN }} warn, {{ counts.PASS }} pass, {{ counts.SKIP }} skipped</summary>
-    <div class="checks-scroll">
-    <table class="audit">
-      <thead><tr><th>Check</th><th>Status</th><th>What it found</th><th class="n">Rows</th></tr></thead>
-      <tbody>
-      {% for c in audit.checks %}
-        <tr class="{{ c.status | lower }}">
-          <td class="mono">{% if c.rows %}<a href="/audit?check={{ c.name }}" class="{{ 'current' if c.name in checks }}">{{ c.name }}</a>{% else %}{{ c.name }}{% endif %}</td>
-          <td><span class="tag {{ c.status | lower }}">{{ c.status }}</span></td>
-          <td>{{ c.summary }}{% for note in c.notes %}<span class="note">{{ note }}</span>{% endfor %}</td>
-          <td class="n">{% if c.rows %}{{ c.rows }}{% else %}—{% endif %}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  </details>
-</div>
-{% endblock %}
+{% block lead %}{% endblock %}{# the lead is _audit_lead.html, inside the table's scroll region #}
 {% block extra_filters %}
   {% set flagged = audit.flagged_checks %}
   <details class="multi" data-param="check">
