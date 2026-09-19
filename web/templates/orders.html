@@ -78,22 +78,22 @@
       {% set af = add_form or {} %}
       <label>Order Date <input name="order_date" data-date value="{{ af.get('order_date', '') }}" placeholder="YYYY-MM-DD" required autocomplete="off"></label>
       <label>Order ID <input name="order_id" value="{{ af.get('order_id', '') }}" required autocomplete="off"></label>
-      <label class="span-3">Item Name <input name="item_name" value="{{ af.get('item_name', '') }}" required autocomplete="off"></label>
+      <label class="span-2">Item Name <input name="item_name" value="{{ af.get('item_name', '') }}" required autocomplete="off"></label>
       <label>Shipment <input name="shipment" value="{{ af.get('shipment', '1') }}" inputmode="numeric"></label>
-      {{ choose('status', [('ordered', 'ordered'), ('shipped', 'shipped'), ('delivered', 'delivered'), ('cancelled', 'cancelled'), ('paid', 'paid'), ('return', 'return')], af.get('status', 'ordered'), 'Status', 'inline') }}
+      <label>Status <input name="status" value="{{ af.get('status', 'ordered') }}" data-choices="status" data-options="ordered,shipped,delivered,cancelled,paid,return" autocomplete="off"></label>
       <label>Retailer <input name="retailer" value="{{ af.get('retailer', '') }}" data-choices="retailer" autocomplete="off"></label>
       <label>Quantity <input name="quantity" value="{{ af.get('quantity', '') }}" inputmode="numeric"></label>
       <label>Cost Per Item <input name="cost_per_item" value="{{ af.get('cost_per_item', '') }}" inputmode="decimal"></label>
       <label>Buying Group <input name="buying_group" value="{{ af.get('buying_group', '') }}" data-choices="buying_group" autocomplete="off"></label>
       <label class="span-2">Tracking Number <input name="tracking_number" value="{{ af.get('tracking_number', '') }}" autocomplete="off"></label>
-      <span class="field-block">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'photo or PDF; the link becomes Receipt Link', required=False, klass='compact') }}</span>
-      <label class="span-2">or a Receipt Link <input name="receipt_url" value="{{ af.get('receipt_url', '') }}" placeholder="https://..." autocomplete="off"></label>
       <label>Card Name <input name="card_name" value="{{ af.get('card_name', '') }}" data-choices="card_name" data-pair="card_last4" autocomplete="off"></label>
       <label>Card Last 4 <input name="card_last4" value="{{ af.get('card_last4', '') }}" data-choices="card_last4" data-pair="card_name" inputmode="numeric" autocomplete="off"></label>
       <label>Profile <input name="profile_label" value="{{ af.get('profile_label', '') }}" data-choices="profile_label" autocomplete="off"></label>
+      <label class="span-3">Receipt Link <input name="receipt_url" value="{{ af.get('receipt_url', '') }}" placeholder="https://... — or drop a file below" autocomplete="off"></label>
+      <div class="span-6">{{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'a photo or PDF; its link becomes Receipt Link', required=False, klass='compact') }}</div>
       <div class="actions">
-      <button type="submit">Add row</button>
-      <span class="muted small">Total Cost is computed from Quantity × Cost Per Item; everything else can be edited in the table afterwards. The row lands at the bottom and sorts into place on the next sync.</span>
+        <button type="submit">Add row</button>
+        <span class="muted small">Total Cost is computed from Quantity × Cost Per Item; everything else can be edited in the table afterwards. The row lands at the bottom and sorts into place on the next sync.</span>
       </div>
     </form>
   </details>

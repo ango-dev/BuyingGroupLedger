@@ -273,10 +273,16 @@
   function formChoices(el) {
     var field = el.getAttribute("data-choices");
     var form = el.form || el.closest("form");
-    return choicesFor(field, function (other) {
+    var list = choicesFor(field, function (other) {
       var sib = form ? form.querySelector('[name="' + other + '"]') : null;
       return sib ? sib.value : "";
+    }).slice();
+    // data-options: a fixed vocabulary (Status) offered even before the ledger has used it
+    (el.getAttribute("data-options") || "").split(",").forEach(function (v) {
+      v = v.trim();
+      if (v && list.indexOf(v) < 0) list.push(v);
     });
+    return list;
   }
   document.addEventListener("focusin", function (e) {
     var el = e.target;

@@ -1451,7 +1451,7 @@ class TestStaticAssetsCarryTheirBlocks:
         js = (self.ROOT / "picker.js").read_text(encoding="utf-8")
         for needle in ("window.Picker", "function renderDays", "function renderMonths", "function renderYears",
                        "function renderChoices", 'data-pick="', 'matches("input[data-month]")', "month: function",
-                       'matches("input[data-choices]")', "choicesFor: choicesFor", "function formChoices(el)",
+                       'matches("input[data-choices]")', "choicesFor: choicesFor", "function formChoices(el)", 'getAttribute("data-options")',
                        'getElementById("cell-choices")', "data.card_pairs",
                        "state.filter = owner.value", 'v === current ? " current"',
                        "stopImmediatePropagation", 'matches("input[data-date]")', 'addEventListener("mousedown", function (e) { e.preventDefault(); })'):
@@ -1464,10 +1464,10 @@ class TestStaticAssetsCarryTheirBlocks:
         for needle in ("table.sheetlike", ".charts figure", "details.multi", ".card-rows-wrap", "td.sel-cell",
                        ".pop.cal", ".pop .choice", ".pop .cal-months .cal-month", "td .cell-upload", ".chip.virtual",
                        "td input.cell-check", ".pop .choice.current",
-                       "border-spacing: 0; border-collapse: separate; }", "body.wide.scoped main",
+                       "border-spacing: 0; border-collapse: separate; }", ".audit-results > .checks-scroll",
                        "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: #d64545; }",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
-                       ".add-form", ".add-form .actions", ".add-form label.span-3", "tr.selected td", ".cards {", ".card ol.items",
+                       ".add-form", ".add-form .actions", ".add-form .span-6", "repeat(6, minmax(0, 1fr))", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
                        "table.activity { width: 100%", ".dropzone.dragover",
                        ".filters { display: flex; flex-wrap: nowrap", ".filters label.search {",

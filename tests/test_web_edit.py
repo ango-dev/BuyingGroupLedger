@@ -388,7 +388,8 @@ class TestOrdersRoutes:
         assert 'name="retailer" value="" data-choices="retailer"' in body
         assert 'name="card_name" value="" data-choices="card_name" data-pair="card_last4"' in body
         assert 'name="card_last4" value="" data-choices="card_last4" data-pair="card_name"' in body
-        assert 'class="actions"' in body
+        assert 'class="actions"' in body and 'class="span-6"' in body
+        assert 'name="status" value="ordered" data-choices="status" data-options="ordered,shipped,delivered,cancelled,paid,return"' in body
         # every date-like editable uses the page's own picker: no native date / month controls anywhere
         assert 'type="month"' not in body and 'type="date"' not in body
         assert 'name="month" data-month' in body and 'name="paid" data-month' in body

@@ -74,9 +74,12 @@ class TestAuditOverTheDatabase:
     def test_the_report_follows_a_write_through_the_adapter(self, client, db):
         assert "111-2" in client.get("/audit").text
         page = client.get("/audit").text
-        assert '<body class="wide scoped">' in page  # scrolls as one page, checks panel included
+        assert '<body class="wide">' in page  # the top section pins as on Orders; the checks panel scrolls inside
+        assert '<div class="checks-scroll">' in page
         assert '<details class="audit-results">' in page and 'class="audit-results" open' not in page  # starts closed
-        assert '<body class="wide">' in client.get("/orders").text
+        # the four tiles are links that filter the rows: Fail / Warning to their checks, Pass / Flagged to all
+        assert page.count('<a class="tile link') == 4 and 'href="/audit?check=' in page and 'href="/audit"' in page
+
         ws = DbWorksheet(db)
         ws.update(range_name="A3", values=[row(
             order_date="2026-08-10", status="delivered", retailer="Amazon", item_name="Fitbit",

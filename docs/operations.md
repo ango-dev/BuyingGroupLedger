@@ -419,7 +419,7 @@ Both are the **Orders view** — the same filter bar, table or cards, sort, sear
 — over a subset of rows, with a **Finding** column (table) or block (card) beside each.
 Neither writes anything.
 
-- **Audit** (`/audit`, `web/audit_view.py`; the page scrolls as one, the checks panel included): every check of `scripts.audit_ledger` run against the
+- **Audit** (`/audit`, `web/audit_view.py`; the top section pins as on Orders, the checks panel scrolls inside itself, and the four tiles filter the rows to the checks they count): every check of `scripts.audit_ledger` run against the
   ledger the dashboard serves (through the worksheet adapter — the CLI's own read-only path), then
   every row a check named, mapped to its order. The lead shows the
   checks with their status and how many rows each flagged; the **Check** dropdown narrows the rows

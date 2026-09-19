@@ -172,12 +172,6 @@ body.wide #bulk { display: flex; flex-direction: column; flex: 1 1 auto; min-hei
 body.wide #orders-table { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 body.wide .count { margin: 4px 8px; flex: 0 0 auto; }
 body.wide .sheet { overflow: auto; flex: 1 1 auto; min-height: 0; background: var(--card); border-top: 1px solid var(--line); }
-/* The Audit and Recon pages (body.scoped) scroll as ONE page -- the checks panel above the table
-   must be readable in full: main is the scroll region in both directions and the
-   sheet stops being one; the table's header still sticks to main's top edge. */
-body.wide.scoped main { display: block; overflow: auto; }
-body.wide.scoped #bulk, body.wide.scoped #orders-table { display: block; }
-body.wide.scoped .sheet { overflow: visible; flex: none; }
 /* SEPARATE borders (spacing 0): with collapsed borders a sticky <th> leaves its borders behind as
    it scrolls, and the row underneath shows through the 1px gaps between the headers. */
 table.sheetlike { width: max-content; min-width: 100%; font-size: 13px; border-spacing: 0; border-collapse: separate; }
@@ -289,15 +283,17 @@ button.danger:hover { background: var(--bad); color: #fff; }
 .add-row summary { cursor: pointer; color: var(--accent); }
 /* A grid of even fields, labels above; wide fields span; the button and the note take the last
    row. */
-.add-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 12px; align-items: end; margin: 8px 0 4px; padding: 10px 12px;
+.add-form { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 12px; align-items: end; margin: 8px 0 4px; padding: 10px 12px;
   background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
 .add-form label { display: flex; flex-direction: column; font-size: 0.85em; color: var(--muted); gap: 3px; }
 .add-form input, .add-form select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 .add-form input { width: 100%; box-sizing: border-box; min-width: 0; }
-.add-form label.span-2, .add-form .field-block { grid-column: span 2; }
-.add-form label.span-3 { grid-column: span 3; }
-.add-form .actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 4px; border-top: 1px solid var(--line); }
-.add-form details.multi { min-width: 0; }
+.add-form .span-2, .add-form label.span-2 { grid-column: span 2; }
+.add-form .span-3, .add-form label.span-3 { grid-column: span 3; }
+.add-form .span-6 { grid-column: 1 / -1; }
+.add-form .dropzone.compact { padding: 6px 12px; }
+.add-form .actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 6px; border-top: 1px solid var(--line); }
+@media (max-width: 1100px) { .add-form { grid-template-columns: repeat(3, minmax(0, 1fr)); } .add-form .span-3 { grid-column: span 3; } }
 table.sheetlike td.sel, table.sheetlike th.sel { width: 26px; text-align: center; padding: 0 4px; }
 /* Sheets-style: the row number is the row's handle; a selected row tints blue over its colour. */
 table.sheetlike td.rownum { cursor: pointer; user-select: none; }
@@ -662,6 +658,10 @@ td.finding b.over, .card .finding b.over { color: var(--ok); }
 .lead details.audit-results > summary::-webkit-details-marker { display: none; }
 .lead details.audit-results > summary::before { content: "\25B8"; margin-right: 6px; }
 .lead details.audit-results[open] > summary::before { content: "\25BE"; }
+/* The top section stays pinned as on Orders (the table is the one scroll region); the checks panel
+   scrolls inside itself so it can be read in full while open. */
+.lead details.audit-results > .checks-scroll { max-height: 42vh; overflow: auto; }
+.lead .tiles.stats a.tile.link.current { border-width: 2px; }
 table.audit { width: 100%; font-size: 0.85em; border-top: 1px solid var(--line); }
 table.audit th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 12px 4px; }
 table.audit td { padding: 3px 12px; vertical-align: top; }
