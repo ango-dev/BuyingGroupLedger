@@ -1466,7 +1466,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "td input.cell-check", ".pop .choice.current",
                        "border-spacing: 0; border-collapse: separate; }", "body.wide .pinned { position: sticky; top: 0;",
                        "body.wide table.sheetlike th { top: var(--pinned-h, 0px); }",
-                       "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: #d64545; }",
+                       "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: #d64545; }", ".tiles.audit-stats .tile.skipped",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".add-form", ".add-form .actions", ".add-form .span-6", "repeat(6, minmax(0, 1fr))", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",

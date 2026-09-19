@@ -81,7 +81,11 @@ class TestAuditOverTheDatabase:
         assert orders.index("<h1>Orders</h1>") < orders.index('<div class="pinned">') < orders.index('id="filters"') < orders.index('<details class="add-row"')
         assert '<details class="audit-results">' in page and 'class="audit-results" open' not in page  # starts closed
         # the four tiles are links that filter the rows: Fail / Warning to their checks, Pass / Flagged to all
-        assert page.count('<a class="tile link') == 4 and 'href="/audit?check=' in page and 'href="/audit"' in page
+        assert page.count('<a class="tile link') == 5 and 'href="/audit?check=' in page and 'href="/audit"' in page
+        assert ">Skipped<" in page and page.index(">Pass<") < page.index(">Skipped<") < page.index(">Flagged<")
+        assert 'class="tile link skipped"' in page
+        # INFO checks put no row on the page (a combined box is not a problem)
+        assert "duplicate_shipment_lines" not in page.split('<div class="sheet"')[1]
 
         ws = DbWorksheet(db)
         ws.update(range_name="A3", values=[row(

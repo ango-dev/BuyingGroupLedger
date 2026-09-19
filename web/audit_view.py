@@ -20,8 +20,9 @@ from scripts.audit_ledger import Grids, Options, Result, Sheet, read_grids, run_
 
 #: The row numbers a detail line names: "row 157: ...", "row 157, Card: ...", "rows [2, 3]: ...".
 _ROWS = re.compile(r"^rows?\s+([\d,\s\[\]]+)")
-#: Statuses whose details are findings (a PASS has none; a SKIP is a note, not a row problem).
-FINDING_STATUSES = ("FAIL", "WARN", "INFO")
+#: Statuses whose details are findings that put a row on the page. A PASS has none, a SKIP is a
+#: note, and an INFO is information the panel shows but no row is flagged for.
+FINDING_STATUSES = ("FAIL", "WARN")
 
 RowKey = tuple[str, str, str, str]
 

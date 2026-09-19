@@ -639,6 +639,7 @@ header nav details.nav-menu .menu a.current { color: var(--accent); font-weight:
 .tiles.audit-stats .tile.fail { border-color: #d64545; }
 .tiles.audit-stats .tile.warning { border-color: #e0a800; }
 .tiles.audit-stats .tile.pass { border-color: #2e9e5b; }
+.tiles.audit-stats .tile.skipped { border-color: #8a8f98; }
 
 /* ---- the Audit and Reconciliation pages: the Orders view plus a Finding column ---- */
 /* The Finding column sizes to its text like every other column (the table is max-content wide);
@@ -653,6 +654,7 @@ td.finding b.over, .card .finding b.over { color: var(--ok); }
 .card .finding div { padding: 1px 0; }
 .lead { flex: 0 0 auto; margin: 0 8px 8px; }
 .lead .tiles.stats { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 6px 0 10px; }
+.lead .tiles.audit-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .lead details.audit-results { background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
 .lead details.audit-results > summary { cursor: pointer; padding: 8px 12px; color: var(--muted); font-size: 0.9em; list-style: none; }
 .lead details.audit-results > summary::-webkit-details-marker { display: none; }
