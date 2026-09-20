@@ -97,7 +97,8 @@ missing host file became an empty directory, a Costco token that is absent with 
 a profile that is configured but can never run, a partially configured receipt bucket, an interval
 that overspends MaxOutDeals' daily quota. Every container start runs it and **alerts and continues**
 — a container that refuses to start also stops scraping; `PREFLIGHT_STRICT=true` fails fast instead.
-It cannot verify the MaxOutDeals IP allowlist from the host, so it warns about that every time.
+It cannot verify the MaxOutDeals IP allowlist from the host; the sync's own push alerts when the
+IP is unregistered.
 
 ## Handing a dossier to whoever fixes it
 

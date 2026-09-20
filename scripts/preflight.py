@@ -322,13 +322,9 @@ def check_money_switches() -> list[Result]:
 
     out.append(Result(OK, "buying-group sync", "ENABLED — every run submits tracking and files BFMR "
                                                "insurance unattended, spending real money."))
-    if (settings.maxoutdeals_api_key or "").strip():
-        out.append(Result(
-            WARN, "MaxOutDeals IP allowlist",
-            "MOD rejects any call from an unregistered IP, whatever the token. This host's public IP "
-            "must be added under the firewall tab in your MOD profile — re-check it after ANY move "
-            "to a new machine, ISP or container host.",
-        ))
+    # No MOD allowlist warning here (dropped 2026-09-19, user): nothing offline can verify it, and
+    # the run's own push is the check -- an unregistered IP is refused with "Authorization header
+    # is not recognized", which the sync alerts. DEPLOY.md §2 says where to register the IP.
     return out
 
 

@@ -270,7 +270,7 @@ class TestMoneySwitches:
         assert "DEFAULT_CASHBACK_RATE" in result.detail or "outside 0-1" in result.detail
         assert "every run fails" in result.detail.lower()
 
-    def test_enabled_sync_surfaces_the_mod_allowlist(self, monkeypatch):
+    def test_enabled_sync_says_so_and_no_longer_warns_about_the_mod_allowlist(self, monkeypatch):
         import sys
 
         monkeypatch.delitem(sys.modules, "config.settings", raising=False)
@@ -281,8 +281,9 @@ class TestMoneySwitches:
 
         assert _by_name(results, "buying-group sync").level == OK
         assert "real money" in _by_name(results, "buying-group sync").detail
-        # Nothing on this host can verify the allowlist, so it is surfaced every time.
-        assert _by_name(results, "MaxOutDeals IP allowlist").level == WARN
+        # The allowlist warning is gone: nothing offline can verify it, and the
+        # run's own push alerts when the IP is unregistered.
+        assert not any(r.name == "MaxOutDeals IP allowlist" for r in results)
 
     def test_disabled_sync_warns_that_nothing_is_submitted(self, monkeypatch):
         import sys

@@ -53,5 +53,4 @@ These ride real orders and close on their own schedule rather than being work it
   (17TRACK/EasyPost), evaluated and not worth it as a delivery watch.
 - **Auto-creating BFMR purchases from reservations** — order numbers go into BFMR by hand right
   after ordering, by design.
-- **The healthcheck's unhealthy state notifies nobody** and **preflight cannot verify the
-  MaxOutDeals IP allowlist** from the host; both accepted for now.
+- **The healthcheck's unhealthy state notifies nobody**; accepted for now.

@@ -183,8 +183,9 @@ thing**, and so never raise:
 - **a missing Costco refresh token** — self-heals from `auth.costco` creds; without those, alerts and
   skips every run.
 
-Fix every `FAIL` before continuing. A `WARN` is a judgement call; the MOD allowlist one always shows
-because nothing on this machine can verify it for you.
+Fix every `FAIL` before continuing. A `WARN` is a judgement call. Nothing on this machine can
+verify the MOD allowlist (step 2); the first tracking push tells you, with "Authorization header is
+not recognized".
 
 ---
 
