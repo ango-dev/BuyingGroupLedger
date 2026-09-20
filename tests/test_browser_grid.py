@@ -142,6 +142,15 @@ def test_the_grid_works_by_touch(served, phone, client):
     cols = page.evaluate("document.querySelector('table.sheetlike tbody tr').cells.length")
     assert page.locator("td.sel-cell").count() == 3 * (cols - 1)
     assert page.locator("th.sel-col").count() == 0  # every row by a drag: no header mark (only Select all marks)
+    # a finger along the header row selects the columns crossed
+    head = page.locator(f"table.sheetlike thead th.col-{field}")
+    head.scroll_into_view_if_needed()
+    hx1, hy1 = _centre(head.bounding_box())
+    hx0, hy0 = _centre(page.locator("table.sheetlike thead th.missing").bounding_box())
+    _touch_drag(page, hx1, hy1, max(hx0, 4), hy0)
+    assert page.locator("table.sheetlike thead th.sel-col").count() == 2
+    assert page.locator("td.sel-cell").count() == 2 * 3
+    page.wait_for_timeout(100)
     # a tap on a cell drops that; a long press opens the menu, whose Select all takes every row
     x, y = _centre(first_cells[1].bounding_box())
     page.touchscreen.tap(x, y)

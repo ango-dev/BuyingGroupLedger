@@ -575,6 +575,35 @@
     selectColumn(th, false, true);
   });
   document.addEventListener("mouseup", function () { colDrag = false; });
+  // The same with a finger along the header row: the headers' touch-action keeps the vertical scroll and gives up the
+  // sideways one, so a sideways drag there selects columns; a downward start is left to the scroll.
+  var colFinger = null;
+  document.addEventListener("touchstart", function (e) {
+    var th = headerOf(e.target);
+    colFinger = th && e.touches.length === 1 && !e.target.closest("a.sort") ? { th: th, x: e.touches[0].clientX, y: e.touches[0].clientY, on: false } : null;
+  }, { passive: true });
+  document.addEventListener("touchmove", function (e) {
+    if (!colFinger) return;
+    var t = e.touches[0];
+    if (!colFinger.on) {
+      var dx = Math.abs(t.clientX - colFinger.x), dy = Math.abs(t.clientY - colFinger.y);
+      if (dx < 8) return;
+      if (dy > dx) { colFinger = null; return; }  // downward: the page scrolls
+      colFinger.on = true;
+      selectColumn(colFinger.th, false, false);
+    }
+    e.preventDefault();
+    var el = document.elementFromPoint(t.clientX, t.clientY);
+    var th = headerOf(el);
+    if (th && th.closest(GRID) === table() && !(active && th.cellIndex === active.c)) selectColumn(th, false, true);
+  }, { passive: false });
+  function colFingerUp(e) {
+    if (!colFinger) return;
+    if (colFinger.on) e.preventDefault();  // no emulated click after the drag
+    colFinger = null;
+  }
+  document.addEventListener("touchend", colFingerUp, { passive: false });
+  document.addEventListener("touchcancel", colFingerUp, { passive: false });
   document.addEventListener("mousemove", function (e) {
     if (!dragging) return;
     var td = e.target.closest ? e.target.closest(GRID_TD) : null;

@@ -957,8 +957,10 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
   /* no double-tap zoom on the grids, so a second tap edits and a long press opens the menu */
   table.sheetlike td, table.sheetlike th, table.order-rows td, table.order-rows th { touch-action: manipulation; }
   table.sheetlike td.edit, table.order-rows td.edit { cursor: default; }
-  /* a finger down the row numbers selects rows (edit.js); sideways still scrolls the table */
+  /* a finger down the row numbers selects rows, one along the headers selects columns (edit.js);
+     the other direction still scrolls the table from either */
   table.sheetlike td.rownum { touch-action: pan-x; }
+  table.sheetlike th:not(.rownum) { touch-action: pan-y; }
   /* a long press is the grid's menu, not the phone's text selection, loupe or link callout;
     the cell editor's input keeps its text selection */
   table.sheetlike td, table.sheetlike th, table.order-rows td, table.order-rows th { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
