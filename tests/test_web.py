@@ -1682,7 +1682,16 @@ class TestAuditPage:
     def test_the_page_is_the_orders_view_over_the_flagged_rows(self, client):
         body = client.get("/audit").text
         assert "<h1>Audit</h1>" in body and 'id="filters"' in body and 'action="/audit"' in body
-        assert '<th class="col-finding">Finding</th>' in body
+        assert '<th class="col-finding "><span class="name">Finding</span><a class="sort" href="/audit?sort=finding&amp;dir=asc"' in body
+        # Finding sorts like the other columns: by the findings' text
+        asc = client.get("/audit", params={"sort": "finding", "dir": "asc"}, headers={"HX-Request": "true"}).text
+        assert 'class="col-finding sorted"' in asc and 'title="sort descending">▲</a>' in asc
+        import re as _re
+        texts = [_re.sub(r"<[^>]+>", " ", cell).split() for cell in _re.findall(r'<td class="finding">(.*?)</td>', asc, _re.S)]
+        firsts = [" ".join(t).lower() for t in texts if t]
+        assert firsts == sorted(firsts) and len(firsts) >= 2
+        # Orders has no Finding column: a remembered finding sort falls back to the default there
+        assert '<th class="col-order_date' in client.get("/orders", params={"sort": "finding", "dir": "asc"}, headers={"HX-Request": "true"}).text
         # Row 8 has COGS but no Cashback Rate: cogs_inputs_complete names it.
         assert "111-0000002-0000002" in body and "no rate resolved" in body
         assert "<b>cogs_inputs_complete</b>" in body

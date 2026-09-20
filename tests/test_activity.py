@@ -230,6 +230,16 @@ class TestThePage:
         assert "<html" not in partial and "<table" in partial
         oldest = client.get("/activity", params={"dir": "asc", "days": "0"}).text
         assert oldest.index("old") < oldest.index("scrape failed")
+        # the columns sort from their header arrows, like the other tables
+        import re as _re
+        by_type = client.get("/activity", params={"sort": "kind", "dir": "asc", "days": "0"}).text
+        kinds = _re.findall(r'<tr class="kind-([a-z]+)"', by_type)
+        assert kinds == sorted(kinds) and len(kinds) == 4
+        assert 'class="col-kind sorted"' in by_type and 'title="sort descending">▲</a>' in by_type
+        assert 'href="/activity?days=0&amp;dir=desc&amp;sort=kind"' in by_type or 'href="/activity?days=0&amp;sort=kind&amp;dir=desc"' in by_type
+        by_type_desc = client.get("/activity", params={"sort": "kind", "dir": "desc", "days": "0"}).text
+        assert _re.findall(r'<tr class="kind-([a-z]+)"', by_type_desc) == sorted(kinds, reverse=True)
+        assert 'class="grid compact activity sheetlike"' in by_type
 
     def test_the_dashboard_records_its_own_changes(self, client):
         client.post("/backup", follow_redirects=False)
@@ -271,7 +281,7 @@ class TestThePage:
         assert ">Container health<" in body and body.count("<tr class=\"kind-") == 2
         css = (Path(__file__).resolve().parents[1] / "web" / "static" / "style.css").read_text(encoding="utf-8")
         assert ".tag.kind-health { background: #" in css  # its own colour, not the default white
-        assert 'data-param="hide"' in body and '<th>Type</th>' in body and "<th>Kind</th>" not in body
+        assert 'data-param="hide"' in body and '<span class="name">Type</span>' in body and ">Kind<" not in body
 
         # the form says: hide health
         hidden = client.get("/activity", params={"hide_set": "1", "hide": "health"})

@@ -67,6 +67,10 @@ SEARCH_FIELDS = ("order_id", "item_name", "tracking_number", "package_id", "card
                  "delivery_address")  # the card's name too
 
 DEFAULT_SORT = "order_date"
+#: Sort keys that are not ledger columns: the Audit / Recon pages' Finding column (sorted by
+#: web/app.orders_context through `sort_by_finding`: "make the Finding column
+#: like the other columns").
+EXTRA_SORTS = ("finding",)
 #: The columns a card's per-row mini-table shows (the same editable cells as the big table).
 CARD_COLUMNS = ("item_name", "shipment", "status", "quantity", "tracking_number", "delivery_date",
                 "insurance", "expected_payout", "payout_amount", "payout_date", "total_profit", "delivery_address",
@@ -144,7 +148,7 @@ class Filters:
         """From a request's query mapping. An unknown sort key, view or page size falls back to
         the default rather than raising -- a stale bookmark should still render."""
         sort = str(params.get("sort") or "").strip()
-        explicit = sort in FIELDNAMES
+        explicit = sort in FIELDNAMES or sort in EXTRA_SORTS
         if not explicit:
             sort = DEFAULT_SORT
         direction = str(params.get("dir") or "").strip().lower() if explicit else ""
@@ -286,6 +290,20 @@ def sort_rows(rows: list[LedgerRow], filters: Filters) -> list[LedgerRow]:
     present = [r for r in ordered if primary(r) is not None]
     blanks = [r for r in ordered if primary(r) is None]
     present.sort(key=primary, reverse=filters.desc)
+    return present + blanks
+
+
+def sort_by_finding(rows: list[LedgerRow], findings: dict, key_of, *, desc: bool) -> list[LedgerRow]:
+    """Audit / Recon rows by the text of their findings (label then line, the first one leading);
+    rows with none last, ties in Order ID / Shipment order, as sort_rows."""
+    def text(row: LedgerRow):
+        lines = findings.get(key_of(row)) or []
+        return " ".join(f"{label} {line}" for label, line in lines).lower() if lines else None
+
+    ordered = sorted(rows, key=lambda r: (r.order_id, _shipment_key(r)))
+    present = [r for r in ordered if text(r) is not None]
+    blanks = [r for r in ordered if text(r) is None]
+    present.sort(key=text, reverse=desc)
     return present + blanks
 
 

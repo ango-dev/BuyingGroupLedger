@@ -10,6 +10,8 @@ or `python -m web` serves, built from config.json's `web` section.
 
 from __future__ import annotations
 
+import dataclasses
+
 import hmac
 import logging
 import math
@@ -38,6 +40,7 @@ from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_fr
 from web.audit_view import AuditCache, audit_grids, audit_key, key_of, run_audit
 from web.queries import (CHOICE_FIELDS, Filters, _values as query_values, cell_choices, column_headings, facets, filter_rows,
                          order_view, sort_rows)
+from web.queries import DEFAULT_SORT, sort_by_finding  # the Finding column's sort
 from web.recon_view import findings_for as recon_findings, reconcile
 from web import tax_inputs
 from web.summary import overview
@@ -654,7 +657,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             for line in lines:
                 if line not in bucket:
                     bucket.append(line)
-        rows = sort_rows(filter_rows(rows, filters), filters)
+        if filters.sort == "finding" and findings is None:  # Orders remembers no such column
+            filters = dataclasses.replace(filters, sort=DEFAULT_SORT, desc=True, explicit_sort=False)
+        if filters.sort == "finding":
+            rows = sort_by_finding(filter_rows(rows, filters), findings, row_key, desc=filters.desc)
+        else:
+            rows = sort_rows(filter_rows(rows, filters), filters)
         context = {
             "snapshot": snapshot, "filters": filters, "rows": rows, "total": len(snapshot.rows),
             "facets": facets(snapshot.rows), "columns": column_headings(),
@@ -1311,6 +1319,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             shown = [e for e in shown if (e.get("kind"), e.get("at"), e.get("summary")) in unacked]
         if not filters.desc:
             shown = list(reversed(shown))
+        if filters.sort and filters.sort != "at":  # a column's sort, stable over the time order
+            field = "run_id" if filters.sort == "run" else filters.sort
+            shown.sort(key=lambda e: str(e.get(field) or "").lower(), reverse=filters.desc)
         context = {"events": shown, "total": len(events), "filters": filters,
                    "counts": activity_module.counts_by_kind(events), "unacked": unacked,
                    "activity_path": str(activity_path), "failures_dir": str(failures_dir)}

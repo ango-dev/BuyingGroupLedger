@@ -61,7 +61,9 @@
     var tr = td.parentElement;
     return { r: tr.sectionRowIndex, c: td.cellIndex };
   }
-  function selectable(td) { return !!td && td.tagName === "TD" && !td.classList.contains("rownum"); }
+  function selectable(td) {  // a hidden row (the Activity table's folded details) is never selected
+    return !!td && td.tagName === "TD" && !td.classList.contains("rownum") && !(td.parentElement && td.parentElement.hidden);
+  }
   function rowsChecked() { return !!document.querySelector('input[name="sel"]:checked'); }
   function editable(td) { return !!td && td.classList.contains("edit") && !td.hasAttribute("data-editing"); }
 
@@ -642,6 +644,8 @@
     var lines = [];
     ranges.forEach(function (range) {
       for (var r = range.r1; r <= range.r2; r++) {
+        var row = table() && table().tBodies[0] ? table().tBodies[0].rows[r] : null;
+        if (row && row.hidden) continue;  // a folded details row
         var cells = [];
         for (var c = range.c1; c <= range.c2; c++) {
           var td = cellAt(r, c);

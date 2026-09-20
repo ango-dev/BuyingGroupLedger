@@ -8,6 +8,7 @@ from diagnostics.activity import KINDS
 
 DEFAULT_DAYS = 7  # the last week by default
 DAY_CHOICES = (1, 7, 30, 90, 0)
+SORTS = ("at", "kind", "run", "summary")  # the table's sortable columns, by event field
 
 
 def _values(params, name: str) -> tuple[str, ...]:
@@ -26,6 +27,8 @@ class ActivityFilters:
     q: str = ""
     run_id: str = ""
     desc: bool = True
+    #: A column to sort by ("" = time): at / kind / run / summary, the header arrows.
+    sort: str = ""
     #: Types hidden from the feed unless picked explicitly -- browser state (the `activity-hide`
     #: cookie), not URL state. `hide_set` says the form carried the hide boxes this time,
     #: so an empty `hidden` means "hide nothing" rather than "the form did not say".
@@ -49,6 +52,7 @@ class ActivityFilters:
             q=str(params.get("q") or "").strip(),
             run_id=str(params.get("run") or "").strip(),
             desc=str(params.get("dir") or "desc").strip().lower() != "asc",
+            sort=(lambda s: s if s in SORTS else "")(str(params.get("sort") or "").strip()),
             hidden=tuple(k for k in _values(params, "hide") if k in KINDS),
             hide_set=str(params.get("hide_set") or "") == "1",
             unacked=str(params.get("unacked") or "").strip().lower() in ("1", "true", "yes"),
@@ -61,7 +65,7 @@ class ActivityFilters:
 
     def as_query(self, **overrides) -> dict:
         values = {"type": list(self.kinds), "days": str(self.days) if self.days != DEFAULT_DAYS else "",
-                  "q": self.q, "run": self.run_id, "dir": "" if self.desc else "asc",
+                  "q": self.q, "run": self.run_id, "dir": "" if self.desc else "asc", "sort": self.sort,
                   "unacked": "1" if self.unacked else ""}
         values = {**values, **overrides}
         return {k: v for k, v in values.items() if v not in ("", None, [], ())}

@@ -701,6 +701,8 @@ table.activity { width: 100%; min-width: 880px; table-layout: fixed; }
 table.activity col.c-when { width: 150px; } table.activity col.c-type { width: 130px; } table.activity col.c-run { width: 170px; }
 table.activity col.c-act { width: 250px; }
 table.activity td, table.activity th { overflow-wrap: anywhere; }
+table.activity th.col-act { cursor: default; padding-right: 6px; }  /* the buttons' column: nothing to sort */
+table.activity th .name { white-space: nowrap; }
 table.activity td.num { white-space: nowrap; }
 
 /* ---- file drop zones (_dropzone.html): the page's own picker, click or drop ---- */
@@ -781,7 +783,6 @@ header nav details.nav-menu .menu a.current { color: var(--accent); font-weight:
    its header is a plain heading in the same type as the sort links beside it. */
 td.finding { white-space: nowrap; font-size: 0.85em; vertical-align: top; }
 td.finding div { padding: 1px 0; }
-table.sheetlike th.col-finding { font-weight: 500; color: var(--accent); }  /* the same blue as the sort links beside it */
 td.finding b, .card .finding b { font-weight: 600; color: var(--warn); margin-right: 4px; }
 td.finding b.short, .card .finding b.short { color: var(--bad); }
 td.finding b.over, .card .finding b.over { color: var(--ok); }

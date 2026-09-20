@@ -27,7 +27,15 @@
   <thead>
     <tr>
       <th class="rownum" title="{{ 'select / unselect every row shown' if editable else '' }}">{% if editable %}<input type="checkbox" id="sel-all" hidden aria-label="select all">{% endif %}#</th>
-      {% if findings is not none %}<th class="col-finding">Finding</th>{% endif %}
+      {%- if findings is not none %}
+      {#- Finding sorts like the ledger columns: by the finding's text -#}
+      {% set active = filters.explicit_sort and filters.sort == 'finding' %}
+      {% if not active %}{% set link = filters.as_query(sort='finding', dir='asc') %}{% set says = 'sort ascending' %}
+      {% elif not filters.desc %}{% set link = filters.as_query(sort='finding', dir='desc') %}{% set says = 'sort descending' %}
+      {% else %}{% set link = filters.as_query(sort='', dir='') %}{% set says = 'clear the sort' %}{% endif %}
+      <th class="col-finding {{ 'sorted' if active }}"><span class="name">Finding</span><a class="sort" href="{{ base }}{% if link %}?{{ link | query }}{% endif %}"
+           hx-get="{{ base }}{% if link %}?{{ link | query }}{% endif %}" hx-target="#orders-table" hx-push-url="true" title="{{ says }}">{{ ('▼' if filters.desc else '▲') if active else '⇅' }}</a></th>
+      {%- endif %}
       {#- A header name cycles the sort: ascending, descending, then clear -- back to the default
           (Order Date, newest first) with no arrow. -#}
       {% for name, heading in columns %}

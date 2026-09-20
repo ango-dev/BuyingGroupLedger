@@ -3,12 +3,21 @@
     its report on the Failures page. -#}
 <p class="muted count">{{ events | length }} event(s){% if total != events | length %} of {{ total }}{% endif %}</p>
 {% if events %}
-<table class="grid compact activity">
+{#- A grid like the others: sheetlike, so edit.js selects and copies its cells,
+    and each column's arrow sorts (web/activity_view.SORTS), one click a step. -#}
+{% macro sort_th(f, name, heading) -%}
+  {% set active = f.sort == name %}
+  {% if not active %}{% set link = f.as_query(sort=name, dir='asc') %}{% set says = 'sort ascending' %}
+  {% elif not f.desc %}{% set link = f.as_query(sort=name, dir='desc') %}{% set says = 'sort descending' %}
+  {% else %}{% set link = f.as_query(sort='', dir='') %}{% set says = 'clear the sort' %}{% endif %}
+  <th class="col-{{ name }} {{ 'sorted' if active }}"><span class="name">{{ heading }}</span><a class="sort" href="/activity?{{ link | query }}" hx-get="/activity?{{ link | query }}" hx-target="#activity-table" hx-push-url="true" title="{{ says }}">{{ ('▼' if f.desc else '▲') if active else '⇅' }}</a></th>
+{%- endmacro %}
+<table class="grid compact activity sheetlike">
   {#- Fixed columns: the widths are the stylesheet's, not the rows', so a search or a filter never
       reflows them. -#}
   <colgroup><col class="c-when"><col class="c-type"><col class="c-run"><col class="c-what"><col class="c-act"></colgroup>
   <thead>
-    <tr><th>When</th><th>Type</th><th>Run</th><th>What happened</th><th></th></tr>
+    <tr>{{ sort_th(filters, 'at', 'When') }}{{ sort_th(filters, 'kind', 'Type') }}{{ sort_th(filters, 'run', 'Run') }}{{ sort_th(filters, 'summary', 'What happened') }}<th class="col-act"></th></tr>
   </thead>
   <tbody>
     {% for e in events %}
