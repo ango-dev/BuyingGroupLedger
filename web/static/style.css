@@ -987,6 +987,9 @@ figure.months svg { display: block; width: 100%; height: auto; }
 figure.months .axis { stroke: var(--line); stroke-width: 1; }
 figure.months .bar .hit { fill: transparent; }
 figure.months .bar:hover .hit { fill: color-mix(in srgb, var(--accent) 8%, transparent); }
+/* The page's a:hover underline reaches the SVG <a> too, and SVG paints a decoration with the fill
+   of the element that declared it -- the <a>'s default black. */
+figure.months .bar, figure.months .bar:hover { text-decoration: none; }
 /* A clicked column kept Chrome's default focus ring -- a black box round the whole hit area. Keyboard focus stays visible through the hit rect instead. */
 figure.months .bar:focus { outline: none; }
 figure.months .bar:focus-visible .hit { fill: color-mix(in srgb, var(--accent) 14%, transparent); }

@@ -256,6 +256,11 @@ def test_a_clicked_month_bar_shows_no_focus_ring(served, page):
             break
     assert page.evaluate("document.activeElement.classList.contains('bar')")
     assert page.evaluate("getComputedStyle(document.activeElement.querySelector('.hit')).fill") != "rgba(0, 0, 0, 0)"
+    # hover: the page's a:hover underline must
+    # not reach the SVG <a>, whose default black fill is what paints the decoration
+    bar.hover()
+    assert page.evaluate("el => getComputedStyle(el).textDecorationLine", bar.element_handle()) == "none"
+    assert page.evaluate("el => getComputedStyle(el.querySelector('text.month')).textDecorationLine", bar.element_handle()) == "none"
 
 
 def test_the_staging_sheet_edits_like_the_orders_grid(served, page, client):
