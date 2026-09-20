@@ -496,12 +496,14 @@ class TestOverview:
         assert summary["status_counts"] == [("ordered", 2), ("shipped", 1), ("delivered", 2),
                                             ("cancelled", 1), ("paid", 2), ("superseded", 1)]
 
-    def test_both_sections_carry_the_same_six_tiles_in_the_same_order(self, summary):
+    def test_both_sections_carry_the_same_tiles_in_the_same_order(self, summary):
         labels = [t["label"] for t in summary["lifetime"]]
-        assert labels == ["Rows / orders", "Open rows", "Spend", "Actual return", "Paid out",
-                          "Floating", "Projected profit", "Realized profit"]
-        assert [t["label"] for t in summary["month"]["tiles"]] == labels
-        assert [t["kind"] for t in summary["month"]["tiles"]] == [t["kind"] for t in summary["lifetime"]]
+        assert labels == ["Rows / orders", "Open rows", "Spend", "Cashback rate", "Paid out",
+                          "Floating", "Projected profit", "Realized profit", "Other income", "Expenses", "Net profit"]
+        # the month has no "Other income": bonuses, program cashback and sites are entered per year
+        assert [t["label"] for t in summary["month"]["tiles"]] == [l for l in labels if l != "Other income"]
+        month_kinds = {t["label"]: t["kind"] for t in summary["month"]["tiles"]}
+        assert all(month_kinds[t["label"]] == t["kind"] for t in summary["lifetime"] if t["label"] in month_kinds)
         # an overview: a few words under each number, the definition in the tooltip
         for t in summary["lifetime"] + summary["month"]["tiles"]:
             assert len(t["hint"].split()) <= 4 and t["detail"]
@@ -522,14 +524,41 @@ class TestOverview:
         # the paid rows, not the money-free ones. NOT spend minus paid out.
         assert by_label["Floating"]["value"] == round(1259.99 + 1000 + 2000 + 100, 2)
         assert by_label["Floating"]["href"] == "/orders?state=unpaid"
-        # Actual return: sum(Total Profit) / sum(Total Cost) over the SETTLED rows -- rows 5 and 6:
-        # (136 + 57) / (400 + 300). Cost-weighted by construction (dollars over dollars).
-        assert by_label["Actual return"]["value"] == round(193.0 / 700.0, 4)
-        assert by_label["Actual return"]["kind"] == "percent"
-        assert by_label["Actual return"]["hint"] == "2 settled rows"
-        assert "(Payout" in by_label["Actual return"]["detail"]
-        assert by_label["Actual return"]["href"] == "/orders?state=settled&sort=total_profit&dir=desc"
+        # Cashback rate (was "Actual return", user 2026-09-19): sum(Total Profit) / sum(Total Cost)
+        # over the SETTLED rows -- rows 5 and 6: (136 + 57) / (400 + 300). Cost-weighted.
+        assert by_label["Cashback rate"]["value"] == round(193.0 / 700.0, 4)
+        assert by_label["Cashback rate"]["kind"] == "percent"
+        assert by_label["Cashback rate"]["hint"] == "weighted, 2 settled rows"
+        assert by_label["Cashback rate"]["detail"].startswith("the average cashback rate per settled order, weighted by cost")
+        assert by_label["Cashback rate"]["href"] == "/orders?state=settled&sort=total_profit&dir=desc"
+        # with no Taxes-page entries the extras are zero and Net profit is the realized profit
+        assert by_label["Other income"]["value"] == 0.0 and by_label["Expenses"]["value"] == 0.0
+        assert by_label["Net profit"]["value"] == 193.0 and by_label["Net profit"]["href"] == "/taxes"
         assert by_label["Floating"]["value"] != round(by_label["Spend"]["value"] - by_label["Paid out"]["value"], 2)
+
+    def test_the_taxes_pages_money_joins_the_profit_tiles(self, snapshot_path):
+        from web.tax_inputs import YearInputs
+
+        inputs = {
+            2025: YearInputs(bonuses={"bonus:0315": 200.0}, expenses=[{"date": "2025-12-05", "amount": 30.0}]),
+            2026: YearInputs(programs={"program:alpha:costco": 120.0}, sites={"TopCashback": 55.5},
+                             other=[{"label": "referral", "amount": 24.5, "kind": "income"}],
+                             expenses=[{"date": "2026-09-02", "amount": 119.0}, {"date": "2026-08-15", "amount": 11.0}]),
+        }
+        summary = overview(SnapshotReader(snapshot_path).load(), month="2026-09", today=NOW.date(),
+                           inputs_by_year=inputs)
+        life = {t["label"]: t for t in summary["lifetime"]}
+        assert life["Other income"]["value"] == 400.0  # 200 + 120 + 55.5 + 24.5, every year
+        assert "sign-up bonuses 200.00" in life["Other income"]["detail"] and "cashback sites 55.50" in life["Other income"]["detail"]
+        assert life["Expenses"]["value"] == 160.0 and life["Expenses"]["hint"] == "every year"
+        assert life["Net profit"]["value"] == round(193.0 + 400.0 - 160.0, 2)
+        assert life["Net profit"]["hint"] == "income in, expenses out"
+        assert life["Realized profit"]["value"] == 193.0  # the ledger's own figure is untouched
+        month = {t["label"]: t for t in summary["month"]["tiles"]}
+        assert "Other income" not in month
+        assert month["Expenses"]["value"] == 119.0 and month["Expenses"]["hint"] == "dated in the month"
+        assert month["Net profit"]["value"] == round(0.0 - 119.0, 2)  # nothing placed in September is settled
+        assert "entered per year" in month["Net profit"]["detail"]
 
     def test_the_month_section_is_by_order_date_alone(self, snapshot_path):
         september = overview(SnapshotReader(snapshot_path).load(), month="2026-09",
@@ -539,7 +568,7 @@ class TestOverview:
         assert tiles["Rows / orders"][0] == 3 and tiles["Open rows"] == 3
         assert tiles["Projected profit"] == 263.6
         assert tiles["Floating"] == round(1259.99 + 1000 + 2000, 2)  # the Fitbit was placed in August
-        assert tiles["Actual return"] is None  # nothing placed in September is settled yet
+        assert tiles["Cashback rate"] is None  # nothing placed in September is settled yet
         # Nothing placed in September is settled yet (row 5 was paid in September but placed in
         # August: the month is by Order Date alone).
         assert tiles["Paid out"] == 0.0 and tiles["Realized profit"] == 0.0
@@ -551,7 +580,7 @@ class TestOverview:
         tiles = {t["label"]: t["value"] for t in august["tiles"]}
         assert tiles["Rows / orders"][0] == 6 and tiles["Open rows"] == 1  # the Fitbit
         assert tiles["Paid out"] == 830.0 and tiles["Realized profit"] == 193.0  # rows 5 and 6
-        assert tiles["Actual return"] == round(193.0 / 700.0, 4)
+        assert tiles["Cashback rate"] == round(193.0 / 700.0, 4)
         assert tiles["Projected profit"] == 0.0
         assert (august["prev"], august["next"]) == ("", "2026-09")
         # a month with no rows still renders, with both arrows
@@ -715,7 +744,7 @@ class TestOverviewPage:
         assert 'href="/orders?state=open"' in body
         assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
         assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body
-        assert ">Actual return<" in body and "27.57%" in body  # rendered as a percentage
+        assert ">Cashback rate<" in body and "27.57%" in body  # rendered as a percentage
         assert 'href="/orders?month=2026-09"' in body
         assert 'href="/orders?month=2026-09&amp;state=open"' in body
         assert 'href="/orders?month=2026-09&amp;state=settled"' in body

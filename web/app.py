@@ -457,7 +457,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         snapshot = load(request)
         month = str(request.query_params.get("month") or "")
         return page(request, "overview.html", snapshot=snapshot,
-                    summary=overview(snapshot, month=month, today=clock().date()),
+                    summary=overview(snapshot, month=month, today=clock().date(),
+                                     inputs_by_year=tax_inputs.load_all(tax_inputs_path)),
                     attention=needs_attention(snapshot))
 
     # The ledger writer: cell edits on the Orders page. The snapshot backend is a CSV, so there is

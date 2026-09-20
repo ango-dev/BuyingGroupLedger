@@ -79,18 +79,62 @@ def actual_return(rows: list[LedgerRow]) -> tuple[float | None, int]:
     return round(sum(r.profit for r in counted) / cost, 4), len(counted)
 
 
+def extras_lifetime(inputs_by_year: dict) -> dict:
+    """The money the Taxes page holds that the ledger's rows do not: every year's sign-up bonuses, program
+    cashback, cashback-site payouts and other income as `income`, every year's expenses (the
+    list, plus any expense-kind "other" row) as `expenses`, and the parts for the tooltip."""
+    parts = {"bonuses": 0.0, "programs": 0.0, "sites": 0.0, "other": 0.0}
+    expenses = 0.0
+    for inputs in (inputs_by_year or {}).values():
+        parts["bonuses"] += inputs.bonus_total
+        parts["programs"] += inputs.program_total
+        parts["sites"] += inputs.site_total
+        parts["other"] += inputs.other_income
+        expenses += inputs.expense_total + inputs.other_expense
+    parts = {k: round(v, 2) for k, v in parts.items()}
+    return {"income": round(sum(parts.values()), 2), "expenses": round(expenses, 2), "parts": parts,
+            "years": sorted(inputs_by_year or {})}
+
+
+def expenses_in_month(inputs_by_year: dict, month: str) -> float:
+    """The Taxes page's expenses dated in the month (an expense carries its date; the yearly
+    lump sums do not, so they belong to Lifetime alone)."""
+    total = 0.0
+    for inputs in (inputs_by_year or {}).values():
+        total += sum(float(e.get("amount") or 0) for e in inputs.expenses
+                     if str(e.get("date") or "").startswith(month))
+    return round(total, 2)
+
+
 def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
-                 link) -> list[dict]:
-    """The SAME eight tiles for any period. `placed` are the period's rows (all of them for
-    Lifetime; by Order Date for a month), `paid` the settled ones among them; `scope` is the
-    phrase the hints end with ("of the ledger" / "placed in September 2026"); `link(**filters)`
-    builds the tile's Orders-page href for that period."""
+                 link, *, extra_income: dict | None = None, expenses: float = 0.0,
+                 expenses_scope: str = "") -> list[dict]:
+    """The SAME tiles for any period. `placed` are the period's rows (all of them for Lifetime; by
+    Order Date for a month), `paid` the settled ones among them; `scope` is the phrase the hints
+    end with ("of the ledger" / "placed in September 2026"); `link(**filters)` builds the tile's
+    Orders-page href for that period. `extra_income` (extras_lifetime) adds the Taxes page's
+    income -- Lifetime only, since it is entered per year -- and `expenses` its expenses for the
+    period; Net profit is realized profit plus that income less those expenses."""
     open_rows = [r for r in placed if r.is_open]
     unpaid = [r for r in placed if r.is_unpaid]
     rate, rated = actual_return(paid)
     projected = _projected_block([r for r in placed if r.is_committed])
     realized = _money_block(paid)
-    return [
+    income = extra_income["income"] if extra_income else 0.0
+    net = round(realized["profit"] + income - expenses, 2)
+    if extra_income:
+        p = extra_income["parts"]
+        income_detail = (f"the Taxes page's income, every year: sign-up bonuses {p['bonuses']:,.2f}, "
+                         f"program cashback {p['programs']:,.2f}, cashback sites {p['sites']:,.2f}, "
+                         f"other income {p['other']:,.2f}")
+        net_detail = (f"realized profit {realized['profit']:,.2f} + other income {income:,.2f} "
+                      f"\u2212 expenses {expenses:,.2f}: what the business actually made, every "
+                      "year's Taxes-page entries included")
+    else:
+        net_detail = (f"realized profit {realized['profit']:,.2f} \u2212 expenses dated in the month "
+                      f"{expenses:,.2f}; sign-up bonuses, program cashback and cashback sites are "
+                      "entered per year and count under Lifetime")
+    tiles = [
         _tile("Rows / orders", (len(placed), len({r.order_id for r in placed})), "pair",
               "all rows", link(), detail=f"every row {scope}"),
         _tile("Open rows", len(open_rows), "count", "not paid yet", link(state="open"),
@@ -99,11 +143,13 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
         _tile("Spend", _spend(placed), "money", "Total Cost", link(sort="total_cost", dir="desc"),
               detail=f"Total Cost over every row {scope} that carries money (cancelled / "
                      "superseded excluded)"),
-        _tile("Actual return", rate, "percent", f"{rated} settled rows",
+        # Renamed from "Actual return".
+        _tile("Cashback rate", rate, "percent", f"weighted, {rated} settled rows",
               link(state="settled", sort="total_profit", dir="desc"),
-              detail=f"(Payout \u2212 COGS \u2212 Insurance) / Total Cost over the {rated} settled "
-                     f"row(s) {scope}: cashback after shipping, tax, gift cards and rewards, less "
-                     "insurance, against what the group actually paid; cost-weighted"),
+              detail=f"the average cashback rate per settled order, weighted by cost: (Payout "
+                     f"\u2212 COGS \u2212 Insurance) / Total Cost over the {rated} settled row(s) "
+                     f"{scope} -- cashback after shipping, tax, gift cards and rewards, less "
+                     "insurance, against what the group actually paid"),
         _tile("Paid out", realized["payout"], "money",
               f"{realized['rows']} settled rows", link(state="settled"), tone="settled",
               detail=f"{realized['rows']} settled row(s) in {realized['orders']} order(s) "
@@ -122,13 +168,24 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
               detail=f"Total Profit of the {realized['rows']} settled row(s), "
                      f"{realized['orders']} order(s) {scope}"),
     ]
+    if extra_income:
+        tiles.append(_tile("Other income", income, "money", "bonuses, cashback, other", "/taxes",
+                           tone="settled", detail=income_detail))
+    tiles.append(_tile("Expenses", expenses, "money", expenses_scope or "Taxes page", "/taxes",
+                       tone="floating",
+                       detail=(f"the Taxes page's expenses{', every year' if extra_income else ' dated in the month'}"
+                               " -- supplies, memberships, card annual fees")))
+    tiles.append(_tile("Net profit", net, "money", "income in, expenses out", "/taxes",
+                       tone="settled", detail=net_detail))
+    return tiles
 
 
-def lifetime_tiles(rows: list[LedgerRow]) -> list[dict]:
+def lifetime_tiles(rows: list[LedgerRow], inputs_by_year: dict | None = None) -> list[dict]:
     """Every row the ledger holds, as clickable tiles (each opens the Orders page filtered the
-    same way the number was counted)."""
-
-    return period_tiles(rows, [r for r in rows if r.is_settled], "of the ledger", _orders_link)
+    same way the number was counted), plus the Taxes page's income and expenses, every year."""
+    extras = extras_lifetime(inputs_by_year or {})
+    return period_tiles(rows, [r for r in rows if r.is_settled], "of the ledger", _orders_link,
+                        extra_income=extras, expenses=extras["expenses"], expenses_scope="every year")
 
 
 def month_label(month: str) -> str:
@@ -143,7 +200,8 @@ def shift_month(month: str, delta: int) -> str:
     return f"{index // 12:04d}-{index % 12 + 1:02d}"
 
 
-def month_section(rows: list[LedgerRow], month: str, today_month: str) -> dict:
+def month_section(rows: list[LedgerRow], month: str, today_month: str,
+                  inputs_by_year: dict | None = None) -> dict:
     """One calendar month: the rows whose ORDER DATE falls in it, and nothing else. Paid out /
     realized are the settled rows among them, whenever the payout landed; the cash-basis view by
     Payout Date is the Orders page's "Paid in" filter and the tax report."""
@@ -153,7 +211,8 @@ def month_section(rows: list[LedgerRow], month: str, today_month: str) -> dict:
     def link(**filters) -> str:
         return _orders_link(month=month, **filters)
 
-    tiles = period_tiles(placed, paid, f"placed in {month_label(month)}", link)
+    tiles = period_tiles(placed, paid, f"placed in {month_label(month)}", link,
+                         expenses=expenses_in_month(inputs_by_year or {}, month), expenses_scope="dated in the month")
     dated = sorted({r.order_date[:7] for r in rows if len(r.order_date) >= 7})
     first = min(dated[0], today_month) if dated else today_month
     return {
@@ -164,9 +223,11 @@ def month_section(rows: list[LedgerRow], month: str, today_month: str) -> dict:
     }
 
 
-def overview(snapshot: Snapshot, month: str = "", today: date | None = None) -> dict:
+def overview(snapshot: Snapshot, month: str = "", today: date | None = None,
+             inputs_by_year: dict | None = None) -> dict:
     """`month` is the calendar month the month section shows (YYYY-MM; blank = the current one,
-    from `today`, which the app takes from its clock)."""
+    from `today`, which the app takes from its clock). `inputs_by_year` is the Taxes page's
+    store (tax_inputs.load_all): its income and expenses join the tiles."""
     rows = snapshot.rows
     open_rows = [r for r in rows if r.is_open]
     today_month = (today or date.today()).strftime("%Y-%m")
@@ -220,8 +281,8 @@ def overview(snapshot: Snapshot, month: str = "", today: date | None = None) -> 
 
     return {
         # The two stat sections.
-        "lifetime": lifetime_tiles(rows),
-        "month": month_section(rows, month, today_month),
+        "lifetime": lifetime_tiles(rows, inputs_by_year),
+        "month": month_section(rows, month, today_month, inputs_by_year),
         "donuts": donuts,
         # The open-rows matrix as stacked bars, drawn in the same row as the donuts.
         "open_bars": open_rows_bars(open_table),
