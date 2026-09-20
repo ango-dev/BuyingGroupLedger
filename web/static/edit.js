@@ -606,8 +606,10 @@
     if (ctrl && (e.key === "z" || e.key === "Z") && document.querySelector(GRID)) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (ctrl && (e.key === "y" || e.key === "Y") && document.querySelector(GRID)) { e.preventDefault(); redo(); return; }
     // Ctrl+A selects every row, as the # corner does; a grid without row ticks
-    // (a view-only table) gets every cell.
-    if (ctrl && (e.key === "a" || e.key === "A") && (ranges.length || inGrid(document.activeElement))) { e.preventDefault(); selectAll(); return; }
+    // (a view-only table) gets every cell. It needs no selection first -- with a grid on the page
+    // and the focus outside a text field, it is the grid's, never the browser's ("ctrl a still
+    // highlights the page instead of selecting all visible cells").
+    if (ctrl && (e.key === "a" || e.key === "A") && document.querySelector(GRID)) { e.preventDefault(); selectAll(); return; }
     var td = active ? cellAt(active.r, active.c) : null;
     // A click on blank page moved the focus off the grid; Esc still clears what is selected.
     //

@@ -292,10 +292,12 @@ def test_headers_row_numbers_and_esc_select_like_sheets(served, page, client):
     page.wait_for_selector("th.col-quantity:not(.sorted)")
     page.locator("th.col-quantity a.sort").click()
     page.wait_for_url("**dir=asc*")
-    # Ctrl+A on a grid without row ticks (this view-only Orders page) selects every cell
+    # Ctrl+A on a grid without row ticks (this view-only Orders page) selects every cell -- straight
+    # after the load, nothing clicked first (the browser's own select-all must not run)
     page.wait_for_selector("table.sheetlike tbody tr")
-    page.locator("table.sheetlike tbody tr").first.locator("td[data-field=quantity]").click()
+    page.locator("h1").click()
     page.keyboard.press("Control+a")
+    assert page.evaluate("String(window.getSelection()).length") < 40, "the page's text got selected instead"
     n_rows = page.locator("table.sheetlike tbody tr").count()
     cols = page.evaluate("document.querySelector('table.sheetlike tbody tr').cells.length")
     assert page.locator("table.sheetlike tbody td.sel-cell").count() == n_rows * (cols - 1)
