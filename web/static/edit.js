@@ -149,6 +149,7 @@
     var rows = t.tBodies[0].rows.length, cols = t.tBodies[0].rows[0].cells.length;
     grid = t;
     ranges = [rect({ r: 0, c: 0 }, { r: rows - 1, c: cols - 1 })];
+    ranges[0].head = true;
     active = active && cellAt(active.r, active.c) ? active : { r: 0, c: 0 };
     anchor = active;
     paint(true);
@@ -169,6 +170,8 @@
       if (last && last.r2 === idx[i] - 1) last.r2 = idx[i];
       else ranges.push(rect({ r: idx[i], c: 1 }, { r: idx[i], c: cols - 1 }));
     }
+    // every row ticked (Ctrl+A, the # corner) is the whole table: the headers show it too
+    if (idx.length === t.tBodies[0].rows.length) ranges.forEach(function (range) { range.head = true; });
     var tr = e.detail && e.detail.tr;
     active = { r: tr ? tr.sectionRowIndex : idx[0], c: 1 };
     anchor = active;

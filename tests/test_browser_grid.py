@@ -301,6 +301,7 @@ def test_headers_row_numbers_and_esc_select_like_sheets(served, page, client):
     n_rows = page.locator("table.sheetlike tbody tr").count()
     cols = page.evaluate("document.querySelector('table.sheetlike tbody tr').cells.length")
     assert page.locator("table.sheetlike tbody td.sel-cell").count() == n_rows * (cols - 1)
+    assert page.locator("table.sheetlike thead th.sel-col").count() == cols - 1  # the headers too
     page.keyboard.press("Escape")
     # a cell selected, a click on blank page, then Esc clears it
     page.wait_for_selector("table.sheetlike tbody tr")
@@ -345,7 +346,9 @@ def test_headers_row_numbers_and_esc_select_like_sheets(served, page, client):
     page.keyboard.press("Control+a")
     assert page.locator("table.sheetlike tbody tr.selected").count() == 2
     assert page.locator("table.sheetlike tbody td.sel-cell").count() == 2 * (cols - 1)
+    assert page.locator("table.sheetlike thead th.sel-col").count() == cols - 1  # the headers too
     page.keyboard.press("Escape")
+    assert page.locator("table.sheetlike thead th.sel-col").count() == 0
     # every cell of a column selected BY HAND does not mark the header
     cells = page.locator("table.sheetlike tbody td[data-field=quantity]")
     cells.first.click()
