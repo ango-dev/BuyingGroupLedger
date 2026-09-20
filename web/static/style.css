@@ -730,7 +730,7 @@ header nav details.nav-menu .menu a.current { color: var(--accent); font-weight:
 #activity-table form.ack-one { display: inline; }
 
 /* ---- the overview's needs-attention cards: shown only when something needs a hand ---- */
-.tiles.attention { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0 0 14px; }  /* five to a row */
+.tiles.attention { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin: 0 0 14px; }  /* about five to a row of the left column */
 .tiles.attention .tile.bad { border-color: #d64545; border-width: 2px; }
 .tiles.attention .tile.warn { border-color: #e0a800; border-width: 2px; }
 .tiles.attention .tile .label { color: var(--fg); font-weight: 600; }
@@ -997,3 +997,13 @@ figure.months text.net.neg { fill: var(--bad); }
 figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; }
 /* On a phone the chart keeps a legible width and scrolls sideways, like the tables. */
 @media (max-width: 560px) { figure.months { overflow-x: auto; } figure.months svg { min-width: 640px; } }
+
+/* The overview's two columns: statement and months left, the breakdown
+   charts stacked right; one column under 1180px, where the charts go back to their own grid. */
+@media (min-width: 1181px) {
+  .overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 34%); gap: 0 24px; align-items: start; }
+  .overview-main .statement-wrap, .overview-main figure.months { max-width: none; }
+  .overview-side h2 { margin-top: 0; }
+  .overview-side .charts { grid-template-columns: 1fr; }
+  .overview-side .charts figure { min-height: 0; }
+}

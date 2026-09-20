@@ -258,7 +258,7 @@ def month_chart(series: list[dict], selected: str) -> dict:
     """SVG geometry for the 12-month chart: realized profit up from the baseline (down, in the
     bad colour, when negative), expenses down from it, the net over each column; the selected
     month outlined. All in view-box units; the template only draws."""
-    width, height, top, bottom, gap = 720.0, 190.0, 26.0, 22.0, 8.0
+    width, height, top, bottom, gap = 720.0, 200.0, 26.0, 40.0, 8.0  # bottom: a loss label, then the month
     n = max(len(series), 1)
     slot = width / n
     w = slot - gap
@@ -279,7 +279,7 @@ def month_chart(series: list[dict], selected: str) -> dict:
         # The net's label: over the column, or under it when nothing stands above the baseline
         # (a month of expenses alone); none at all for an empty month.
         below = s["realized"] <= 0 and (rh or eh)
-        net_y = (ey + eh + 13) if below else (peak - 6)
+        net_y = min(ey + eh + 13, height - 22) if below else (peak - 6)  # never on the month name
         bars.append({
             "month": s["month"], "label": s["label"], "href": s["href"], "selected": s["month"] == selected,
             "realized": s["realized"], "expenses": s["expenses"], "net": s["net"],
