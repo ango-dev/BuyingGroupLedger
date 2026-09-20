@@ -546,7 +546,8 @@ class TestOverview:
         summary = overview(SnapshotReader(snapshot_path).load(), month="2026-09", today=NOW.date(), inputs_by_year=inputs)
         st = summary["statement"]
         assert [c["label"] for c in st["columns"]] == ["Lifetime", "2026", "September 2026"]
-        assert [r["label"] for r in st["rows"]][:4] == ["Net profit", "Realized profit", "Other income", "Expenses"]
+        assert [r["label"] for r in st["rows"]] == ["Net profit", "Realized profit", "Other income", "Expenses", "Projected profit",
+                                                    "Cashback rate", "Floating", "Paid out", "Spend", "Rows / orders", "Open rows"]  # the user's order
         assert [r["level"] for r in st["rows"]][:5] == ["net", "sub", "sub", "sub", ""]
         by = {r["label"]: r["cells"] for r in st["rows"]}
         life, year, month = by["Net profit"]
@@ -782,7 +783,7 @@ class TestOverviewPage:
         assert '<a href="/orders" title="every row of the ledger">' in body
         assert '<a href="/orders?month=2026" title="every row placed in 2026">' in body  # the year column
         assert '<table class="statement">' in body and '<figure class="months"' in body  # the statement, not tiles
-        assert body.index("<th scope=\"row\">Net profit</th>") < body.index("<th scope=\"row\">Rows / orders</th>")  # Net profit is the top line
+        assert body.index("<th scope=\"row\">Net Profit</th>") < body.index("<th scope=\"row\">Rows / Orders</th>")  # Net Profit is the top line, in Title Case
         assert 'href="/orders?state=open"' in body
         assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
         assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body

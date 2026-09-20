@@ -1020,7 +1020,7 @@ figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; 
   /* Every card the same shape: the chart at a fixed size on the left, the legend filling the
      width beside it, two columns when there are many entries. The Open Rows bars no longer
      stretch to the card. */
-  .overview-side .charts figure.bars svg { flex: 0 0 auto; width: 260px; }
+  .overview-side .charts figure.bars svg { flex: 0 0 auto; width: 320px; }
   .overview-side .charts figure.bars text { font-size: 11px; }
   .overview-side .charts .legend { flex: 1 1 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); column-gap: 14px; row-gap: 3px; align-content: center; }
   .overview-side .charts .legend li { justify-content: space-between; }

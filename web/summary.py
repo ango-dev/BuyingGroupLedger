@@ -205,9 +205,9 @@ def year_tiles(rows: list[LedgerRow], year: str, inputs_by_year: dict | None = N
 
 #: The Profit & Loss statement's rows, top to bottom: Net profit first, its three parts indented
 #: under it ("sub"), then the rates and the counts.
-STATEMENT_ROWS: tuple[tuple[str, str], ...] = (
+STATEMENT_ROWS: tuple[tuple[str, str], ...] = (  # the order the user asked for (2026-09-19)
     ("Net profit", "net"), ("Realized profit", "sub"), ("Other income", "sub"), ("Expenses", "sub"),
-    ("Cashback rate", ""), ("Paid out", ""), ("Floating", ""), ("Projected profit", ""),
+    ("Projected profit", ""), ("Cashback rate", ""), ("Floating", ""), ("Paid out", ""),
     ("Spend", ""), ("Rows / orders", ""), ("Open rows", ""),
 )
 
@@ -401,7 +401,7 @@ def overview(snapshot: Snapshot, month: str = "", today: date | None = None,
         # The open-rows matrix as stacked bars, drawn in the same row as the donuts.
         # A narrow label column, so the bars start where a donut ring does in the card beside
         # them.
-        "open_bars": open_rows_bars(open_table, label_width=46, bar_height=22, gap=8),
+        "open_bars": open_rows_bars(open_table, label_width=46, bar_height=26, gap=8),
         "rows": len(rows),
         "orders": len({r.order_id for r in rows}),
         "open_rows": len(open_rows),
