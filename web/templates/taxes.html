@@ -74,7 +74,7 @@
     <div class="muted count">{{ inputs.expenses | length }} expense(s) · <span id="sel-count">0</span> selected {% with id='expense-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}</div>
     <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Delete the selected expense? Its uploaded receipt is deleted too." data-confirm-many="Delete the {n} selected expenses? Their uploaded receipts are deleted too.">Delete selected</button>
     <div class="sheet">
-    <table class="grid compact expenses sheetlike" data-cell-url="/taxes/expense/cell?year={{ year }}">
+    <table class="grid compact expenses sheetlike stacked" data-cell-url="/taxes/expense/cell?year={{ year }}">
       {#- The arrow at each header's right sorts, as on the Orders table: ascending, descending,
           then clear -- the default, newest date first (esort / edir in the URL). A click on the
           header itself selects the column (edit.js); the menu names a direction outright. -#}
@@ -83,7 +83,7 @@
         {% for field, heading in ecols %}{% set active = esort == field %}{% set link = ('&esort=' ~ field ~ '&edir=asc') if not active else (('&esort=' ~ field ~ '&edir=desc') if edir == 'asc' else '') %}<th class="col-{{ field }} {{ 'num' if field == 'amount' }} {{ 'sorted' if active }}"><span class="name">{{ heading }}</span><a class="sort" href="/taxes?year={{ year }}{{ link | safe }}#s-expenses" title="{{ 'sort ascending' if not active else ('sort descending' if edir == 'asc' else 'clear the sort') }}">{{ ('▼' if edir == 'desc' else '▲') if active else '⇅' }}</a></th>{% endfor %}</tr></thead>
       <tbody>
         {% for e in expenses %}
-        <tr>
+        <tr class="has-num">
           <td class="rownum muted" title="expense {{ loop.index }} — click to select"><input type="checkbox" name="sel" value="{{ e.id }}" hidden aria-label="select expense {{ loop.index }}">{{ loop.index }}</td>
           {% for field in ('date', 'description', 'category', 'profile', 'email', 'receipt_url', 'amount') %}{% with e=e, field=field, entry_id=e.id, error='' %}{% include "_expense_cell.html" %}{% endwith %}{% endfor %}
         </tr>

@@ -1128,3 +1128,48 @@ header.setup-top .setup-title { padding: 14px 10px; color: var(--muted); font-we
 .banner.setup-again { margin: 0 0 12px; border-radius: 6px; }
 table.summary th { text-align: left; font-weight: 500; color: var(--muted); width: 200px; }
 main .setup-steps + h1 { margin-top: 6px; }
+
+/* ---- Narrow screens: the Expenses and Activity tables stack. The Orders grid keeps its sheet: it is meant to scroll. ---- */
+@media (max-width: 760px) {
+  table.stacked { display: block; width: 100%; min-width: 0; table-layout: auto; }
+  table.stacked colgroup { display: none; }
+  table.stacked thead { display: block; }
+  table.stacked thead tr { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 8px; }
+  table.stacked thead th { display: inline-flex; align-items: center; position: relative; top: auto; z-index: auto; min-width: 0;
+    padding: 4px 26px 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); box-shadow: none;
+    font-size: 0.85em; cursor: pointer; }
+  table.stacked thead th.rownum, table.stacked thead th.col-act, table.stacked thead th:empty { display: none; }
+  table.stacked thead th a.sort { right: 6px; }
+  table.stacked thead th.sel-col { border-color: var(--accent); }
+  table.stacked tbody { display: block; }
+  table.stacked tbody tr { display: grid; grid-template-columns: 1fr; gap: 0 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  table.stacked tbody tr.has-num { grid-template-columns: 30px 1fr; }
+  table.stacked tbody td { display: block; border: 0; padding: 3px 6px; min-width: 0; grid-column: 1; }
+  table.stacked tbody tr.has-num td { grid-column: 2; }
+  table.stacked tbody tr.has-num td.rownum { grid-column: 1; grid-row: 1 / span 12; position: static; border-right: 1px solid var(--line); text-align: center; padding-top: 6px; }
+  table.stacked tbody td::before { content: attr(data-label); display: block; font-size: 0.7em; line-height: 1.2; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  table.stacked tbody td.rownum::before, table.stacked tbody td[colspan]::before { content: none; }
+  table.stacked tbody td.num { text-align: left; }
+  table.stacked tbody td[colspan] { grid-column: 1 / -1; }
+  table.stacked tbody td:empty:not(.edit) { display: none; }
+  table.stacked tfoot { display: block; }
+  table.stacked tfoot tr { display: flex; justify-content: space-between; padding: 8px 6px; }
+  table.stacked tfoot td { display: block; border: 0; padding: 0; }
+  /* the expenses grid */
+  table.expenses.stacked tbody td[data-field="date"]::before { content: "Date"; }
+  table.expenses.stacked tbody td[data-field="description"]::before { content: "Description"; }
+  table.expenses.stacked tbody td[data-field="category"]::before { content: "Category"; }
+  table.expenses.stacked tbody td[data-field="profile"]::before { content: "Profile"; }
+  table.expenses.stacked tbody td[data-field="email"]::before { content: "Email"; }
+  table.expenses.stacked tbody td[data-field="receipt_url"]::before { content: "Receipt"; }
+  table.expenses.stacked tbody td[data-field="amount"]::before { content: "Amount"; }
+  /* the activity table */
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(1)::before { content: "When"; }
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(2)::before { content: "Type"; }
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(3)::before { content: "Run"; }
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(4)::before { content: "What happened"; }
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(5)::before { content: none; }
+  table.activity.stacked tbody td.when { font-size: 0.85em; }
+  table.activity.stacked tbody tr.details-row { display: block; }
+  table.activity.stacked tbody tr.details-row[hidden] { display: none; }
+}

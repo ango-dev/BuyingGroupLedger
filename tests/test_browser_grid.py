@@ -204,6 +204,46 @@ def test_the_tabs_fold_into_a_dropdown_on_a_phone(served, phone):
     assert phone.errors == []
 
 
+def test_the_expenses_and_activity_tables_stack_on_a_phone(served, phone, client, tmp_path):
+    """("does it make sense for cards to exist for expenses and activity?" -- no:
+    the same table stacks on a narrow screen): each row's cells one under another with a heading,
+    the row number at the left, the headers a row of sort chips; the Orders grid keeps its sheet."""
+    from diagnostics import activity
+    log = tmp_path / "logs" / "activity.jsonl"
+    activity.record("edit", "Orders: Quantity 2 -> 3", {"order_id": "111-0000001-0000001"}, path=log)
+    activity.record("backup", "Backup ledger_backup_1.zip", {}, path=log)
+    client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                data={"date": "2026-03-04", "description": "boxes", "amount": "12.50", "profile": "alpha",
+                      "category": "supplies", "receipt_url": "https://x/r"})
+    page = phone
+    page.goto(f"{served}/taxes?year=2026")
+    page.wait_for_selector("table.expenses tbody tr")
+    assert page.evaluate("getComputedStyle(document.querySelector('table.expenses tbody tr')).display") == "grid"
+    assert page.evaluate("getComputedStyle(document.querySelector('table.expenses td[data-field=amount]'), '::before').content") == '"Amount"'
+    assert page.evaluate("document.querySelector('table.expenses').getBoundingClientRect().width <= innerWidth")
+    chips = page.locator("table.expenses thead th")
+    assert chips.filter(has_text="Amount").is_visible() and not page.locator("table.expenses thead th.rownum").is_visible()
+    chips.filter(has_text="Amount").locator("a.sort").click()   # the chip's arrow still sorts
+    page.wait_for_url("**esort=amount*")
+    page.wait_for_selector("table.expenses tbody tr")
+    page.locator("table.expenses td[data-field=description]").first.tap()  # a cell still selects
+    assert page.locator("table.expenses td.sel-cell").count() == 1
+    page.goto(f"{served}/activity?days=0")
+    page.wait_for_selector("table.activity tbody tr")
+    assert page.evaluate("getComputedStyle(document.querySelector('table.activity tbody tr')).display") == "grid"
+    assert page.evaluate("getComputedStyle(document.querySelector('table.activity tbody td.what'), '::before').content") == '"What happened"'
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+    row = page.locator("table.activity tbody tr.kind-edit")
+    row.locator("button", has_text="details").tap()
+    details = page.locator("table.activity tbody tr.kind-edit + tr.details-row")  # the row's own details
+    assert details.is_visible() and "order id" in details.inner_text()
+    # the Orders grid is still a sheet on a phone
+    page.goto(f"{served}/orders")
+    page.wait_for_selector("table.sheetlike tbody tr")
+    assert page.evaluate("getComputedStyle(document.querySelector('table.sheetlike tbody tr')).display") == "table-row"
+    assert page.errors == []
+
+
 def test_a_desktop_window_keeps_the_tabs(served, page):
     page.set_viewport_size({"width": 1400, "height": 800})
     page.goto(f"{served}/orders")

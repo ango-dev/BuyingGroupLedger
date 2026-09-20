@@ -239,7 +239,7 @@ class TestThePage:
         assert 'href="/activity?days=0&amp;dir=desc&amp;sort=kind"' in by_type or 'href="/activity?days=0&amp;sort=kind&amp;dir=desc"' in by_type
         by_type_desc = client.get("/activity", params={"sort": "kind", "dir": "desc", "days": "0"}).text
         assert _re.findall(r'<tr class="kind-([a-z]+)"', by_type_desc) == sorted(kinds, reverse=True)
-        assert 'class="grid compact activity sheetlike"' in by_type
+        assert 'class="grid compact activity sheetlike stacked"' in by_type
 
     def test_the_dashboard_records_its_own_changes(self, client):
         client.post("/backup", follow_redirects=False)

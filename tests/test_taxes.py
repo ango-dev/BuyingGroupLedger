@@ -305,7 +305,7 @@ class TestTaxesPage:
         store = tmp_path / "data" / "tax_inputs.json"
         ids = [e["id"] for e in json.loads(store.read_text(encoding="utf-8"))["2026"]["expenses"]]
         body = client.get("/taxes", params={"year": "2026"}).text
-        assert 'class="grid compact expenses sheetlike" data-cell-url="/taxes/expense/cell?year=2026"' in body
+        assert 'class="grid compact expenses sheetlike stacked" data-cell-url="/taxes/expense/cell?year=2026"' in body
         assert 'class="num actions"' not in body and "del-expense-" not in body  # no per-row buttons
         assert "Edit Expense" not in body and 'action="/taxes/expense?year=2026"' in body  # the form only adds
         assert '<details class="add-row" id="expense-form" >' in body  # folded above the list, closed by default

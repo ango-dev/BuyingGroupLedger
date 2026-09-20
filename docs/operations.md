@@ -229,6 +229,9 @@ row is too narrow for it (an iPad, a shortened desktop window), a tablet-width w
 tightens the gutters and stacks the expense form two-up, and **on a phone or an iPad** (under
 760px, or a touch screen) the header's links scroll sideways, the forms stack, and the grids take
 touch: a tap selects a cell, a
+on a narrow screen the Expenses and Activity tables stack -- each row's cells one under another
+with a small heading, the row number at the left, the column headers a row of sort chips -- while the
+Orders grid keeps its sheet and scrolls; a
 second tap on the selected cell opens its editor, a long press opens the right-click menu (which
 has Select all; its Paste opens a box to paste into where the page may not read the clipboard), a
 drag from the handle at the selection's corner extends the range, a drag down the row numbers
