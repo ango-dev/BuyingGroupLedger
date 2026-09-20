@@ -88,6 +88,10 @@
     var td = active ? cellAt(active.r, active.c) : null;
     if (!td || dragging || document.activeElement === td || document.querySelector("input.cell-input")) return;
     var free = document.activeElement === document.body || inGrid(document.activeElement);
+    // A cell that is not editable (Item Name, a view-only table) has no tabindex, so focus() did
+    // nothing and the keyboard handler -- gated on focus being inside the grid -- ignored Ctrl+C
+    // on it. -1: focusable, not in the tab order.
+    if (!td.hasAttribute("tabindex")) td.setAttribute("tabindex", "-1");
     if (takeFocus || free) td.focus({ preventScroll: true });
   }
   function rangeCount() { var n = 0; forEachSelected(function () { n++; }); return n; }

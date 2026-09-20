@@ -222,3 +222,17 @@ def test_a_sideways_scroll_moves_only_the_table(client, served, page):
     assert int(page.evaluate("getComputedStyle(document.querySelector('body.wide .pinned')).zIndex")) > int(add_row_z or 0)  # and over the closed Add-a-row box
     assert page.evaluate("document.querySelector('table.sheetlike th.col-order_date').getBoundingClientRect().left") < 0  # the table did move
     assert page.errors == []
+
+
+def test_a_cell_that_is_not_editable_still_copies(served, page):
+    """Item Name is a key, never editable, so it had no tabindex, took no
+    focus, and the Ctrl+C handler (gated on focus inside the grid) ignored it."""
+    page.set_viewport_size({"width": 1400, "height": 800})
+    page.goto(f"{served}/orders?days=0")
+    cell = page.locator("table.sheetlike td[data-field=item_name]").first
+    cell.click()
+    page.keyboard.press("Control+c")
+    page.wait_for_timeout(150)
+    assert page.evaluate("(document.getElementById('grid-clipboard') || {}).value") == cell.inner_text().strip()
+    assert page.evaluate("document.activeElement.getAttribute('data-field')") == "item_name"
+
