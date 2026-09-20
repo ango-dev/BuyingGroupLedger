@@ -1,0 +1,26 @@
+<section class="panel">
+  {% if restored %}<p>The backup is restored: its configuration, ledger and receipts are in place.</p>
+  {% else %}<p>Setup is complete. Here is what is in place; everything can be changed on the Settings page.</p>{% endif %}
+  <table class="grid compact summary">
+    <tbody>{% for label, value in summary %}<tr><th scope="row">{{ label }}</th><td>{{ value }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% if signin_again %}<div class="banner warn">The password changed: after the restart, sign in with the new one.</div>{% endif %}
+</section>
+{% if restart %}
+{% include "_restart_banner.html" %}
+<div class="inline-form">
+  <form method="post" action="/settings/restart" class="inline-form" data-confirm="Restart the dashboard process now? It re-reads config.json; the scheduler is untouched.">
+    <button type="submit" class="{{ 'primary attention' if restart == 'dashboard' }}">Restart dashboard</button>
+  </form>
+  {% if in_container %}
+  <form method="post" action="/settings/restart-container" class="inline-form" data-confirm="Restart the whole container now? Every setting is re-read on the way up; the scheduler and the dashboard come back in about half a minute.">
+    <button type="submit" class="danger {{ 'attention' if restart == 'container' }}">Restart container</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+<div class="setup-actions">
+  <a class="button primary" href="/">Open the dashboard</a>
+  <a class="button" href="/tools/import">Import history</a>
+  <a class="button" href="/settings">Settings</a>
+</div>

@@ -104,6 +104,11 @@ Then lock them down — `config.json` holds every password in plaintext:
 chmod 600 config.json .state.json
 ```
 
+**Or let the dashboard ask.** Start the container with no `config.json` at all and open the
+dashboard: a fresh install lands on the setup wizard at `/setup`, which walks restore-a-backup,
+the password, the keys, profiles, groups, cards, alerts and the schedule, each step saving into
+`config.json` the way the Settings page does (docs/operations.md, "First-time setup").
+
 ### Upgrading a host that is already running the old six-file layout
 
 **Order matters here, and getting it wrong fails quietly.** A bind mount whose host file is missing

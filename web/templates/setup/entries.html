@@ -1,0 +1,24 @@
+{% set singular = {'profiles': 'profile', 'warehouses': 'warehouse', 'cards': 'card'}[step.section] %}
+{% set fields = {'profiles': profile_fields, 'warehouses': warehouse_fields, 'cards': card_fields}[step.section] %}
+{% if step.section == 'profiles' %}<p class="muted">One entry per browser identity: which retailers it is logged into, its proxy, and the sign-in it can perform unattended. Add at least one; the wizard is complete once a profile exists.</p>
+{% elif step.section == 'warehouses' %}<p class="muted">Each buying group and the address jigs that route an order to it; below, the groups' API access.</p>
+{% else %}<p class="muted">Cards by their last 4 digits, with the cashback rate the profit formula nets from COGS.</p>{% endif %}
+{{ entry_section(step.section, singular, entries, fields, action_base='/setup/' ~ step.key ~ ('?again=1' if again else ''), show_json=false) }}
+{% if rows %}
+<section class="panel">
+  <header><h2>{{ section_title(step.sections[0])[0] }}</h2><p class="muted">{{ section_title(step.sections[0])[1] }}</p></header>
+  <form method="post" action="/setup/{{ step.key }}{{ '?again=1' if again }}" class="settings" autocomplete="off" id="step-scalars">
+    <div class="fields">
+      {% set ns = namespace(group='') %}
+      {% for row in rows if row.setting.env not in hidden_envs %}
+{{ setting_row(row, step.key, ns) }}
+      {% endfor %}
+    </div>
+    <div class="inline-form"><button type="submit" class="primary small">Save these</button></div>
+  </form>
+</section>
+{% endif %}
+<div class="setup-actions">
+  <a class="button primary" href="{{ next_url }}">{{ 'Keep and continue' if again else 'Continue' }}</a>
+  {% if prev_url %}<a class="button" href="{{ prev_url }}">Back</a>{% endif %}
+</div>

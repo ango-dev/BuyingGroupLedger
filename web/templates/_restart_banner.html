@@ -1,0 +1,27 @@
+{#- "Restart to apply" after a save (Settings) or the wizard (its Done step): the container reads
+    some settings once at start, the dashboard others. Needs `restart` ("container" / "dashboard" /
+    "") and `in_container` in the context. -#}
+{% if restart == 'container' %}
+<div class="banner warn restart-prompt">
+  <strong>Restart the container to apply this change.</strong> You changed a setting the container
+  reads once at start (the schedule, the timezone, whether the dashboard runs). It is saved, but it
+  takes effect only after a container restart.
+  {% if in_container %}
+  <form method="post" action="/settings/restart-container" class="inline-form"
+        data-confirm="Restart the container now? The scheduler and the dashboard come back in about half a minute. It is refused while a run is in progress.">
+    <button type="submit" class="primary">Restart the container now</button>
+    <span class="muted small">or, on the host: <code>docker compose restart</code></span>
+  </form>
+  {% else %}
+  <pre>docker compose restart</pre>
+  {% endif %}
+  Do it between runs: a restart mid-run aborts that run (the heartbeat shows the last run's age
+  above; the button refuses while <code>logs/.run.lock</code> is live).
+</div>
+{% elif restart == 'dashboard' %}
+<div class="banner warn restart-prompt">
+  <strong>Restart the dashboard to apply this change.</strong> It is saved; the web process reads
+  settings once at start. Use <em>Restart dashboard</em> at the bottom of this page (the scheduler is
+  untouched).
+</div>
+{% endif %}

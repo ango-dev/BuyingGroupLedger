@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_select.html" import choose %}
+{% from "_settings_macros.html" import setting_row, profile_fields, warehouse_fields, card_fields, entry_section with context %}
+{% from "_dropzone.html" import dropzone %}
+{% block title %}Setup · {{ step.title }}{% endblock %}
+{#- A slim header of its own: on a fresh install nothing else on the site is reachable yet. -#}
+{% block header %}
+<header class="top setup-top">
+  <nav>
+    <a href="/setup" class="brand" title="Setup"><img src="/static/logo.svg?v={{ asset_version }}" alt="" class="logo" width="28" height="28"><span class="wordmark">Buying Group <strong>Ledger</strong></span></a>
+    <span class="nav-link setup-title">{{ 'Setup, again' if again else 'First-time setup' }}</span>
+  </nav>
+  <div class="meta"><a href="/settings" class="muted small" title="every setting on one page, for those who know what they want">Settings instead</a></div>
+</header>
+{% endblock %}
+{% block content %}
+<ol class="setup-steps">
+  {% for s in steps %}<li class="{{ 'current' if s.key == step.key }}{{ ' done' if loop.index0 < index }}"><a href="/setup/{{ s.key }}{{ '?again=1' if again }}">{{ loop.index }}. {{ s.title }}</a></li>{% endfor %}
+</ol>
+<h1>{{ step.title }}{% if step.optional %} <span class="muted small">— optional</span>{% endif %}</h1>
+{% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
+{% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
+{% if again and step.kind in ('password', 'scalars', 'entries') %}
+<div class="banner ok setup-again">This is set already. Change it below, or <a href="{{ next_url }}"><strong>keep it and continue</strong></a>.</div>
+{% endif %}
+{% include "setup/" ~ step.kind ~ ".html" %}
+{% include "_confirm_dialog.html" %}
+{% endblock %}

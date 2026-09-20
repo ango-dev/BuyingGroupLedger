@@ -1,0 +1,17 @@
+<section class="panel">
+  {% set title, blurb = section_title(step.sections[0] if step.sections else 'browser_use') %}
+  <p class="muted">{{ blurb }}</p>
+  <form method="post" action="/setup/{{ step.key }}{{ '?again=1' if again }}" class="settings" autocomplete="off">
+    <div class="fields">
+      {% set ns = namespace(group='') %}
+      {% for row in rows if row.setting.env not in hidden_envs %}
+{{ setting_row(row, step.key, ns) }}
+      {% endfor %}
+    </div>
+    <div class="setup-actions">
+      <button type="submit" class="primary">{{ 'Change and continue' if again else 'Save and continue' }}</button>
+      <a class="button" href="{{ next_url }}">{{ 'Keep and continue' if again else 'Skip' }}</a>
+      {% if prev_url %}<a class="button" href="{{ prev_url }}">Back</a>{% endif %}
+    </div>
+  </form>
+</section>

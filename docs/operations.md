@@ -558,6 +558,21 @@ gives the waiting rows in the ledger's columns to fix in a spreadsheet and uploa
 `python -m scripts.import_history` remains for the command line; it is stricter (it refuses open
 rows and invents nothing either, but reconciles a profit column before writing).
 
+### First-time setup (/setup)
+
+A fresh install -- no `config.json`, or one with no profile, and no finished setup on record --
+lands on the wizard from any page (the static assets, `/health`, sign-in, the restore and
+`/settings` stay open: Settings is the expert's way in). Ten steps over the Settings page's own
+fields, each saving only its own settings: restore a backup (skip it on a new setup; a restored
+`config.json` ends the wizard), the dashboard password (the browser is signed in for it at once,
+so the restart at the end does not ask), the Browser-Use key, profiles (one is what makes the
+install configured), buying groups with their API keys, cards, alerts, the schedule and backups,
+a pointer to the importer, done. The Done step lists what is set and, when a step changed a
+setting the dashboard or the container reads at start, offers that restart. The record is
+`setup` in `.state.json`; an install that already has profiles is stamped complete the first time
+the dashboard sees it and is never interrupted. *Run the setup wizard again* on Settings walks the
+same steps with what is set already and a Keep on each.
+
 ### The Settings page
 
 An **Advanced** panel at the foot of the page, behind a warning, holds the settings nobody should
@@ -614,7 +629,8 @@ editor alone, a display / form-builder pair in `web/settings_form.py` (`display_
 or `Card` needs the same: the card's form only knows the fields it renders (anything else is kept
 as stored, never lost, but not editable until the form shows it).
 
-**No login.** Whoever can open the page can read and change every credential. Keep the dashboard on
+**Sign-in.** With `web.password` set, every page asks for it (see Sign-in above); without one,
+whoever can open the page can read and change every credential, so keep the dashboard on
 loopback or your own network; the LAN publish is opt-in for that reason.
 
 **What the dashboard cannot do, by design:** change the ledger's columns, or submit tracking, file

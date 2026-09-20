@@ -31,6 +31,7 @@ from scripts import backup as backup_module
 from web import auth as auth_module
 from web import failures as failures_module
 from web import importer
+from web import setup_wizard
 from web.ledger_writer import RunInProgress
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
@@ -217,6 +218,31 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             "heartbeat": context.pop("heartbeat", None) or heartbeat(),
         }
         return templates.TemplateResponse(request=request, name=name, context={**base, **context})
+
+    # ---- the first-time setup (web/setup_wizard.py) -------------------------------------------------
+    # A fresh install (no profiles, no record of a finished setup) lands on /setup from anywhere
+    # but the wizard's own pages, the static assets, /health, sign-in, the restore and Settings
+    # (the expert's way in). Decided ONCE per process: a configured install is never re-checked.
+    SETUP_OPEN = ("/setup", "/static/", "/health", "/login", "/logout", "/backup/restore", "/settings")
+    setup_state = {"needed": None}
+
+    def setup_needed() -> bool:
+        if setup_state["needed"] is None or setup_state["needed"] is True:
+            try:
+                setup_state["needed"] = setup_wizard.needs_setup(clock)
+            except Exception:  # noqa: BLE001 -- a malformed state file must not take the site down
+                log.exception("could not read the setup record")
+                setup_state["needed"] = False
+        return setup_state["needed"]
+
+    @app.middleware("http")
+    async def require_setup(request: Request, call_next):
+        path = request.url.path
+        if path.startswith(SETUP_OPEN) or not setup_needed():
+            return await call_next(request)
+        if request.headers.get("HX-Request"):
+            return Response(status_code=401, headers={"HX-Redirect": "/setup"})
+        return RedirectResponse(url="/setup", status_code=303)
 
     # ---- the sign-in (web/auth.py): a password, a rate limit, remember me ------------------------
     # `web.password` set = every page but the login page, the static assets and /health (the
@@ -1593,6 +1619,177 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return Response(content="\ufeff" + importer.staging_csv(staging), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="ledger_import_staging.csv"'})
 
+
+    # ---- the setup wizard (web/setup_wizard.py): the Settings page's fields, one step at a time ------------
+    def setup_page(request: Request, key: str, *, errors: list[str] | None = None, message: str = "",
+                   open_section: str = "", status: int = 200, **extra):
+        step = setup_wizard.step(key)
+        again = request.query_params.get("again") == "1" or setup_wizard.rerunning()
+        nxt = setup_wizard.next_step(key)
+        prev = setup_wizard.prev_step(key)
+        suffix = "?again=1" if again else ""
+        rows = settings_form.view(step.scalar_settings(), os.environ) if step.kind in ("scalars", "entries", "password") else []
+        entries = settings_form.display_entries(step.section) if step.section else []
+        response = page_no_snapshot(
+            request, "setup.html", step=step, steps=setup_wizard.STEPS, index=setup_wizard.index(key), again=again,
+            next_url=f"/setup/{nxt.key}{suffix}" if nxt else "", prev_url=f"/setup/{prev.key}{suffix}" if prev else "",
+            rows=rows, entries=entries, errors=errors or [], message=message, open_section=open_section,
+            hidden_envs=settings_form.hidden_envs(), section_title=settings_form.section_title,
+            field_label=settings_form.field_label, retailer_keys=settings_form.RETAILER_KEYS,
+            auth_retailers=settings_form.AUTH_RETAILERS, profile_labels=settings_form.profile_labels(),
+            section_forms=[], in_container=in_container, auth_on=auth_on,
+            restart=setup_wizard.pending_restart(), configured=setup_wizard.is_configured(), **extra)
+        response.status_code = status
+        return response
+
+    def setup_next(key: str, request: Request) -> RedirectResponse:
+        nxt = setup_wizard.next_step(key)
+        again = request.query_params.get("again") == "1" or setup_wizard.rerunning()
+        return RedirectResponse(url=f"/setup/{nxt.key if nxt else 'done'}{'?again=1' if again else ''}", status_code=303)
+
+    @app.get("/setup")
+    def setup_root(request: Request):
+        suffix = "?again=1" if request.query_params.get("again") == "1" else ""
+        return RedirectResponse(url=f"/setup/restore{suffix}", status_code=303)
+
+    @app.get("/setup/{key}", response_class=HTMLResponse)
+    def setup_step(request: Request, key: str):
+        try:
+            step = setup_wizard.step(key)
+        except KeyError:
+            raise HTTPException(status_code=404)
+        if step.kind == "done":
+            setup_wizard.mark_complete(clock)
+            setup_wizard.clear_rerun()
+            setup_state["needed"] = False
+            return setup_page(request, key, message=request.query_params.get("message", ""),
+                              restored=request.query_params.get("restored") == "1",
+                              summary=setup_summary(), signin_again=request.query_params.get("signin") == "1")
+        return setup_page(request, key, message=request.query_params.get("message", ""))
+
+    def setup_summary() -> list[tuple[str, str]]:
+        """What the wizard left behind, for the Done step: counts and set / not set, never a secret."""
+        from config.loader import config_value
+
+        out = [("Dashboard password", "set" if config_value("web.password") else "not set (no sign-in)"),
+               ("Browser-Use key", "set" if config_value("browser_use.api_key") else "not set")]
+        for path, label in (("profiles", "Profiles"), ("warehouses", "Buying groups"), ("cards", "Cards")):
+            out.append((label, f"{len(settings_form.display_entries(path))} entered"))
+        out.append(("Alerts", ", ".join(c for c, on in (("Discord", config_value("alerts.discord_enabled", True) and config_value("alerts.discord_webhook_url")),
+                                                        ("Gmail", config_value("alerts.gmail_enabled", True) and config_value("alerts.gmail_address"))) if on) or "none configured"))
+        out.append(("Schedule", f"every {config_value('container.run_interval_hours', 6)} h; backups {'on' if config_value('backups.enabled', True) else 'off'}"))
+        return out
+
+    @app.post("/setup/restore")
+    async def setup_restore(request: Request, archive: UploadFile = File(...), force: str = Form("")):
+        result, message = await do_restore(archive, bool(force))
+        if "config.json" in result["restored"]:
+            # A restored config is a finished setup: the wizard is over, the container re-reads it.
+            settings_form.loader.reload_config()
+            setup_wizard.mark_complete(clock)
+            setup_wizard.note_restart("container")
+            setup_state["needed"] = False
+            return RedirectResponse(url="/setup/done?restored=1&message=" + message.replace(" ", "+"), status_code=303)
+        return RedirectResponse(url="/setup/restore?message=" + message.replace(" ", "+"), status_code=303)
+
+    @app.post("/setup/restart")
+    def setup_rerun(request: Request):
+        """Settings' "Run the setup wizard again"."""
+        setup_wizard.mark_rerun(clock)
+        act("settings", "Setup wizard run again from the Settings page")
+        return RedirectResponse(url="/setup/restore?again=1", status_code=303)
+
+    @app.post("/setup/password", response_class=HTMLResponse)
+    async def setup_password(request: Request):
+        form = await request.form()
+        password = str(form.get("password", "") or "")
+        confirm = str(form.get("confirm", "") or "")
+        if password != confirm:
+            return setup_page(request, "password", errors=["the two passwords differ"], status=400)
+        if not password.strip():
+            return setup_next("password", request)  # blank keeps what is set (nothing, on a fresh install)
+        step = setup_wizard.step("password")
+        try:
+            changes = settings_form.apply_scalars({"WEB_PASSWORD": password.strip()}, settings=step.scalar_settings(),
+                                                  skip=settings_form.hidden_envs())
+        except settings_form.SettingsError as exc:
+            return setup_page(request, "password", errors=exc.errors, status=400)
+        setup_wizard.note_restart(settings_form.restart_needed(changes))
+        act("settings", "Setup: dashboard password set", {"changed": sorted(changes)})
+        response = setup_next("password", request)
+        if not auth_on:
+            # Sign this browser in for the password just set: the token is signed with the
+            # persisted secret over the new password, so it is good after the restart at Done.
+            secret = session_secret or auth_module.session_secret()
+            if isinstance(secret, str):
+                secret = secret.encode("utf-8")
+            fresh = auth_module.Sessions(secret, password.strip(),
+                                         session_hours=float(_setting("web_session_hours", 6)),
+                                         remember_days=float(_setting("web_remember_days", 730)),
+                                         clock=lambda: clock().timestamp())
+            token, lifetime = fresh.issue(remember=True)
+            response.set_cookie(auth_module.COOKIE, token, max_age=lifetime, httponly=True, samesite="lax", path="/")
+        elif password.strip() != password_now():
+            response.headers["location"] = response.headers["location"] + ("&" if "?" in response.headers["location"] else "?") + "signin=1"
+        return response
+
+    def password_now() -> str:
+        return str(_setting("web_password", "")).strip()
+
+    @app.post("/setup/{key}", response_class=HTMLResponse)
+    async def setup_save(request: Request, key: str):
+        """A step's scalar settings (Browser-Use, the groups' keys, alerts, the schedule): only the
+        step's own settings are written, so an untouched box elsewhere is never read as blank."""
+        try:
+            step = setup_wizard.step(key)
+        except KeyError:
+            raise HTTPException(status_code=404)
+        if step.kind not in ("scalars", "entries") or not (step.envs or step.sections):
+            return setup_next(key, request)
+        form = await request.form()
+        try:
+            changes = settings_form.apply_scalars(form, settings=step.scalar_settings(), skip=settings_form.hidden_envs())
+        except settings_form.SettingsError as exc:
+            return setup_page(request, key, errors=exc.errors, status=400)
+        if changes:
+            setup_wizard.note_restart(settings_form.restart_needed(changes))
+            act("settings", f"Setup: {step.title} saved: {', '.join(sorted(changes))}", {"changed": sorted(changes)})
+        if step.kind == "entries":
+            suffix = "?again=1" if (request.query_params.get("again") == "1" or setup_wizard.rerunning()) else ""
+            return RedirectResponse(url=f"/setup/{key}{suffix}", status_code=303)
+        return setup_next(key, request)
+
+    async def setup_entry(request: Request, key: str, index: int | None, delete: bool = False):
+        step = setup_wizard.step(key)
+        if not step.section:
+            raise HTTPException(status_code=404)
+        suffix = "?again=1" if (request.query_params.get("again") == "1" or setup_wizard.rerunning()) else ""
+        try:
+            if delete:
+                label = settings_form.delete_entry(step.section, index)
+                act("settings", f"Setup: removed {step.section[:-1]} {label}", {"path": step.section})
+            else:
+                form = await request.form()
+                _landed, label = settings_form.apply_entry(step.section, index, form)
+                act("settings", f"Setup: {'added' if index is None else 'saved'} {step.section[:-1]} {label}", {"path": step.section})
+        except settings_form.SettingsError as exc:
+            return setup_page(request, key, errors=exc.errors, open_section=step.section, status=400)
+        setup_state["needed"] = None  # a profile may just have arrived: re-decide on the next request
+        return RedirectResponse(url=f"/setup/{key}{suffix}", status_code=303)
+
+    @app.post("/setup/{key}/entry", response_class=HTMLResponse)
+    async def setup_add_entry(request: Request, key: str):
+        return await setup_entry(request, key, None)
+
+    @app.post("/setup/{key}/entry/{index}", response_class=HTMLResponse)
+    async def setup_save_entry(request: Request, key: str, index: int):
+        return await setup_entry(request, key, index)
+
+    @app.post("/setup/{key}/entry/{index}/delete", response_class=HTMLResponse)
+    async def setup_delete_entry(request: Request, key: str, index: int):
+        return await setup_entry(request, key, index, delete=True)
+
+
     # The Backup page moved INTO Settings; the old address still lands there.
     @app.get("/backup")
     def backup_page(request: Request):
@@ -1639,26 +1836,31 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         act("backup", f"Backup {name} deleted", {"name": name})
         return RedirectResponse(url=f"/settings?message=Deleted+{name}#s-backup", status_code=303)
 
-    @app.post("/backup/restore")
-    async def backup_restore(request: Request, archive: UploadFile = File(...),
-                             force: str = Form("")):
-        # On ANY host, confirmed
-        # in-page first. Existing files are kept unless the overwrite box is ticked, so an
-        # accidental upload onto a configured host changes nothing without that tick. The page
-        # has no login: keep the dashboard on loopback or your own network (docs/operations.md).
+    async def do_restore(archive: UploadFile, force: bool) -> tuple[dict, str]:
+        """Keep the upload under backups/ and restore it onto this host; (result, message). Used
+        by the Backup panel and by the setup wizard's first step."""
         backups_dir.mkdir(parents=True, exist_ok=True)
         safe_name = Path(archive.filename or "upload.zip").name
         if not safe_name.endswith(".zip"):
             safe_name += ".zip"
         saved = backups_dir / f"uploaded_{safe_name}"
         saved.write_bytes(await archive.read())
-        result = backup_module.restore_backup(saved, repo_root, force=bool(force))
+        result = backup_module.restore_backup(saved, repo_root, force=force)
         message = (f"Restored {len(result['restored'])} file(s), kept {len(result['skipped_existing'])}"
                    " existing" + (" (tick overwrite to replace them)" if result["skipped_existing"]
                                   else "") + ".")
         act("backup", f"Restore from {safe_name}: {message}",
-            {"archive": safe_name, "force": bool(force), "restored": result["restored"],
+            {"archive": safe_name, "force": force, "restored": result["restored"],
              "kept": result["skipped_existing"]})
+        return result, message
+
+    @app.post("/backup/restore")
+    async def backup_restore(request: Request, archive: UploadFile = File(...),
+                             force: str = Form("")):
+        # On ANY host, confirmed
+        # in-page first. Existing files are kept unless the overwrite box is ticked, so an
+        # accidental upload onto a configured host changes nothing without that tick.
+        result, message = await do_restore(archive, bool(force))
         url = f"/settings?message={message.replace(' ', '+')}"
         if "config.json" in result["restored"]:
             url += "&restart=container"  # the run and the dashboard read config.json at start

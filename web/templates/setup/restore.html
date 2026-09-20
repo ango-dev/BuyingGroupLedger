@@ -1,0 +1,13 @@
+<section class="panel">
+  {% if configured %}
+  <p class="muted">This install is configured. A restore replaces what a backup holds -- only with <em>overwrite</em> ticked -- so most people skip this step now.</p>
+  {% else %}
+  <p>Moving from another machine? Upload the backup zip (<code>backups/ledger_backup_*.zip</code>) and everything comes with it: the configuration, the ledger, the receipts. Then the wizard is done. Starting fresh? Skip this step.</p>
+  {% endif %}
+  <form method="post" action="/setup/restore" enctype="multipart/form-data" class="inline-form" data-confirm="Restore this backup onto this host? Existing files are kept unless overwrite is ticked.">
+    {{ dropzone('archive', '.zip', 'a ledger_backup_*.zip', klass='compact') }}
+    <label><input type="checkbox" name="force" value="1"> overwrite files that already exist</label>
+    <button type="submit" class="primary">Restore</button>
+  </form>
+</section>
+<div class="setup-actions"><a class="button" href="{{ next_url }}">Skip — start fresh</a></div>
