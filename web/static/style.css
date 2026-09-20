@@ -243,6 +243,7 @@ h2.with-hint .hint-mark { font-size: 0.68em; }
 .count label.protect { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; cursor: pointer; }
 .count label.protect input { margin: 0; accent-color: var(--accent); }
 td input.cell-check { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: var(--accent); cursor: pointer; }
+table.grid td[data-field="tracking_submitted"], td[data-field="tracking_submitted"] { text-align: center; }  /* the tick sits mid-cell; outranks table.grid td */
 td input.cell-check:disabled { cursor: default; opacity: 0.7; }
 /* editing */
 /* The header cell selects its column: room to click BESIDE the name (which sorts) on every column --
@@ -937,7 +938,18 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
   /* no double-tap zoom on the grids, so a second tap edits and a long press opens the menu */
   table.sheetlike td, table.sheetlike th, table.order-rows td, table.order-rows th { touch-action: manipulation; }
   table.sheetlike td.edit, table.order-rows td.edit { cursor: default; }
+  /* a finger down the row numbers selects rows (edit.js); sideways still scrolls the table */
+  table.sheetlike td.rownum { touch-action: pan-x; }
 }
+/* The selection's corner handle on a touch screen (edit.js): a drag from it extends the range. */
+.sel-handle { display: none; position: fixed; z-index: 9; width: 22px; height: 22px; border-radius: 50%; box-sizing: border-box;
+  background: var(--accent); border: 3px solid var(--card); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); touch-action: none; }
+.sel-handle.on { display: block; }
+.sel-handle.dragging { pointer-events: none; opacity: 0.6; }
+/* The paste box on a phone (edit.js showPasteBox): the clipboard textarea, shown to paste into. */
+textarea.paste-box { position: fixed; left: 50%; top: 18%; transform: translateX(-50%); z-index: 1002; width: min(320px, 86vw); height: 72px;
+  padding: 10px 12px; font: inherit; color: var(--fg); background: var(--card); border: 2px solid var(--accent); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); opacity: 1; pointer-events: auto; }
 
 /* The sign-in page (web/auth.py): one card, centred, no header. */
 .login-wrap { display: flex; justify-content: center; padding: 8vh 0 0; }

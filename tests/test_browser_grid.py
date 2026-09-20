@@ -58,6 +58,103 @@ def page():
         browser.close()
 
 
+@pytest.fixture
+def phone():
+    """A phone: touch, a coarse pointer, a narrow viewport (Playwright's Pixel 5 descriptor)."""
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(channel="chrome", headless=True)
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"no local Chrome for Playwright: {type(exc).__name__}")
+        context = browser.new_context(**p.devices["Pixel 5"])
+        page = context.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.errors = errors  # type: ignore[attr-defined]
+        yield page
+        browser.close()
+
+
+def _touch(cdp, kind, x=0, y=0):
+    """One touch event over an open CDP session (a touch sequence must stay within one session)."""
+    points = [] if kind == "touchEnd" else [{"x": x, "y": y}]
+    cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": points})
+
+
+def _touch_drag(page, x1, y1, x2, y2, steps=6):
+    cdp = page.context.new_cdp_session(page)
+    _touch(cdp, "touchStart", x1, y1)
+    for i in range(1, steps + 1):
+        _touch(cdp, "touchMove", x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps)
+    _touch(cdp, "touchEnd")
+    cdp.detach()
+
+
+def _long_press(page, x, y, hold_ms=750):
+    cdp = page.context.new_cdp_session(page)
+    _touch(cdp, "touchStart", x, y)
+    page.wait_for_timeout(hold_ms)
+    _touch(cdp, "touchEnd")
+    cdp.detach()
+
+
+def _centre(box):
+    return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+
+def test_the_grid_works_by_touch(served, phone, client):
+    """On a phone a tap selects and shows the corner handle; a drag from the handle extends the
+    range; a drag down the row numbers selects rows; a long press opens the menu, which has Select
+    all. Real touch events through CDP in the machine's Chrome."""
+    csv_text = "Order Number,Date,Item,Qty,Status\n" + "".join(f"X{i},3/1{i}/2026,Thing {i},1,paid\n" for i in range(1, 4))
+    client.post("/tools/import/upload", files={"source": ("old.csv", csv_text.encode(), "text/csv")}, follow_redirects=False)
+    client.post("/tools/import/map", data={"map.0": "order_id", "map.1": "order_date", "map.2": "item_name", "map.3": "quantity",
+                                          "map.4": "status", "date_order": "", "profile": ""}, follow_redirects=False)
+    assert client.post("/tools/import/run", follow_redirects=False).status_code == 303
+    page = phone
+    page.goto(f"{served}/tools/import")
+    page.wait_for_selector("table.sheetlike tbody tr")
+    assert page.evaluate("matchMedia('(pointer: coarse)').matches")
+    rows = page.locator("table.sheetlike tbody tr")
+    assert rows.count() == 3
+    first_cells = [rows.nth(i).locator("td.edit").first for i in range(3)]
+    field = first_cells[0].get_attribute("data-field")
+    # a tap selects the cell and shows the handle at its corner
+    first_cells[0].scroll_into_view_if_needed()
+    x, y = _centre(first_cells[0].bounding_box())
+    page.touchscreen.tap(x, y)
+    page.wait_for_timeout(100)
+    assert page.locator("td.sel-cell").count() == 1
+    handle = page.locator(".sel-handle.on")
+    assert handle.count() == 1
+    # a drag from the handle to the third row's cell selects the three cells of the column
+    hx, hy = _centre(handle.bounding_box())
+    tx, ty = _centre(first_cells[2].bounding_box())
+    _touch_drag(page, hx, hy, tx, ty)
+    assert page.locator("td.sel-cell").count() == 3
+    assert page.evaluate(f"Array.from(document.querySelectorAll('td.sel-cell')).every(td => td.dataset.field === '{field}')")
+    # a drag down the row numbers selects the rows (and their cells)
+    nums = page.locator("table.sheetlike tbody td.rownum")
+    x1, y1 = _centre(nums.nth(0).bounding_box())
+    x3, y3 = _centre(nums.nth(2).bounding_box())
+    _touch_drag(page, x1, y1, x3, y3)
+    assert page.locator("table.sheetlike tbody tr.selected").count() == 3
+    cols = page.evaluate("document.querySelector('table.sheetlike tbody tr').cells.length")
+    assert page.locator("td.sel-cell").count() == 3 * (cols - 1)
+    # a tap on a cell drops that; a long press opens the menu, whose Select all takes every row
+    x, y = _centre(first_cells[1].bounding_box())
+    page.touchscreen.tap(x, y)
+    assert page.locator("table.sheetlike tbody tr.selected").count() == 0 and page.locator("td.sel-cell").count() == 1
+    _long_press(page, x, y)
+    page.wait_for_selector(".ctx.on")
+    page.wait_for_timeout(650)  # the menu ignores the tap that opened it for a moment
+    item = page.locator(".ctx.on button[data-act=all]")
+    ix, iy = _centre(item.bounding_box())
+    page.touchscreen.tap(ix, iy)
+    assert page.locator("table.sheetlike tbody tr.selected").count() == 3
+    assert page.errors == []
+
+
 def test_the_expenses_grid_writes_undoes_narrows_and_deletes(client, served, page, tmp_path):
     for when, what in (("2026-03-04", "boxes"), ("2026-03-05", "tape")):
         client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,

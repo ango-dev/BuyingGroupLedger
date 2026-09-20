@@ -21,7 +21,10 @@
 //                    step; Ctrl+Shift+Z redoes too); the old value goes back through the same
 //                    conflict-checked POST, so a cell someone changed meanwhile is refused, not clobbered
 //   right-click      a menu of these actions, with their keys, on any cell, header cell or row number
-//   touch            a tap selects, a second tap on the selected cell edits, a long press opens the menu
+//   touch            a tap selects, a second tap on the selected cell edits, a long press opens the
+//                    menu; the selection's corner handle drags a range, a drag down the row numbers
+//                    selects rows; the menu's Paste opens a box to paste into where the page may not
+//                    read the clipboard (http)
 //   a link in a cell a plain click selects the cell (copy works); Ctrl-click, middle-click or a
 //                    double-click on a read-only cell opens it
 //   Ctrl+C / Ctrl+V  copies the selection as tab-separated values (pastes into Sheets / Excel too),
@@ -90,6 +93,7 @@
     document.querySelectorAll("td.sel-cell").forEach(function (td) { td.classList.remove("sel-cell"); });
     document.querySelectorAll("th.sel-col").forEach(function (th) { th.classList.remove("sel-col"); });
     forEachSelected(function (td) { td.classList.add("sel-cell"); });
+    if (COARSE) setTimeout(placeHandle, 0);  // after the focus and the layout settle
     // A column selected THROUGH ITS HEADER shows it on the header cell too; the same cells selected by hand do not ("if I select
     // all cells in a column I do not want to automatically select the column name too").
     var t = table(), rows = t && t.tBodies[0] ? t.tBodies[0].rows.length : 0, head = t && t.tHead ? t.tHead.rows[0] : null;
@@ -108,6 +112,66 @@
     // on it. -1: focusable, not in the tab order.
     if (!td.hasAttribute("tabindex")) td.setAttribute("tabindex", "-1");
     if (takeFocus || free) td.focus({ preventScroll: true });
+  }
+  // ---- touch: the selection's corner handle. A finger on a cell scrolls the table, so a range is
+  // dragged from the handle at the selection's bottom-right corner, as in Sheets on a phone: the
+  // range runs from the last range's top-left to the cell under the finger. ---------------------
+  var handle = null;
+  function selHandle() {
+    if (handle) return handle;
+    handle = document.createElement("div");
+    handle.className = "sel-handle";
+    handle.setAttribute("aria-hidden", "true");
+    document.body.appendChild(handle);
+    var from = null;
+    handle.addEventListener("touchstart", function (e) {
+      var r = lastRange();
+      if (e.touches.length !== 1 || !r) return;
+      e.preventDefault();  // no scroll, no emulated mouse events after
+      from = { r: r.r1, c: r.c1 };
+      anchor = from;
+      dragging = true;
+      handle.classList.add("dragging");  // no pointer events: elementFromPoint sees the cell under it
+    }, { passive: false });
+    handle.addEventListener("touchmove", function (e) {
+      if (!dragging || !from) return;
+      e.preventDefault();
+      var t = e.touches[0];
+      var el = document.elementFromPoint(t.clientX, t.clientY);
+      var td = el && el.closest ? el.closest(GRID_TD) : null;
+      if (!selectable(td) || td.closest(GRID) !== table()) return;
+      var p = coordsOf(td);
+      if (!active || p.r !== active.r || p.c !== active.c) { active = p; setSelection(from, p); }
+    }, { passive: false });
+    function end(e) {
+      if (!dragging) return;
+      e.preventDefault();
+      dragging = false; from = null;
+      handle.classList.remove("dragging");
+      paint(true);
+    }
+    handle.addEventListener("touchend", end, { passive: false });
+    handle.addEventListener("touchcancel", end, { passive: false });
+    return handle;
+  }
+  function placeHandle() {
+    if (!COARSE) return;
+    var h = selHandle(), r = lastRange(), t = table();
+    var td = r && t ? cellAt(r.r2, r.c2) : null;
+    if (!td || document.querySelector("input.cell-input")) { h.classList.remove("on"); return; }
+    var box = td.getBoundingClientRect();
+    var seen = box.right > 0 && box.bottom > 0 && box.left < window.innerWidth && box.top < window.innerHeight;
+    if (!seen) { h.classList.remove("on"); return; }
+    // at the cell's corner, kept inside the viewport when the cell runs off it
+    h.style.left = (Math.min(box.right, window.innerWidth - 6) - 11) + "px";
+    h.style.top = (Math.min(box.bottom, window.innerHeight - 6) - 11) + "px";
+    h.classList.add("on");
+  }
+  if (COARSE) {
+    window.addEventListener("scroll", placeHandle, true);
+    window.addEventListener("resize", placeHandle);
+    document.addEventListener("focusin", function () { setTimeout(placeHandle, 0); });  // the editor opening hides it
+    document.addEventListener("focusout", function () { setTimeout(placeHandle, 0); });
   }
   function rangeCount() { var n = 0; forEachSelected(function () { n++; }); return n; }
   function setSelection(a, b) {  // the last range becomes a..b (a first one is made)
@@ -579,9 +643,19 @@
       var text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
       e.preventDefault();
       clip.value = "";
+      hidePasteBox();
       pasteText(text);
       paint(true);
     });
+    clip.addEventListener("input", function () {  // a keyboard that inserts without a paste event
+      if (!clip.classList.contains("paste-box") || !clip.value) return;
+      var text = clip.value;
+      clip.value = "";
+      hidePasteBox();
+      pasteText(text);
+      paint(true);
+    });
+    clip.addEventListener("keydown", function (e) { if (e.key === "Escape") { hidePasteBox(); paint(true); } });
     return clip;
   }
   function copySelection() {
@@ -714,8 +788,25 @@
   }
   function pasteFromClipboard() {  // the menu's Paste: the clipboard API where the page may read it (https), else the Ctrl+V box
     if (navigator.clipboard && navigator.clipboard.readText) {
-      navigator.clipboard.readText().then(function (text) { pasteText(text); paint(true); }, function () { armPaste(); });
-    } else { armPaste(); }
+      navigator.clipboard.readText().then(function (text) { pasteText(text); paint(true); }, function () { COARSE ? showPasteBox() : armPaste(); });
+    } else if (COARSE) { showPasteBox(); } else { armPaste(); }
+  }
+  // A phone with no keyboard shortcut and no clipboard API (http): the hidden clipboard textarea
+  // is shown as a box to long-press and Paste into; its paste event (or the text arriving) fills
+  // the selection, and the box goes away.
+  function showPasteBox() {
+    var c = clipboard();
+    c.value = "";
+    c.classList.add("paste-box");
+    c.setAttribute("placeholder", "long-press here, then Paste");
+    c.style.cssText = "";
+    c.focus();
+  }
+  function hidePasteBox() {
+    if (!clip || !clip.classList.contains("paste-box")) return;
+    clip.classList.remove("paste-box");
+    clip.removeAttribute("placeholder");
+    clip.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
   }
   function selectRowOf(td) {  // the row-number cell's click, as the row selection understands it
     var num = td.parentElement ? td.parentElement.querySelector("td.rownum") : null;
@@ -739,6 +830,7 @@
     else if (act === "redo") redo();
     else if (act === "hand") toggleHandSelection();
     else if (act === "column") { var t = td && td.closest(GRID); var th = t && t.tHead ? t.tHead.rows[0].cells[td.cellIndex] : null; if (th) selectColumn(th, false, false); }
+    else if (act === "all") selectAll();
     else if (act === "row") { if (td) selectRowOf(td); }
     else if (act === "delete-rows") { var button = document.getElementById("delete-selected"); if (button) button.click(); }
   }
@@ -770,6 +862,7 @@
     if (ledger) html += "<hr>" + ctxItem("hand", marked ? "Release hand edits" : "Mark as hand edits", "Ctrl+Shift+H", !marked && !plain);
     if (sortLink(ctxHead)) html += "<hr>" + ctxItem("sort-asc", "Sort ascending", "") + ctxItem("sort-desc", "Sort descending", "") + ctxItem("sort-clear", "Clear sort", "", !sorted);
     html += "<hr>" + ctxItem("column", "Select column", "", !cur) + ctxItem("row", "Select row", "", !(cur && cur.parentElement.querySelector("td.rownum")));
+    html += ctxItem("all", "Select all", "Ctrl+A");
     if (rows && document.getElementById("delete-selected")) html += "<hr>" + ctxItem("delete-rows", "Delete selected row(s)", "Delete");
     var m = ctxMenu();
     m.innerHTML = html;
@@ -953,6 +1046,35 @@
     if (press && press.toggleOff && !press.moved) { setRow(press.tr, false); changed(press.tr); }
     press = null;
   });
+  // A finger dragged DOWN the row numbers selects the rows it crosses: the numbers' touch-action keeps sideways scrolling and gives up the
+  // vertical one, and the drag is replayed as the mouse events above. A tap stays a tap.
+  var finger = null;
+  document.addEventListener("touchstart", function (e) {
+    var td = e.target.closest ? e.target.closest("table.sheetlike td.rownum") : null;
+    finger = td && e.touches.length === 1 ? { td: td, x: e.touches[0].clientX, y: e.touches[0].clientY, on: false } : null;
+  }, { passive: true });
+  document.addEventListener("touchmove", function (e) {
+    if (!finger) return;
+    var t = e.touches[0];
+    if (!finger.on) {
+      var dx = Math.abs(t.clientX - finger.x), dy = Math.abs(t.clientY - finger.y);
+      if (dy < 8) return;
+      if (dx > dy) { finger = null; return; }  // sideways: the table scrolls
+      finger.on = true;
+      finger.td.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+    }
+    e.preventDefault();
+    var el = document.elementFromPoint(t.clientX, t.clientY);
+    var over = el && el.closest ? el.closest("table.sheetlike td.rownum") : null;
+    if (over) over.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+  }, { passive: false });
+  function fingerUp(e) {
+    if (!finger) return;
+    if (finger.on) { document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); e.preventDefault(); }
+    finger = null;
+  }
+  document.addEventListener("touchend", fingerUp, { passive: false });
+  document.addEventListener("touchcancel", fingerUp, { passive: false });
   document.addEventListener("change", function (e) {
     if (e.target && (e.target.name === "sel" || e.target.id === "sel-all")) syncClasses();
   });
