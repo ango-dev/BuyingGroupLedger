@@ -1001,9 +1001,27 @@ figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; 
 /* The overview's two columns: statement and months left, the breakdown
    charts stacked right; one column under 1180px, where the charts go back to their own grid. */
 @media (min-width: 1181px) {
-  .overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 34%); gap: 0 24px; align-items: start; }
+  .overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 36%); gap: 0 20px; align-items: start; }
   .overview-main .statement-wrap, .overview-main figure.months { max-width: none; }
   .overview-side h2 { margin-top: 0; }
-  .overview-side .charts { grid-template-columns: 1fr; }
-  .overview-side .charts figure { min-height: 0; }
+  /* Compact, so the whole overview fits one screen: tighter rows with the hints left to the tooltips, a flatter chart, the
+     breakdown charts two-up with smaller donuts. */
+  body.overview h1 { margin: 8px 0 6px; }
+  body.overview main { padding-bottom: 12px; }
+  .overview-grid h2 { margin: 10px 0 6px; }
+  .overview-main .tiles.attention { margin-bottom: 8px; }
+  .overview-main .tiles.attention .tile { padding: 6px 10px; }
+  .overview-main .statement-wrap { margin: 4px 0 10px; }
+  table.statement th, table.statement td { padding: 4px 14px; }
+  table.statement thead th { padding-top: 6px; padding-bottom: 6px; }
+  table.statement tr.level-net th, table.statement tr.level-net td { font-size: 1.12em; padding-top: 8px; }
+  table.statement tr.level-sub:last-of-type td { padding-bottom: 8px; }
+  table.statement .cell-hint { display: none; }
+  figure.months { margin-bottom: 8px; padding: 8px 12px 4px; }
+  figure.months figcaption { font-size: 0.95em; }
+  .overview-side .charts { grid-template-columns: 1fr; gap: 8px; margin-top: 0; }
+  .overview-side .charts figure { padding: 8px 10px 6px; gap: 4px; }
+  .overview-side .charts figcaption { font-size: 0.95em; }
+  .overview-side .charts .donut svg { width: 118px; height: 118px; }
+  .overview-side .charts .legend { font-size: 0.82em; }
 }

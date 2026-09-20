@@ -258,7 +258,7 @@ def month_chart(series: list[dict], selected: str) -> dict:
     """SVG geometry for the 12-month chart: realized profit up from the baseline (down, in the
     bad colour, when negative), expenses down from it, the net over each column; the selected
     month outlined. All in view-box units; the template only draws."""
-    width, height, top, bottom, gap = 720.0, 200.0, 26.0, 40.0, 8.0  # bottom: a loss label, then the month
+    width, height, top, bottom, gap = 720.0, 135.0, 20.0, 34.0, 8.0  # flat, so the page fits a screen; bottom: a loss label, then the month
     n = max(len(series), 1)
     slot = width / n
     w = slot - gap
