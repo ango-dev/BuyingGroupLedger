@@ -399,7 +399,9 @@ def overview(snapshot: Snapshot, month: str = "", today: date | None = None,
         "months": month_chart(monthly_series(rows, inputs_by_year, month), month),
         "donuts": donuts,
         # The open-rows matrix as stacked bars, drawn in the same row as the donuts.
-        "open_bars": open_rows_bars(open_table),
+        # A narrow label column, so the bars start where a donut ring does in the card beside
+        # them.
+        "open_bars": open_rows_bars(open_table, label_width=46, bar_height=22, gap=8),
         "rows": len(rows),
         "orders": len({r.order_id for r in rows}),
         "open_rows": len(open_rows),
