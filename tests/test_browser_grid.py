@@ -166,7 +166,7 @@ def test_the_tabs_fold_into_a_dropdown_on_a_phone(served, phone):
     assert phone.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")  # nothing sticks out sideways
     pick.locator("summary").first.click()  # the dropdown's own summary, not the nested Tools one
     items = pick.locator(".menu a").evaluate_all("as => as.map(a => a.firstChild.textContent.trim())")  # the name, not its badge
-    assert items[:6] == ["Overview", "Orders", "Activity", "Audit", "Reconciliation", "Taxes"] and "Settings" in items
+    assert items[:6] == ["Overview", "Orders", "Activity", "Audit", "Reconciliation", "Taxes"] and "Settings" not in items  # the gear has it
     # Tools is a dropdown of its own inside the menu: closed here, its items hidden
     tools = pick.locator(".menu details.sub")
     assert tools.locator("summary").inner_text().startswith("Tools") and not tools.locator("a", has_text="Run once").is_visible()

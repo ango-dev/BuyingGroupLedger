@@ -85,7 +85,6 @@
           {% for key, title in items %}{% if key == 'import' %}<a href="/tools/import" class="{{ 'current' if path.startswith('/tools/import') }}">{{ title }}{% if badges.import %} <span class="badge">{{ badges.import }}</span>{% endif %}</a>{% else %}<a href="/tools?tool={{ key }}" class="{{ 'current' if request.query_params.get('tool', 'profile') == key and path.startswith('/tools') and not path.startswith('/tools/import') }}">{{ title }}</a>{% endif %}{% endfor %}
           {% endfor %}
         </details>
-        <a href="/settings" class="{{ 'current' if path.startswith('/settings') }}">Settings</a>
       </div>
     </details>
   </nav>
