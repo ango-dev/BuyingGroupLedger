@@ -1,0 +1,25 @@
+{#- The last twelve months (web/summary.month_chart): realized profit up from the baseline (the
+    bad colour when negative), the Taxes page's expenses down from it, the net over each column;
+    the selected month outlined; a click opens that month in the statement. Colours are the
+    theme's own variables, so the chart follows light and dark. -#}
+<figure class="months" aria-label="realized profit and expenses by month">
+  <figcaption>Last 12 Months <span class="muted small">— realized profit up, expenses down, net on top; click a month</span></figcaption>
+  <svg viewBox="0 0 {{ c.width }} {{ c.height }}" width="100%" role="img" aria-label="realized profit and expenses, by month">
+    <line class="axis" x1="0" x2="{{ c.width }}" y1="{{ c.base }}" y2="{{ c.base }}"/>
+    {% for b in c.bars %}
+    <a href="{{ b.href }}" class="bar{{ ' selected' if b.selected }}" aria-label="{{ b.title }}">
+      <title>{{ b.title }}</title>
+      <rect class="hit" x="{{ b.x }}" y="0" width="{{ b.w }}" height="{{ c.height }}"/>
+      {% if b.realized_h %}<rect class="realized{{ ' loss' if b.realized < 0 }}" x="{{ b.x }}" y="{{ b.realized_y }}" width="{{ b.w }}" height="{{ b.realized_h }}" rx="3"/>{% endif %}
+      {% if b.expenses_h %}<rect class="expenses" x="{{ b.x }}" y="{{ b.expenses_y }}" width="{{ b.w }}" height="{{ b.expenses_h }}" rx="3"/>{% endif %}
+      {% if b.labelled %}<text class="net{{ ' neg' if b.net < 0 }}" x="{{ b.cx }}" y="{{ b.net_y }}" text-anchor="middle">{{ b.net_label }}</text>{% endif %}
+      <text class="month" x="{{ b.cx }}" y="{{ c.height - 6 }}" text-anchor="middle">{{ b.label }}</text>
+    </a>
+    {% endfor %}
+  </svg>
+  {% if c.empty %}<p class="muted small">Nothing settled and no expenses in these months yet.</p>{% endif %}
+</figure>
+<script>
+  // On a phone the chart scrolls sideways: start at the newest months, not the oldest.
+  (function () { var f = document.querySelector("figure.months"); if (f && f.scrollWidth > f.clientWidth) f.scrollLeft = f.scrollWidth; })();
+</script>

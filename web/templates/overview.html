@@ -44,37 +44,39 @@
 {% include "_hx_confirm.html" %}
 {% endif %}
 
-{#- A stat tile is a LINK: it opens the Orders page filtered the same way the number was counted.
-   -#}
-{% macro tiles(items) %}
-<section class="tiles stats period">
-  {% for t in items %}
-  <a class="tile link {{ 'payout-' ~ t.tone if t.tone }}" href="{{ t.href }}" title="{{ t.detail }}">
-    <div class="label">{{ t.label }}</div>
-    {% if t.kind == 'money' %}<div class="value money">{{ t.value | money }}</div>
-    {% elif t.kind == 'percent' %}<div class="value money">{{ (t.value | percent) if t.value is not none else '—' }}</div>
-    {% elif t.kind == 'pair' %}<div class="value">{{ t.value[0] }} <span class="muted">/ {{ t.value[1] }}</span></div>
-    {% else %}<div class="value">{{ t.value }}</div>{% endif %}
-    <div class="hint">{{ t.hint }}</div>
-  </a>
-  {% endfor %}
-</section>
-{% endmacro %}
-
-<h2>Lifetime <span class="muted small">— every row, plus the Taxes page's money</span></h2>
-{{ tiles(summary.lifetime) }}
-
+{#- The Profit & Loss statement (web/summary.statement): three periods as columns, the figures
+    as rows with Net profit on top and its parts under it, every number a link to the rows it
+    counts. The month
+    column follows the pager; the 12-month chart under it selects a month too. -#}
 {% set m = summary.month %}
-<h2 class="month-head">Calendar Month
+<h2 class="month-head">Profit &amp; Loss
   <span class="month-nav">
     {% if m.prev %}<a class="button small" href="/?month={{ m.prev }}" title="{{ m.prev }}">‹</a>{% else %}<span class="button small disabled">‹</span>{% endif %}
     <span class="month-label">{{ m.label }}</span>
     {% if m.next %}<a class="button small" href="/?month={{ m.next }}" title="{{ m.next }}">›</a>{% else %}<span class="button small disabled">›</span>{% endif %}
     {% if not m.current %}<a class="muted small" href="/">this month</a>{% endif %}
   </span>
-  <span class="muted small">— by Order Date</span>
+  <span class="muted small">— by Order Date; click a number to open its rows</span>
 </h2>
-{{ tiles(m.tiles) }}
+<div class="statement-wrap">
+<table class="statement">
+  <thead><tr><th scope="col"></th>{% for c in summary.statement.columns %}<th scope="col" class="num {{ 'current' if c.key == 'month' }}">{{ c.label }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for r in summary.statement.rows %}
+  <tr class="{{ 'level-' ~ r.level if r.level }}">
+    <th scope="row">{{ r.label }}</th>
+    {% for t in r.cells %}
+    {% if t %}<td class="num {{ 'payout-' ~ t.tone if t.tone }}{{ ' neg' if t.kind == 'money' and t.value < 0 }}{{ ' rate' if t.kind == 'percent' }}"><a href="{{ t.href }}" title="{{ t.detail }}">
+      {%- if t.kind == 'money' %}{{ t.value | money }}{% elif t.kind == 'percent' %}{{ (t.value | percent) if t.value is not none else '—' }}{% elif t.kind == 'pair' %}{{ t.value[0] }} <span class="muted">/ {{ t.value[1] }}</span>{% else %}{{ t.value }}{% endif -%}
+      </a><span class="cell-hint">{{ t.hint }}</span></td>
+    {% else %}<td class="num muted" title="entered per year on the Taxes page: see the year and Lifetime">—</td>{% endif %}
+    {% endfor %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% with c=summary.months %}{% include "_months.html" %}{% endwith %}
 
 <h2>Rows by Group, Status, Retailer <span class="muted small">— click a slice or a bar to open it on the Orders page</span></h2>
 <div class="charts">

@@ -91,10 +91,14 @@ STATES = ("open", "committed", "settled", "unpaid")
 _MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
+_YEAR = re.compile(r"^\d{4}$")
+
+
 def month_of(value) -> str:
-    """A YYYY-MM string or "" -- anything else (a stale link, a typo) means no month filter."""
+    """A YYYY-MM string, or a bare YYYY (the overview's year column links here, 2026-09-19), or
+    "" -- anything else (a stale link, a typo) means no window. Both match the date's prefix."""
     text = str(value or "").strip()
-    return text if _MONTH.match(text) else ""
+    return text if _MONTH.match(text) or _YEAR.match(text) else ""
 
 
 def _values(params, name: str) -> tuple[str, ...]:

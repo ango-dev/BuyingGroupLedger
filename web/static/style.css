@@ -951,3 +951,49 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
 @keyframes spin { to { transform: rotate(360deg); } }
 header .meta .signout { display: inline; margin: 0; }
 .warn-text { color: var(--warn); font-weight: 600; }
+
+/* The overview's Profit & Loss statement and 12-month chart. Figures coloured by what they are: settled money green, floating orange, committed
+   purple, a loss red, the rate in the accent; Net profit is the top line. */
+.statement-wrap { max-width: 1040px; margin: 8px 0 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: auto; }
+table.statement { width: 100%; border-collapse: collapse; }
+table.statement th, table.statement td { padding: 8px 16px; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
+table.statement thead th { color: var(--muted); font-size: 0.76em; text-transform: uppercase; letter-spacing: .04em; background: var(--bg); padding-top: 9px; padding-bottom: 9px; }
+table.statement thead th.current { color: var(--accent); }
+table.statement tbody th { text-align: left; font-weight: 500; }
+table.statement tbody tr:last-child th, table.statement tbody tr:last-child td { border-bottom: 0; }
+table.statement tr.level-net th, table.statement tr.level-net td { font-size: 1.22em; font-weight: 700; padding-top: 12px; }
+table.statement tr.level-sub th { padding-left: 32px; font-weight: 400; color: var(--muted); font-size: 0.92em; }
+table.statement tr.level-sub td { font-size: 0.95em; }
+table.statement tr.level-sub:last-of-type td { padding-bottom: 12px; }
+table.statement tr.level-sub + tr:not(.level-sub) th, table.statement tr.level-sub + tr:not(.level-sub) td { border-top: 2px solid var(--line); }
+table.statement td a { color: inherit; text-decoration: none; }
+table.statement td a:hover { text-decoration: underline; }
+table.statement td.payout-settled a { color: var(--ok); }
+table.statement td.payout-floating a { color: var(--warn); }
+table.statement td.payout-committed a { color: var(--committed); }
+table.statement td.rate a { color: var(--accent); }
+table.statement td.neg a, table.statement tr.level-net td.neg a { color: var(--bad); }
+table.statement .cell-hint { display: block; font-size: 0.66em; color: var(--muted); font-weight: 400; letter-spacing: 0; }
+table.statement td.muted { color: var(--muted); }
+@media (max-width: 760px) {
+  table.statement th, table.statement td { padding: 6px 9px; font-size: 0.92em; }
+  table.statement tr.level-net th, table.statement tr.level-net td { font-size: 1.08em; }
+  table.statement tr.level-sub th { padding-left: 18px; }
+  table.statement .cell-hint { display: none; }
+}
+figure.months { margin: 0 0 18px; max-width: 1040px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px 8px; }
+figure.months figcaption { font-size: 1.05em; font-weight: 600; margin-bottom: 4px; }
+figure.months svg { display: block; width: 100%; height: auto; }
+figure.months .axis { stroke: var(--line); stroke-width: 1; }
+figure.months .bar .hit { fill: transparent; }
+figure.months .bar:hover .hit { fill: color-mix(in srgb, var(--accent) 8%, transparent); }
+figure.months .bar .realized { fill: var(--ok); }
+figure.months .bar .realized.loss { fill: var(--bad); }
+figure.months .bar .expenses { fill: var(--warn); }
+figure.months .bar.selected .realized, figure.months .bar.selected .expenses { stroke: var(--accent); stroke-width: 2; }
+figure.months text { font-size: 11px; fill: var(--muted); }
+figure.months text.net { fill: var(--fg); font-weight: 600; }
+figure.months text.net.neg { fill: var(--bad); }
+figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; }
+/* On a phone the chart keeps a legible width and scrolls sideways, like the tables. */
+@media (max-width: 560px) { figure.months { overflow-x: auto; } figure.months svg { min-width: 640px; } }

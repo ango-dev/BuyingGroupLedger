@@ -536,6 +536,46 @@ class TestOverview:
         assert by_label["Net profit"]["value"] == 193.0 and by_label["Net profit"]["href"] == "/taxes"
         assert by_label["Floating"]["value"] != round(by_label["Spend"]["value"] - by_label["Paid out"]["value"], 2)
 
+    def test_the_statement_has_three_periods_and_the_chart_twelve_months(self, snapshot_path):
+        """a statement with Lifetime, the year and the month
+        as columns, Net profit on top; and a 12-month chart of realized profit and expenses."""
+        from web.tax_inputs import YearInputs
+
+        inputs = {2026: YearInputs(bonuses={"bonus:0315": 200.0},
+                                   expenses=[{"date": "2026-09-02", "amount": 119.0}, {"date": "2026-08-15", "amount": 11.0}])}
+        summary = overview(SnapshotReader(snapshot_path).load(), month="2026-09", today=NOW.date(), inputs_by_year=inputs)
+        st = summary["statement"]
+        assert [c["label"] for c in st["columns"]] == ["Lifetime", "2026", "September 2026"]
+        assert [r["label"] for r in st["rows"]][:4] == ["Net profit", "Realized profit", "Other income", "Expenses"]
+        assert [r["level"] for r in st["rows"]][:5] == ["net", "sub", "sub", "sub", ""]
+        by = {r["label"]: r["cells"] for r in st["rows"]}
+        life, year, month = by["Net profit"]
+        assert life["value"] == round(193.0 + 200.0 - 130.0, 2) and life["href"] == "/taxes"
+        assert year["value"] == round(193.0 + 200.0 - 130.0, 2)  # every 2026 row is settled in 2026 here
+        assert month["value"] == -119.0
+        assert by["Other income"][2] is None  # a month has no yearly lump sums
+        assert by["Other income"][1]["value"] == 200.0 and "in 2026" in by["Other income"][1]["detail"]
+        assert by["Realized profit"][1]["href"] == "/orders?month=2026&state=settled"  # the year column links by year
+        assert by["Rows / orders"][1]["value"][0] == len(LEDGER_ROWS)  # every fixture row was placed in 2026
+        chart = summary["months"]
+        assert len(chart["bars"]) == 12 and chart["bars"][-1]["month"] == "2026-09" and chart["bars"][-1]["selected"]
+        assert chart["bars"][0]["month"] == "2025-10" and chart["bars"][0]["label"] == "Oct '25"
+        august = next(b for b in chart["bars"] if b["month"] == "2026-08")
+        assert august["realized"] == 193.0 and august["expenses"] == 11.0 and august["net"] == 182.0
+        assert august["net_label"] == "$182" and august["realized_h"] > 0 and august["expenses_h"] > 0
+        assert august["expenses_y"] == chart["base"]  # expenses hang from the baseline
+        assert round(august["realized_y"] + august["realized_h"], 1) == chart["base"]  # profit stands on it
+        assert chart["bars"][-1]["net"] == -119.0 and chart["bars"][-1]["net_label"] == "-$119"
+        assert chart["bars"][-1]["net_y"] > chart["base"] and august["net_y"] < chart["base"]  # a loss labelled under its bar, a profit over it
+        assert not chart["bars"][0]["labelled"] and august["labelled"]  # an empty month carries no "$0"
+        assert not chart["empty"]
+
+    def test_placed_in_takes_a_year(self):
+        from web.queries import Filters, month_of
+
+        assert month_of("2026") == "2026" and month_of("2026-09") == "2026-09" and month_of("202") == ""
+        assert Filters.from_query({"month": "2026"}).month == "2026"
+
     def test_the_taxes_pages_money_joins_the_profit_tiles(self, snapshot_path):
         from web.tax_inputs import YearInputs
 
@@ -734,13 +774,15 @@ class TestOverviewPage:
 
     def test_lifetime_and_month_sections_are_linked_tiles(self, client):
         body = client.get("/").text
-        assert "<h2>Lifetime" in body and "Calendar Month" in body
+        assert "Profit &amp; Loss" in body and ">Lifetime</th>" in body and ">September 2026</th>" in body
         # NOW is 2026-09-17: the month section opens on September, with a way back only.
         assert "September 2026" in body and 'href="/?month=2026-08"' in body
         assert 'href="/?month=2026-10"' not in body
-        # every tile is a link to the Orders page, filtered the way it was counted
-        assert 'class="tile link " href="/orders" title="every row of the ledger"' in body
-        assert '<section class="tiles stats period">' in body  # one line on a desktop
+        # every figure is a link to the Orders page, filtered the way it was counted
+        assert '<a href="/orders" title="every row of the ledger">' in body
+        assert '<a href="/orders?month=2026" title="every row placed in 2026">' in body  # the year column
+        assert '<table class="statement">' in body and '<figure class="months"' in body  # the statement, not tiles
+        assert body.index("<th scope=\"row\">Net profit</th>") < body.index("<th scope=\"row\">Rows / orders</th>")  # Net profit is the top line
         assert 'href="/orders?state=open"' in body
         assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
         assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body
@@ -753,7 +795,7 @@ class TestOverviewPage:
     def test_an_earlier_month_can_be_opened_and_navigated(self, client):
         body = client.get("/", params={"month": "2026-08"}).text
         assert "August 2026" in body and 'href="/?month=2026-09"' in body
-        assert 'href="/?month=2026-07"' not in body  # nothing was placed before August
+        assert 'href="/?month=2026-07" title="2026-07"' not in body  # the pager stops: nothing was placed before August (the chart still draws July)
         assert '<a class="muted small" href="/">this month</a>' in body
         # a bad month falls back to the current one rather than failing
         assert "September 2026" in client.get("/", params={"month": "never"}).text
@@ -1437,7 +1479,7 @@ class TestCharts:
 
     def test_the_overview_renders_the_charts_with_clickable_slices(self, client):
         body = client.get("/").text
-        assert body.count("<figure") == 4  # bars + three donuts
+        assert body.count("<figure") == 5  # the 12-month chart, the bars and three donuts
         assert 'href="/orders?status=ordered"' in body and 'href="/orders?retailer=Costco"' in body
         assert 'href="/orders?group=MOD"' in body
         assert 'href="/orders?status=shipped&amp;group=BFMR"' in body
