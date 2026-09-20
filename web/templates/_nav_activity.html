@@ -1,0 +1,3 @@
+{#- The nav's Activity link with its badge. Rendered by base.html, and again, out of band, in
+    the response to an acknowledgement so the count drops without a page load. -#}
+<a href="/activity" id="nav-activity" class="{{ 'active' if path.startswith('/activity') }}"{% if oob %} hx-swap-oob="true"{% endif %}>Activity{% if badges.activity %} <span class="badge" title="unacknowledged alerts and failure dossiers from the last 7 days">{{ badges.activity }}</span>{% endif %}</a>

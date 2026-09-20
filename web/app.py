@@ -1248,7 +1248,21 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             # The Reset button: type, window, search, run and order back to their defaults. The
             # hidden types are a preference and stay.
             return RedirectResponse(url="/activity", status_code=303)
-        filters = ActivityFilters.from_query(request.query_params)
+        filters, context = activity_context(request, request.query_params)
+        name = "_activity_rows.html" if request.headers.get("HX-Request") else "activity.html"
+        response = page_no_snapshot(request, name, wide=True, **context)  # the Orders layout
+        if filters.hide_set:
+            if filters.hidden:
+                response.set_cookie(HIDE_COOKIE, ",".join(filters.hidden), max_age=365 * 24 * 3600,
+                                    samesite="lax")
+            else:
+                response.delete_cookie(HIDE_COOKIE)  # "hide nothing": forget, rather than store ""
+        return response
+
+    def activity_context(request: Request, params) -> tuple:
+        """The Activity table for a query: (filters, template context). Shared by the page and by
+        an acknowledgement's in-place answer."""
+        filters = ActivityFilters.from_query(params)
         # The hidden types: what the form just said, else what this browser remembered.
         if not filters.hide_set:
             remembered_hidden = [k for k in request.cookies.get(HIDE_COOKIE, "").split(",") if k]
@@ -1266,15 +1280,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         context = {"events": shown, "total": len(events), "filters": filters,
                    "counts": activity_module.counts_by_kind(events), "unacked": unacked,
                    "activity_path": str(activity_path), "failures_dir": str(failures_dir)}
-        name = "_activity_rows.html" if request.headers.get("HX-Request") else "activity.html"
-        response = page_no_snapshot(request, name, wide=True, **context)  # the Orders layout
-        if filters.hide_set:
-            if filters.hidden:
-                response.set_cookie(HIDE_COOKIE, ",".join(filters.hidden), max_age=365 * 24 * 3600,
-                                    samesite="lax")
-            else:
-                response.delete_cookie(HIDE_COOKIE)  # "hide nothing": forget, rather than store ""
-        return response
+        return filters, context
 
     @app.get("/activity/dossier/{name}/download")
     def dossier_download(name: str):
@@ -1321,8 +1327,26 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                 act("ack", f"Acknowledged {count} {label}(s) through {through}",
                     {"kind": kind, "through": through, "count": count})
         target = str(form.get("next", "/"))
-        return RedirectResponse(url=target if target.startswith("/") and not target.startswith("//") else "/",
-                                status_code=303)
+        if not target.startswith("/") or target.startswith("//"):
+            target = "/"
+        if request.headers.get("HX-Request"):
+            # In place, no page load: the Activity page gets its rows
+            # again (the button gone, or the row, under "unacknowledged only"), the overview's
+            # card gets nothing (it leaves), and both get the nav's Activity link out of band so
+            # the badge drops.
+            from urllib.parse import urlsplit
+
+            from starlette.datastructures import QueryParams
+
+            parts = urlsplit(target)
+            body = ""
+            if parts.path.startswith("/activity"):
+                _filters, context = activity_context(request, QueryParams(parts.query))
+                body = page_no_snapshot(request, "_activity_rows.html", wide=True, **context).body.decode("utf-8")
+            link = page_no_snapshot(request, "_nav_activity.html", badges=nav_badges(), path=parts.path,
+                                    oob=True).body.decode("utf-8")
+            return HTMLResponse(body + link)
+        return RedirectResponse(url=target, status_code=303)
 
     @app.get("/failures")
     def failures_page(request: Request):

@@ -1862,8 +1862,9 @@ class TestOverviewAttention:
         body = client.get("/").text
         assert ">Alerts<" in body and ">Failure dossiers<" in body
         assert body.count('action="/activity/acknowledge"') == 2 and 'name="kind" value="alert"' in body
-        assert ">acknowledge all<" in body and 'data-confirm="Acknowledge all 1 alerts?' in body  # asked once
-        assert 'id="settings-confirm"' in body
+        assert ">acknowledge all<" in body and 'hx-confirm="Acknowledge all 1 alerts?' in body  # asked once
+        assert 'hx-post="/activity/acknowledge" hx-target="closest .tile" hx-swap="outerHTML"' in body  # in place, no page load
+        assert 'id="confirm"' in body  # the hx-confirm dialog (edit.js routes htmx:confirm to it)
         assert f'name="through" value="{stamp}"' in body
         response = client.post("/activity/acknowledge", data={"kind": "alert", "through": stamp}, follow_redirects=False)
         assert response.status_code == 303 and response.headers["location"] == "/"
@@ -1926,6 +1927,34 @@ class TestOverviewAttention:
         client.post("/activity/acknowledge", data={"kind": "alert"}, follow_redirects=False)
         assert 'class="ack-one"' not in client.get("/activity", params={"type": "alert", "days": "0"}).text
         assert ">Alerts<" not in client.get("/").text
+
+    def test_an_acknowledgement_answers_in_place_for_htmx(self, client, logs_dir):
+        """the Activity page's
+        button swaps the rows, the overview's card swaps itself away, and the nav badge follows
+        out of band."""
+        import re
+        from datetime import timedelta
+        from diagnostics import activity
+
+        path = logs_dir / "activity.jsonl"
+        first, second = NOW - timedelta(hours=3), NOW - timedelta(hours=1)
+        activity.record("alert", "Costco [p]: first", {"message": "a"}, path=path, at=first)
+        activity.record("alert", "Costco [p]: second", {"message": "b"}, path=path, at=second)
+        assert 'hx-post="/activity/acknowledge" hx-target="#activity-table"' in client.get("/activity").text
+        stamp = first.isoformat(timespec="seconds")
+        done = client.post("/activity/acknowledge", headers={"HX-Request": "true"},
+                           data={"kind": "alert", "at": stamp, "summary": "Costco [p]: first",
+                                 "next": "/activity?type=alert&days=7&unacked=1"})
+        assert done.status_code == 200
+        assert "<html" not in done.text and "<table" in done.text  # the rows, not a page
+        assert "Costco [p]: second" in done.text and "Costco [p]: first" not in done.text  # left the unacknowledged list
+        assert done.text.count('class="ack-one"') == 1
+        assert re.search(r'<a href="/activity" id="nav-activity" class="active" hx-swap-oob="true">Activity <span class="badge"[^>]*>1</span>', done.text)
+        # the overview's card: nothing but the nav link, so the card leaves
+        done = client.post("/activity/acknowledge", headers={"HX-Request": "true"}, data={"kind": "alert", "next": "/"})
+        assert done.status_code == 200 and "<table" not in done.text
+        assert re.search(r'<a href="/activity" id="nav-activity" class="" hx-swap-oob="true">Activity</a>', done.text)
+        assert client.get("/activity").text.count('class="ack-one"') == 0
 
     def test_nothing_is_shown_when_nothing_is_wrong(self, tmp_path, logs_dir):
         from web.ledger_reader import LedgerRow

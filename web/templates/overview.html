@@ -17,7 +17,8 @@
       <div class="value">{{ c.count }}</div>
       <div class="hint">{{ c.text }}</div>
     </a>
-    <form method="post" action="/activity/acknowledge" class="ack" data-confirm="Acknowledge all {{ c.count }} {{ c.label | lower }}? They leave this card and the Activity badge (each stays on the Activity page, where one can also be acknowledged on its own).">
+    {#- hx-post: the card leaves and the badge drops in place, no page load; method/action are the no-JS fallback. -#}
+    <form method="post" action="/activity/acknowledge" class="ack" hx-post="/activity/acknowledge" hx-target="closest .tile" hx-swap="outerHTML" hx-confirm="Acknowledge all {{ c.count }} {{ c.label | lower }}? They leave this card and the Activity badge (each stays on the Activity page, where one can also be acknowledged on its own).">
       <input type="hidden" name="kind" value="{{ c.ack.kind }}"><input type="hidden" name="through" value="{{ c.ack.through }}">
       <button type="submit" data-tip-from="tip-ack-{{ loop.index }}">acknowledge all</button>
     </form>
@@ -40,7 +41,7 @@
   {% endif %}
   {% endfor %}
 </section>
-{% include "_confirm_dialog.html" %}
+{% include "_hx_confirm.html" %}
 {% endif %}
 
 {#- A stat tile is a LINK: it opens the Orders page filtered the same way the number was counted.

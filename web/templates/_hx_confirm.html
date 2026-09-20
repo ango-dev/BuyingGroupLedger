@@ -1,0 +1,11 @@
+{#- The in-page confirmation for hx-confirm: static/edit.js routes htmx:confirm here, so the
+    browser's own dialog is never shown. Include once per page that uses hx-confirm. -#}
+<dialog id="confirm" class="confirm">
+  <form method="dialog">
+    <p id="confirm-text"></p>
+    <div class="inline-form">
+      <button type="button" id="confirm-cancel" value="cancel">Cancel</button>
+      <button type="button" id="confirm-ok" class="danger">Confirm</button>
+    </div>
+  </form>
+</dialog>
