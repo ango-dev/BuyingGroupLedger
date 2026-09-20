@@ -3,9 +3,7 @@
     downloads one, POST /backup/restore uploads one into a FRESH clone only. -#}
 <section class="panel" id="s-backup">
   <header><h2>Backup &amp; Restore</h2>
-    <p class="muted">One zip of everything a <code>git clone</code> does not give you: <code>config.json</code>,
-    <code>.state.json</code>, <code>.env</code> and the whole <code>data/</code> directory. It holds every live
-    credential: keep it private. Logs and failure dossiers are not included.</p></header>
+    <p class="muted">A zip of <code>config.json</code>, <code>.state.json</code>, <code>.env</code> and <code>data/</code>. It holds every credential: keep it private.</p></header>
 
   <form method="post" action="/backup" class="inline-form">
     <button type="submit" class="primary">Create a backup now</button>
@@ -50,10 +48,7 @@
   <p>No <code>config.json</code> exists here, so this is a fresh clone. Upload a backup to restore it,
   then restart the app so the restored configuration is read.</p>
   {% else %}
-  <p class="muted">Upload a backup zip. Files that already exist here are <strong>kept</strong> unless
-  you tick overwrite; with it ticked the upload replaces <code>config.json</code>, <code>.state.json</code>,
-  <code>.env</code> and everything under <code>data/</code> — the ledger included. A restore that brings a
-  <code>config.json</code> prompts for the container restart that makes it take effect.</p>
+  <p class="muted">Upload a backup zip. Existing files are <strong>kept</strong> unless overwrite is ticked; ticked, it replaces the config, the state, <code>.env</code> and everything under <code>data/</code>, ledger included.</p>
   {% endif %}
   <form method="post" action="/backup/restore" enctype="multipart/form-data" class="inline-form"
         data-confirm="Restore this backup onto this host? Existing files are kept unless overwrite is ticked.">

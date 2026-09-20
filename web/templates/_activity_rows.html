@@ -4,6 +4,9 @@
 <p class="muted count">{{ events | length }} event(s){% if total != events | length %} of {{ total }}{% endif %}</p>
 {% if events %}
 <table class="grid compact activity">
+  {#- Fixed columns: the widths are the stylesheet's, not the rows', so a search or a filter never
+      reflows them. -#}
+  <colgroup><col class="c-when"><col class="c-type"><col class="c-run"><col class="c-what"><col class="c-act"></colgroup>
   <thead>
     <tr><th>When</th><th>Type</th><th>Run</th><th>What happened</th><th></th></tr>
   </thead>

@@ -181,13 +181,18 @@ body.wide h1, body.wide .lead, body.wide .pinned, body.wide .add-row, body.wide 
    scrollbar, which left the count line 15px wider than the blocks above it (its hint pill under
    the scrollbar). */
 /* the swap containers span the table's width, so a count line or notice inside them has room to stick */
-body.wide form#bulk, body.wide #orders-table, body.wide #activity-table { width: max-content; min-width: 100%; }
+body.wide form#bulk, body.wide #orders-table { width: max-content; min-width: 100%; }
+body.wide #activity-table { width: 100%; }  /* its table has fixed columns and a min-width of its own */
 /* Their side margins became padding: a sticky block gives its margin up as it sticks, which
    shifted them 8px on the first sideways scroll. */
 body.wide h1, body.wide .lead, body.wide .add-row, body.wide .count { margin-left: 0; margin-right: 0; padding-left: 8px; padding-right: 8px; }
 /* Sticky makes a stacking layer of its own: the filter bar's and add-row form's dropdowns must
    paint above the sheet header (z 4), which covered them. */
-body.wide .pinned, body.wide .add-row { z-index: 7; }
+body.wide .add-row { z-index: 7; }
+/* The filter bar above the add-row box: both are sticky layers, and the later one paints on top,
+   so a filter menu opened over "Add a row" was covered by it and the click landed on its summary.
+  */
+body.wide .pinned { z-index: 8; }
 body.wide #activity-table { padding: 0 8px 16px; }
 body.wide table.sheetlike th.rownum { z-index: 4; }
 /* SEPARATE borders (spacing 0): with collapsed borders a sticky <th> leaves its borders behind as
@@ -654,7 +659,11 @@ details.multi.inline summary { flex-direction: row; align-items: center; gap: 6p
 .add-form details.multi .summary-text { padding: 4px 8px; }
 .entry-card details.multi.field { font-size: 1em; color: var(--muted); min-width: 0; }
 .entry-card details.multi.field .summary-text { font-size: 1em; width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: 6px; }
-table.activity { width: 100%; table-layout: auto; }
+table.activity { width: 100%; min-width: 880px; table-layout: fixed; }
+table.activity col.c-when { width: 150px; } table.activity col.c-type { width: 130px; } table.activity col.c-run { width: 170px; }
+table.activity col.c-act { width: 250px; }
+table.activity td, table.activity th { overflow-wrap: anywhere; }
+table.activity td.num { white-space: nowrap; }
 
 /* ---- file drop zones (_dropzone.html): the page's own picker, click or drop ---- */
 .dropzone { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1.5px dashed var(--line); border-radius: 8px;

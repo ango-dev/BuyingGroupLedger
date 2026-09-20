@@ -30,13 +30,7 @@
 {% endif %}
 {% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
 
-<p class="muted">Edits <code>{{ config_path }}</code> in place (your <code>//</code> comment keys are kept).
-A scheduled run reads the file fresh at its start, so most changes apply to the next run with no
-restart; a field tagged <span class="tag">container restart</span> or <span class="tag">dashboard restart</span>
-says when one is needed. A field tagged <span class="tag stale">env override</span> is exported in the
-environment: the file value is saved but the environment still wins for the running process.
-<strong>This page has no login</strong> — whoever can open it can read and change every credential
-here, so keep the dashboard on loopback or your own network.</p>
+<p class="muted">Edits <code>{{ config_path }}</code> in place. Most changes apply to the next run; <span class="tag">container restart</span> and <span class="tag">dashboard restart</span> say when one is needed, and <span class="tag stale">env override</span> means the environment wins for the running process.</p>
 
 <div class="settings-layout">
   <nav class="settings-nav" aria-label="settings sections">

@@ -2,7 +2,7 @@
     title and the lead scroll away, then the filter bar sticks to the top. -#}
 {% set counts = audit.counts() %}
 <div class="lead">
-  <p class="muted small">Every check of <span class="mono">scripts.audit_ledger</span> run against the ledger this page serves. Below: every row a check named, with the finding beside it. Pick checks to narrow the rows; the filters, sort and search work as on Orders.</p>
+  <p class="muted small">Every audit check against this ledger, and the rows they flag. Pick checks to narrow the rows.</p>
   {# FAIL, WARNING, PASS, FLAGGED -- the first three edged red, yellow and green in every theme;
      each tile is a link that filters the rows to the checks it counts. #}
   {% set fail_checks = audit.checks | selectattr('status', 'equalto', 'FAIL') | selectattr('rows') | map(attribute='name') | list %}

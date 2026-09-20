@@ -199,7 +199,7 @@ class TestTaxesPage:
         assert "USB Prime Business …0315" in body and "Amex Business Gold …4331" in body
         assert 'name="bonus:0315"' in body and "Sign-up Bonus" in body
         assert 'name="fee:0315"' not in body and "Annual Fee" not in body  # a fee is an expense, with a receipt
-        assert "annual fee is an expense" in body
+        assert "Annual fees go in Expenses" in body  # the panel says where they go (shortened 2026-09-19)
         # the Add-an-Expense form is one four-column grid
         assert body.count('class="egrid"') == 1 and body.count('class="span-2"') == 3 and 'class="lbl span-2"' in body
         assert "…4351" not in body

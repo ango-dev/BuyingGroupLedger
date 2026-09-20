@@ -1,7 +1,7 @@
 {#- The page's lead (its description, tiles and panel), rendered under the title (orders.html's lead block); the
     title and the lead scroll away, then the filter bar sticks to the top. -#}
 <div class="lead">
-  <p class="muted small">Settled rows whose <strong>Actual Payout</strong> disagrees with the <strong>Expected Payout</strong> the buying group committed to, compared as order totals over the same rows (two cents of tolerance, plus a cent per row for proration). A row with no commitment is not compared. Nothing below is written by this page; fix a figure by editing the cell, or take it up with the group.</p>
+  <p class="muted small">Settled orders whose <strong>Actual Payout</strong> differs from the <strong>Expected Payout</strong> the group committed to, within a few cents. Fix a figure by editing the cell, or take it up with the group.</p>
   <section class="tiles stats">
     {# Each tile is a link: Short-paid / Over-paid narrow the rows to those orders, the other two show all. #}
     <a class="tile link payout-floating {{ 'warn' if recon.short }} {{ 'current' if kind == 'short' }}" href="/recon?kind=short" title="the short-paid orders"><div class="label">Short-paid</div><div class="value money">{{ recon.short_total | money }}</div><div class="hint">{{ recon.short | length }} order(s) paid less</div></a>

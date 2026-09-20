@@ -218,5 +218,7 @@ def test_a_sideways_scroll_moves_only_the_table(client, served, page):
     widths = page.evaluate("""() => { const m = document.querySelector('main'); return ['h1', '.lead', '.pinned', '.count'].map(s => Math.round(document.querySelector('body.wide ' + s).getBoundingClientRect().width) - m.clientWidth); }""")
     assert widths == [0, 0, 0, 0], widths  # each exactly as wide as the scroll region
     assert int(page.evaluate("getComputedStyle(document.querySelector('body.wide .pinned')).zIndex")) > int(page.evaluate("getComputedStyle(document.querySelector('table.sheetlike th')).zIndex") or 0)  # its dropdowns paint over the sheet header
+    add_row_z = page.evaluate("() => { const d = document.createElement('details'); d.className = 'add-row'; document.body.appendChild(d); const z = getComputedStyle(d).zIndex; d.remove(); return z; }")
+    assert int(page.evaluate("getComputedStyle(document.querySelector('body.wide .pinned')).zIndex")) > int(add_row_z or 0)  # and over the closed Add-a-row box
     assert page.evaluate("document.querySelector('table.sheetlike th.col-order_date').getBoundingClientRect().left") < 0  # the table did move
     assert page.errors == []

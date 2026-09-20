@@ -465,38 +465,24 @@ def apply_section(path: str, text: str) -> int:
 #: Friendly titles and one-line blurbs for the page's panels. A section missing here still renders,
 #: titled from its key -- this is presentation only, never a second list of settings.
 SECTION_TITLES: dict[str, tuple[str, str]] = {
-    "browser_use": ("Browser-Use", "The cloud browser Best Buy and the Amazons drive over CDP."),
-    "container": ("Schedule", "How often the container runs, and whether it runs at start. "
-                  "Read once at container start."),
+    # One clause each; the per-setting help under each field carries the detail.
+    "browser_use": ("Browser-Use", "The cloud browser Best Buy and the Amazons drive."),
+    "container": ("Schedule", "How often the container runs. Read once at container start."),
     "scraping": ("Scraping", "How far back each run looks, and the money rules the ledger applies."),
-    "alerts": ("Alerts", "Where a failed run, a logged-out session or a stale heartbeat is reported: "
-               "a Discord webhook and a Gmail account, each with its own switch (off keeps the "
-               "configuration and sends nothing). The Gmail account here is only for alerts -- the "
-               "BFMR auto-reply's mailbox is its own setting under Buying groups, entered separately "
-               "even when it is the same account."),
-    "buying_groups": ("Buying groups", "BFMR and MaxOutDeals: API access, insurance, and the "
-                      "combined-package auto-reply."),
-    "receipts": ("Receipts", "Receipt capture: each order's proof of purchase, kept as a file beside "
-                 "the ledger and served by this dashboard."),
-    "web": ("Dashboard", "This web dashboard: the address alerts link to, the heartbeat's stale "
-            "threshold, and the sign-in -- the password (blank = no sign-in), how long a plain "
-            "sign-in and a remembered one last, and how many wrong passwords lock an address out "
-            "for how long. Read once at dashboard start."),
-    "database": ("Database", "The SQLite file that is the ledger. Read once at dashboard start."),
-    "advanced": ("Advanced", "Where the ledger lives, which backend the dashboard serves, where it "
-                 "listens, where receipts go, and the buying groups' API hosts. A wrong value here "
-                 "shows an empty ledger, writes to the wrong file, or takes the dashboard off the "
-                 "network -- the runs and the page were set up around these once and do not need "
-                 "them changed."),
-    "backups": ("Backups", "Scheduled backups of config.json, .state.json, .env and data/ (the "
-                "ledger) into backups/, on the container's clock, and how many to keep. Read once "
-                "at container start; the Backup & Restore panel below shows the schedule."),
-    "profiles": ("Profiles", "One browser identity per entry: the Browser-Use profile, its proxy, "
-                 "the retailers it is logged into and the sign-in it can perform unattended."),
-    "warehouses": ("Warehouses", "Each buying group and the address jigs that route an order to "
-                   "it. An order matching no jig is tagged Unclassified."),
-    "cards": ("Cards", "Cards by their last 4 digits, with the cashback rate the profit formula "
-              "nets from COGS -- overall, and per retailer."),
+    "alerts": ("Alerts", "Where failures are reported: a Discord webhook and a Gmail account, each with "
+               "its own switch."),
+    "buying_groups": ("Buying groups", "BFMR and MaxOutDeals: API access, insurance and the auto-reply."),
+    "receipts": ("Receipts", "Receipt capture: each order's proof of purchase, kept beside the ledger."),
+    "web": ("Dashboard", "This dashboard: the address alerts link to, the heartbeat threshold and the "
+            "sign-in. Read once at dashboard start."),
+    "database": ("Database", "The SQLite file that is the ledger."),
+    "advanced": ("Advanced", "Paths, backends, bind address and API hosts. A wrong value here shows an "
+                 "empty ledger or takes the dashboard off the network."),
+    "backups": ("Backups", "Scheduled backups into backups/, and how many to keep. Read once at "
+                "container start."),
+    "profiles": ("Profiles", "One browser identity per entry: its proxy, retailers and unattended sign-in."),
+    "warehouses": ("Warehouses", "Each buying group and the address jigs that route an order to it."),
+    "cards": ("Cards", "Cards by last 4, with the cashback rate the profit formula nets from COGS."),
 }
 
 

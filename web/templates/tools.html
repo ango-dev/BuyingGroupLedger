@@ -34,10 +34,7 @@
 {% if selected == 'profile' %}
 <section class="panel tool-card" id="t-profile">
   <header><h2>Log a Profile In</h2></header>
-  <p class="muted">Opens a live cloud browser on the profile, through its proxy, right here. Log into the
-  retailers, then <strong>Close &amp; save</strong> — closing the session is what saves the cookies. Leave the
-  page and the session stays open; it is closed for you after {{ session_minutes }} minutes
-  (<em>Settings → Dashboard → Tool session minutes</em>).</p>
+  <p class="muted">Opens a live cloud browser on the profile, through its proxy. Log into the retailers, then <strong>Close &amp; save</strong>: closing is what saves the cookies. Left open, it closes itself after {{ session_minutes }} minutes.</p>
   {% if not session %}
   <form method="post" action="/tools/profile/start" class="tool-form" data-confirm="Open a live browser session for this profile? It costs a cloud browser session while open.">
     <span class="field-block">Profile {{ choose('label', profile_labels, profile_labels[0] if profile_labels else '', '', 'cell') }}</span>

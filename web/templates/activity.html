@@ -5,10 +5,7 @@
 {# The Orders layout: the title, this description and the filter bar scroll
    away, only the table's header sticks, the table takes the whole page. #}
 <h1>Activity</h1>
-<p class="muted small lead">Everything the app did, newest first: what each run scraped and wrote to the ledger,
-what the buying-group sync submitted, insured and read back, the emails it sent, every alert, every
-failure dossier (its report opens in place), and every change made from this dashboard.
-From <code>{{ activity_path }}</code> and the dossiers under <code>{{ failures_dir }}</code>.</p>
+<p class="muted small lead">Everything the app did, newest first: runs, buying-group syncs, emails, alerts, failure dossiers and every change made here.</p>
 
 <div class="pinned">
 <form id="activity-filters" class="filters" method="get" action="/activity"
