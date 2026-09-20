@@ -742,7 +742,7 @@ class TestOverviewPage:
         assert response.status_code == 200
         body = response.text
         assert "Projected Profit" in body and "$263.60" in body  # Title Case on the page
-        assert "Realized profit" in body and "$193.00" in body
+        assert "Realized Profit" in body and "$193.00" in body
         assert "Open Rows" in body
         assert "Blank Card Last 4" not in body and "COGS Input Gaps" not in body and ">Scheduler<" not in body
         assert 'data-tip-from="tip-heartbeat"' in body  # the header pill's tooltip, a table
