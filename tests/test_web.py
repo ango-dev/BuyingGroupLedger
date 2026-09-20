@@ -741,7 +741,7 @@ class TestOverviewPage:
         response = client.get("/")
         assert response.status_code == 200
         body = response.text
-        assert "Projected profit" in body and "$263.60" in body
+        assert "Projected Profit" in body and "$263.60" in body  # Title Case on the page
         assert "Realized profit" in body and "$193.00" in body
         assert "Open Rows" in body
         assert "Blank Card Last 4" not in body and "COGS Input Gaps" not in body and ">Scheduler<" not in body
@@ -787,7 +787,7 @@ class TestOverviewPage:
         assert 'href="/orders?state=open"' in body
         assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
         assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body
-        assert ">Cashback rate<" in body and "27.57%" in body  # rendered as a percentage
+        assert ">Cashback Rate<" in body and "27.57%" in body  # rendered as a percentage, Title Case
         assert 'href="/orders?month=2026-09"' in body
         assert 'href="/orders?month=2026-09&amp;state=open"' in body
         assert 'href="/orders?month=2026-09&amp;state=settled"' in body
