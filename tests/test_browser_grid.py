@@ -236,3 +236,23 @@ def test_a_cell_that_is_not_editable_still_copies(served, page):
     assert page.evaluate("(document.getElementById('grid-clipboard') || {}).value") == cell.inner_text().strip()
     assert page.evaluate("document.activeElement.getAttribute('data-field')") == "item_name"
 
+
+
+def test_a_clicked_month_bar_shows_no_focus_ring(served, page):
+    """on the 12-month chart --
+    Chrome's default focus ring round the column's hit area after a click. Keyboard focus keeps a
+    tint on the hit rect instead."""
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/")
+    bar = page.locator("figure.months a.bar").first
+    page.evaluate("el => el.focus()", bar.element_handle())
+    assert page.evaluate("document.activeElement.classList.contains('bar')")
+    assert page.evaluate("getComputedStyle(document.activeElement).outlineStyle") == "none"
+    # keyboard focus: tab forward from the body until a bar has focus, then its hit rect is tinted
+    page.evaluate("document.body.focus()")
+    for _ in range(80):
+        page.keyboard.press("Tab")
+        if page.evaluate("document.activeElement.classList.contains('bar')"):
+            break
+    assert page.evaluate("document.activeElement.classList.contains('bar')")
+    assert page.evaluate("getComputedStyle(document.activeElement.querySelector('.hit')).fill") != "rgba(0, 0, 0, 0)"
