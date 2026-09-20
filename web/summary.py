@@ -144,7 +144,7 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
               detail=f"Total Cost over every row {scope} that carries money (cancelled / "
                      "superseded excluded)"),
         # Renamed from "Actual return".
-        _tile("Cashback rate", rate, "percent", f"weighted, {rated} settled rows",
+        _tile("Weighted cashback rate", rate, "percent", f"{rated} settled rows",
               link(state="settled", sort="total_profit", dir="desc"),
               detail=f"the average cashback rate per settled order, weighted by cost: (Payout "
                      f"\u2212 COGS \u2212 Insurance) / Total Cost over the {rated} settled row(s) "
@@ -207,7 +207,7 @@ def year_tiles(rows: list[LedgerRow], year: str, inputs_by_year: dict | None = N
 #: under it ("sub"), then the rates and the counts.
 STATEMENT_ROWS: tuple[tuple[str, str], ...] = (  # the order the user asked for (2026-09-19)
     ("Net profit", "net"), ("Realized profit", "sub"), ("Other income", "sub"), ("Expenses", "sub"),
-    ("Projected profit", ""), ("Cashback rate", ""), ("Floating", ""), ("Paid out", ""),
+    ("Projected profit", ""), ("Weighted cashback rate", ""), ("Floating", ""), ("Paid out", ""),
     ("Spend", ""), ("Rows / orders", ""), ("Open rows", ""),
 )
 
