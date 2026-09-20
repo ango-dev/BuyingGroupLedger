@@ -3,7 +3,8 @@
 //   click            selects a cell (the active cell, outlined); shift-click or drag selects a range;
 //                    Ctrl-click adds a cell (or takes a selected one out) and keeps the rest selected;
 //                    a click on a column's header cell (the name included) selects the column, the
-//                    header too; the arrow at the header's right sorts by it, one click a step
+//                    header too, and a drag across the headers selects the columns crossed;
+//                    the arrow at the header's right sorts by it, one click a step
 //                    (the menu offers both directions); a click on a row number selects the row,
 //                    its cells included; Ctrl+A selects every row (every cell where rows have no tick)
 //   double-click     opens the editor (or press Enter, or just start typing: the keystroke replaces
@@ -544,6 +545,7 @@
       if (e.target.closest("a.sort")) return;  // the sort arrow: its own click, through htmx or the link
       e.preventDefault();
       selectColumn(th, e.ctrlKey || e.metaKey, e.shiftKey);
+      colDrag = !(e.ctrlKey || e.metaKey);  // a drag across the headers extends from this column
       return;
     }
     if (e.target.closest && e.target.closest("a, button, input, .cell-edit, .cell-empty")) return;
@@ -564,6 +566,15 @@
     e.preventDefault();  // no text selection while dragging a range
     if (again && editable(td)) { dragging = false; startEdit(td); }
   });
+  // A drag across the header cells selects the columns crossed, from the pressed column to the one under the pointer.
+  var colDrag = false;
+  document.addEventListener("mousemove", function (e) {
+    if (!colDrag) return;
+    var th = headerOf(e.target);
+    if (!th || th.closest(GRID) !== table() || (active && th.cellIndex === active.c)) return;
+    selectColumn(th, false, true);
+  });
+  document.addEventListener("mouseup", function () { colDrag = false; });
   document.addEventListener("mousemove", function (e) {
     if (!dragging) return;
     var td = e.target.closest ? e.target.closest(GRID_TD) : null;

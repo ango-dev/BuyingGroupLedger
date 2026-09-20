@@ -432,6 +432,16 @@ def test_headers_row_numbers_and_esc_select_like_sheets(served, page, client):
     n_rows = page.locator("table.sheetlike tbody tr").count()
     assert page.locator("table.sheetlike tbody td.sel-cell").count() == n_rows
     assert page.evaluate(f"document.querySelector('table.sheetlike tbody tr').cells[{idx}].classList.contains('sel-cell')")
+    # a drag across the headers selects the columns crossed
+    a = page.locator("table.sheetlike thead th.col-quantity .name").bounding_box()
+    b = page.locator("table.sheetlike thead th.col-order_id .name").bounding_box()
+    page.mouse.move(a["x"] + a["width"] / 2, a["y"] + a["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2, steps=6)
+    page.mouse.up()
+    assert page.locator("table.sheetlike thead th.sel-col").count() == 2
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == 2 * n_rows
+    assert "sort=" not in page.url
     # the menu's sort: descending, and the URL follows
     th.click(button="right")
     page.locator(".ctx.on button[data-act=sort-desc]").click()
