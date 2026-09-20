@@ -5,8 +5,6 @@
 {#- Two columns on a desktop: the attention cards, the statement
     and the 12-month chart on the left; the four breakdown charts stacked on the right. One
     column under 1180px. -#}
-<div class="overview-grid">
-<div class="overview-main">
 {% if attention %}
 {# Only when something needs a hand: alerts and dossiers from Activity, the audit's failures and
    warnings, the reconciliation's short- and over-paid orders -- each a link to where it is dealt
@@ -54,7 +52,8 @@
     counts. The month
     column follows the pager; the 12-month chart under it selects a month too. -#}
 {% set m = summary.month %}
-<h2 class="month-head">Profit &amp; Loss
+<div class="overview-grid">
+<h2 class="month-head overview-head">Profit &amp; Loss
   <span class="month-nav">
     {% if m.prev %}<a class="button small" href="/?month={{ m.prev }}" title="{{ m.prev }}">‹</a>{% else %}<span class="button small disabled">‹</span>{% endif %}
     <span class="month-label">{{ m.label }}</span>
@@ -63,6 +62,7 @@
   </span>
   <span class="muted small">— by Order Date; click a number to open its rows</span>
 </h2>
+<div class="overview-main">
 <div class="statement-wrap">
 <table class="statement">
   <thead><tr><th scope="col"></th>{% for c in summary.statement.columns %}<th scope="col" class="num {{ 'current' if c.key == 'month' }}">{{ c.label }}</th>{% endfor %}</tr></thead>
@@ -85,7 +85,8 @@
 </div>
 
 <aside class="overview-side">
-<h2>Rows by Group, Status, Retailer <span class="muted small">— click to open on Orders</span></h2>
+{#- No heading: the cards say what they are, and the column's top lines up with the statement.
+   -#}
 <div class="charts">
   {% with b=summary.open_bars, table=summary.open_table %}{% include "_bars.html" %}{% endwith %}
   {% for d in summary.donuts %}

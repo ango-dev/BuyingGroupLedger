@@ -1001,9 +1001,24 @@ figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; 
 /* The overview's two columns: statement and months left, the breakdown
    charts stacked right; one column under 1180px, where the charts go back to their own grid. */
 @media (min-width: 1181px) {
-  .overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 36%); gap: 0 20px; align-items: start; }
+  .overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 36%); gap: 0 20px; align-items: stretch; }
+  .overview-grid > .overview-head { grid-column: 1 / -1; }
   .overview-main .statement-wrap, .overview-main figure.months { max-width: none; }
-  .overview-side h2 { margin-top: 0; }
+  /* The left column is a flex column whose chart card takes whatever height the right column's
+     cards need beyond the statement, so the two columns end on the same line. */
+  .overview-main { display: flex; flex-direction: column; min-width: 0; }
+  .overview-main figure.months { margin-bottom: 0; flex: 1; display: flex; flex-direction: column; }
+  .overview-main figure.months svg { flex: 1; min-height: 0; }
+  /* The right column is exactly as tall as the statement plus the chart; its four cards split
+     that height, so their top and bottom edges line up with the left. */
+  .overview-side { display: flex; }
+  .overview-side .charts { flex: 1; display: grid; grid-auto-rows: minmax(0, 1fr); }
+  .overview-side .charts figure { min-height: 0; justify-content: center; }
+  .overview-side .charts .chart-body { flex: 0 0 auto; }
+  /* A donut's legend fills the card's width beside it, two columns when there are many. */
+  .overview-side .charts .donut .legend { flex: 1 1 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); column-gap: 14px; row-gap: 3px; align-content: center; }
+  .overview-side .charts .donut .legend li { justify-content: space-between; }
+  .overview-side .charts .donut .legend li a, .overview-side .charts .donut .legend li > span:not(.swatch):not(.num) { flex: 1; }
   /* Compact, so the whole overview fits one screen: tighter rows with the hints left to the tooltips, a flatter chart, the
      breakdown charts two-up with smaller donuts. */
   body.overview h1 { margin: 8px 0 6px; }
@@ -1011,7 +1026,7 @@ figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; 
   .overview-grid h2 { margin: 10px 0 6px; }
   .overview-main .tiles.attention { margin-bottom: 8px; }
   .overview-main .tiles.attention .tile { padding: 6px 10px; }
-  .overview-main .statement-wrap { margin: 4px 0 10px; }
+  .overview-main .statement-wrap { margin: 4px 0 8px; }
   table.statement th, table.statement td { padding: 4px 14px; }
   table.statement thead th { padding-top: 6px; padding-bottom: 6px; }
   table.statement tr.level-net th, table.statement tr.level-net td { font-size: 1.12em; padding-top: 8px; }
@@ -1019,9 +1034,9 @@ figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; 
   table.statement .cell-hint { display: none; }
   figure.months { margin-bottom: 8px; padding: 8px 12px 4px; }
   figure.months figcaption { font-size: 0.95em; }
-  .overview-side .charts { grid-template-columns: 1fr; gap: 8px; margin-top: 0; }
-  .overview-side .charts figure { padding: 8px 10px 6px; gap: 4px; }
-  .overview-side .charts figcaption { font-size: 0.95em; }
-  .overview-side .charts .donut svg { width: 118px; height: 118px; }
+  .overview-side .charts { grid-template-columns: 1fr; gap: 8px; margin: 4px 0 0; }
+  .overview-side .charts figure { padding: 6px 10px 6px; gap: 3px; }
+  .overview-side .charts figcaption { font-size: 0.9em; }
+  .overview-side .charts .donut svg { width: 90px; height: 90px; }
   .overview-side .charts .legend { font-size: 0.82em; }
 }
