@@ -1013,12 +1013,17 @@ figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; 
      that height, so their top and bottom edges line up with the left. */
   .overview-side { display: flex; }
   .overview-side .charts { flex: 1; display: grid; grid-auto-rows: minmax(0, 1fr); }
-  .overview-side .charts figure { min-height: 0; justify-content: center; }
-  .overview-side .charts .chart-body { flex: 0 0 auto; }
-  /* A donut's legend fills the card's width beside it, two columns when there are many. */
-  .overview-side .charts .donut .legend { flex: 1 1 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); column-gap: 14px; row-gap: 3px; align-content: center; }
-  .overview-side .charts .donut .legend li { justify-content: space-between; }
-  .overview-side .charts .donut .legend li a, .overview-side .charts .donut .legend li > span:not(.swatch):not(.num) { flex: 1; }
+  /* Caption at the top of every card, the chart centred in what is left -- the same in all four.
+    */
+  .overview-side .charts figure { min-height: 0; justify-content: flex-start; }
+  .overview-side .charts .chart-body { flex: 1 1 auto; align-items: center; }
+  /* Every card the same shape: the chart at a fixed size on the left, the legend filling the
+     width beside it, two columns when there are many entries. The Open Rows bars no longer
+     stretch to the card. */
+  .overview-side .charts figure.bars svg { flex: 0 0 auto; width: 260px; }
+  .overview-side .charts .legend { flex: 1 1 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); column-gap: 14px; row-gap: 3px; align-content: center; }
+  .overview-side .charts .legend li { justify-content: space-between; }
+  .overview-side .charts .legend li a, .overview-side .charts .legend li > span:not(.swatch):not(.num) { flex: 1; }
   /* Compact, so the whole overview fits one screen: tighter rows with the hints left to the tooltips, a flatter chart, the
      breakdown charts two-up with smaller donuts. */
   body.overview h1 { margin: 8px 0 6px; }
