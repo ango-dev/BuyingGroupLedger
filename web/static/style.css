@@ -98,6 +98,16 @@ a.tile.link:hover .label { color: var(--accent); }
 .tiles.stats .hint { font-size: 0.76em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 1180px) { .tiles.stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .tiles.stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* The Lifetime / month tiles: ONE line on a desktop however many there are, the value scaling with the window; six,
+   three and two to a row as the window narrows. */
+.tiles.stats.period { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
+.tiles.stats.period .tile { padding: 7px 9px; }
+.tiles.stats.period .label { font-size: 0.64em; }
+.tiles.stats.period .value { font-size: clamp(0.95em, 1.05vw, 1.25em); margin: 2px 0 1px; }
+.tiles.stats.period .hint { font-size: 0.68em; }
+@media (max-width: 1180px) { .tiles.stats.period { grid-auto-flow: row; grid-template-columns: repeat(6, minmax(0, 1fr)); } .tiles.stats.period .value { font-size: 1.15em; } }
+@media (max-width: 760px) { .tiles.stats.period { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .tiles.stats.period { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .reconcile { margin: -4px 0 14px; }
 .reconcile .money { font-variant-numeric: tabular-nums; }
 h2.month-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

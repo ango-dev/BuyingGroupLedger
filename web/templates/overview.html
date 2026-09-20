@@ -47,7 +47,7 @@
 {#- A stat tile is a LINK: it opens the Orders page filtered the same way the number was counted.
    -#}
 {% macro tiles(items) %}
-<section class="tiles stats">
+<section class="tiles stats period">
   {% for t in items %}
   <a class="tile link {{ 'payout-' ~ t.tone if t.tone }}" href="{{ t.href }}" title="{{ t.detail }}">
     <div class="label">{{ t.label }}</div>
@@ -61,7 +61,7 @@
 </section>
 {% endmacro %}
 
-<h2>Lifetime <span class="muted small">— every row, plus the Taxes page's income and expenses; click a tile to open it, hover for the definition</span></h2>
+<h2>Lifetime <span class="muted small">— every row, plus the Taxes page's money</span></h2>
 {{ tiles(summary.lifetime) }}
 
 {% set m = summary.month %}
@@ -72,7 +72,7 @@
     {% if m.next %}<a class="button small" href="/?month={{ m.next }}" title="{{ m.next }}">›</a>{% else %}<span class="button small disabled">›</span>{% endif %}
     {% if not m.current %}<a class="muted small" href="/">this month</a>{% endif %}
   </span>
-  <span class="muted small">— every row whose Order Date falls in the month</span>
+  <span class="muted small">— by Order Date</span>
 </h2>
 {{ tiles(m.tiles) }}
 

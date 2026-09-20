@@ -740,7 +740,7 @@ class TestOverviewPage:
         assert 'href="/?month=2026-10"' not in body
         # every tile is a link to the Orders page, filtered the way it was counted
         assert 'class="tile link " href="/orders" title="every row of the ledger"' in body
-        assert '<section class="tiles stats">' in body
+        assert '<section class="tiles stats period">' in body  # one line on a desktop
         assert 'href="/orders?state=open"' in body
         assert 'href="/orders?state=settled"' in body and 'href="/orders?state=committed"' in body
         assert 'href="/orders?state=unpaid"' in body and ">Floating<" in body
