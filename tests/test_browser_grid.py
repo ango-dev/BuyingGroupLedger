@@ -141,6 +141,7 @@ def test_the_grid_works_by_touch(served, phone, client):
     assert page.locator("table.sheetlike tbody tr.selected").count() == 3
     cols = page.evaluate("document.querySelector('table.sheetlike tbody tr').cells.length")
     assert page.locator("td.sel-cell").count() == 3 * (cols - 1)
+    assert page.locator("th.sel-col").count() == 0  # every row by a drag: no header mark (only Select all marks)
     # a tap on a cell drops that; a long press opens the menu, whose Select all takes every row
     x, y = _centre(first_cells[1].bounding_box())
     page.touchscreen.tap(x, y)
@@ -152,6 +153,32 @@ def test_the_grid_works_by_touch(served, phone, client):
     ix, iy = _centre(item.bounding_box())
     page.touchscreen.tap(ix, iy)
     assert page.locator("table.sheetlike tbody tr.selected").count() == 3
+    assert page.locator("th.sel-col").count() == cols - 1  # Select all marks the headers
+    assert page.errors == []
+
+
+def test_the_tabs_fold_into_a_dropdown_on_a_phone(served, phone):
+    phone.goto(f"{served}/orders")
+    phone.wait_for_selector("header.top.compact")
+    assert not phone.locator("header nav .tabs").is_visible()
+    pick = phone.locator("header nav details.nav-pick")
+    assert pick.is_visible() and pick.locator("summary strong").inner_text() == "Orders"
+    assert phone.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")  # nothing sticks out sideways
+    pick.locator("summary").click()
+    items = pick.locator(".menu a").evaluate_all("as => as.map(a => a.firstChild.textContent.trim())")  # the name, not its badge
+    assert items[:6] == ["Overview", "Orders", "Activity", "Audit", "Reconciliation", "Taxes"] and "Settings" in items
+    pick.locator(".menu a", has_text="Taxes").click()
+    phone.wait_for_url("**/taxes*")
+    assert phone.locator("header nav details.nav-pick summary strong").inner_text() == "Taxes"
+    assert phone.errors == []
+
+
+def test_a_desktop_window_keeps_the_tabs(served, page):
+    page.set_viewport_size({"width": 1400, "height": 800})
+    page.goto(f"{served}/orders")
+    page.wait_for_selector("header nav .tabs")
+    assert not page.evaluate("document.querySelector('header.top').classList.contains('compact')")
+    assert page.locator("header nav .tabs").is_visible() and not page.locator("header nav details.nav-pick").is_visible()
     assert page.errors == []
 
 

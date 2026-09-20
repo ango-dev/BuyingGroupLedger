@@ -162,9 +162,10 @@
     var box = td.getBoundingClientRect();
     var seen = box.right > 0 && box.bottom > 0 && box.left < window.innerWidth && box.top < window.innerHeight;
     if (!seen) { h.classList.remove("on"); return; }
-    // at the cell's corner, kept inside the viewport when the cell runs off it
-    h.style.left = (Math.min(box.right, window.innerWidth - 6) - 11) + "px";
-    h.style.top = (Math.min(box.bottom, window.innerHeight - 6) - 11) + "px";
+    // centred on the cell's corner (the box is 28px with its finger padding), kept inside the
+    // viewport when the cell runs off it
+    h.style.left = (Math.min(box.right, window.innerWidth - 6) - 14) + "px";
+    h.style.top = (Math.min(box.bottom, window.innerHeight - 6) - 14) + "px";
     h.classList.add("on");
   }
   if (COARSE) {
@@ -234,8 +235,9 @@
       if (last && last.r2 === idx[i] - 1) last.r2 = idx[i];
       else ranges.push(rect({ r: idx[i], c: 1 }, { r: idx[i], c: cols - 1 }));
     }
-    // every row ticked (Ctrl+A, the # corner) is the whole table: the headers show it too
-    if (idx.length === t.tBodies[0].rows.length) ranges.forEach(function (range) { range.head = true; });
+    // Select all (Ctrl+A, the # corner) is the whole table: the headers show it too; the same rows ticked by a drag or
+    // by hand do not ("that should only be for ctrl a")
+    if (e.detail && e.detail.all) ranges.forEach(function (range) { range.head = true; });
     var tr = e.detail && e.detail.tr;
     active = { r: tr ? tr.sectionRowIndex : idx[0], c: 1 };
     anchor = active;
@@ -956,7 +958,8 @@
     if (e.target && (e.target.id === "sel-all" || e.target.name === "sel")) {
       count();
       // the cell selection follows the ticks (edit.js's grid listens)
-      document.dispatchEvent(new CustomEvent("rows:changed", { detail: { tr: e.target.name === "sel" ? e.target.closest("tr") : null } }));
+      document.dispatchEvent(new CustomEvent("rows:changed", { detail: { tr: e.target.name === "sel" ? e.target.closest("tr") : null,
+                                                                          all: e.target.id === "sel-all" && e.target.checked } }));
     }
   });
   document.addEventListener("rows:clear", clearRows);  // a plain click on a cell
@@ -1095,6 +1098,22 @@
   window.addEventListener("resize", measure);
   document.addEventListener("htmx:afterSwap", measure);
   measure();
+})();
+
+// The header's tabs fold into one dropdown when they do not fit the window: the tabs row is
+// measured with the class off, and header.compact shows the pages dropdown instead.
+(function () {
+  "use strict";
+  var head = document.querySelector("header.top");
+  var tabs = head ? head.querySelector("nav .tabs") : null;
+  if (!tabs) return;
+  function fit() {
+    head.classList.remove("compact");
+    if (tabs.scrollWidth > tabs.clientWidth + 1) head.classList.add("compact");
+  }
+  fit();
+  window.addEventListener("resize", fit);
+  window.addEventListener("orientationchange", fit);
 })();
 
 // The # header is the select-all handle (the header checkbox is hidden, like the row ones).
