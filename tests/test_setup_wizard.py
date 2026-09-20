@@ -52,6 +52,11 @@ def configured(config_file, tmp_path):
     return _client(tmp_path)
 
 
+@pytest.fixture(autouse=True)
+def _gate_on(monkeypatch):
+    monkeypatch.setattr(setup_wizard, "GATE_ENABLED", True)  # conftest turns it off for every other test
+
+
 def state_record():
     return loader.load_state().get("setup", {})
 

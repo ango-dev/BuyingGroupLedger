@@ -99,6 +99,16 @@ def _isolate_activity_log(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_setup_gate(monkeypatch):
+    """Every test runs with an empty config (the fixture below), which is what a FRESH INSTALL looks
+    like -- so without this the dashboard would send every page of every test to the setup wizard.
+    tests/test_setup_wizard.py switches the gate back on for itself."""
+    from web import setup_wizard
+
+    monkeypatch.setattr(setup_wizard, "GATE_ENABLED", False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_config(tmp_path_factory, monkeypatch):
     """Safety net: no test may read the developer's REAL config.json or .state.json.
 

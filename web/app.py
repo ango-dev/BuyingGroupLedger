@@ -227,6 +227,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     setup_state = {"needed": None}
 
     def setup_needed() -> bool:
+        if not setup_wizard.GATE_ENABLED:
+            return False
         if setup_state["needed"] is None or setup_state["needed"] is True:
             try:
                 setup_state["needed"] = setup_wizard.needs_setup(clock)

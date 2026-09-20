@@ -26,6 +26,10 @@ from config import loader
 __all__ = ["STEPS", "Step", "is_configured", "mark_complete", "mark_rerun", "needs_setup", "step"]
 
 RESTART_RANK = {"": 0, "next run": 0, "dashboard": 1, "container": 2}
+#: The gate's switch. Off in the test suite (conftest.py): every test runs with an empty config,
+#: which is exactly what a fresh install looks like, and only tests/test_setup_wizard.py wants the
+#: wizard for that.
+GATE_ENABLED = True
 
 
 @dataclass(frozen=True)
