@@ -931,3 +931,4 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
 .restarting .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 header .meta .signout { display: inline; margin: 0; }
+.warn-text { color: var(--warn); font-weight: 600; }

@@ -1324,9 +1324,17 @@ class TestMandatoryByStage:
         assert "Insurance" in result_for(paid, "mandatory_by_stage").details[0]  # paid needs its insurance too
         returned = build(row_cells(2, Status=Cell("return"), **{"Return Qty": Cell(""), "Return Date": Cell("")}))
         assert "missing Return Qty, Return Date" in result_for(returned, "mandatory_by_stage").details[0]
-        # delivered (and beyond) needs the retailer's receipt as well
+        # delivered (and beyond) needs the retailer's receipt as well, and the
+        # finding names the remedy
         no_receipt = build(row_cells(2, **{"Receipt Link": Cell("")}))
-        assert "row 2 (delivered): missing Receipt Link" in result_for(no_receipt, "mandatory_by_stage").details[0]
+        assert "row 2 (delivered): missing Receipt Link (the receipts backfill under Tools -> Checks captures it)" in result_for(no_receipt, "mandatory_by_stage").details[0]
+        # a payout with no date is a FAIL at any status -- income in no tax year
+        undated = build(row_cells(2, **{"Actual Payout": Cell(100.0, fmt="currency"), "Payout Date": Cell("")}))
+        result = result_for(undated, "mandatory_by_stage")
+        assert result.status == "FAIL"
+        assert any("an Actual Payout with no Payout Date -- income in no tax year" in d for d in result.details)
+        zero = build(row_cells(2, **{"Actual Payout": Cell(0.0, fmt="currency"), "Payout Date": Cell("")}))
+        assert not any("no Payout Date" in d for d in result_for(zero, "mandatory_by_stage").details)  # a 0 is not money
         shipped_no_receipt = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell(""), "Receipt Link": Cell("")}))
         assert result_for(shipped_no_receipt, "mandatory_by_stage").status == "PASS"
         # from ordered on: the order link, the delivery address, the card and its last 4, and COGS
@@ -1383,9 +1391,10 @@ class TestMandatoryByStage:
         early = build(row_cells(2, **{"Delivery Date": Cell("2026-08-01")}))  # the order date is 2026-08-06
         assert any("Delivery Date 2026-08-01 is before the Order Date 2026-08-06" in d for d in result_for(early, "mandatory_by_stage").details)
         # a payout on a row that is not paid yet is a stale status, a warning
-        paid_but_open = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell(""), "Actual Payout": Cell(100.0, fmt="currency")}))
+        # (dated: an UNDATED payout is a FAIL at any status since 2026-09-19 -- income in no tax year)
+        paid_but_open = build(row_cells(2, Status=Cell("shipped"), **{"Delivery Date": Cell(""), "Actual Payout": Cell(100.0, fmt="currency"), "Payout Date": Cell("2026-08-20")}))
         result = result_for(paid_but_open, "mandatory_by_stage")
-        assert result.status == "WARN" and "carries Actual Payout" in result.details[0]
+        assert result.status == "WARN" and "carries Payout Date, Actual Payout" in result.details[0]
 
     def test_a_money_free_row_needs_only_its_identity(self):
         sheet = build(row_cells(2, Status=Cell("superseded"), **{"Cost Per Item": Cell(""), "Total Cost": Cell(""),

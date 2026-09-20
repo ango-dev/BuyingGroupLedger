@@ -1307,6 +1307,10 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
             if unrouted or not group:
                 ticked = []  # nothing to submit; a card sold to a group keeps the tick requirement
         missing = [name for name in required if not cell(name)]
+        # The remedy beside the finding: the receipts backfill under Tools -> Checks captures a receipt a
+        # terminal order never got.
+        missing = ["Receipt Link (the receipts backfill under Tools -> Checks captures it)" if name == "Receipt Link" else name
+                   for name in missing]
         missing += [f"{name} (not ticked)" for name in ticked
                     if cell(name).lower() not in ("true", "1", "yes", "checked")]
         if missing:
@@ -1322,6 +1326,12 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
             impossible.append("Tracking Submitted ticked with no Tracking Number")
         if cell("Payout Date") and not cell("Actual Payout"):
             impossible.append("a Payout Date with no Actual Payout")
+        # The other way round, at ANY status (a hand-entered payout on a row left `delivered` is
+        # the usual case): the tax report keys income on Payout Date, so this money is income in
+        # no year until the date is filled.
+        paid_amount = _parse_display_number(cell("Actual Payout"))
+        if paid_amount not in (None, 0) and not cell("Payout Date"):
+            impossible.append("an Actual Payout with no Payout Date -- income in no tax year until the date is filled")
         order_date = cell("Order Date")
         for name in ("Delivery Date", "Payout Date", "Return Date"):
             when = cell(name)

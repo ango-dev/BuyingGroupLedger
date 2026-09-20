@@ -90,6 +90,10 @@ def build_report(sheet: Sheet, year: int) -> dict:
     funding_rows = {"rows": 0, "cogs": 0.0}  # bought gift cards: cost, never a payout
     paid_from_other_years = {"rows": 0, "payouts": 0.0}
     paid_in_later_year = {"rows": 0, "payouts": 0.0}
+    # A payout with no Payout Date is income in NO year (cash basis keys on that date), whatever
+    # year the order was placed: counted here so the report says so instead of dropping it.
+    #The Audit page fails the row until the date is filled.
+    undated = {"rows": 0, "payouts": 0.0}
 
     for row_number, _ in sheet.ledger_rows(f):
         cell = lambda name, grid=u: sheet.cell(grid, row_number, name)  # noqa: E731
@@ -103,6 +107,9 @@ def build_report(sheet: Sheet, year: int) -> dict:
 
         cost_side = order_year == year and status not in MONEY_FREE_STATUSES
         income_side = payout_year == year and payout
+        if payout and payout_year is None and status not in MONEY_FREE_STATUSES:
+            undated["rows"] += 1
+            undated["payouts"] += payout
 
         if cost_side:
             total_cost = _money(cell("Total Cost"))
@@ -143,9 +150,11 @@ def build_report(sheet: Sheet, year: int) -> dict:
             if is_deliberately_unrouted(group):
                 funding_rows["rows"] += 1
                 funding_rows["cogs"] += cogs
-            elif payout_year is None or not payout:
+            elif not payout:
                 unpaid_cost["rows"] += 1
                 unpaid_cost["cogs"] += cogs
+            elif payout_year is None:
+                pass  # paid, undated: in `undated` above, not "not yet paid"
             elif payout_year > year:
                 paid_in_later_year["rows"] += 1
                 paid_in_later_year["payouts"] += payout
@@ -182,6 +191,7 @@ def build_report(sheet: Sheet, year: int) -> dict:
             "ordered_this_year_paid_in_a_later_year": {**paid_in_later_year, "payouts": round(paid_in_later_year["payouts"], 2)},
             "paid_this_year_for_orders_from_other_years": {**paid_from_other_years, "payouts": round(paid_from_other_years["payouts"], 2)},
             "gift_card_purchases_never_paid": {**funding_rows, "cogs": round(funding_rows["cogs"], 2)},
+            "paid_with_no_payout_date": {**undated, "payouts": round(undated["payouts"], 2)},
         },
         "cost_rows": cost_rows,
         "payout_rows": payout_rows,
@@ -220,6 +230,8 @@ def render_text(report: dict, *, list_rows: bool = True) -> str:
         f"    paid {report['year']}, ordered in another year:    {s['paid_this_year_for_orders_from_other_years']['rows']} row(s), payouts {_fmt(s['paid_this_year_for_orders_from_other_years']['payouts'])}",
         *([f"    gift cards bought (income arrives via the orders they fund): {s['gift_card_purchases_never_paid']['rows']} row(s), COGS {_fmt(s['gift_card_purchases_never_paid']['cogs'])}"]
           if s["gift_card_purchases_never_paid"]["rows"] else []),
+        *([f"    PAID WITH NO PAYOUT DATE (income in no year until filled): {s['paid_with_no_payout_date']['rows']} row(s), payouts {_fmt(s['paid_with_no_payout_date']['payouts'])} -- the Audit page lists them"]
+          if s.get("paid_with_no_payout_date", {}).get("rows") else []),
         "",
     ]
     for title, table in (("By retailer", report["by_retailer"]), ("By buying group", report["by_buying_group"])):

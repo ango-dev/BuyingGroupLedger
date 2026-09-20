@@ -35,6 +35,9 @@
     {{ s.ordered_this_year_paid_in_a_later_year.rows }} paid in a later year ({{ s.ordered_this_year_paid_in_a_later_year.payouts | money }});
     {{ s.paid_this_year_for_orders_from_other_years.rows }} paid this year for orders from other years ({{ s.paid_this_year_for_orders_from_other_years.payouts | money }});
     {{ s.gift_card_purchases_never_paid.rows }} gift-card purchase row(s) ({{ s.gift_card_purchases_never_paid.cogs | money }}), funding orders rather than paid out themselves.
+    {%- if s.paid_with_no_payout_date and s.paid_with_no_payout_date.rows %}
+    <br><strong class="warn-text">{{ s.paid_with_no_payout_date.rows }} paid row(s) have no Payout Date ({{ s.paid_with_no_payout_date.payouts | money }}) and count as income in no year until the date is filled — <a href="/audit">Audit</a> lists them.</strong>
+    {%- endif %}
   </p>
 </details>
 

@@ -43,6 +43,21 @@ class TestTheTwoDates:
         assert r["totals"]["cogs"] == 798.0 and r["totals"]["payouts"] == 0
         assert r["straddling"]["ordered_this_year_not_yet_paid"] == {"rows": 1, "cogs": 798.0}
 
+    def test_a_paid_row_with_no_payout_date_is_counted_as_undated_not_dropped(self):
+        """a settled row whose date is blank was invisible in
+        every year. It still lands in no year (cash basis), but the report says so."""
+        sheet = build(_row(2, order_date="2026-03-01", payout=500.0),                       # this year, undated
+                      _row(3, order_date="2025-11-01", payout=250.0),                       # another year, undated
+                      _row(4, order_date="2026-03-02", payout=900.0, payout_date="2026-04-01"))
+        r = build_report(sheet, 2026)
+        assert r["totals"]["payouts"] == 900.0  # the undated money is in no year
+        assert r["straddling"]["paid_with_no_payout_date"] == {"rows": 2, "payouts": 750.0}
+        assert r["straddling"]["ordered_this_year_not_yet_paid"] == {"rows": 0, "cogs": 0.0}  # paid, not "not yet paid"
+        assert "PAID WITH NO PAYOUT DATE (income in no year until filled): 2 row(s), payouts 750.00" in render_text(r)
+        clean = build_report(build(_row(2, order_date="2026-03-02", payout=900.0, payout_date="2026-04-01")), 2026)
+        assert clean["straddling"]["paid_with_no_payout_date"] == {"rows": 0, "payouts": 0.0}
+        assert "NO PAYOUT DATE" not in render_text(clean)
+
     def test_a_cancelled_order_carries_no_cost(self):
         r = build_report(build(_row(2, order_date="2026-03-01", status="cancelled", cogs="")), 2026)
         assert r["totals"]["rows"] == 0 and r["totals"]["cogs"] == 0
