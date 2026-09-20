@@ -77,11 +77,14 @@
         <a href="/audit" class="{{ 'current' if path.startswith('/audit') }}">Audit{% if badges.audit %} <span class="badge">{{ badges.audit }}</span>{% endif %}</a>
         <a href="/recon" class="{{ 'current' if path.startswith('/recon') }}">Reconciliation{% if badges.recon %} <span class="badge">{{ badges.recon }}</span>{% endif %}</a>
         <a href="/taxes" class="{{ 'current' if path.startswith('/taxes') }}">Taxes</a>
-        {% for group, items in nav_tools() %}
-        <div class="group">{{ group }}</div>
-        {% for key, title in items %}{% if key == 'import' %}<a href="/tools/import" class="{{ 'current' if path.startswith('/tools/import') }}">{{ title }}{% if badges.import %} <span class="badge">{{ badges.import }}</span>{% endif %}</a>{% else %}<a href="/tools?tool={{ key }}" class="{{ 'current' if request.query_params.get('tool', 'profile') == key and path.startswith('/tools') and not path.startswith('/tools/import') }}">{{ title }}</a>{% endif %}{% endfor %}
-        {% endfor %}
-        <div class="group">Dashboard</div>
+        {#- Tools is a dropdown of its own inside the menu, open on a Tools page -#}
+        <details class="sub"{% if path.startswith('/tools') %} open{% endif %}>
+          <summary class="{{ 'current' if path.startswith('/tools') }}">Tools{% if badges.import %} <span class="badge">{{ badges.import }}</span>{% endif %} <span class="caret">▾</span></summary>
+          {% for group, items in nav_tools() %}
+          <div class="group">{{ group }}</div>
+          {% for key, title in items %}{% if key == 'import' %}<a href="/tools/import" class="{{ 'current' if path.startswith('/tools/import') }}">{{ title }}{% if badges.import %} <span class="badge">{{ badges.import }}</span>{% endif %}</a>{% else %}<a href="/tools?tool={{ key }}" class="{{ 'current' if request.query_params.get('tool', 'profile') == key and path.startswith('/tools') and not path.startswith('/tools/import') }}">{{ title }}</a>{% endif %}{% endfor %}
+          {% endfor %}
+        </details>
         <a href="/settings" class="{{ 'current' if path.startswith('/settings') }}">Settings</a>
       </div>
     </details>

@@ -64,6 +64,15 @@ header.top.compact nav details.nav-pick { display: flex; }
 header nav details.nav-pick .nav-link strong { color: var(--fg); font-weight: 600; }
 header nav details.nav-pick .nav-link .badge { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: 999px; background: #d64545; color: #fff; font-size: 0.72em; font-weight: 600; line-height: 1.5; text-align: center; }
 header nav details.nav-pick .menu a .badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: #d64545; color: #fff; font-size: 0.72em; font-weight: 600; line-height: 1.5; text-align: center; }
+/* Tools inside the pages dropdown: a dropdown of its own, a row like the page links */
+header nav details.nav-pick .menu details.sub > summary { list-style: none; cursor: pointer; display: flex; flex-direction: row; justify-content: flex-start; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 6px; color: var(--fg); }
+header nav details.nav-pick .menu details.sub > summary::-webkit-details-marker { display: none; }
+header nav details.nav-pick .menu details.sub > summary.current { color: var(--accent); font-weight: 600; }
+header nav details.nav-pick .menu details.sub > summary .caret { transition: transform .12s; }
+header nav details.nav-pick .menu details.sub[open] > summary .caret { transform: rotate(180deg); }
+header nav details.nav-pick .menu details.sub .group { padding-left: 22px; }
+header nav details.nav-pick .menu details.sub a { padding-left: 22px; }
+header nav details.nav-pick .menu details.sub > summary .badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: #d64545; color: #fff; font-size: 0.72em; font-weight: 600; line-height: 1.5; text-align: center; }
 header nav a { color: var(--muted); font-weight: 500; padding: 14px 10px; border-bottom: 2px solid transparent;
   text-decoration: none; }
 header nav a:hover { color: var(--fg); text-decoration: none; }

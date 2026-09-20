@@ -164,9 +164,14 @@ def test_the_tabs_fold_into_a_dropdown_on_a_phone(served, phone):
     pick = phone.locator("header nav details.nav-pick")
     assert pick.is_visible() and pick.locator("summary strong").inner_text() == "Orders"
     assert phone.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")  # nothing sticks out sideways
-    pick.locator("summary").click()
+    pick.locator("summary").first.click()  # the dropdown's own summary, not the nested Tools one
     items = pick.locator(".menu a").evaluate_all("as => as.map(a => a.firstChild.textContent.trim())")  # the name, not its badge
     assert items[:6] == ["Overview", "Orders", "Activity", "Audit", "Reconciliation", "Taxes"] and "Settings" in items
+    # Tools is a dropdown of its own inside the menu: closed here, its items hidden
+    tools = pick.locator(".menu details.sub")
+    assert tools.locator("summary").inner_text().startswith("Tools") and not tools.locator("a", has_text="Run once").is_visible()
+    tools.locator("summary").click()
+    assert tools.locator("a", has_text="Run once").is_visible()
     pick.locator(".menu a", has_text="Taxes").click()
     phone.wait_for_url("**/taxes*")
     assert phone.locator("header nav details.nav-pick summary strong").inner_text() == "Taxes"
