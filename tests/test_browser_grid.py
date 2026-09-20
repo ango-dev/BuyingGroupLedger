@@ -172,6 +172,23 @@ def test_the_tabs_fold_into_a_dropdown_on_a_phone(served, phone):
     assert tools.locator("summary").inner_text().startswith("Tools") and not tools.locator("a", has_text="Run once").is_visible()
     tools.locator("summary").click()
     assert tools.locator("a", has_text="Run once").is_visible()
+    # the open menu hangs right below the header (its own 4px gap) and scrolls with it -- on a page the window scrolls (Overview; Orders scrolls inside its main area)
+    header_bottom = phone.evaluate("document.querySelector('header.top').getBoundingClientRect().bottom")
+    menu = pick.locator(".menu")
+    assert 0 <= menu.bounding_box()["y"] - header_bottom < 8
+    phone.goto(f"{served}/")
+    phone.wait_for_selector("header.top.compact")
+    phone.locator("header nav details.nav-pick summary").first.click()
+    menu = phone.locator("header nav details.nav-pick .menu")
+    before = menu.bounding_box()["y"]
+    phone.evaluate("window.scrollBy(0, 200)")
+    phone.wait_for_timeout(100)
+    assert phone.evaluate("scrollY") == 200
+    assert abs((before - menu.bounding_box()["y"]) - 200) < 12  # moved with the page (a fixed menu would not)
+    phone.goto(f"{served}/orders")
+    phone.wait_for_selector("header.top.compact")
+    pick = phone.locator("header nav details.nav-pick")
+    pick.locator("summary").first.click()
     pick.locator(".menu a", has_text="Taxes").click()
     phone.wait_for_url("**/taxes*")
     assert phone.locator("header nav details.nav-pick summary strong").inner_text() == "Taxes"
@@ -184,6 +201,12 @@ def test_a_desktop_window_keeps_the_tabs(served, page):
     page.wait_for_selector("header nav .tabs")
     assert not page.evaluate("document.querySelector('header.top').classList.contains('compact')")
     assert page.locator("header nav .tabs").is_visible() and not page.locator("header nav details.nav-pick").is_visible()
+    # the Tools menu opens in full below the tabs (nothing clips it)
+    page.locator("header nav .tabs details.nav-menu summary").click()
+    menu = page.locator("header nav .tabs details.nav-menu .menu")
+    assert menu.is_visible() and menu.locator("a").last.is_visible()
+    box = menu.bounding_box()
+    assert box["height"] > 150 and box["y"] > 30
     assert page.errors == []
 
 
