@@ -2712,3 +2712,110 @@ class TestLastOccupiedRowAndTheCheckbox:
         padding[checkbox_i] = "FALSE"
 
         assert _last_occupied_row([list(HEADER), real_row, padding, list(padding)]) == 2
+
+
+
+class TestAProvisionalPackageIdNeverDisplaces:
+    """Live (Amazon Business order 111-9990023-9990023, 4 PS5s in two boxes). Pre-ship,
+    Amazon rendered BOTH qty-2 cards under the first package's shipmentId (the second was not
+    minted yet); the subtotal veto rightly kept both rows. When the real id appeared on card 0,
+    the exact key still named Shipment 1 -- but "its id is still on the page" read as a re-ordered
+    page, and a THIRD full-cost row was appended. An id two rows carry is not an identity."""
+
+    OID, DATE, NAME = "111-9990023-9990023", "2026-09-17", "PlayStation 5 Digital Edition"
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    def _existing(self, shipment, pid):
+        return row(retailer="Amazon Business", order_id=self.OID, order_date=self.DATE, item_name=self.NAME,
+                   shipment=shipment, status="ordered", quantity="2", cost_per_item="599",
+                   total_cost="1198", tracking_number="", package_id=pid)
+
+    def _incoming(self, shipment, pid):
+        return dict(retailer="Amazon Business", order_id=self.OID, order_date=self.DATE, item_name=self.NAME,
+                    shipment=shipment, status="ordered", quantity=2, cost_per_item=599, total_cost=1198,
+                    package_id=pid)
+
+    def test_the_minted_id_lands_on_its_own_row_and_nothing_is_appended(self, sheet, tmp_path, alerts):
+        sheet.rows = [list(HEADER), self._existing("1", "NHZdvfjPs"), self._existing("2", "NHZdvfjPs")]
+        path = write_csv_file(tmp_path, self._incoming("1", "N7xQDXmRs"), self._incoming("2", "NHZdvfjPs"))
+
+        sync_csv_to_ledger(path)
+
+        rows = {str(r[_F["shipment"]]): r[_F["package_id"]] for r in sheet.data_rows()}
+        assert rows == {"1": "N7xQDXmRs", "2": "NHZdvfjPs"}
+        assert alerts == []
+
+    def test_a_unique_id_still_displaces_a_re_ordered_page(self, sheet, tmp_path, alerts):
+        # The rule that stays: two DIFFERENT ids swapping cards re-route by identity, 0 appended.
+        sheet.rows = [list(HEADER), self._existing("1", "AAA"), self._existing("2", "BBB")]
+        path = write_csv_file(tmp_path, self._incoming("1", "BBB"), self._incoming("2", "AAA"))
+
+        sync_csv_to_ledger(path)
+
+        rows = {str(r[_F["shipment"]]): r[_F["package_id"]] for r in sheet.data_rows()}
+        assert rows == {"1": "AAA", "2": "BBB"}
+
+
+class TestAnAppendedRowInheritsTheOrdersHandEditedCardFields:
+    """the Cashback Rate typed by hand on Shipment 1 of 111-9990023-9990023 did
+    not reach the split's new rows, which came in at the card's configured 5%. One card pays an
+    order, so a hand-edited card field holds for every row of it -- whichever retailer."""
+
+    OID, DATE, NAME = "111-9990023-9990023", "2026-09-17", "PlayStation 5 Digital Edition"
+
+    def _existing(self, shipment, **v):
+        base = dict(retailer="Amazon Business", order_id=self.OID, order_date=self.DATE, item_name=self.NAME,
+                    shipment=shipment, status="ordered", quantity="2", cost_per_item="599",
+                    total_cost="1198", cashback_rate="0.06", card_last4="0315", package_id="NHZ")
+        base.update(v)
+        return row(**base)
+
+    def _incoming(self, shipment, **v):
+        base = dict(retailer="Amazon Business", order_id=self.OID, order_date=self.DATE, item_name=self.NAME,
+                    shipment=shipment, status="ordered", quantity=2, cost_per_item=599, total_cost=1198,
+                    cashback_rate=0.05, card_last4="0315")
+        base.update(v)
+        return base
+
+    def test_the_new_split_row_takes_the_hand_edited_rate(self, sheet, tmp_path, monkeypatch):
+        first = self._existing("1")
+        sheet.rows = [list(HEADER), first]
+        from ledger_db.hand_edits import key_of_row
+        monkeypatch.setattr("ledger.sync._protected_cells", lambda ws: {key_of_row(first): {"cashback_rate"}})
+        path = write_csv_file(tmp_path, self._incoming("1", package_id="NHZ"),
+                              self._incoming("2", package_id="N7x"))
+
+        sync_csv_to_ledger(path)
+
+        rates = {str(r[_F["shipment"]]): r[_F["cashback_rate"]] for r in sheet.data_rows()}
+        assert rates == {"1": 0.06, "2": 0.06}
+
+    def test_disagreeing_hand_edits_on_the_order_are_left_alone(self, sheet, tmp_path, monkeypatch):
+        a, b = self._existing("1", cashback_rate="0.06"), self._existing("2", cashback_rate="0.07", package_id="N7x")
+        sheet.rows = [list(HEADER), a, b]
+        from ledger_db.hand_edits import key_of_row
+        monkeypatch.setattr("ledger.sync._protected_cells",
+                            lambda ws: {key_of_row(a): {"cashback_rate"}, key_of_row(b): {"cashback_rate"}})
+        path = write_csv_file(tmp_path, self._incoming("1", package_id="NHZ"),
+                              self._incoming("2", package_id="N7x"),
+                              self._incoming("3", package_id="ZZZ"))
+
+        sync_csv_to_ledger(path)
+
+        rates = {str(r[_F["shipment"]]): r[_F["cashback_rate"]] for r in sheet.data_rows()}
+        assert rates["3"] == 0.05  # the run's own value: two hand-typed answers disagree
+
+    def test_a_row_without_hand_edits_gives_nothing_to_inherit(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER), self._existing("1")]
+        path = write_csv_file(tmp_path, self._incoming("1", package_id="NHZ"),
+                              self._incoming("2", package_id="N7x"))
+
+        sync_csv_to_ledger(path)
+
+        rates = {str(r[_F["shipment"]]): r[_F["cashback_rate"]] for r in sheet.data_rows()}
+        assert rates["2"] == 0.05

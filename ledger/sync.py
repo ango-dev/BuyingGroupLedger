@@ -490,6 +490,56 @@ def _ensure_grid_cols(worksheet) -> None:
         worksheet.add_cols(len(HEADER) - current)
 
 
+#: The fields that describe the CARD an order was paid with -- one card pays an order, so a value
+#: the user corrected on one of its rows holds for every row of it, whichever retailer.
+_ORDER_CARD_FIELDS = ("cashback_rate", "card_name", "card_last4")
+
+
+def _inherit_hand_edited_card_fields(worksheet, appends: list[list], existing: list[list],
+                                     protected: dict) -> list[list]:
+    """A row appended for an order whose rows carry a HAND-EDITED card field takes that value too,
+    recorded as a hand edit of the new row so later runs keep it (and clearing it restores what
+    the run would have written). order 111-9990023-9990023's Cashback Rate was
+    set to 6% by hand on Shipment 1, and the split's new rows came in at the card's configured 5%.
+    Only when every hand-edited value of that field on the order agrees -- a disagreement is the
+    user's to settle -- and never for the key fields, which `record` refuses anyway."""
+    if not appends or not protected:
+        return appends
+    oid_idx = FIELDNAMES.index("order_id")
+    by_key = {_row_key(r): r for r in existing[1:] if r}
+    agreed: dict[tuple[str, str], set[str]] = {}
+    for key, fields in protected.items():
+        source = by_key.get(key)
+        if source is None:
+            continue
+        for field in _ORDER_CARD_FIELDS:
+            if field in fields:
+                i = FIELDNAMES.index(field)
+                value = str(source[i] if i < len(source) and source[i] is not None else "").strip()
+                if value:
+                    agreed.setdefault((key[0], field), set()).add(value)
+    if not agreed:
+        return appends
+    from ledger_db.hand_edits import ledger_db_of, record
+
+    db = ledger_db_of(worksheet)
+    for row in appends:
+        order_id = str(row[oid_idx] if row[oid_idx] is not None else "").strip()
+        for field in _ORDER_CARD_FIELDS:
+            values = agreed.get((order_id, field))
+            if not values or len(values) != 1:
+                continue
+            i = FIELDNAMES.index(field)
+            inherited = next(iter(values))
+            previous = row[i]
+            row[i] = _coerce(field, inherited)
+            log.info("Order %s: appended row inherits the hand-edited %s %r.", order_id, field, inherited)
+            if db is not None:
+                record(db, _row_key(row), field, inherited,
+                       previous="" if previous is None else previous)
+    return appends
+
+
 def _protected_cells(worksheet) -> dict:
     """{row key: fields} the user typed by hand (ledger_db/hand_edits); {} for a fake worksheet."""
     from ledger_db.hand_edits import protected_fields
@@ -780,9 +830,16 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
         #    appending the "new" package here would book the order's full cost a second time, which
         #    is history 1f all over again.
         hit = key_to_existing.get(key)
+        hit_pid = _package_id_of(hit[1], package_hdr_idx) if hit is not None else ""
         displaced = (
             hit is not None and not same_package(hit)
-            and _package_id_of(hit[1], package_hdr_idx) in incoming_pids_by_order.get(record["order_id"], set())
+            and hit_pid in incoming_pids_by_order.get(record["order_id"], set())
+            # A package id that TWO of the order's rows carry is provisional, not an identity.
+            # Pre-ship, Amazon renders a not-yet-minted second package under the first one's
+            # shipmentId. When the real
+            # id appeared, the exact key still named the right row, but "its id is still on the
+            # page" read as a re-ordered page and appended a THIRD full-cost row.
+            and len(package_to_existing.get((record["order_id"], hit_pid), [])) == 1
         )
         if hit is not None and not displaced:
             row_number, existing_row = hit
@@ -994,6 +1051,7 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
         written_rows.append(row_number)
         updates += 1
 
+    appends = _inherit_hand_edited_card_fields(worksheet, appends, existing, protected)
     if appends:
         # Write at an explicit column-A range rather than worksheet.append_rows(): an append that
         # auto-detects the "table" to append after once anchored to the wrong column (observed

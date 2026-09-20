@@ -267,3 +267,22 @@ class TestTheCli:
         assert main(["--forget", "X1", "--field", "nope"]) == 2
         assert main(["--forget", "X1", "--field", "cashback_rate"]) == 0
         assert "Released 1" in capsys.readouterr().out and hand_edits.protected(db) == {}
+
+
+    def test_a_split_rows_new_box_inherits_the_hand_typed_rate_and_is_protected(self, ws, db, tmp_path,
+                                                                                monkeypatch, logs_dir):
+        # a 6% typed on Shipment 1 must reach the split's new Shipment 2, recorded
+        # as a hand edit of that row too (clearing it later restores the run's own 4%).
+        monkeypatch.setattr(ledger_sync, "_get_worksheet", lambda: ws)
+        LedgerCellWriter(opener=lambda: ws, logs_dir=logs_dir).write_cell(KEY, "cashback_rate", "0.06")
+        common = {"retailer": "Costco", "quantity": "1", "cost_per_item": "100", "total_cost": "100",
+                  "cashback_rate": "0.04", "card_last4": "4351", "status": "shipped"}
+        csv_path = write_csv_file(tmp_path / "orders.csv",
+                                  {**KEY, **common, "tracking_number": "1Z1"},
+                                  {**KEY, "shipment": "2", **common, "tracking_number": "1Z2"})
+        ledger_sync.sync_csv_to_ledger(csv_path)
+        by_shipment = {str(r["shipment"]): r for r in db.fetch_rows()}
+        assert by_shipment["1"]["cashback_rate"] == 0.06 and by_shipment["2"]["cashback_rate"] == 0.06
+        key2 = (KEY["order_id"], KEY["order_date"], KEY["item_name"], "2")
+        assert "cashback_rate" in hand_edits.protected(db).get(key2, set())
+        assert hand_edits.previous_value(db, key2, "cashback_rate") == "0.04"
