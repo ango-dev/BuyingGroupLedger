@@ -91,6 +91,11 @@ ALIASES: dict[str, tuple[str, ...]] = {
 _DISPLAY_TO_FIELD = {h.lower().replace(" ", ""): f for f, h in zip(FIELDNAMES, HEADER)}
 
 REQUIRED = ("order_date", "item_name", "total_cost")
+
+
+class ImportRefused(ValueError):
+    """A mapping or a file the import cannot proceed with; the CLI prints it and exits 2, the
+    dashboard's importer shows it (web/importer.py)."""
 _DATE_SLASH = re.compile(r"^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\s*$")
 _DATE_ISO = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})")
 _LAST4 = re.compile(r"(\d{4})\s*$")
@@ -149,7 +154,7 @@ def map_headers(source_headers: list[str], overrides: dict[str, str]) -> tuple[d
             target = overrides[h]
             field = target if target in FIELDNAMES or target == "source_profit" else _DISPLAY_TO_FIELD.get(norm(target))
             if field is None:
-                raise SystemExit(f"--map {h!r}={target!r}: {target!r} is not a ledger column")
+                raise ImportRefused(f"--map {h!r}={target!r}: {target!r} is not a ledger column")
             mapping[h] = field
             continue
         field = by_norm.get(norm(h))
@@ -169,10 +174,10 @@ def detect_date_order(values: list[str]) -> str | None:
             continue
         a, b = int(m.group(1)), int(m.group(2))
         if a > 12 and b > 12:
-            raise SystemExit(f"date {v!r} is impossible in either day/month order")
+            raise ImportRefused(f"date {v!r} is impossible in either day/month order")
         found = "dmy" if a > 12 else ("mdy" if b > 12 else None)
         if found and verdict and found != verdict:
-            raise SystemExit(f"the file mixes day/month orders ({v!r} contradicts an earlier date)")
+            raise ImportRefused(f"the file mixes day/month orders ({v!r} contradicts an earlier date)")
         verdict = verdict or found
     return verdict
 
@@ -459,7 +464,11 @@ def main(argv=None) -> int:
     overrides = dict(m.split("=", 1) for m in args.map)
     if args.source_profit:
         overrides[args.source_profit] = "source_profit"
-    mapping, unmapped = map_headers(headers, overrides)
+    try:
+        mapping, unmapped = map_headers(headers, overrides)
+    except ImportRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
     print(f"Source: {args.csv} -- {len(raw_rows)} row(s), {len(headers)} column(s)\n")
     print("Column mapping:")
     for h in headers:
@@ -475,7 +484,11 @@ def main(argv=None) -> int:
     # dates
     inverse = {f: h for h, f in mapping.items()}
     date_values = [clean(r.get(inverse[f], "")) for r in raw_rows for f in ("order_date", "delivery_date", "payout_date") if f in inverse]
-    order = args.date_format or detect_date_order(date_values)
+    try:
+        order = args.date_format or detect_date_order(date_values)
+    except ImportRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
     if order is None and any(_DATE_SLASH.match(v) for v in date_values):
         print("\nREFUSED: every slash date in the file could be month/day OR day/month. Say which with "
               "--date-format mdy|dmy.", file=sys.stderr)

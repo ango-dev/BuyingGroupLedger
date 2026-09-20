@@ -30,6 +30,8 @@ from scripts import backup as backup_module
 
 from web import auth as auth_module
 from web import failures as failures_module
+from web import importer
+from web.ledger_writer import RunInProgress
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
 from web.audit_view import AuditCache, audit_grids, audit_key, key_of, run_audit
@@ -396,7 +398,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         is no badge. No ledger yet, or a check that blows up, leaves the badge off rather than
         the page down."""
         loud = loud_summary()
-        out = {"activity": sum(loud[kind]["count"] for kind in LOUD_KINDS), "audit": 0, "recon": 0}
+        out = {"activity": sum(loud[kind]["count"] for kind in LOUD_KINDS), "audit": 0, "recon": 0,
+               "import": importer.staged_count(data_dir)}  # the staging sheet's rows still to import
         try:
             snapshot = reader.load()
         except Exception:  # noqa: BLE001
@@ -478,6 +481,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     from web.queries import CHOICE_FIELDS
 
     templates.env.globals["DATE_FIELDS"] = DATE_FIELDS
+    templates.env.globals["STAGING_FIELDS"] = importer.STAGING_FIELDS
     templates.env.globals["CHOICE_FIELDS"] = CHOICE_FIELDS
     templates.env.globals["LINK_FIELDS"] = LINK_FIELDS
     templates.env.globals["MONEY_FIELDS"] = MONEY_FIELDS
@@ -1073,7 +1077,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     def nav_tools() -> list[tuple[str, list[tuple[str, str]]]]:
         """The header's Tools menu: every tool this backend shows, grouped in GROUPS order."""
-        out = []
+        # The importer is a page of its own (Tools > Import > Run importer).
+        out = [("Import", [("import", "Run importer")])]
         for group in tools_module.GROUPS:
             items = [(t.key, t.title) for t in tools_module.TOOLS if t.group == group]
             if group == "Accounts":
@@ -1377,6 +1382,216 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         base = {"request": request, "backend": reader.backend, "source": "", "loaded_at": None,
                 "schema_matches": True, "heartbeat": heartbeat()}
         return templates.TemplateResponse(request=request, name=name, context={**base, **context})
+
+
+    # ---- Tools > Import: a CSV mapped onto the ledger, with a staging sheet (web/importer.py) --------------
+    def ledger_index_now() -> dict:
+        try:
+            return importer.ledger_index(reader.load().rows)
+        except Exception:  # noqa: BLE001 -- no ledger yet: nothing to compare against
+            return {"keys": set(), "orders": set(), "trackings": {}}
+
+    def ledger_choices_now() -> dict:
+        try:
+            return cell_choices(reader.load().rows)
+        except Exception:  # noqa: BLE001
+            return {"values": {}, "card_pairs": []}
+
+    def import_page(request: Request, *, error: str = "", notice: str = "", status: int = 200):
+        batch = importer.live_batch(data_dir)
+        staging = batch.load_staging() if batch else None
+        rows = staging.staged if staging else []
+        response = page_no_snapshot(
+            request, "tools_import.html", wide=bool(rows), batch=batch, staging=staging, rows=rows,
+            gaps={r.id: importer.gap_fields(r) for r in rows}, gap_names={r.id: importer.gaps_for(r) for r in rows},
+            editable=True, can_import=writer is not None, choices=importer.choices_for(staging, ledger_choices_now()),
+            unfinished=bool(batch and staging is None), error=error, notice=notice,
+            step="staging" if rows else ("map" if batch else "upload"))
+        response.status_code = status
+        return response
+
+    def staged_from_batch(batch: importer.Batch) -> tuple[importer.Staging, list[str]]:
+        """The staging sheet a batch's mapping produces (not yet saved), and the orders whose
+        order-level amounts were prorated."""
+        mapping = batch.load_mapping() or {}
+        _headers, raw = importer.read_source(batch)
+        rows = importer.stage_rows(raw, mapping.get("mapping") or {}, date_order=str(mapping.get("date_order") or "mdy"),
+                                   profile=str(mapping.get("profile") or ""))
+        touched = importer.prorate_order_level(rows)
+        staging = importer.Staging(id=batch.id, created_at=clock().isoformat(timespec="seconds"),
+                                   source_name=batch.source_name, date_order=str(mapping.get("date_order") or "mdy"), rows=rows)
+        return staging, touched
+
+    @app.get("/tools/import", response_class=HTMLResponse)
+    def tools_import(request: Request):
+        return import_page(request, notice=request.query_params.get("notice", ""), error=request.query_params.get("error", ""))
+
+    @app.get("/tools/import/template.csv")
+    def tools_import_template():
+        return Response(content="\ufeff" + importer.template_csv(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="ledger_import_template.csv"'})
+
+    @app.post("/tools/import/upload", response_class=HTMLResponse)
+    async def tools_import_upload(request: Request, source: UploadFile = File(...)):
+        payload = await source.read()
+        try:
+            batch = importer.new_batch(data_dir, source.filename or "upload.csv", payload, clock=clock)
+        except importer.StagingError as exc:
+            return import_page(request, error=str(exc), status=409 if "already in progress" in str(exc) else 400)
+        act("import", f"Import: {batch.source_name} uploaded ({len(payload)} bytes)", {"batch": batch.id})
+        return RedirectResponse(url="/tools/import/map", status_code=303)
+
+    def import_map_page(request: Request, batch: importer.Batch, *, error: str = "", status: int = 200):
+        mapping = batch.load_mapping() or {}
+        columns = importer.source_columns(batch, mapping.get("mapping") or None)
+        suggested = {c["header"]: c["suggested"] for c in columns if c["suggested"]}
+        try:
+            verdict, samples = importer.detect_order(batch, mapping.get("mapping") or suggested)
+        except importer.StagingError as exc:
+            verdict, samples = None, []
+            error = error or str(exc)
+        response = page_no_snapshot(request, "tools_import_map.html", batch=batch, columns=columns,
+                                    targets=importer.target_options(), verdict=verdict, samples=samples,
+                                    date_order=str(mapping.get("date_order") or ""), profile=str(mapping.get("profile") or ""),
+                                    profiles=settings_form.profile_labels(), error=error, step="map")
+        response.status_code = status
+        return response
+
+    @app.get("/tools/import/map", response_class=HTMLResponse)
+    def tools_import_map(request: Request):
+        batch = importer.live_batch(data_dir)
+        if batch is None or batch.load_staging() is not None:
+            return RedirectResponse(url="/tools/import", status_code=303)
+        return import_map_page(request, batch)
+
+    @app.post("/tools/import/map", response_class=HTMLResponse)
+    async def tools_import_map_save(request: Request):
+        batch = importer.live_batch(data_dir)
+        if batch is None or batch.load_staging() is not None:
+            return RedirectResponse(url="/tools/import", status_code=303)
+        form = await request.form()
+        headers, _rows = importer.read_source(batch)
+        try:
+            mapping = importer.mapping_from_form(headers, form)
+            date_order = str(form.get("date_order", "") or "").strip().lower()
+            if date_order not in ("mdy", "dmy"):
+                verdict, _samples = importer.detect_order(batch, mapping)
+                date_order = verdict or "mdy"
+        except importer.StagingError as exc:
+            return import_map_page(request, batch, error=str(exc), status=400)
+        batch.save_mapping(mapping, date_order=date_order, profile=str(form.get("profile", "") or "").strip())
+        return RedirectResponse(url="/tools/import/preview", status_code=303)
+
+    @app.get("/tools/import/preview", response_class=HTMLResponse)
+    def tools_import_preview(request: Request):
+        batch = importer.live_batch(data_dir)
+        if batch is None or batch.load_staging() is not None:
+            return RedirectResponse(url="/tools/import", status_code=303)
+        if not (batch.load_mapping() or {}).get("mapping"):
+            return RedirectResponse(url="/tools/import/map", status_code=303)
+        staging, touched = staged_from_batch(batch)
+        buckets = importer.classify(staging.rows, ledger_index_now())
+        bucket_of = {r.id: name for name, rows in buckets.items() for r in rows}
+        warnings = [(r.source_row, w) for r in staging.rows for w in r.warnings]
+        return page_no_snapshot(request, "tools_import_preview.html", batch=batch, staging=staging,
+                                counts={k: len(v) for k, v in buckets.items()}, bucket_of=bucket_of,
+                                gap_names={r.id: importer.gaps_for(r) for r in staging.rows},
+                                warnings=warnings[:40], warning_total=len(warnings), touched=touched,
+                                rows=staging.rows[:200], editable=writer is not None, step="preview")
+
+    @app.post("/tools/import/run", response_class=HTMLResponse)
+    def tools_import_run(request: Request):
+        """Stage every row of the mapped file, then import the complete ones (the same commit the
+        sheet's button runs)."""
+        batch = importer.live_batch(data_dir)
+        if batch is None or batch.load_staging() is not None:
+            return RedirectResponse(url="/tools/import", status_code=303)
+        staging, _touched = staged_from_batch(batch)
+        if writer is None:
+            # A view-only backend: the sheet holds everything, nothing lands (as /orders/add refuses).
+            importer.classify(staging.rows, ledger_index_now())  # the rows' notes, at least
+            batch.save_staging(staging)
+            act("import", f"Import: {len(staging.staged)} row(s) staged from {batch.source_name}; editing is off", {"batch": batch.id})
+            return RedirectResponse(url="/tools/import?" + urlencode({"notice": f"{len(staging.staged)} row(s) staged; editing is off on this "
+                                                                            "backend (a CSV snapshot), so nothing was imported"}), status_code=303)
+        batch.save_staging(staging)
+        return tools_import_commit(request)
+
+    @app.post("/tools/import/cell", response_class=HTMLResponse)
+    async def tools_import_cell(request: Request):
+        """One cell of the staging sheet (the grid's inline editor); always 200 with the cell,
+        an error riding in its data-error, as the Orders and Taxes grids answer."""
+        form = await request.form()
+        entry_id, field, value = str(form.get("entry_id", "")), str(form.get("field", "")), str(form.get("value", ""))
+        expected = form.get("expected")
+        batch = importer.live_batch(data_dir)
+        staging = batch.load_staging() if batch else None
+        row, error = None, ""
+        if staging is None:
+            error = "no staging sheet (reload the page)"
+        else:
+            try:
+                row = importer.write_staged_cell(staging, entry_id, field, value, expected=None if expected is None else str(expected))
+            except KeyError:
+                error = "no such row (the sheet is stale: reload the page)"
+            except importer.StagingError as exc:
+                error = str(exc)
+                try:
+                    row = staging.row(entry_id)
+                except KeyError:
+                    row = None
+            if not error:
+                batch.save_staging(staging)
+        return page_no_snapshot(request, "_import_cell.html", row=row, field=field, entry_id=entry_id,
+                                gaps=importer.gap_fields(row) if row else set(), editable=True, error=error)
+
+    @app.post("/tools/import/rows/delete")
+    async def tools_import_rows_delete(request: Request):
+        form = await request.form()
+        ids = [str(v) for v in form.getlist("sel")]
+        batch = importer.live_batch(data_dir)
+        staging = batch.load_staging() if batch else None
+        if staging is None or not ids:
+            return RedirectResponse(url="/tools/import", status_code=303)
+        removed = importer.remove_rows(staging, ids)
+        batch.save_staging(staging)
+        act("import", f"Import: {len(removed)} staged row(s) dropped", {"batch": batch.id, "rows": [r.id for r in removed]})
+        return RedirectResponse(url="/tools/import?" + urlencode({"notice": f"{len(removed)} row(s) dropped from the staging sheet"}), status_code=303)
+
+    @app.post("/tools/import/commit", response_class=HTMLResponse)
+    def tools_import_commit(request: Request):
+        batch = importer.live_batch(data_dir)
+        staging = batch.load_staging() if batch else None
+        if staging is None:
+            return RedirectResponse(url="/tools/import", status_code=303)
+        if writer is None:
+            return import_page(request, error="editing is off: this backend is a CSV snapshot", status=409)
+        try:
+            result = importer.import_complete(staging, writer, ledger_index_now(), save=batch.save_staging, clock=clock)
+        except RunInProgress as exc:
+            return import_page(request, error=str(exc), status=423)
+        reader.load(force=True)
+        act("import", f"Import: {result.notice()} ({batch.source_name})",
+            {"batch": batch.id, "imported": [r.cells.get("order_id", "") for r in result.imported],
+             "duplicates": len(result.duplicates), "refused": len(result.refused), "staged": result.remaining})
+        return RedirectResponse(url="/tools/import?" + urlencode({"notice": result.notice()}), status_code=303)
+
+    @app.post("/tools/import/discard")
+    def tools_import_discard(request: Request):
+        batch = importer.live_batch(data_dir)
+        if batch is not None:
+            act("import", f"Import: {batch.source_name} discarded", {"batch": batch.id})
+            batch.discard()
+        return RedirectResponse(url="/tools/import?" + urlencode({"notice": "the import was discarded"}), status_code=303)
+
+    @app.get("/tools/import/staging.csv")
+    def tools_import_staging_csv():
+        batch = importer.live_batch(data_dir)
+        staging = batch.load_staging() if batch else None
+        if staging is None:
+            raise HTTPException(status_code=404)
+        return Response(content="\ufeff" + importer.staging_csv(staging), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="ledger_import_staging.csv"'})
 
     # The Backup page moved INTO Settings; the old address still lands there.
     @app.get("/backup")

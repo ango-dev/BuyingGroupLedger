@@ -1,0 +1,5 @@
+{#- The importer's four steps, the current one marked. -#}
+{% set steps = [('upload', 'Upload'), ('map', 'Map columns'), ('preview', 'Preview'), ('staging', 'Staging sheet')] %}
+<ol class="import-steps">
+  {% for key, label in steps %}<li class="{{ 'current' if key == step }}{{ ' done' if steps.index((key, label)) < steps.index((step, dict(steps)[step])) }}">{{ label }}</li>{% endfor %}
+</ol>

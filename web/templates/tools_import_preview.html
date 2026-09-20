@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Import · Preview{% endblock %}
+{% block content %}
+<h1>Import <span class="muted">· Preview</span></h1>
+<p class="muted small lead">What running the import does with <strong>{{ batch.source_name }}</strong>. Nothing is written until you run it.</p>
+{% include "_import_steps.html" %}
+<section class="tiles stats preview-counts">
+  <div class="tile"><div class="label">Complete</div><div class="value">{{ counts.complete }}</div><div class="hint">land on the ledger</div></div>
+  <div class="tile"><div class="label">Incomplete</div><div class="value">{{ counts.incomplete }}</div><div class="hint">to the staging sheet</div></div>
+  <div class="tile"><div class="label">Open orders</div><div class="value">{{ counts.staged_open }}</div><div class="hint">staged: the scrapers own them</div></div>
+  <div class="tile"><div class="label">Near duplicates</div><div class="value">{{ counts.staged_near }}</div><div class="hint">staged: check them</div></div>
+  <div class="tile"><div class="label">Duplicates</div><div class="value">{{ counts.duplicate }}</div><div class="hint">already on the ledger: skipped</div></div>
+</section>
+{% if not editable %}<div class="banner warn">Editing is off on this backend (a CSV snapshot): every row goes to the staging sheet and nothing is imported.</div>{% endif %}
+{% if touched %}<p class="muted small">Shipping, tax, gift card or rewards given as the order's total on every row were split by Total Cost for: {{ touched | join(', ') }}.</p>{% endif %}
+{% if warnings %}
+<details class="panel"><summary>{{ warning_total }} note(s) on the rows</summary>
+  <ul class="small">{% for n, w in warnings %}<li>row {{ n }}: {{ w }}</li>{% endfor %}{% if warning_total > warnings | length %}<li class="muted">… and {{ warning_total - warnings | length }} more</li>{% endif %}</ul>
+</details>
+{% endif %}
+<div class="sheet">
+<table class="grid compact preview">
+  <thead><tr><th>Row</th><th>Result</th><th>Order ID</th><th>Order Date</th><th>Item</th><th>Status</th><th>Qty</th><th>Cost/item</th><th>Still needed</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    {% set b = bucket_of.get(r.id, '') %}
+    <tr>
+      <td class="muted">{{ r.source_row }}</td>
+      <td><span class="chip {{ 'ok' if b == 'complete' else 'gap' if b == 'incomplete' else 'note' }}">{{ {'complete': 'imports', 'incomplete': 'staged', 'staged_open': 'staged: open', 'staged_near': 'staged: near duplicate', 'duplicate': 'skipped: duplicate'}.get(b, b) }}</span></td>
+      <td class="mono">{{ r.cells.order_id }}</td><td class="mono">{{ r.cells.order_date }}</td><td>{{ r.cells.item_name }}</td><td>{{ r.cells.status }}</td><td class="num">{{ r.cells.quantity }}</td><td class="num">{{ r.cells.cost_per_item }}</td>
+      <td>{% for g in gap_names[r.id] %}<span class="chip gap">{{ g }}</span>{% endfor %}</td>
+    </tr>
+  {% endfor %}
+  {% if staging.rows | length > rows | length %}<tr><td colspan="9" class="muted">… {{ staging.rows | length - rows | length }} more row(s)</td></tr>{% endif %}
+  </tbody>
+</table>
+</div>
+<div class="inline-form">
+  <form method="post" action="/tools/import/run" data-confirm="Run the import? The complete rows go onto the ledger now (their cells kept as hand edits); the rest wait on the staging sheet."><button type="submit" class="primary">Run the import</button></form>
+  <a class="button" href="/tools/import/map">Back to the mapping</a>
+  <form method="post" action="/tools/import/discard" data-confirm="Discard the uploaded file?"><button type="submit" class="danger">Discard</button></form>
+</div>
+{% include "_confirm_dialog.html" %}
+{% endblock %}

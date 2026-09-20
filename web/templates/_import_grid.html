@@ -1,0 +1,27 @@
+{#- The staging sheet (Tools > Import): the rows the import could not land yet, as a GRID like
+    the Orders table (static/edit.js) -- click, type, Enter; ranges; Ctrl+C / Ctrl+V; undo; row
+    numbers select rows and Delete drops them after one confirmation. A cell posts to
+    data-cell-url and gets the <td> back. The first column says what each row still needs. -#}
+<form id="bulk" method="post" action="/tools/import/rows/delete" data-confirm="Drop every selected row from the staging sheet? They are not imported, and the sheet does not keep them.">
+  <div class="muted count">{{ rows | length }} staged row(s) · <span id="sel-count">0</span> selected {% with id='import-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}</div>
+  <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Drop the selected row from the staging sheet?" data-confirm-many="Drop the {n} selected rows from the staging sheet?">Drop selected</button>
+  <div class="sheet">
+  <table class="grid compact sheetlike imports" data-cell-url="/tools/import/cell">
+    <thead><tr><th class="rownum" title="select / unselect every row"><input type="checkbox" id="sel-all" hidden aria-label="select all">#</th><th class="missing">Still needed</th>{% for f in STAGING_FIELDS %}<th class="col-{{ f }}">{{ header_of(f) }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="rownum muted" title="row {{ loop.index }} (source row {{ r.source_row }}) — click to select"><input type="checkbox" name="sel" value="{{ r.id }}" hidden aria-label="select row {{ loop.index }}">{{ loop.index }}</td>
+        <td class="missing">
+          {%- for g in gap_names[r.id] %}<span class="chip gap">{{ g }}</span>{% endfor -%}
+          {%- if r.note %}<span class="chip note" title="{{ r.note }}">{{ 'open order' if r.note.startswith('open order') else 'duplicate' if r.note.startswith('already') else 'check: near duplicate' }}</span>{% endif -%}
+          {%- for w in r.warnings %}<span class="chip warn" title="{{ w }}">{{ w[:38] }}{{ '…' if w | length > 38 }}</span>{% endfor -%}
+        </td>
+        {% for field in STAGING_FIELDS %}{% with row=r, field=field, entry_id=r.id, gaps=gaps[r.id], error='' %}{% include "_import_cell.html" %}{% endwith %}{% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</form>
+<script type="application/json" id="cell-choices">{{ choices | tojson }}</script>

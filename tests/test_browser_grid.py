@@ -256,3 +256,36 @@ def test_a_clicked_month_bar_shows_no_focus_ring(served, page):
             break
     assert page.evaluate("document.activeElement.classList.contains('bar')")
     assert page.evaluate("getComputedStyle(document.activeElement.querySelector('.hit')).fill") != "rgba(0, 0, 0, 0)"
+
+
+def test_the_staging_sheet_edits_like_the_orders_grid(served, page, client):
+    """Tools > Import's staging sheet (web/importer.py) is driven by the same edit.js as Orders:
+    click-type-Enter writes a cell (and the gap outline goes), Ctrl+Z undoes it, Space toggles the
+    tick cell, a row number plus Delete drops the row through the dialog."""
+    csv_text = "Order Number,Date,Item,Qty,Status\nX1,3/11/2026,Widget,2,paid\n"
+    client.post("/tools/import/upload", files={"source": ("old.csv", csv_text.encode(), "text/csv")}, follow_redirects=False)
+    client.post("/tools/import/map", data={"map.0": "order_id", "map.1": "order_date", "map.2": "item_name", "map.3": "quantity",
+                                          "map.4": "status", "date_order": "", "profile": ""}, follow_redirects=False)
+    assert client.post("/tools/import/run", follow_redirects=False).status_code == 303
+    page.set_viewport_size({"width": 1400, "height": 800})
+    page.goto(f"{served}/tools/import")
+    cell = 'td[data-field="retailer"][data-entry-id="r0001-1"]'
+    assert page.evaluate(f"document.querySelector('{cell}').classList.contains('gap')")
+    page.click(cell)
+    page.keyboard.type("Costco")
+    page.keyboard.press("Enter")
+    page.wait_for_function(f"document.querySelector('{cell}').getAttribute('data-raw') === 'Costco'", timeout=3000)
+    assert not page.evaluate(f"document.querySelector('{cell}').classList.contains('gap')")
+    page.keyboard.press("Control+z")
+    page.wait_for_function(f"document.querySelector('{cell}').getAttribute('data-raw') === ''", timeout=3000)
+    tick = 'td[data-field="tracking_submitted"][data-entry-id="r0001-1"]'
+    page.click(tick)
+    page.keyboard.press("Space")
+    page.wait_for_function(f"document.querySelector('{tick}').getAttribute('data-raw') === 'TRUE'", timeout=3000)
+    page.click("td.rownum")
+    page.keyboard.press("Delete")
+    page.wait_for_selector("dialog#settings-confirm[open]", timeout=3000)
+    page.click('dialog#settings-confirm button[value="ok"]')
+    page.wait_for_url("**/tools/import**", timeout=5000)
+    page.wait_for_selector('form[action="/tools/import/upload"]', timeout=5000)
+    assert page.errors == []

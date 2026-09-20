@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% from "_dropzone.html" import dropzone %}
+{% block title %}Import{% endblock %}
+{% block content %}
+<h1>Import</h1>
+<p class="muted small lead">Bring order history in from a CSV: map its columns to the ledger's, or download the template and fill it in. A row lands only when it has everything the Audit page asks of it; the rest wait here, on the staging sheet, until you fill them in.</p>
+{% if notice %}<div class="banner ok">{{ notice }}</div>{% endif %}
+{% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
+{% include "_import_steps.html" %}
+
+{% if rows %}
+<section class="panel import-actions">
+  <div class="inline-form">
+    <span><strong>{{ staging.source_name }}</strong> <span class="muted small">— uploaded {{ staging.created_at[:16].replace('T', ' ') }} · {{ rows | length }} row(s) still to import</span></span>
+    <form method="post" action="/tools/import/commit" data-confirm="Import every row that is complete now? Each becomes a row of the ledger, its cells kept as hand edits."><button type="submit" class="primary" {{ '' if can_import else 'disabled' }}>Import the complete rows</button></form>
+    <a class="button" href="/tools/import/staging.csv" title="the staged rows in the ledger's columns: fix them in a spreadsheet, then upload the file again">Download the staging CSV</a>
+    <form method="post" action="/tools/import/discard" data-confirm="Discard the staging sheet and its source file? The rows already imported stay on the ledger."><button type="submit" class="danger">Discard</button></form>
+  </div>
+  {% if not can_import %}<p class="muted small">Editing is off on this backend (a CSV snapshot): the sheet can be filled in, but nothing can be imported.</p>{% endif %}
+  <p class="muted small">A cell outlined in orange is still needed for the row's status. <em>open order</em>: the scrapers own ordered and shipped orders, so the row waits for you. <em>near duplicate</em>: the ledger already holds this order under another key, or another order holds this tracking number.</p>
+</section>
+{% include "_import_grid.html" %}
+
+{% elif unfinished %}
+<section class="panel">
+  <p>An upload, <strong>{{ batch.source_name }}</strong>, is waiting for its column mapping.</p>
+  <div class="inline-form">
+    <a class="button primary" href="/tools/import/map">Continue</a>
+    <form method="post" action="/tools/import/discard" data-confirm="Discard the uploaded file?"><button type="submit" class="danger">Discard</button></form>
+  </div>
+</section>
+
+{% else %}
+<section class="panel tool-card">
+  <header><h2>Upload a CSV</h2></header>
+  <form method="post" action="/tools/import/upload" enctype="multipart/form-data" class="tool-form">
+    {{ dropzone('source', '.csv,text/csv', 'a CSV export of your spreadsheet (UTF-8)', autosubmit=True) }}
+  </form>
+  <p class="muted small">Any columns: the next screen maps them onto the ledger's. Or <a href="/tools/import/template.csv">download the template</a>, fill it in and upload that.</p>
+</section>
+{% endif %}
+{% include "_confirm_dialog.html" %}
+{% endblock %}

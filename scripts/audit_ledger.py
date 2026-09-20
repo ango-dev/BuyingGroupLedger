@@ -33,7 +33,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping
 
 from models.order import (
     FIELDNAMES, MONEY_FREE_STATUSES, RETIRED_STATUSES, STATUSES, TERMINAL_STATUSES,
@@ -1275,6 +1275,39 @@ GIFT_CARD_HINTS = ("gift card", "egift", "e-gift", "balance reload")
 GIFT_CARD_EXEMPT = ("Tracking Number", "Delivery Address", "Delivery Date")
 
 
+def mandatory_gaps(cells: "Mapping[str, str]") -> tuple[list[str], list[str]]:
+    """The mandatory rule as ONE function, so the audit and the dashboard's importer (web/importer.py)
+    cannot drift: `cells` keyed by FIELD name (models.order.FIELDNAMES) with display text as values;
+    returns (missing, unticked) as DISPLAY names -- the cells that must hold a value for the row's
+    status but are blank, and the cells that must be ticked but are not. MANDATORY_ALWAYS,
+    MANDATORY_COSTED (skipped for cancelled / superseded), MANDATORY_BY_STAGE and
+    MANDATORY_TICKED_BY_STAGE, with GIFT_CARD_EXEMPT and the unrouted / gift-card tick rule."""
+    from config.warehouses import is_deliberately_unrouted
+
+    def cell(name: str) -> str:
+        return str(cells.get(_FIELD_FOR_HEADER.get(name, name), "") or "").strip()
+
+    status = cell("Status").lower()
+    required = list(MANDATORY_ALWAYS)
+    if status not in ("cancelled", "superseded"):
+        required += MANDATORY_COSTED
+    required += MANDATORY_BY_STAGE.get(status, ())
+    ticked = list(MANDATORY_TICKED_BY_STAGE.get(status, ()))
+    group = cell("Buying Group")
+    unrouted = is_deliberately_unrouted(group)
+    gift_card = unrouted or any(h in cell("Item Name").lower() for h in GIFT_CARD_HINTS)
+    if gift_card:
+        required = [name for name in required if name not in GIFT_CARD_EXEMPT]
+        if unrouted or not group:
+            ticked = []  # nothing to submit; a card sold to a group keeps the tick requirement
+    missing = [name for name in required if not cell(name)]
+    unticked = [name for name in ticked if cell(name).lower() not in ("true", "1", "yes", "checked")]
+    return missing, unticked
+
+
+_FIELD_FOR_HEADER = {h: f for f, h in zip(FIELDNAMES, HEADER)}
+
+
 @check("mandatory_by_stage")
 def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
     """Every row carries its identity and, unless cancelled / superseded, its cost inputs, profile,
@@ -1294,31 +1327,21 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
             return str(sheet.cell(grid, row_number, name)).strip()
 
         status = cell("Status").lower()
-        required = list(MANDATORY_ALWAYS)
-        if status not in ("cancelled", "superseded"):
-            required += MANDATORY_COSTED
-        required += MANDATORY_BY_STAGE.get(status, ())
-        ticked = list(MANDATORY_TICKED_BY_STAGE.get(status, ()))
         group = cell("Buying Group")
         unrouted = is_deliberately_unrouted(group)
         gift_card = unrouted or any(h in cell("Item Name").lower() for h in GIFT_CARD_HINTS)
-        if gift_card:
-            required = [name for name in required if name not in GIFT_CARD_EXEMPT]
-            if unrouted or not group:
-                ticked = []  # nothing to submit; a card sold to a group keeps the tick requirement
-        missing = [name for name in required if not cell(name)]
+        submitted = cell("Tracking Submitted").lower() in ("true", "1", "yes", "checked")
+        missing, unticked = mandatory_gaps({f: cell(h) for f, h in zip(FIELDNAMES, HEADER)})
         # The remedy beside the finding: the receipts backfill under Tools -> Checks captures a receipt a
         # terminal order never got.
         missing = ["Receipt Link (the receipts backfill under Tools -> Checks captures it)" if name == "Receipt Link" else name
                    for name in missing]
-        missing += [f"{name} (not ticked)" for name in ticked
-                    if cell(name).lower() not in ("true", "1", "yes", "checked")]
+        missing += [f"{name} (not ticked)" for name in unticked]
         if missing:
             fails.append(f"row {row_number} ({status or 'no status'}): missing {', '.join(missing)}")
         # IMPOSSIBLE combinations. A ticked Tracking
         # Submitted needs a number to have been submitted, unless the row is a gift card sold to a
         # group (the tick is the card's submission); an ordered row has nothing to submit at all.
-        submitted = cell("Tracking Submitted").lower() in ("true", "1", "yes", "checked")
         impossible = []
         if submitted and status == "ordered":
             impossible.append("Tracking Submitted ticked on an ordered row -- nothing has shipped")

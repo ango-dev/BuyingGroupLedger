@@ -528,6 +528,36 @@ holds what the ledger cannot know:
 Everything is stored per year in `data/tax_inputs.json`. It is a summary for a preparer, not tax
 advice — every line says what it holds. Nothing on the page writes the ledger.
 
+### Importing order history (Tools → Import → Run importer)
+
+Upload a CSV of past orders -- any columns. The next screen maps each of its columns onto a ledger
+column (pre-filled from the header names; *ignore* leaves a column unread), asks which way round
+slash dates are when the file does not say, and takes a profile for rows that name none. Or
+download the template (the ledger's own header) and fill that in. The preview says what the run
+will do with every row, and nothing is written until you run it.
+
+**What lands.** A row goes onto the ledger only when it carries everything the Audit page's
+`mandatory_by_stage` check asks of a row with its status -- the same function decides both, so the
+importer can never land a row the audit would fail (COGS and Total Profit are computed, never
+asked; Total Cost follows Quantity × Cost Per Item). Each landed row is written through the Orders
+page's own add-row path: refused while a scheduled run holds the lock, refused when its key is
+already on the ledger (reported as a duplicate), every cell kept as a hand edit so a later scrape
+leaves it alone.
+
+**What waits.** Everything else goes to the **staging sheet**: rows with a gap (the missing cells
+outlined in orange, named in the first column), rows whose status is still *ordered* or *shipped*
+(the scrapers own open orders), and rows that look like an order the ledger already holds under
+another item name or shipment, or whose tracking number another order holds. The sheet is the
+Orders grid -- click, type, Enter; ranges; paste; undo; the row numbers select and Delete drops --
+and *Import the complete rows* moves whatever is complete now onto the ledger. The sheet lives in
+`data/imports/<stamp>/` (`source.csv`, `mapping.json`, `staging.json`), so every backup carries it
+and the page finds it again after a restart; the nav's Tools menu counts the rows still waiting.
+One import at a time: finish or discard it before uploading another. *Download the staging CSV*
+gives the waiting rows in the ledger's columns to fix in a spreadsheet and upload again.
+
+`python -m scripts.import_history` remains for the command line; it is stricter (it refuses open
+rows and invents nothing either, but reconciles a profit column before writing).
+
 ### The Settings page
 
 An **Advanced** panel at the foot of the page, behind a warning, holds the settings nobody should

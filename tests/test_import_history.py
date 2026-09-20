@@ -19,7 +19,7 @@ class TestHeaderMapping:
     def test_an_override_wins_and_a_bad_target_is_refused(self):
         m, _ = ih.map_headers(["Net"], {"Net": "source_profit"})
         assert m["Net"] == "source_profit"
-        with pytest.raises(SystemExit):
+        with pytest.raises(ih.ImportRefused):  # an exception, so the dashboard's importer can show it
             ih.map_headers(["X"], {"X": "Nonsense Column"})
 
 
@@ -30,7 +30,7 @@ class TestDates:
         assert ih.detect_date_order(["3/11/2026", "4/5/2026"]) is None   # never disambiguated
 
     def test_mixed_orders_are_refused(self):
-        with pytest.raises(SystemExit):
+        with pytest.raises(ih.ImportRefused):
             ih.detect_date_order(["21/2/2026", "2/21/2026"])
 
     def test_to_iso(self):
