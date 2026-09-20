@@ -309,7 +309,7 @@ class TestTaxesPage:
         assert 'class="num actions"' not in body and "del-expense-" not in body  # no per-row buttons
         assert "Edit Expense" not in body and 'action="/taxes/expense?year=2026"' in body  # the form only adds
         assert '<details class="add-row" id="expense-form" >' in body  # folded above the list, closed by default
-        assert body.index('<details class="add-row"') < body.index('class="grid compact expenses sheetlike"')
+        assert body.index('<details class="add-row"') < body.index('class="grid compact expenses sheetlike stacked"')
         assert body.count('name="sel"') == 2 and 'id="sel-all"' in body and 'id="delete-selected"' in body
         assert 'action="/taxes/expenses/delete?year=2026" data-confirm=' in body and 'data-confirm-many="Delete the {n} selected expenses?' in body
         assert f'data-field="amount" data-entry-id="{ids[0]}" data-raw="12.50"' in body
@@ -321,14 +321,14 @@ class TestTaxesPage:
         # the arrow at the header's right is the sort link, the name selects
         assert ('<span class="name">Amount</span><a class="sort" href="/taxes?year=2026&esort=amount&edir=asc#s-expenses" '
                 'title="sort ascending">⇅</a>') in body
-        grid_at = body.index('class="grid compact expenses sheetlike"')
+        grid_at = body.index('class="grid compact expenses sheetlike stacked"')
         default_rows = body[grid_at:body.index("</tbody>", grid_at)]
         assert default_rows.index(ids[1]) < default_rows.index(ids[0]) and "▼" not in body[grid_at:body.index("</thead>", grid_at)]
         by_amount = client.post("/taxes/expense/cell", params={"year": "2026"},
                                 data={"entry_id": ids[1], "field": "amount", "value": "99", "expected": "12.50"})
         assert "data-error" not in by_amount.text
         sorted_page = client.get("/taxes", params={"year": "2026", "esort": "amount", "edir": "desc"}).text
-        grid_at = sorted_page.index('class="grid compact expenses sheetlike"')
+        grid_at = sorted_page.index('class="grid compact expenses sheetlike stacked"')
         rows_part = sorted_page[grid_at:sorted_page.index("</tbody>", grid_at)]
         assert rows_part.index(ids[1]) < rows_part.index(ids[0]) and "▼</a>" in sorted_page
         assert 'href="/taxes?year=2026#s-expenses" title="clear the sort">▼</a>' in sorted_page
