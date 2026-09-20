@@ -880,8 +880,10 @@ class TestOrdersPage:
         dates = re.findall(r'data-field="order_date"[^>]*>\s*([^<]*)', default)
         assert [d.strip() for d in dates] == sorted((d.strip() for d in dates), reverse=True)
         asc = client.get("/orders", params={"sort": "total_cost", "dir": "asc"}, headers={"HX-Request": "true"}).text
-        assert "Total Cost ▲" in asc and 'href="/orders?sort=total_cost&amp;dir=desc"' in asc
-        assert "Total Cost ▼" in body and 'href="/orders"' in body and 'title="clear the sort"' in body  # no query: cleared
+        # the arrow at the header's right is the sort link; the name selects
+        assert '<span class="name">Total Cost</span><a class="sort" href="/orders?sort=total_cost&amp;dir=desc"' in asc
+        assert 'title="sort descending">▲</a>' in asc
+        assert '▼</a>' in body and 'href="/orders"' in body and 'title="clear the sort"' in body  # no query: cleared
         assert 'name="sort" value=""' in client.get("/orders").text  # the filter form carries no sort by default
 
     def test_the_card_facet_files_by_last4_and_shows_the_name(self, client):
@@ -1845,7 +1847,7 @@ class TestTableSorting:
                           headers={"HX-Request": "true"}).text
         first = body.index('data-field="total_cost">')
         assert "$2,000.00" in body[first:first + 40]
-        assert "▼" in body[body.index("Total Cost"):body.index("Total Cost") + 30]
+        assert "▼</a>" in body[body.index("Total Cost"):body.index("Total Cost") + 240]  # the arrow link after the name
 
 
 class TestReceiptFiles:

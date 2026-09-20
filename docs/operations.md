@@ -155,7 +155,8 @@ cancelled grey and superseded dark grey with strikethrough), a frozen header, fu
 edits like a spreadsheet: click a
 cell to select it, Ctrl-click to add one to the selection (or take a selected one out), shift-click
 or drag for a range; click a column's header cell (the name included) to select the whole column,
-its header marked too -- the sort is a double-click on the name, or the menu's Sort items;
+its header marked too -- the arrow at the header's right sorts, one click a step (ascending,
+descending, clear), and the menu's Sort items name a direction; Ctrl+A selects every row;
 right-click any cell, header or row number for a menu of these actions with their keys; a click on
 a link inside a cell selects the cell (so it copies), Ctrl-click, middle-click or a double-click
 opens the link; double-click, Enter or just start typing to

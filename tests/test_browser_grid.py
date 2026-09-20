@@ -273,7 +273,7 @@ def test_headers_row_numbers_and_esc_select_like_sheets(served, page, client):
     page.wait_for_selector("table.sheetlike tbody tr")
     th = page.locator("table.sheetlike thead th.col-quantity")
     idx = page.evaluate("el => el.cellIndex", th.element_handle())
-    th.locator("a").click()
+    th.locator(".name").click()
     page.wait_for_timeout(200)
     assert "sort=" not in page.url                       # selected, not sorted
     assert page.evaluate("document.querySelector('th.col-quantity').classList.contains('sel-col')")
@@ -286,13 +286,20 @@ def test_headers_row_numbers_and_esc_select_like_sheets(served, page, client):
     page.wait_for_url("**sort=quantity*")
     assert "dir=desc" in page.url
     page.wait_for_selector("th.col-quantity.sorted")
-    # a double-click on the name follows the link's next state: after descending it clears the sort,
-    # and on an unsorted column it sorts ascending
-    page.locator("th.col-quantity a").dblclick()
+    # the arrow is one click a step: after descending it clears the sort, then ascending
+    page.locator("th.col-quantity a.sort").click()
     page.wait_for_url(lambda url: "sort=" not in url)
     page.wait_for_selector("th.col-quantity:not(.sorted)")
-    page.locator("th.col-quantity a").dblclick()
+    page.locator("th.col-quantity a.sort").click()
     page.wait_for_url("**dir=asc*")
+    # Ctrl+A on a grid without row ticks (this view-only Orders page) selects every cell
+    page.wait_for_selector("table.sheetlike tbody tr")
+    page.locator("table.sheetlike tbody tr").first.locator("td[data-field=quantity]").click()
+    page.keyboard.press("Control+a")
+    n_rows = page.locator("table.sheetlike tbody tr").count()
+    cols = page.evaluate("document.querySelector('table.sheetlike tbody tr').cells.length")
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == n_rows * (cols - 1)
+    page.keyboard.press("Escape")
     # a cell selected, a click on blank page, then Esc clears it
     page.wait_for_selector("table.sheetlike tbody tr")
     page.locator("table.sheetlike tbody tr").first.locator("td[data-field=quantity]").click()
@@ -332,6 +339,20 @@ def test_headers_row_numbers_and_esc_select_like_sheets(served, page, client):
     page.wait_for_timeout(150)
     copied = page.evaluate("(document.getElementById('grid-clipboard') || {}).value")
     assert "X1" in copied and "Widget" in copied
+    # Ctrl+A ticks every row, as the # corner does
+    page.keyboard.press("Control+a")
+    assert page.locator("table.sheetlike tbody tr.selected").count() == 2
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == 2 * (cols - 1)
+    page.keyboard.press("Escape")
+    # every cell of a column selected BY HAND does not mark the header
+    cells = page.locator("table.sheetlike tbody td[data-field=quantity]")
+    cells.first.click()
+    cells.nth(1).click(modifiers=["Shift"])
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == 2
+    assert page.locator("table.sheetlike th.sel-col").count() == 0
+    page.locator("table.sheetlike thead th.col-quantity").click()  # the staging sheet's headers are plain text
+    assert page.locator("table.sheetlike th.sel-col").count() == 1
+    page.keyboard.press("Escape")
     assert page.errors == []
     # the expenses grid sorts by plain links (esort / edir): the menu and the double-click follow them
     client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
@@ -344,9 +365,9 @@ def test_headers_row_numbers_and_esc_select_like_sheets(served, page, client):
     page.locator(".ctx.on button[data-act=sort-asc]").click()
     page.wait_for_url("**esort=amount*")
     assert "edir=asc" in page.url
-    page.locator("table.expenses thead th.col-amount a").click()
+    page.locator("table.expenses thead th.col-amount .name").click()
     assert page.evaluate("document.querySelector('table.expenses th.col-amount').classList.contains('sel-col')")
-    page.locator("table.expenses thead th.col-amount a").dblclick()
+    page.locator("table.expenses thead th.col-amount a.sort").click()
     page.wait_for_url("**edir=desc*")
     assert page.errors == []
 

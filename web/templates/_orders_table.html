@@ -35,10 +35,12 @@
       {% if not active %}{% set link = filters.as_query(sort=name, dir='asc') %}{% set says = 'sort ascending' %}
       {% elif not filters.desc %}{% set link = filters.as_query(sort=name, dir='desc') %}{% set says = 'sort descending' %}
       {% else %}{% set link = filters.as_query(sort='', dir='') %}{% set says = 'clear the sort' %}{% endif %}
+      {#- The name selects the column (edit.js); the arrow at the right is the sort link: one click
+          a step, ascending, descending, then clear. -#}
       <th class="col-{{ name }} {{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }} {{ 'sorted' if active }}">
-        <a href="{{ base }}{% if link %}?{{ link | query }}{% endif %}"
+        <span class="name">{{ heading }}</span><a class="sort" href="{{ base }}{% if link %}?{{ link | query }}{% endif %}"
            hx-get="{{ base }}{% if link %}?{{ link | query }}{% endif %}"
-           hx-target="#orders-table" hx-push-url="true" title="{{ says }}">{{ heading }}{% if active %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a>
+           hx-target="#orders-table" hx-push-url="true" title="{{ says }}">{{ ('▼' if filters.desc else '▲') if active else '⇅' }}</a>
       </th>
       {% endfor %}
     </tr>

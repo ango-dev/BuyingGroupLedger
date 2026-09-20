@@ -250,14 +250,21 @@ td input.cell-check:disabled { cursor: default; opacity: 0.7; }
    width, gains nothing. */
 table.sheetlike th:not(.rownum), table.order-rows th { cursor: s-resize; padding-right: 28px; min-width: 64px; box-sizing: border-box; }
 table.sheetlike th:not(.rownum) a, table.order-rows th a { cursor: pointer; }
+/* the sort arrow at a header's right; the header is sticky, so
+   it is the arrow's containing block */
+table.sheetlike th a.sort { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); padding: 1px 4px; border-radius: 4px;
+  color: var(--muted); font-size: 0.9em; line-height: 1.2; text-decoration: none; }
+table.sheetlike th a.sort:hover { color: var(--accent); background: var(--card); text-decoration: none; }
+table.sheetlike th.sorted a.sort { color: var(--accent); font-weight: 700; }
+table.sheetlike th.sel-col a.sort { color: var(--card); }
 table.sheetlike td.edit { cursor: cell; }
 table.sheetlike td.edit:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 table.sheetlike td.edit:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 table.sheetlike td:focus, table.order-rows td:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 table.sheetlike td.sel-cell, table.order-rows td.sel-cell { box-shadow: inset 0 0 0 200px rgba(67, 97, 178, 0.14); }
 /* a column selected top to bottom marks its header like a selected row's number */
-table.sheetlike th.sel-col, table.order-rows th.sel-col { background: var(--accent); color: #fff; }
-table.sheetlike th.sel-col a, table.order-rows th.sel-col a { color: #fff; }
+table.sheetlike th.sel-col, table.order-rows th.sel-col { background: var(--accent); color: var(--card); }  /* dark on the pale dark-mode accent */
+table.sheetlike th.sel-col a, table.order-rows th.sel-col a { color: var(--card); }
 table.sheetlike td, table.order-rows td { user-select: none; }
 table.sheetlike td input.cell-input, table.order-rows td input.cell-input { user-select: text; }
 table.sheetlike td[data-editing] { padding: 0; }
@@ -355,7 +362,7 @@ table.sheetlike td.sel, table.sheetlike th.sel { width: 26px; text-align: center
 table.sheetlike td.rownum { cursor: pointer; user-select: none; }
 table.sheetlike td.rownum:hover { color: var(--accent); }
 table.sheetlike tr.selected td { box-shadow: inset 0 0 0 200px rgba(29, 78, 216, 0.16); }
-table.sheetlike tr.selected td.rownum { background: var(--accent); color: #fff; }
+table.sheetlike tr.selected td.rownum { background: var(--accent); color: var(--card); }
 table.sheetlike tr[class*="status-"] td.sel { background: var(--bg); text-decoration: none; }
 body.wide .banner { margin: 8px 8px 0; border-radius: 6px; }
 

@@ -3,8 +3,9 @@
 //   click            selects a cell (the active cell, outlined); shift-click or drag selects a range;
 //                    Ctrl-click adds a cell (or takes a selected one out) and keeps the rest selected;
 //                    a click on a column's header cell (the name included) selects the column, the
-//                    header too; a double-click on the name sorts by it (the menu offers both
-//                    directions); a click on a row number selects the row, its cells included
+//                    header too; the arrow at the header's right sorts by it, one click a step
+//                    (the menu offers both directions); a click on a row number selects the row,
+//                    its cells included; Ctrl+A selects every row (every cell where rows have no tick)
 //   double-click     opens the editor (or press Enter, or just start typing: the keystroke replaces
 //                    the value, as in Sheets)
 //   Enter            saves; with a RANGE selected, fills every editable cell in it with the value
@@ -89,10 +90,11 @@
     document.querySelectorAll("td.sel-cell").forEach(function (td) { td.classList.remove("sel-cell"); });
     document.querySelectorAll("th.sel-col").forEach(function (th) { th.classList.remove("sel-col"); });
     forEachSelected(function (td) { td.classList.add("sel-cell"); });
-    // A column selected top to bottom shows it on its header cell too.
+    // A column selected THROUGH ITS HEADER shows it on the header cell too; the same cells selected by hand do not ("if I select
+    // all cells in a column I do not want to automatically select the column name too").
     var t = table(), rows = t && t.tBodies[0] ? t.tBodies[0].rows.length : 0, head = t && t.tHead ? t.tHead.rows[0] : null;
     if (head && rows) ranges.forEach(function (range) {
-      if (range.r1 !== 0 || range.r2 !== rows - 1) return;
+      if (!range.head || range.r1 !== 0 || range.r2 !== rows - 1) return;
       for (var c = range.c1; c <= range.c2; c++) {
         var th = head.cells[c];
         if (th && !th.classList.contains("rownum")) th.classList.add("sel-col");
@@ -139,6 +141,18 @@
     return true;
   }
   function clearSelection() { ranges = []; anchor = null; paint(false); }
+  function selectAll() {
+    var t = table() || document.querySelector(GRID);
+    if (!t || !t.tBodies[0] || !t.tBodies[0].rows.length) return;
+    var all = t.querySelector("#sel-all");
+    if (all) { all.checked = true; all.dispatchEvent(new Event("change", { bubbles: true })); return; }
+    var rows = t.tBodies[0].rows.length, cols = t.tBodies[0].rows[0].cells.length;
+    grid = t;
+    ranges = [rect({ r: 0, c: 0 }, { r: rows - 1, c: cols - 1 })];
+    active = active && cellAt(active.r, active.c) ? active : { r: 0, c: 0 };
+    anchor = active;
+    paint(true);
+  }
   // The ticked rows ARE the cell selection, as in Sheets: a press on a row number selects its cells
   // too, so the menu's actions and the keys act on the row. Consecutive rows make one range; column 0 is the number.
   document.addEventListener("rows:changed", function (e) {
@@ -378,9 +392,11 @@
     });
   }
 
-  // A click on a column's HEADER CELL selects the whole column, as in Sheets;
-  // Ctrl adds the column, Shift extends from the anchor's column. The name in it is the sort link;
-  // a click on it selects too -- the sort is a double-click on the name, or the menu's Sort items.
+  // A click on a column's HEADER CELL, its name included, selects the whole column, as in Sheets;
+  //
+  // Ctrl adds the column, Shift extends from the anchor's column. The arrow at the header's right
+  // is the sort link (one click a step: ascending, descending, clear: "it takes
+  // a lot of clicks to adjust the sort"); the menu's Sort items name a direction outright.
   function headerOf(el) {  // the grid's header cell under el, or null (the row-number corner is none)
     var th = el && el.closest ? el.closest("th") : null;
     return th && th.closest(GRID) && !th.classList.contains("rownum") ? th : null;
@@ -389,7 +405,7 @@
     var t = td && td.closest(GRID);
     return t && t.tHead ? t.tHead.rows[0].cells[td.cellIndex] || null : null;
   }
-  function sortLink(th) { return th ? th.querySelector("a[href]") : null; }
+  function sortLink(th) { return th ? th.querySelector("a.sort") : null; }
   // The header's own link, with the direction asked for ("" clears the sort). The Orders table
   // sorts by sort / dir through htmx, the expenses grid by esort / edir with a plain link: the
   // names are read off the header's links (one of them always carries them), the request goes
@@ -423,6 +439,7 @@
       anchor = { r: 0, c: c };
       ranges.push(rect({ r: 0, c: c }, { r: rows - 1, c: c }));
     }
+    lastRange().head = true;  // selected through the header: paint marks the header cell
     active = { r: 0, c: c };
     document.dispatchEvent(new Event("rows:clear"));
     paint(true);
@@ -444,13 +461,6 @@
     var hit = cellLink(e);
     if (hit && !(e.ctrlKey || e.metaKey || e.shiftKey) && e.button === 0) e.preventDefault();  // selected, not followed
   });
-  // The header's sort link: a real click selects the column instead, and must not reach htmx's
-  // own listener on the link (capture, before the link sees it). The double-click and the menu
-  // sort through a synthetic click, which passes.
-  document.addEventListener("click", function (e) {
-    var th = headerOf(e.target);
-    if (th && e.isTrusted && e.target.closest("a")) { e.preventDefault(); e.stopPropagation(); }
-  }, true);
   document.addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
     var hit = cellLink(e);
@@ -462,6 +472,7 @@
     }
     var th = headerOf(e.target);
     if (th) {
+      if (e.target.closest("a.sort")) return;  // the sort arrow: its own click, through htmx or the link
       e.preventDefault();
       selectColumn(th, e.ctrlKey || e.metaKey, e.shiftKey);
       return;
@@ -493,8 +504,6 @@
   });
   document.addEventListener("mouseup", function () { if (dragging) { dragging = false; paint(true); } });
   document.addEventListener("dblclick", function (e) {
-    var th = headerOf(e.target);
-    if (th) { var sort = sortLink(th); if (sort && e.target.closest("a")) { e.preventDefault(); sort.click(); } return; }
     var td = e.target.closest ? e.target.closest("td.edit") : null;
     if (td && !td.hasAttribute("data-editing")) { startEdit(td); return; }
     var cell = e.target.closest ? e.target.closest(GRID_TD) : null;  // a read-only link cell: open it
@@ -596,6 +605,9 @@
     // Undo / redo need no selection: they act on this page's last accepted write.
     if (ctrl && (e.key === "z" || e.key === "Z") && document.querySelector(GRID)) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (ctrl && (e.key === "y" || e.key === "Y") && document.querySelector(GRID)) { e.preventDefault(); redo(); return; }
+    // Ctrl+A selects every row, as the # corner does; a grid without row ticks
+    // (a view-only table) gets every cell.
+    if (ctrl && (e.key === "a" || e.key === "A") && (ranges.length || inGrid(document.activeElement))) { e.preventDefault(); selectAll(); return; }
     var td = active ? cellAt(active.r, active.c) : null;
     // A click on blank page moved the focus off the grid; Esc still clears what is selected.
     //
