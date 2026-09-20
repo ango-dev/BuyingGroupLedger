@@ -263,6 +263,94 @@ def test_a_clicked_month_bar_shows_no_focus_ring(served, page):
     assert page.evaluate("el => getComputedStyle(el.querySelector('text.month')).textDecorationLine", bar.element_handle()) == "none"
 
 
+def test_headers_row_numbers_and_esc_select_like_sheets(served, page, client):
+    """a click on a column's NAME selects the column (the header marked too)
+    instead of sorting; the sort is a double-click on the name or the menu's Sort items. A row
+    number's right-click opens the whole menu over the row's cells, not only the delete. Esc still
+    clears the selection after a click on blank page took the focus."""
+    page.set_viewport_size({"width": 1600, "height": 900})
+    page.goto(f"{served}/orders")
+    page.wait_for_selector("table.sheetlike tbody tr")
+    th = page.locator("table.sheetlike thead th.col-quantity")
+    idx = page.evaluate("el => el.cellIndex", th.element_handle())
+    th.locator("a").click()
+    page.wait_for_timeout(200)
+    assert "sort=" not in page.url                       # selected, not sorted
+    assert page.evaluate("document.querySelector('th.col-quantity').classList.contains('sel-col')")
+    n_rows = page.locator("table.sheetlike tbody tr").count()
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == n_rows
+    assert page.evaluate(f"document.querySelector('table.sheetlike tbody tr').cells[{idx}].classList.contains('sel-cell')")
+    # the menu's sort: descending, and the URL follows
+    th.click(button="right")
+    page.locator(".ctx.on button[data-act=sort-desc]").click()
+    page.wait_for_url("**sort=quantity*")
+    assert "dir=desc" in page.url
+    page.wait_for_selector("th.col-quantity.sorted")
+    # a double-click on the name follows the link's next state: after descending it clears the sort,
+    # and on an unsorted column it sorts ascending
+    page.locator("th.col-quantity a").dblclick()
+    page.wait_for_url(lambda url: "sort=" not in url)
+    page.wait_for_selector("th.col-quantity:not(.sorted)")
+    page.locator("th.col-quantity a").dblclick()
+    page.wait_for_url("**dir=asc*")
+    # a cell selected, a click on blank page, then Esc clears it
+    page.wait_for_selector("table.sheetlike tbody tr")
+    page.locator("table.sheetlike tbody tr").first.locator("td[data-field=quantity]").click()
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == 1
+    page.locator("h1").click()
+    assert not page.evaluate("!!document.activeElement.closest('table.sheetlike')")
+    page.keyboard.press("Escape")
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == 0
+    assert page.errors == []
+    # a row number's right-click, on a grid with row selection (the staging sheet; the served Orders
+    # page has no writer, so no row checkboxes): the row ticked, its cells selected, the whole menu
+    csv_text = "Order Number,Date,Item,Qty,Status\nX1,3/11/2026,Widget,2,paid\nX2,3/12/2026,Gadget,1,paid\n"
+    client.post("/tools/import/upload", files={"source": ("old.csv", csv_text.encode(), "text/csv")}, follow_redirects=False)
+    client.post("/tools/import/map", data={"map.0": "order_id", "map.1": "order_date", "map.2": "item_name", "map.3": "quantity",
+                                          "map.4": "status", "date_order": "", "profile": ""}, follow_redirects=False)
+    assert client.post("/tools/import/run", follow_redirects=False).status_code == 303
+    page.goto(f"{served}/tools/import")
+    page.wait_for_selector("table.sheetlike tbody tr")
+    row = page.locator("table.sheetlike tbody tr").nth(1)
+    row.locator("td.rownum").click(button="right")
+    assert row.evaluate("tr => tr.classList.contains('selected')")
+    cols = page.evaluate("document.querySelector('table.sheetlike tbody tr').cells.length")
+    assert row.locator("td.sel-cell").count() == cols - 1
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == cols - 1
+    acts = page.locator(".ctx.on button[data-act]").evaluate_all("bs => bs.map(b => b.dataset.act)")
+    for act in ("copy", "paste", "clear", "undo", "delete-rows"):
+        assert act in acts, acts
+    page.keyboard.press("Escape")
+    assert not page.evaluate("document.querySelector('.ctx').classList.contains('on')")
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == 0
+    assert page.locator("table.sheetlike tbody tr.selected").count() == 0
+    # a plain click on a row number selects the row's cells too; Ctrl+C then copies the row
+    page.locator("table.sheetlike tbody tr").first.locator("td.rownum").click()
+    assert page.locator("table.sheetlike tbody tr.selected").count() == 1
+    assert page.locator("table.sheetlike tbody td.sel-cell").count() == cols - 1
+    page.keyboard.press("Control+c")
+    page.wait_for_timeout(150)
+    copied = page.evaluate("(document.getElementById('grid-clipboard') || {}).value")
+    assert "X1" in copied and "Widget" in copied
+    assert page.errors == []
+    # the expenses grid sorts by plain links (esort / edir): the menu and the double-click follow them
+    client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                data={"date": "2026-03-01", "description": "Tape", "category": "supplies", "amount": "4.00", "profile": "alpha", "receipt_url": "https://x/r"})
+    page.goto(f"{served}/taxes?year=2026")
+    page.wait_for_selector("table.expenses tbody tr")
+    page.locator("table.expenses thead th.col-amount").scroll_into_view_if_needed()
+    page.wait_for_timeout(600)  # a scroll closes the menu: let the scroll into view settle first
+    page.locator("table.expenses thead th.col-amount").click(button="right")
+    page.locator(".ctx.on button[data-act=sort-asc]").click()
+    page.wait_for_url("**esort=amount*")
+    assert "edir=asc" in page.url
+    page.locator("table.expenses thead th.col-amount a").click()
+    assert page.evaluate("document.querySelector('table.expenses th.col-amount').classList.contains('sel-col')")
+    page.locator("table.expenses thead th.col-amount a").dblclick()
+    page.wait_for_url("**edir=desc*")
+    assert page.errors == []
+
+
 def test_the_staging_sheet_edits_like_the_orders_grid(served, page, client):
     """Tools > Import's staging sheet (web/importer.py) is driven by the same edit.js as Orders:
     click-type-Enter writes a cell (and the gap outline goes), Ctrl+Z undoes it, Space toggles the

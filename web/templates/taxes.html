@@ -76,8 +76,8 @@
     <div class="sheet">
     <table class="grid compact expenses sheetlike" data-cell-url="/taxes/expense/cell?year={{ year }}">
       {#- The header names sort, as on the Orders table: ascending, descending, then clear -- the
-          default, newest date first, with no arrow (esort / edir in the URL); the header cell
-          beside the name selects the column. -#}
+          default, newest date first, with no arrow (esort / edir in the URL). A click on the header
+          selects the column; the sort is a double-click on the name or the menu (edit.js). -#}
       {% set ecols = (('date', 'Date'), ('description', 'Description'), ('category', 'Category'), ('profile', 'Profile'), ('email', 'Email'), ('receipt_url', 'Receipt'), ('amount', 'Amount')) %}
       <thead><tr><th class="rownum" title="select / unselect every expense"><input type="checkbox" id="sel-all" hidden aria-label="select all">#</th>
         {% for field, heading in ecols %}{% set active = esort == field %}{% set link = ('&esort=' ~ field ~ '&edir=asc') if not active else (('&esort=' ~ field ~ '&edir=desc') if edir == 'asc' else '') %}<th class="col-{{ field }} {{ 'num' if field == 'amount' }} {{ 'sorted' if active }}"><a href="/taxes?year={{ year }}{{ link | safe }}#s-expenses" title="{{ 'sort ascending' if not active else ('sort descending' if edir == 'asc' else 'clear the sort') }}">{{ heading }}{% if active %} {{ '▼' if edir == 'desc' else '▲' }}{% endif %}</a></th>{% endfor %}</tr></thead>

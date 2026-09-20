@@ -2,11 +2,14 @@
 //
 //   click            selects a cell (the active cell, outlined); shift-click or drag selects a range;
 //                    Ctrl-click adds a cell (or takes a selected one out) and keeps the rest selected;
-//                    a click on a column's header cell (beside its name, which sorts) selects the column
+//                    a click on a column's header cell (the name included) selects the column, the
+//                    header too; a double-click on the name sorts by it (the menu offers both
+//                    directions); a click on a row number selects the row, its cells included
 //   double-click     opens the editor (or press Enter, or just start typing: the keystroke replaces
 //                    the value, as in Sheets)
 //   Enter            saves; with a RANGE selected, fills every editable cell in it with the value
-//   Esc              cancels the editor, or clears the selection (cells and rows both)
+//   Esc              cancels the editor, or clears the selection (cells and rows both), also after
+//                    a click elsewhere on the page took the focus
 //   Delete/Backspace clears every editable selected cell
 //   Ctrl+;           puts today's date into every selected date cell (as in Sheets)
 //   Ctrl+Shift+H     toggles the hand-edit mark on the selection: marked cells are released (values
@@ -16,7 +19,7 @@
 //   Ctrl+Z / Ctrl+Y  undo / redo the last accepted write (a range fill, a paste or Ctrl+; is one
 //                    step; Ctrl+Shift+Z redoes too); the old value goes back through the same
 //                    conflict-checked POST, so a cell someone changed meanwhile is refused, not clobbered
-//   right-click      a menu of these actions, with their keys, on any cell or header cell
+//   right-click      a menu of these actions, with their keys, on any cell, header cell or row number
 //   touch            a tap selects, a second tap on the selected cell edits, a long press opens the menu
 //   a link in a cell a plain click selects the cell (copy works); Ctrl-click, middle-click or a
 //                    double-click on a read-only cell opens it
@@ -84,7 +87,17 @@
   // does not focus each cell it crosses (that would flash the tooltip on every one).
   function paint(takeFocus) {
     document.querySelectorAll("td.sel-cell").forEach(function (td) { td.classList.remove("sel-cell"); });
+    document.querySelectorAll("th.sel-col").forEach(function (th) { th.classList.remove("sel-col"); });
     forEachSelected(function (td) { td.classList.add("sel-cell"); });
+    // A column selected top to bottom shows it on its header cell too.
+    var t = table(), rows = t && t.tBodies[0] ? t.tBodies[0].rows.length : 0, head = t && t.tHead ? t.tHead.rows[0] : null;
+    if (head && rows) ranges.forEach(function (range) {
+      if (range.r1 !== 0 || range.r2 !== rows - 1) return;
+      for (var c = range.c1; c <= range.c2; c++) {
+        var th = head.cells[c];
+        if (th && !th.classList.contains("rownum")) th.classList.add("sel-col");
+      }
+    });
     var td = active ? cellAt(active.r, active.c) : null;
     if (!td || dragging || document.activeElement === td || document.querySelector("input.cell-input")) return;
     var free = document.activeElement === document.body || inGrid(document.activeElement);
@@ -126,7 +139,27 @@
     return true;
   }
   function clearSelection() { ranges = []; anchor = null; paint(false); }
-  document.addEventListener("cells:clear", clearSelection);  // a plain click on a row number
+  // The ticked rows ARE the cell selection, as in Sheets: a press on a row number selects its cells
+  // too, so the menu's actions and the keys act on the row. Consecutive rows make one range; column 0 is the number.
+  document.addEventListener("rows:changed", function (e) {
+    var boxes = document.querySelectorAll('table.sheetlike tbody input[name="sel"]:checked');
+    var t = boxes.length ? boxes[0].closest(GRID) : null;
+    ranges = [];
+    if (!t) { anchor = null; paint(false); return; }
+    grid = t;
+    var cols = t.tBodies[0].rows[0].cells.length, idx = [];
+    boxes.forEach(function (box) { idx.push(box.closest("tr").sectionRowIndex); });
+    idx.sort(function (a, b) { return a - b; });
+    for (var i = 0; i < idx.length; i++) {
+      var last = lastRange();
+      if (last && last.r2 === idx[i] - 1) last.r2 = idx[i];
+      else ranges.push(rect({ r: idx[i], c: 1 }, { r: idx[i], c: cols - 1 }));
+    }
+    var tr = e.detail && e.detail.tr;
+    active = { r: tr ? tr.sectionRowIndex : idx[0], c: 1 };
+    anchor = active;
+    paint(true);
+  });
 
   // ---- undo / redo -------------------------
   // Every write the server ACCEPTED goes on the undo stack with what the cell showed before; one
@@ -345,8 +378,39 @@
     });
   }
 
-  // A click on a column's HEADER CELL -- beside the name, which sorts -- selects the whole column,
-  // as in Sheets; Ctrl adds the column, Shift extends from the anchor's column.
+  // A click on a column's HEADER CELL selects the whole column, as in Sheets;
+  // Ctrl adds the column, Shift extends from the anchor's column. The name in it is the sort link;
+  // a click on it selects too -- the sort is a double-click on the name, or the menu's Sort items.
+  function headerOf(el) {  // the grid's header cell under el, or null (the row-number corner is none)
+    var th = el && el.closest ? el.closest("th") : null;
+    return th && th.closest(GRID) && !th.classList.contains("rownum") ? th : null;
+  }
+  function headerAbove(td) {
+    var t = td && td.closest(GRID);
+    return t && t.tHead ? t.tHead.rows[0].cells[td.cellIndex] || null : null;
+  }
+  function sortLink(th) { return th ? th.querySelector("a[href]") : null; }
+  // The header's own link, with the direction asked for ("" clears the sort). The Orders table
+  // sorts by sort / dir through htmx, the expenses grid by esort / edir with a plain link: the
+  // names are read off the header's links (one of them always carries them), the request goes
+  // the way the link's own click would.
+  function sortBy(th, dir) {
+    var a = sortLink(th), m = th ? /(?:^|\s)col-([A-Za-z0-9_]+)/.exec(th.className) : null;
+    if (!a || !m) return;
+    var names = null;
+    th.parentElement.querySelectorAll("a[href]").forEach(function (link) {
+      if (names) return;
+      var q = new URL(link.getAttribute("href"), window.location.href).searchParams;
+      if (q.has("esort")) names = ["esort", "edir"]; else if (q.has("sort")) names = ["sort", "dir"];
+    });
+    if (!names) return;
+    var viaHtmx = a.hasAttribute("hx-get");
+    var u = new URL(a.getAttribute(viaHtmx ? "hx-get" : "href"), window.location.href);
+    if (dir) { u.searchParams.set(names[0], m[1]); u.searchParams.set(names[1], dir); }
+    else { u.searchParams.delete(names[0]); u.searchParams.delete(names[1]); }
+    if (viaHtmx) htmx.ajax("GET", u.pathname + u.search, { source: a, target: a.getAttribute("hx-target") || "#orders-table" });
+    else window.location.assign(u.href);
+  }
   function selectColumn(th, add, extend) {
     var t = th.closest(GRID);
     var rows = t && t.tBodies[0] ? t.tBodies[0].rows.length : 0;
@@ -380,6 +444,13 @@
     var hit = cellLink(e);
     if (hit && !(e.ctrlKey || e.metaKey || e.shiftKey) && e.button === 0) e.preventDefault();  // selected, not followed
   });
+  // The header's sort link: a real click selects the column instead, and must not reach htmx's
+  // own listener on the link (capture, before the link sees it). The double-click and the menu
+  // sort through a synthetic click, which passes.
+  document.addEventListener("click", function (e) {
+    var th = headerOf(e.target);
+    if (th && e.isTrusted && e.target.closest("a")) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
   document.addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
     var hit = cellLink(e);
@@ -389,13 +460,13 @@
       document.dispatchEvent(new Event("rows:clear"));
       return;
     }
-    if (e.target.closest && e.target.closest("a, button, input, .cell-edit, .cell-empty")) return;
-    var th = e.target.closest ? e.target.closest("th") : null;
-    if (th && th.closest(GRID) && !th.classList.contains("rownum")) {
+    var th = headerOf(e.target);
+    if (th) {
       e.preventDefault();
       selectColumn(th, e.ctrlKey || e.metaKey, e.shiftKey);
       return;
     }
+    if (e.target.closest && e.target.closest("a, button, input, .cell-edit, .cell-empty")) return;
     var td = e.target.closest ? e.target.closest(GRID_TD) : null;
     if (!selectable(td)) return;
     if (td.hasAttribute("data-editing")) return;
@@ -422,6 +493,8 @@
   });
   document.addEventListener("mouseup", function () { if (dragging) { dragging = false; paint(true); } });
   document.addEventListener("dblclick", function (e) {
+    var th = headerOf(e.target);
+    if (th) { var sort = sortLink(th); if (sort && e.target.closest("a")) { e.preventDefault(); sort.click(); } return; }
     var td = e.target.closest ? e.target.closest("td.edit") : null;
     if (td && !td.hasAttribute("data-editing")) { startEdit(td); return; }
     var cell = e.target.closest ? e.target.closest(GRID_TD) : null;  // a read-only link cell: open it
@@ -524,6 +597,9 @@
     if (ctrl && (e.key === "z" || e.key === "Z") && document.querySelector(GRID)) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (ctrl && (e.key === "y" || e.key === "Y") && document.querySelector(GRID)) { e.preventDefault(); redo(); return; }
     var td = active ? cellAt(active.r, active.c) : null;
+    // A click on blank page moved the focus off the grid; Esc still clears what is selected.
+    //
+    if (e.key === "Escape" && ranges.length && !inGrid(document.activeElement)) { clearSelection(); return; }
     if (!td || !inGrid(document.activeElement)) return;
     if (e.key === "ArrowUp") { e.preventDefault(); move(-1, 0, e.shiftKey); }
     else if (e.key === "ArrowDown") { e.preventDefault(); move(1, 0, e.shiftKey); }
@@ -630,8 +706,12 @@
     num.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
     document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   }
+  var ctxHead = null;  // the header cell the open menu's Sort items act on
   function runCtx(act) {
     var td = active ? cellAt(active.r, active.c) : null;
+    if (act === "sort-asc") { sortBy(ctxHead, "asc"); return; }
+    if (act === "sort-desc") { sortBy(ctxHead, "desc"); return; }
+    if (act === "sort-clear") { sortBy(ctxHead, ""); return; }
     if (act === "open") { var a = td && td.querySelector("a"); if (a) openLink(a); }
     else if (act === "edit") { if (td && editable(td)) startEdit(td); }
     else if (act === "copy") copySelection();
@@ -648,31 +728,32 @@
   var ctxOpenedAt = 0;
   function openMenuAt(target, x, y) {  // the menu for the cell or header cell under (x, y); false when none applies
     var td = target.closest ? target.closest(GRID_TD) : null;
-    var th = td ? null : (target.closest ? target.closest("th") : null);
-    if (th && (!th.closest(GRID) || th.classList.contains("rownum"))) th = null;
+    var th = td ? null : headerOf(target);
     if (!td && !th) { hideCtx(); return false; }
     var onRow = !!(td && td.classList.contains("rownum"));
     if (td && !onRow && !td.classList.contains("sel-cell")) { selectOne(td, false); document.dispatchEvent(new Event("rows:clear")); }
-    if (th) selectColumn(th, false, false);
+    if (th && !th.classList.contains("sel-col")) selectColumn(th, false, false);
     if (onRow) { var box = td.querySelector('input[name="sel"]'); if (box && !box.checked) selectRowOf(td); }
+    // The row number's menu is the cell menu over the row's cells, plus the delete.
+    var cur = active ? cellAt(active.r, active.c) : null;
+    var rows = rowsChecked();  // with rows ticked the Delete key deletes them, so Clear shows no key
+    var anyDate = false, anyEditable = false;
+    forEachSelected(function (c) { if (editable(c)) { anyEditable = true; if (c.getAttribute("data-kind") === "date") anyDate = true; } });
+    var grid_ = (td || th).closest(GRID);
+    var ledger = !!(grid_ && grid_.querySelector("td[data-order-id]"));
+    var marked = handSelected().length, plain = markable().length;
+    ctxHead = th || headerAbove(cur);
+    var sorted = !!(ctxHead && ctxHead.classList.contains("sorted"));
     var html = "";
-    if (onRow) {
-      html += ctxItem("delete-rows", "Delete selected row(s)", "Delete", !document.getElementById("delete-selected"));
-    } else {
-      var cur = active ? cellAt(active.r, active.c) : null;
-      var anyDate = false, anyEditable = false;
-      forEachSelected(function (c) { if (editable(c)) { anyEditable = true; if (c.getAttribute("data-kind") === "date") anyDate = true; } });
-      var grid_ = (td || th).closest(GRID);
-      var ledger = !!(grid_ && grid_.querySelector("td[data-order-id]"));
-      var marked = handSelected().length, plain = markable().length;
-      html += ctxItem("edit", "Edit", "Enter", !(cur && editable(cur)));
-      html += ctxItem("open", "Open link", "Ctrl+click", !(cur && cur.querySelector("a")));
-      html += ctxItem("copy", "Copy", "Ctrl+C") + ctxItem("paste", "Paste", "Ctrl+V", !anyEditable);
-      html += ctxItem("clear", "Clear", "Delete", !anyEditable) + ctxItem("today", "Fill with today", "Ctrl+;", !anyDate);
-      html += "<hr>" + ctxItem("undo", "Undo", "Ctrl+Z", !undoStack.length) + ctxItem("redo", "Redo", "Ctrl+Y", !redoStack.length);
-      if (ledger) html += "<hr>" + ctxItem("hand", marked ? "Release hand edits" : "Mark as hand edits", "Ctrl+Shift+H", !marked && !plain);
-      html += "<hr>" + ctxItem("column", "Select column", "") + ctxItem("row", "Select row", "", !td || !td.parentElement.querySelector("td.rownum"));
-    }
+    html += ctxItem("edit", "Edit", "Enter", !(cur && editable(cur)));
+    html += ctxItem("open", "Open link", "Ctrl+click", !(cur && cur.querySelector("a")));
+    html += ctxItem("copy", "Copy", "Ctrl+C") + ctxItem("paste", "Paste", "Ctrl+V", !anyEditable);
+    html += ctxItem("clear", "Clear", rows ? "" : "Delete", !anyEditable) + ctxItem("today", "Fill with today", "Ctrl+;", !anyDate);
+    html += "<hr>" + ctxItem("undo", "Undo", "Ctrl+Z", !undoStack.length) + ctxItem("redo", "Redo", "Ctrl+Y", !redoStack.length);
+    if (ledger) html += "<hr>" + ctxItem("hand", marked ? "Release hand edits" : "Mark as hand edits", "Ctrl+Shift+H", !marked && !plain);
+    if (sortLink(ctxHead)) html += "<hr>" + ctxItem("sort-asc", "Sort ascending", "") + ctxItem("sort-desc", "Sort descending", "") + ctxItem("sort-clear", "Clear sort", "", !sorted);
+    html += "<hr>" + ctxItem("column", "Select column", "", !cur) + ctxItem("row", "Select row", "", !(cur && cur.parentElement.querySelector("td.rownum")));
+    if (rows && document.getElementById("delete-selected")) html += "<hr>" + ctxItem("delete-rows", "Delete selected row(s)", "Delete");
     var m = ctxMenu();
     m.innerHTML = html;
     m.classList.add("on");
@@ -683,7 +764,9 @@
     return true;
   }
   document.addEventListener("contextmenu", function (e) {
-    if (e.target.closest && e.target.closest("input, textarea, a")) return;  // the editor, a link: the browser's menu
+    if (!e.target.closest) return;
+    if (e.target.closest("input, textarea")) return;                 // the editor: the browser's menu
+    if (e.target.closest("a") && !headerOf(e.target)) return;         // a link too; the header's sort link is ours
     if (openMenuAt(e.target, e.clientX, e.clientY)) e.preventDefault();
   });
   // A long press on a touch screen opens the same menu (iOS never fires contextmenu); the touch's
@@ -760,7 +843,11 @@
     if (e.target && e.target.id === "sel-all") {
       document.querySelectorAll('input[name="sel"]').forEach(function (box) { box.checked = e.target.checked; });
     }
-    if (e.target && (e.target.id === "sel-all" || e.target.name === "sel")) count();
+    if (e.target && (e.target.id === "sel-all" || e.target.name === "sel")) {
+      count();
+      // the cell selection follows the ticks (edit.js's grid listens)
+      document.dispatchEvent(new CustomEvent("rows:changed", { detail: { tr: e.target.name === "sel" ? e.target.closest("tr") : null } }));
+    }
   });
   document.addEventListener("rows:clear", clearRows);  // a plain click on a cell
   document.addEventListener("htmx:afterSwap", count);
@@ -814,8 +901,7 @@
       // a plain click narrows to this row, as in Sheets, and the next click deselects it. The
       // deselect waits for mouseup so a drag that starts on it still selects a range.
       var alone = box.checked && document.querySelectorAll('input[name="sel"]:checked').length === 1;
-      document.dispatchEvent(new Event("rows:clear"));   // this row, and nothing else --
-      document.dispatchEvent(new Event("cells:clear"));  // not the cells either, as in Sheets
+      document.dispatchEvent(new Event("rows:clear"));   // this row, and nothing else (its cells follow the tick)
       setRow(tr, true);
       press = { tr: tr, moved: false, rows: rows, on: [tr], toggleOff: alone };
     }

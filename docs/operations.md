@@ -154,8 +154,9 @@ coloured by status (ordered red, shipped orange, delivered yellow, paid green, r
 cancelled grey and superseded dark grey with strikethrough), a frozen header, full page width. It
 edits like a spreadsheet: click a
 cell to select it, Ctrl-click to add one to the selection (or take a selected one out), shift-click
-or drag for a range; click a column's header cell beside its name to select the whole column (the
-name itself sorts); right-click any cell for a menu of these actions with their keys; a click on
+or drag for a range; click a column's header cell (the name included) to select the whole column,
+its header marked too -- the sort is a double-click on the name, or the menu's Sort items;
+right-click any cell, header or row number for a menu of these actions with their keys; a click on
 a link inside a cell selects the cell (so it copies), Ctrl-click, middle-click or a double-click
 opens the link; double-click, Enter or just start typing to
 edit (the keystroke replaces the value); Enter saves, and fills every cell of a selected range;
@@ -200,7 +201,8 @@ ledger's words; dates must be `YYYY-MM-DD`. The snapshot backend is view-only (a
 to write to).
 
 **Rows: select, add, delete.** Selection is Sheets-style: click a row number to select that row
-and nothing else (it tints blue; a plain click on a cell likewise drops the row selection), Ctrl-click
+and nothing else (it tints blue, and its cells are the cell selection, so Ctrl+C, a fill or the
+right-click menu act on the row; a plain click on a cell likewise drops the row selection), Ctrl-click
 to add a row (or take one out), drag down the numbers or shift-click for a range, click the `#`
 header for every row shown (or, with anything selected, to clear); Esc clears. The counter sits on the table's count line, and the how-it-works hints for cells, rows and edits
 are a small table behind the **hint** pill (a light bulb) at the line's right end (hover or focus it). With rows
