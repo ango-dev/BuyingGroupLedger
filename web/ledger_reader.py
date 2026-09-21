@@ -460,6 +460,35 @@ class DbReader:
         self._clock = clock
         self._lock = threading.Lock()
         self._loaded_at: float | None = None
+        #: The built snapshot, served until the ledger FILE changes (2026-09-21: every page's nav
+        #: badges load the whole ledger, so an unchanged file must not rebuild it per request).
+        self._snap: Snapshot | None = None
+        self._snap_stamp: tuple | None = None
+        self._monitor = None  # a connection kept only for PRAGMA data_version
+
+    def _stamp(self) -> tuple:
+        """The ledger file family's identity. SQLite's `data_version` bumps when any OTHER
+        connection commits -- the dashboard's own writer and the scheduled run's process alike --
+        and the db / -wal / -journal stats ride along because a WAL commit leaves the main file
+        untouched and NTFS updates mtimes lazily (the audit cache learned that one)."""
+        import sqlite3
+
+        parts = []
+        for suffix in ("", "-wal", "-journal"):
+            try:
+                stat = Path(str(self.db.path) + suffix).stat()
+                parts.append((stat.st_mtime_ns, stat.st_size))
+            except OSError:
+                parts.append(None)
+        version = -1
+        if Path(self.db.path).is_file():  # never connect first: that would CREATE an empty db
+            try:
+                if self._monitor is None:
+                    self._monitor = sqlite3.connect(self.db.path, timeout=5)
+                version = self._monitor.execute("PRAGMA data_version").fetchone()[0]
+            except Exception:  # noqa: BLE001 -- the stats still gate; a broken monitor never blocks
+                self._monitor = None
+        return (version, tuple(parts))
 
     def refresh(self, force: bool = False) -> bool:
         """Nothing to pull from anywhere: the file IS the ledger, and load() reads it fresh."""
@@ -467,6 +496,11 @@ class DbReader:
 
     def load(self, force: bool = False) -> Snapshot:
         with self._lock:
+            # The stamp is taken BEFORE the read: a write racing the build makes the stored stamp
+            # stale, so the next request rebuilds -- one rebuild too many, never a stale page.
+            stamp = self._stamp()
+            if not force and self._snap is not None and stamp == self._snap_stamp:
+                return self._snap
             records = self.db.fetch_rows()
             try:
                 from ledger_db.hand_edits import protected
@@ -498,6 +532,7 @@ class DbReader:
                 source=str(self.db.path), loaded_at=datetime.now(timezone.utc),
             )
             snapshot.meta = {"db_path": str(self.db.path)}
+            self._snap, self._snap_stamp = snapshot, stamp
             return snapshot
 
     def health(self) -> dict:

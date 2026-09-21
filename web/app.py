@@ -177,6 +177,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return FileResponse(str(target), filename=target.name)
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # No auto-reload: with it on, EVERY `{% include %}` stats the template file, and the Orders
+    # sheet includes _cell.html once per cell -- ~10,000 stat calls per page render, most of the
+    # page's server time on the Pi's SD card (profiled 2026-09-21). Templates change only with
+    # the code, and the dashboard restarts with the code (the Settings page's Restart button,
+    # `python -m web` in dev).
+    templates.env.auto_reload = False
     # Cache-busting for the static assets: the newest mtime under static/ goes on every asset URL
     # (?v=...), so a deploy is never served an older stylesheet from the browser's cache (seen
     # live: a page rendered with the previous CSS after a pull).
@@ -443,7 +449,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except Exception:  # noqa: BLE001
             log.exception("could not audit the ledger for the nav")
         try:
-            recon = reconcile(snapshot.rows)
+            recon = recon_summary(snapshot)
             out["recon"] = len(recon.short) + len(recon.over)
         except Exception:  # noqa: BLE001
             log.exception("could not reconcile the ledger for the nav")
@@ -487,7 +493,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except Exception:  # noqa: BLE001
             log.exception("could not audit the ledger for the overview")
         try:
-            recon = reconcile(snapshot.rows)
+            recon = recon_summary(snapshot)
             if recon.short:
                 cards.append({"tone": "bad", "label": "Short-paid", "count": len(recon.short),
                               "text": f"order(s), {money(recon.short_total)} under the commitment", "href": "/recon?kind=short"})
@@ -637,9 +643,22 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     def audit_report(snapshot):
         def build():
-            return run_audit(audit_grids(reader, snapshot))
+            # The app's clock, so the staleness check is deterministic under test and honest on
+            # a host whose wall clock the dashboard already trusts everywhere else.
+            return run_audit(audit_grids(reader, snapshot), now=clock())
 
         return audit_cache.get(audit_key(reader, snapshot), build)
+
+    # The reconciliation, cached exactly as the audit is: it ran over every row on EVERY page
+    # render for the nav badge (2026-09-21). The key is audit_key's -- cheap now that the digest
+    # is memoized on the snapshot -- so one ledger change rebuilds both once.
+    _recon_cache: dict = {}
+
+    def recon_summary(snapshot):
+        key = audit_key(reader, snapshot)
+        if _recon_cache.get("key") != key:
+            _recon_cache["key"], _recon_cache["value"] = key, reconcile(snapshot.rows)
+        return _recon_cache["value"]
 
     def row_key(row) -> tuple:
         return key_of(row.order_id, row.order_date, row.item_name, row.shipment)
@@ -676,7 +695,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             }
             extra.update(audit=report, checks=checks)
         elif scope == "recon":
-            report = reconcile(snapshot.rows)
+            report = recon_summary(snapshot)
             kind = str(params.get("kind") or "")  # the tiles: short-paid / over-paid orders only
             kind = kind if kind in ("short", "over") else ""
             rows = [r for r in rows if r.order_id in report.keys and (not kind or report.kind_of(r.order_id) == kind)]

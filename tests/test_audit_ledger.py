@@ -613,6 +613,18 @@ class TestOpenRowStaleness:
         sheet = build(row_cells(2, Status=Cell("ordered"), **{"Last Scraped At": Cell(_iso_days_ago(0))}))
         assert result_for(sheet, "open_row_staleness").status == "PASS"
 
+    def test_the_check_reads_the_clock_it_is_given(self):
+        """2026-09-21: the dashboard passes its own clock (`Options.now`), so an audit under a
+        test clock is deterministic -- a fixture row went stale when the REAL date crossed the
+        threshold, days after the tests were written. None keeps the CLI on the wall clock."""
+        from datetime import datetime, timedelta, timezone
+
+        sheet = build(row_cells(2, Status=Cell("ordered"), **{"Last Scraped At": Cell(_iso_days_ago(0))}))
+        assert result_for(sheet, "open_row_staleness", Options()).status == "PASS"
+        future = datetime.now(timezone.utc) + timedelta(days=9)
+        result = result_for(sheet, "open_row_staleness", Options(now=future))
+        assert result.status == "WARN" and "9 days ago" in result.details[0]
+
     def test_a_superseded_row_is_terminal_and_never_stale(self):
         sheet = build(row_cells(2, Status=Cell("superseded"), **{"Last Scraped At": Cell(_iso_days_ago(400))}))
         assert result_for(sheet, "open_row_staleness").status == "PASS"

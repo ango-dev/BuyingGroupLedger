@@ -246,3 +246,46 @@ class TestFactory:
 
         dev = reader_from_settings(base, source="snapshot", snapshot_path="data/ledger_backup_x.csv")
         assert isinstance(dev, SnapshotReader)
+
+
+class TestDbReaderSnapshotCache:
+    """2026-09-21: every page's nav badges load the whole ledger, so an unchanged file is served
+    from the built snapshot; SQLite's data_version plus the db/-wal stats invalidate it whenever
+    ANY connection -- the dashboard's writer or the scheduled run's process -- commits."""
+
+    def test_the_snapshot_is_served_until_the_file_changes(self, seeded, monkeypatch):
+        from web.ledger_reader import DbReader
+
+        reader = DbReader(seeded)
+        first = reader.load()
+        calls = {"n": 0}
+        real = seeded.fetch_rows
+
+        def counted():
+            calls["n"] += 1
+            return real()
+
+        monkeypatch.setattr(seeded, "fetch_rows", counted)
+        assert reader.load() is first and calls["n"] == 0  # unchanged: no re-read, no rebuild
+        assert reader.load(force=True) is not first and calls["n"] == 1  # force bypasses
+        # a write through ANOTHER connection (here: the worksheet adapter, exactly as the cell
+        # writer and the run write) is seen on the next load
+        before = reader.load()
+        ws = DbWorksheet(seeded)
+        ws.update(range_name="B2", values=[["shipped"]])
+        fresh = reader.load()
+        assert fresh is not before
+        assert any(r.cells.get("status") == "shipped" for r in fresh.rows)
+
+    def test_the_digest_is_hashed_once_per_snapshot(self, seeded):
+        from web.audit_view import audit_key
+        from web.ledger_reader import DbReader
+
+        reader = DbReader(seeded)
+        snap = reader.load()
+        key = audit_key(reader, snap)
+        assert snap.meta["rows_digest"] == key[-1]  # memoized on the snapshot it describes
+        assert audit_key(reader, snap) == key      # and stable on re-ask
+        ws = DbWorksheet(seeded)
+        ws.update(range_name="B2", values=[["paid"]])
+        assert audit_key(reader, reader.load()) != key  # a changed ledger is a new key

@@ -82,11 +82,11 @@ class AuditReport:
         return out
 
 
-def run_audit(grids: Grids, *, stale_days: int = 3) -> AuditReport:
+def run_audit(grids: Grids, *, stale_days: int = 3, now=None) -> AuditReport:
     """Every check over `grids`, its row-level findings keyed by the rows' upsert keys."""
     sheet = Sheet(grids)
     # No truncation: the page shows every affected row, not the CLI's first eight.
-    results = run_checks(sheet, Options(max_detail=10_000_000, stale_days=stale_days))
+    results = run_checks(sheet, Options(max_detail=10_000_000, stale_days=stale_days, now=now))
     report = AuditReport(results=results)
     grid = grids.formatted
     for r in results:
@@ -168,13 +168,23 @@ def audit_key(reader, snapshot) -> tuple:
     """What the cached report is keyed on: a digest of the rows the dashboard just loaded, so a
     cell edit or a sync rebuilds the report and a page load plus its htmx swap share one. (Not the
     file's timestamp: NTFS updates it lazily.)"""
-    digest = hashlib.blake2b(digest_size=16)
-    for row in snapshot.rows:
-        digest.update(str(row.row_number).encode())
-        for name, value in row.cells.items():
-            digest.update(b"" + name.encode() + b"=" + str(value).encode("utf-8", "replace"))
-        digest.update(b"")
-    return (getattr(reader, "backend", ""), snapshot.source, len(snapshot.rows), digest.hexdigest())
+    meta = getattr(snapshot, "meta", None)
+    memo = meta.get("rows_digest") if isinstance(meta, dict) else None
+    if memo is None:
+        # Hashed once per snapshot, not once per request: DbReader serves one snapshot object
+        # until the ledger file changes (2026-09-21), so the memo lives exactly as long as
+        # the rows it describes. A row mutated in place would go unseen -- nothing does that;
+        # every change lands in the file and a fresh snapshot.
+        digest = hashlib.blake2b(digest_size=16)
+        for row in snapshot.rows:
+            digest.update(str(row.row_number).encode())
+            for name, value in row.cells.items():
+                digest.update(b"" + name.encode() + b"=" + str(value).encode("utf-8", "replace"))
+            digest.update(b"    ")
+        memo = digest.hexdigest()
+        if isinstance(meta, dict):
+            meta["rows_digest"] = memo
+    return (getattr(reader, "backend", ""), snapshot.source, len(snapshot.rows), memo)
 
 
 class AuditCache:

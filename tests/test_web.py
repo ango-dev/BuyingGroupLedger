@@ -824,6 +824,24 @@ class TestOverviewPage:
         # a single-item order carries no separators
         assert 'class="items "' in card
 
+    def test_the_pages_reconcile_once_per_ledger_change(self, client, monkeypatch):
+        """2026-09-21: the nav badge ran the reconciliation over every row on EVERY page render;
+        it is cached on the audit key now, so two page loads of an unchanged ledger compute it
+        once (the overview's own cards included)."""
+        import web.app as app_module
+
+        calls = {"n": 0}
+        real = app_module.reconcile
+
+        def counted(rows):
+            calls["n"] += 1
+            return real(rows)
+
+        monkeypatch.setattr(app_module, "reconcile", counted)
+        assert client.get("/").status_code == 200
+        assert client.get("/orders").status_code == 200
+        assert calls["n"] == 1
+
     def test_heartbeat_shows_fresh(self, client):
         body = client.get("/").text
         assert "last run 3h 0m ago" in body

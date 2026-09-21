@@ -287,6 +287,10 @@ class Options:
     # How long an OPEN row may go un-rescraped before it's suspicious. The scheduler runs ~4x/day, so
     # 3 days is many missed runs, not a blip.
     stale_days: int = 3
+    # The clock the staleness check reads. None = the wall clock (the CLI); the dashboard passes
+    # its own so an audit is deterministic under test (2026-09-21: a fixture's rows crossed the
+    # threshold when the real date moved on).
+    now: "datetime | None" = None
 
 
 CHECKS: list[tuple[str, bool, Callable]] = []
@@ -1743,7 +1747,7 @@ def check_open_row_staleness(sheet: Sheet, opts: Options) -> Result:
     """
     from datetime import datetime, timezone
 
-    now = datetime.now(timezone.utc)
+    now = opts.now or datetime.now(timezone.utc)
     stale, open_count, unparsed = [], 0, 0
     for row_number, _ in sheet.ledger_rows(sheet.grids.formatted):
         status = str(sheet.cell(sheet.grids.formatted, row_number, "Status")).strip().lower()
