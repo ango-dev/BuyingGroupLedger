@@ -505,9 +505,10 @@ class TestEntryCards:
         assert response.status_code == 303 and "Added+card" in response.headers["location"]
         saved = config_value("cards")[1]
         assert saved["retailer_rates"] == {"Amazon": "5%", "Amazon Business": "5%", "Best Buy": "3%"}
+        # the one-line outside spend still loads, as the dated log with each period at its start
         assert saved["caps"] == [
             {"retailers": ["Amazon", "Amazon Business"], "spend_limit": 150000.0, "fallback_rate": "1%", "resets": "03-15",
-             "outside_spend": {"2026": 4000.0, "2027": 0.0}},
+             "outside_spend": [{"date": "2026-03-15", "amount": 4000.0, "note": ""}, {"date": "2027-03-15", "amount": 0.0, "note": ""}]},
             {"retailers": [], "spend_limit": 25000.0, "fallback_rate": "1%", "resets": "calendar-year"}]
         body = client.get("/settings").text
         # one table: the capped row with its retailers (the page's own dropdown), the plain rate
@@ -516,7 +517,11 @@ class TestEntryCards:
         assert 'name="rr.0.retailers" value="amazon" data-text="Amazon" checked>' in body and 'name="rr.0.retailers" value="amazon-business" data-text="Amazon Business" checked>' in body
         assert 'name="rr.0.retailers" value="bestbuy" data-text="Best Buy" >' in body and 'name="rr.0.rate" value="5%"' in body
         assert 'name="rr.0.anniversary" value="03-15" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" >' in body
-        assert 'name="rr.0.outside_spend" value="2026: 4000, 2027: 0"' in body
+        # the outside spend is the dated log: the current period's total (NOW is 2026-09-17, in the
+        # period from 2026-03-15), its rows newest first, a row for the next entry dated today
+        assert 'data-log="rr.0.os" data-period-start="2026-03-15" data-period-end="2027-03-14"' in body and "$4,000.00" in body
+        assert 'name="rr.0.os.0.date" value="2027-03-15"' in body and 'name="rr.0.os.1.amount" value="4000"' in body
+        assert 'name="rr.0.os.new.date" value="2026-09-17"' in body and 'name="rr.0.outside_spend"' not in body
         assert 'name="rr.1.retailers" value="bestbuy" data-text="Best Buy" checked>' in body and 'name="rr.1.spend_limit" value=""' in body
         assert 'name="cap_all.spend_limit" value="25000"' in body
         assert 'class="mono anniversary" hidden>' in body and "<th>on (MM-DD)</th>" not in body
@@ -609,6 +614,44 @@ class TestEntryCards:
         assert config_value("cards")[0]["caps"][0]["retailers"] == ["Amazon", "Woot"]
         body = client.get("/settings").text
         assert 'value="woot" data-text="Woot" checked>' in body and "Amazon, Woot 5% up to 1,000" in body
+
+    def test_the_outside_spend_log_round_trips_through_its_rows(self, client):
+        """the dated log -- add, take back, remove; the period's total on the summary."""
+        response = client.post("/settings/section/cards/entry", data={
+            "name": "Aven", "last4": "1234", "cashback_rate": "1%", "profile": "",
+            "cap_all.spend_limit": "25000", "cap_all.fallback_rate": "", "cap_all.resets": "calendar-year",
+            "cap_all.os.new.date": "2026-02-03", "cap_all.os.new.amount": "$4,000", "cap_all.os.new.note": "TV",
+            "rr.0.retailers": "", "rr.0.spend_limit": ""}, follow_redirects=False)
+        assert response.status_code == 303 and "Added+card" in response.headers["location"]
+        assert config_value("cards")[1]["caps"] == [{"retailers": [], "spend_limit": 25000.0, "resets": "calendar-year",
+                                                     "outside_spend": [{"date": "2026-02-03", "amount": 4000.0, "note": "TV"}]}]
+        body = client.get("/settings").text
+        assert 'data-log="cap_all.os" data-period-start="2026-01-01" data-period-end="2026-12-31"' in body and "$4,000.00" in body
+        assert 'name="cap_all.os.0.amount" value="4000"' in body and 'name="cap_all.os.0.note" value="TV"' in body
+        # take some back, add a last-year entry (outside the period), remove nothing, then remove the first
+        response = client.post("/settings/section/cards/entry/1", data={
+            "name": "Aven", "last4": "1234", "cashback_rate": "1%", "profile": "",
+            "cap_all.spend_limit": "25000", "cap_all.resets": "calendar-year",
+            "cap_all.os.0.date": "2026-02-03", "cap_all.os.0.amount": "4000", "cap_all.os.0.note": "TV",
+            "cap_all.os.1.date": "", "cap_all.os.1.amount": "-500", "cap_all.os.1.note": "returned",
+            "cap_all.os.new.date": "2025-12-30", "cap_all.os.new.amount": "100"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert config_value("cards")[1]["caps"][0]["outside_spend"] == [
+            {"date": "2025-12-30", "amount": 100.0, "note": ""}, {"date": "2026-02-03", "amount": 4000.0, "note": "TV"},
+            {"date": "2026-09-17", "amount": -500.0, "note": "returned"}]  # a blank date is today
+        body = client.get("/settings").text
+        assert "$3,500.00" in body and "$3,600.00" not in body  # this period only
+        response = client.post("/settings/section/cards/entry/1", data={
+            "name": "Aven", "last4": "1234", "cap_all.spend_limit": "25000", "cap_all.resets": "calendar-year",
+            "cap_all.os.0.date": "2026-09-17", "cap_all.os.0.amount": "-500", "cap_all.os.0.remove": "on",
+            "cap_all.os.1.date": "2026-02-03", "cap_all.os.1.amount": "4000", "cap_all.os.1.note": "TV",
+            "cap_all.os.2.date": "2025-12-30", "cap_all.os.2.amount": "100"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert [e["amount"] for e in config_value("cards")[1]["caps"][0]["outside_spend"]] == [100.0, 4000.0]
+        # a bad amount is refused by name, in place
+        refused = client.post("/settings/section/cards/entry/1", data={
+            "name": "Aven", "last4": "1234", "cap_all.spend_limit": "25000", "cap_all.os.new.amount": "lots"})
+        assert refused.status_code == 400 and "log row new: " in refused.text and "lots" in refused.text and "is not an amount" in refused.text
 
     def test_amazon_and_amazon_business_on_their_own_rows_save_and_render(self, client):
         """a lone Amazon Business row crashed the rows builder (its key has a dash)."""

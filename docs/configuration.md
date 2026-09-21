@@ -221,7 +221,8 @@ never by the rate:
 { "last4": "5555", "name": "Amazon Business Prime", "cashback_rate": "1%",
   "retailer_rates": { "Amazon": "5%", "Amazon Business": "5%" },
   "caps": [ { "retailers": ["Amazon", "Amazon Business"], "spend_limit": 120000,
-              "fallback_rate": "1%", "resets": "calendar-year", "outside_spend": { "2026": 4000 } } ] }
+              "fallback_rate": "1%", "resets": "calendar-year",
+              "outside_spend": [ { "date": "2026-02-03", "amount": 4000, "note": "personal" } ] } ] }
 ```
 
 - `retailers` is the cap's scope: these retailers share ONE allowance. An **empty** list is the
@@ -237,8 +238,11 @@ never by the rate:
 - A limit named for Amazon covers Amazon Business too, and the other way round (one issuer
   program), unless each site has a cap of its own.
 - `resets`: `calendar-year` (default), `never`, or an `MM-DD` the period starts on each year.
-- `outside_spend`: per period (`"2026"`, or `"all"` for a cap that never resets), spend on the card
-  the ledger never sees — personal purchases that also use up the allowance. Update it by hand.
+- `outside_spend`: a dated log of spend on the card the ledger never sees — personal purchases
+  that also use up the allowance — as entries `{date, amount, note}`; a negative amount takes spend
+  back. Each period sums the entries dated inside it. The card's form on Settings keeps the log
+  (open the Outside Spend total to add or take back). The older per-period shape (`"2026": 4000`)
+  still loads, dated at the period's start.
 
 **Getting close.** After every sync the run measures each cap against the period's spend and
 alerts once per state per period — *close* when `CASHBACK_CAP_WARN_PERCENT` of the limit is spent

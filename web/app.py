@@ -754,6 +754,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         inputs = load_tax_inputs(year)
         programs, cards = tax_prompts(snapshot, year)
         summary = tax_inputs.schedule_c(tax_report_for(snapshot, year), inputs)
+        program_logs, site_logs = tax_inputs.log_entries(inputs, year)  # the dated logs' rows
         try:
             labels = profile_labels()
         except Exception:  # noqa: BLE001
@@ -764,6 +765,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return page(request, "taxes.html", snapshot=snapshot, year=year, years=years,
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
+                    program_logs=program_logs, site_logs=site_logs, today=clock().date().isoformat(),
                     draft=draft or {}, expense_choices=tax_inputs.expense_choices(inputs),
                     expenses=tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True),
                     esort=esort, edir=edir, **extra)
@@ -788,7 +790,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         programs, cards = tax_prompts(load(request), year)
         inputs = load_tax_inputs(year)
         try:
-            inputs = tax_inputs.apply_form(inputs, form, programs + cards)
+            inputs = tax_inputs.apply_form(inputs, form, programs + cards, today=clock().date().isoformat())
         except ValueError as exc:
             return taxes_page(request, year, error=str(exc))
         tax_inputs.save_year(tax_inputs_path, year, inputs)
@@ -1654,7 +1656,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         prev = setup_wizard.prev_step(key)
         suffix = "?again=1" if again else ""
         rows = settings_form.view(step.scalar_settings(), os.environ) if step.kind in ("scalars", "entries", "password") else []
-        entries = settings_form.display_entries(step.section) if step.section else []
+        today = clock().date().isoformat()
+        entries = settings_form.display_entries(step.section, today=today) if step.section else []
         response = page_no_snapshot(
             request, "setup.html", step=step, steps=setup_wizard.STEPS, index=setup_wizard.index(key), again=again,
             next_url=f"/setup/{nxt.key}{suffix}" if nxt else "", prev_url=f"/setup/{prev.key}{suffix}" if prev else "",
@@ -1663,7 +1666,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             field_label=settings_form.field_label, retailer_keys=settings_form.RETAILER_KEYS,
             auth_retailers=settings_form.AUTH_RETAILERS, profile_labels=settings_form.profile_labels(),
             retailer_names=retailers_module.NAMES, default_rate_text=default_rate_text(),
-            retailer_options=retailer_options(),
+            retailer_options=retailer_options(), today=today,
             card_choices=card_choices(), section_forms=[], in_container=in_container, auth_on=auth_on,
             restart=setup_wizard.pending_restart(), configured=setup_wizard.is_configured(), **extra)
         response.status_code = status
@@ -1797,7 +1800,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                 act("settings", f"Setup: removed {step.section[:-1]} {label}", {"path": step.section})
             else:
                 form = await request.form()
-                _landed, label = settings_form.apply_entry(step.section, index, form)
+                _landed, label = settings_form.apply_entry(step.section, index, form, today=clock().date().isoformat())
                 act("settings", f"Setup: {'added' if index is None else 'saved'} {step.section[:-1]} {label}", {"path": step.section})
         except settings_form.SettingsError as exc:
             return setup_page(request, key, errors=exc.errors, open_section=step.section, status=400)
@@ -1925,7 +1928,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         texts = section_texts or {}
         forms = [(path, shape, help_text, texts.get(path, settings_form.section_text(path)))
                  for path, shape, _model, help_text in settings_form.SECTIONS]
-        entries = {path: settings_form.display_entries(path) for path in settings_form.CARD_SECTIONS}
+        today = clock().date().isoformat()  # the dated logs' new row, and which period a cap's total is
+        entries = {path: settings_form.display_entries(path, today=today) for path in settings_form.CARD_SECTIONS}
         usage = cap_usage()
         for i, card in enumerate(entries.get("cards", [])):  # each cap row learns where its allowance stands
             for row in card.get("rate_rows", []):
@@ -1939,7 +1943,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             hidden_envs=settings_form.hidden_envs(), in_container=in_container,
             open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE),
             section_title=settings_form.section_title, field_label=settings_form.field_label,
-            entries=entries,
+            entries=entries, today=today,
             retailer_keys=settings_form.RETAILER_KEYS, auth_retailers=settings_form.AUTH_RETAILERS,
             retailer_names=retailers_module.NAMES, default_rate_text=default_rate_text(),
             retailer_options=retailer_options(),
@@ -2039,7 +2043,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     async def _save_entry(request: Request, path: str, index: int | None):
         form = await request.form()
         try:
-            landed, label = settings_form.apply_entry(path, index, form)
+            landed, label = settings_form.apply_entry(path, index, form, today=clock().date().isoformat())
         except settings_form.SettingsError as exc:
             if wants_fragment(request):
                 return settings_section(request, path, errors=exc.errors, open_index=index, open_new=index is None, status=400)

@@ -50,7 +50,30 @@ class TestTheModel:
         c = cap(retailers="Amazon, best-buy", spend_limit="$150,000", fallback_rate="1%",
                 outside_spend="2026: 4,000; 2027: 0")
         assert c.retailers == ["amazon", "bestbuy"] and c.spend_limit == 150000.0
-        assert c.fallback_rate == 0.01 and c.outside_spend == {"2026": 4000.0, "2027": 0.0}
+        assert c.fallback_rate == 0.01
+        # the older per-period text loads as a dated log, each period at its start
+        assert c.outside_spend == [{"date": "2026-01-01", "amount": 4000.0, "note": ""},
+                                   {"date": "2027-01-01", "amount": 0.0, "note": ""}]
+        assert c.outside_for("2026") == 4000.0 and c.outside_for("2025") == 0.0
+        anniversary = cap(resets="03-15", outside_spend={"2026": 4000})
+        assert anniversary.outside_spend[0]["date"] == "2026-03-15" and anniversary.outside_for("2026") == 4000.0
+        forever = cap(resets="never", outside_spend={"all": 500})
+        assert forever.outside_spend[0]["date"] == "1970-01-01" and forever.outside_for("all") == 500.0
+        assert cap(outside_spend=4000).outside_spend == [{"date": "1970-01-01", "amount": 4000.0, "note": ""}]
+
+    def test_the_log_sums_per_period_and_a_negative_entry_takes_spend_back(self):
+        c = cap(outside_spend=[{"date": "2026-02-01", "amount": "$1,000", "note": "tv"},
+                               {"date": "2026-03-01", "amount": -200, "note": "returned"},
+                               {"date": "2025-12-31", "amount": 50}])
+        assert [e["date"] for e in c.outside_spend] == ["2025-12-31", "2026-02-01", "2026-03-01"]  # oldest first
+        assert c.outside_for("2026") == 800.0 and c.outside_for("2025") == 50.0
+        assert c.period_bounds("2026-06-01") == ("2026-01-01", "2026-12-31")
+        assert cap(resets="03-15").period_bounds("2026-03-01") == ("2025-03-15", "2026-03-14")
+        assert cap(resets="03-15").period_bounds("2026-03-15") == ("2026-03-15", "2027-03-14")
+        assert cap(resets="never").period_bounds("2026-06-01") is None
+        assert cap(resets="02-30").period_bounds("2026-06-01") == ("2026-02-28", "2027-02-27")  # a day February lacks
+        with pytest.raises(ValueError, match="not an amount"):
+            cap(outside_spend=[{"date": "2026-02-01", "amount": "lots"}])
 
     def test_resets_is_calendar_year_never_or_a_date(self):
         assert cap().resets == "calendar-year"
@@ -98,8 +121,7 @@ class TestTheModel:
             cap(spend_limit=0)
         with pytest.raises(ValueError, match="outside 0-1"):
             cap(fallback_rate=2)
-        with pytest.raises(ValueError, match="negative"):
-            cap(outside_spend={"2026": -1})
+        assert cap(outside_spend={"2026": -1}).outside_for("2026") == -1.0  # a negative entry is allowed: it takes spend back
 
     def test_a_card_routes_a_retailer_to_its_cap_else_the_catch_all(self):
         c = card(caps=[{"retailers": ["Amazon"], "spend_limit": 100, "fallback_rate": "1%"},
@@ -454,3 +476,48 @@ class TestTheRunOrder:
         it = item(order_id="N1", total_cost=5000, cashback_rate=None)
         main._tag_cards([it], "Amazon [p]")
         assert it.cashback_rate == 0.05
+
+
+class TestAmountLog:
+    """models/amount_log.py: the pure part of the dated log."""
+
+    def test_coerce_reads_every_stored_shape(self):
+        from models import amount_log
+
+        assert amount_log.coerce(None, "2026-01-01") == [] and amount_log.coerce("", "x") == [] and amount_log.coerce({}, "x") == []
+        assert amount_log.coerce(130, "2026-01-01") == [{"date": "2026-01-01", "amount": 130.0, "note": ""}]
+        assert amount_log.coerce("$1,250.5", "2026-01-01") == [{"date": "2026-01-01", "amount": 1250.5, "note": ""}]
+        got = amount_log.coerce({"2026": 4000, "all": 5}, "2026-06-01")
+        assert got == [{"date": "2026-01-01", "amount": 4000.0, "note": ""}, {"date": "2026-06-01", "amount": 5.0, "note": ""}]
+        assert amount_log.coerce("2026: 4,000, 2027: 0", "x") == [{"date": "2026-01-01", "amount": 4000.0, "note": ""},
+                                                                  {"date": "2027-01-01", "amount": 0.0, "note": ""}]
+        assert amount_log.coerce({"2026": 1}, lambda period: f"{period}-03-15") == [{"date": "2026-03-15", "amount": 1.0, "note": ""}]
+        assert amount_log.coerce([{"date": "bad", "amount": "3", "note": 7}, {"date": "2026-01-02", "amount": ""}, "junk"], "2026-09-20") == [
+            {"date": "2026-09-20", "amount": 3.0, "note": "7"}]
+        with pytest.raises(ValueError, match="not an amount"):
+            amount_log.coerce([{"date": "2026-01-02", "amount": "x"}], "2026-09-20")
+        assert amount_log.total([{"amount": 1.1}, {"amount": -0.1}, {}]) == 1.0
+
+    def test_parse_reads_the_widgets_rows(self):
+        from models import amount_log
+
+        form = {"c.os.0.date": "2026-02-01", "c.os.0.amount": "1,000", "c.os.0.note": "tv",
+                "c.os.1.date": "2026-03-01", "c.os.1.amount": "5", "c.os.1.remove": "on",   # ticked away
+                "c.os.2.date": "2026-01-05", "c.os.2.amount": "",                              # no amount: dropped
+                "c.os.new.date": "", "c.os.new.amount": "-200", "c.os.new.note": "back",      # blank date: today
+                "c.os.3.date": "2026-04-01", "c.os.3.amount": "1",
+                "other.0.amount": "9"}
+        assert amount_log.has_fields(form, "c.os") and not amount_log.has_fields(form, "c.o") and not amount_log.has_fields({"c.os": "1"}, "c.os")
+        assert amount_log.parse(form, "c.os", today="2026-09-20") == [
+            {"date": "2026-02-01", "amount": 1000.0, "note": "tv"},
+            {"date": "2026-04-01", "amount": 1.0, "note": ""},
+            {"date": "2026-09-20", "amount": -200.0, "note": "back"}]
+        with pytest.raises(ValueError, match="log row new: 'lots' is not an amount"):
+            amount_log.parse({"c.os.new.amount": "lots"}, "c.os")
+        assert amount_log.parse({}, "c.os") == []
+
+    def test_display_is_newest_first_with_plain_numbers(self):
+        from models import amount_log
+
+        rows = amount_log.display([{"date": "2026-01-01", "amount": 4000.0, "note": ""}, {"date": "2026-03-01", "amount": 12.5, "note": "n"}])
+        assert rows == [{"date": "2026-03-01", "amount": 12.5, "note": "n"}, {"date": "2026-01-01", "amount": 4000, "note": ""}]

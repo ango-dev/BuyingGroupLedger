@@ -76,6 +76,15 @@ class TestStorage:
         assert load_year(path, 2026) == inputs and load_year(path, 2025).sites == {"TopCashback": 1.0}
         assert load_year(path, 2024) == YearInputs()
         assert set(json.loads(path.read_text(encoding="utf-8"))) == {"2025", "2026"}
+        logged = YearInputs(programs={"p": 42.5}, program_entries={"p": [{"date": "2026-01-01", "amount": 30.0, "note": ""},
+                                                                          {"date": "2026-04-02", "amount": 12.5, "note": "Q1"}]},
+                            sites={"Rakuten": 5.0}, site_entries={"Rakuten": [{"date": "2026-02-02", "amount": 5.0, "note": ""}]})
+        save_year(path, 2027, logged)
+        assert load_year(path, 2027) == logged
+        programs, sites = tax_inputs.log_entries(load_year(path, 2027), 2027)
+        assert programs["p"][0]["date"] == "2026-04-02" and sites["Rakuten"][0]["amount"] == 5
+        programs, sites = tax_inputs.log_entries(YearInputs(programs={"q": 7.0}), 2025)  # an older single amount
+        assert programs == {"q": [{"date": "2025-01-01", "amount": 7, "note": ""}]} and sites == {}
 
     def test_a_damaged_file_or_entry_reads_as_empty(self, tmp_path):
         path = tmp_path / "tax_inputs.json"
@@ -94,6 +103,12 @@ class TestStorage:
              "other.0.amount": "3", "other.1.label": "", "notes": " n "}, prompts)
         assert programs == {"program:a:costco": 130.0} and bonuses == {}  # fee:0315 is ignored: a fee is an expense
         assert sites == {"Rakuten": 55.5} and notes == "n"
+        # the dated log's rows, in place of a plain amount
+        programs, _b, sites, _o, _n = parse_form(
+            {"program:a:costco.0.date": "2026-01-01", "program:a:costco.0.amount": "10", "program:a:costco.0.remove": "on",
+             "program:a:costco.new.date": "2026-05-05", "program:a:costco.new.amount": "5",
+             "site.0.name": "Rakuten", "site.0.amount.new.amount": "2"}, prompts, today="2026-09-18")
+        assert programs == {"program:a:costco": 5.0} and sites == {"Rakuten": 2.0}
         assert other == [{"label": "refund", "amount": 3.0, "kind": "income"}]  # income only
         with pytest.raises(ValueError, match="Costco Executive — a: not a number"):
             parse_form({"program:a:costco": "lots"}, prompts)
@@ -219,12 +234,52 @@ class TestTaxesPage:
         saved = json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]
         assert saved["programs"] == {"program:alpha:costco": 30.0} and saved["sites"] == {"TopCashback": 40.0, "Honey": 2.5}
         body = client.get("/taxes", params={"year": "2026"}).text
-        assert 'value="30.0"' in body and 'name="site.5.name" value="Honey"' in body and "for Pat" in body
+        # the amounts are dated logs now: a plain total shows as one entry dated the year's first day
+        assert 'name="program:alpha:costco.0.date" value="2026-01-01"' in body and 'name="program:alpha:costco.0.amount" value="30"' in body
+        assert 'name="site.5.name" value="Honey"' in body and "for Pat" in body
         assert "$280.50" in body   # line 6: 30 + 40 + 2.5 + 200 + 8
         assert "$95.00" not in body and "fees" not in saved  # fee:4331 was ignored: a fee is an expense
         bad = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "lots"})
         assert bad.status_code == 200 and "Costco Executive Cashback — alpha: not a number" in bad.text
         assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["programs"] == {"program:alpha:costco": 30.0}
+
+    def test_the_amounts_keep_a_dated_log(self, client, tmp_path):
+        """program cashback and cashback sites change often -- a log of what was
+        added or taken back and when, the total kept for the summary."""
+        client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "30"}, follow_redirects=False)
+        response = client.post("/taxes/save", data={
+            "year": "2026",
+            "program:alpha:costco.0.date": "2026-01-01", "program:alpha:costco.0.amount": "30", "program:alpha:costco.0.note": "",
+            "program:alpha:costco.new.date": "2026-04-02", "program:alpha:costco.new.amount": "12.5", "program:alpha:costco.new.note": "Q1",
+            "site.0.name": "Rakuten", "site.0.amount.new.date": "", "site.0.amount.new.amount": "$1,000", "site.0.amount.new.note": "",
+            "site.1.name": "", "site.1.amount.new.amount": ""}, follow_redirects=False)
+        assert response.status_code == 303
+        saved = json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]
+        assert saved["programs"] == {"program:alpha:costco": 42.5} and saved["sites"] == {"Rakuten": 1000.0}
+        assert saved["program_entries"] == {"program:alpha:costco": [{"date": "2026-01-01", "amount": 30.0, "note": ""},
+                                                                      {"date": "2026-04-02", "amount": 12.5, "note": "Q1"}]}
+        assert saved["site_entries"] == {"Rakuten": [{"date": "2026-09-18", "amount": 1000.0, "note": ""}]}  # a blank date: today
+        body = client.get("/taxes", params={"year": "2026"}).text
+        assert 'data-log="program:alpha:costco"' in body and "$42.50" in body and "$1,000.00" in body
+        assert 'name="program:alpha:costco.0.date" value="2026-04-02"' in body  # newest first
+        assert '.amount.0.amount" value="1000"' in body and '.amount.new.date" value="2026-09-18"' in body  # Rakuten's row, the empty row
+        # a row ticked for removal goes; the total follows
+        response = client.post("/taxes/save", data={
+            "year": "2026",
+            "program:alpha:costco.0.date": "2026-04-02", "program:alpha:costco.0.amount": "12.5", "program:alpha:costco.0.remove": "on",
+            "program:alpha:costco.1.date": "2026-01-01", "program:alpha:costco.1.amount": "30"}, follow_redirects=False)
+        assert response.status_code == 303
+        saved = json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]
+        assert saved["programs"] == {"program:alpha:costco": 30.0} and saved["program_entries"] == {"program:alpha:costco": [{"date": "2026-01-01", "amount": 30.0, "note": ""}]}
+        assert saved["sites"] == {} and saved["site_entries"] == {}  # not posted: dropped, as before
+        # a plain amount keeps the stored log while the total is unchanged, drops it when it moves
+        client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "30"}, follow_redirects=False)
+        assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["program_entries"] == {
+            "program:alpha:costco": [{"date": "2026-01-01", "amount": 30.0, "note": ""}]}
+        client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "31"}, follow_redirects=False)
+        assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["program_entries"] == {}
+        bad = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco.new.amount": "lots"})
+        assert bad.status_code == 200 and "Costco Executive Cashback — alpha: not a number" in bad.text
 
     def test_an_expense_with_an_uploaded_receipt(self, client, tmp_path):
         response = client.post("/taxes/expense", params={"year": "2026"},

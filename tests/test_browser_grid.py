@@ -688,3 +688,53 @@ def test_the_staging_sheet_edits_like_the_orders_grid(served, page, client):
     page.wait_for_url("**/tools/import**", timeout=5000)
     page.wait_for_selector('form[action="/tools/import/upload"]', timeout=5000)
     assert page.errors == []
+
+
+def test_the_dated_log_totals_live_grows_a_row_and_saves(served, page):
+    """the outside-spend log -- open the total, type an amount, the total follows,
+    a fresh row appears, a removed row leaves the total, an outside click closes it, the save keeps it."""
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/settings")
+    page.wait_for_selector("#s-cards details.entry-card")
+    card = page.locator("#s-cards details.entry-card").first
+    card.evaluate("d => d.open = true")
+    log = card.locator("details.log[data-log='cap_all.os']")
+    assert log.locator(".summary-value").inner_text() == "$0.00"
+    log.locator("summary").click()
+    assert log.evaluate("d => d.open")
+    log.locator("input[name='cap_all.os.new.amount']").fill("4000")
+    assert log.locator(".summary-value").inner_text() == "$4,000.00"
+    assert log.locator("tr.entry").count() == 2  # the typed row is numbered now, a fresh new row follows
+    assert log.locator("input[name='cap_all.os.0.amount']").input_value() == "4000"
+    assert log.locator("input[name='cap_all.os.new.amount']").input_value() == ""
+    log.locator("input[name='cap_all.os.new.amount']").fill("-500")
+    assert log.locator(".summary-value").inner_text() == "$3,500.00" and log.locator("tr.entry").count() == 3
+    log.locator("label.remove").first.click()  # the 4,000 entry ticked away
+    assert log.locator(".summary-value").inner_text() == "-$500.00"
+    log.locator("label.remove").first.click()  # and back
+    assert log.locator(".summary-value").inner_text() == "$3,500.00"
+    page.mouse.click(5, 5)  # outside: closes
+    assert not log.evaluate("d => d.open")
+    card.locator("input[name='cap_all.spend_limit']").fill("25000")  # a cap needs a limit to be kept
+    card.locator("button", has_text="Save card").click()
+    page.wait_for_selector("#toast .toast.ok")
+    saved = page.locator("#s-cards details.entry-card").first.locator("details.log[data-log='cap_all.os']")
+    assert saved.locator(".summary-value").inner_text() == "$3,500.00"
+    assert saved.locator("input[name='cap_all.os.0.amount']").input_value() in ("-500", "4000")
+    assert saved.locator("tr.entry").count() == 3
+    # the menu stays inside the window: at a phone width the rates table scrolls sideways and would
+    # clip an absolute menu; at the page's right edge it would run off it
+    page.set_viewport_size({"width": 390, "height": 844})
+    log = page.locator("#s-cards details.entry-card").first.locator("details.log[data-log='cap_all.os']")
+    log.scroll_into_view_if_needed()
+    log.locator("summary").click()
+    box = log.locator(".menu").bounding_box()
+    assert box["x"] >= 0 and box["x"] + box["width"] <= 390 and box["width"] > 200
+    assert log.locator("input[name='cap_all.os.new.amount']").is_visible()
+    page.mouse.wheel(0, 120)  # a page scroll: the fixed menu is placed again, under the summary
+    page.wait_for_timeout(150)
+    assert log.evaluate("d => d.open")
+    under = log.locator("summary").bounding_box()
+    box = log.locator(".menu").bounding_box()
+    assert abs(box["y"] - (under["y"] + under["height"] + 4)) <= 2
+    assert page.errors == []

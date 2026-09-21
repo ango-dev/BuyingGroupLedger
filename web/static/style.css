@@ -626,7 +626,7 @@ table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-to
 table.entry-table.rates td.resets { width: 1%; white-space: nowrap; }  /* content-sized: no gap before outside spend */
 table.entry-table.rates td.resets .inline { display: inline-flex; align-items: center; gap: 6px; }
 table.entry-table.rates td.outside { width: 1%; }
-table.entry-table.rates td.outside input { width: 150px; }
+table.entry-table.rates td.outside details.log .summary-text { min-width: 110px; }
 /* the allowance left this period: a bar and the amount, inline with the row */
 table.entry-table.rates td.left { white-space: nowrap; }
 .cap-left { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9em; }
@@ -1230,4 +1230,37 @@ main .setup-steps + h1 { margin-top: 6px; }
   table.activity.stacked tbody td.when { font-size: 0.85em; }
   table.activity.stacked tbody tr.details-row { display: block; }
   table.activity.stacked tbody tr.details-row[hidden] { display: none; }
+}
+
+/* --- The dated log (_amount_log.html): a total that opens into its entries ---- */
+details.log { position: relative; font-size: 0.85em; color: var(--muted); }
+details.log summary { list-style: none; cursor: pointer; display: inline-block; }
+details.log summary::-webkit-details-marker { display: none; }
+details.log .summary-text { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 1.18em;
+  color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 96px; white-space: nowrap; }
+details.log[open] .summary-text { border-color: var(--accent); }
+details.log .summary-value { font-variant-numeric: tabular-nums; }
+details.log .caret { color: var(--muted); flex: 0 0 auto; }
+/* the menu is FIXED and placed by edit.js: a rates table that scrolls sideways on a phone, or a
+   cell at the page's right edge, would otherwise clip it (an overflow container clips absolute menus) */
+details.log .menu { position: fixed; z-index: 30; width: max-content; max-width: calc(100vw - 16px); max-height: 340px; overflow: auto;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+details.log table.log-table { border-collapse: collapse; width: max-content; font-size: 1.05em; }
+details.log table.log-table th { text-align: left; font-weight: 500; color: var(--muted); padding: 2px 6px; position: static; }
+/* the rates table's first-cell rule (a wide retailer picker) reaches the log's cells too: undone here */
+details.log table.log-table td, table.entry-table.rates details.log table.log-table td:first-child { width: auto; min-width: 0; padding: 2px 4px; border: 0; white-space: nowrap; }
+table.entry-table.rates details.log table.log-table th:first-child { width: auto; min-width: 0; padding: 2px 6px; }
+details.log table.log-table input[type="text"] { width: 118px; font: inherit; padding: 3px 6px; }
+details.log table.log-table input.amount { width: 92px; text-align: right; font-variant-numeric: tabular-nums; }
+details.log table.log-table td:nth-child(3) input { width: 170px; }
+details.log label.remove { cursor: pointer; color: var(--muted); padding: 2px 6px; border-radius: 4px; }
+details.log label.remove:hover { color: var(--bad); background: var(--bg); }
+details.log label.remove input { position: absolute; opacity: 0; width: 0; height: 0; }
+details.log label.remove:has(input:checked) { color: var(--bad); }
+details.log tr:has(label.remove input:checked) input[type="text"] { opacity: 0.45; text-decoration: line-through; }
+details.log tr.new input { border-style: dashed; }
+details.log .menu p { margin: 6px 2px 0; }
+@media (max-width: 760px) {
+  details.log table.log-table input[type="text"] { width: 96px; }
+  details.log table.log-table td:nth-child(3) input { width: 110px; }
 }

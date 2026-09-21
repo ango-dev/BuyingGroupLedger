@@ -531,7 +531,7 @@ def _is_set(value) -> bool:
     return bool(str(value or "").strip())
 
 
-def display_entries(path: str) -> list[dict]:
+def display_entries(path: str, today: str | None = None) -> list[dict]:
     """What the cards show: the stored entries with every secret replaced by whether it is set."""
     out = []
     for index, raw in enumerate(_entries(path)):
@@ -572,14 +572,14 @@ def display_entries(path: str) -> list[dict]:
                 "virtual_of": str(entry.get("virtual_of") or ""),
                 "own_bonus": bool(entry.get("own_bonus")),
                 "retailer_rates": list((entry.get("retailer_rates") or {}).items()),
-                "caps": [_cap_display(c) for c in caps],
-                "rate_rows": _rate_rows(entry.get("retailer_rates") or {}, caps),
-                "cap_all": next(({**_cap_display(c), "cap_index": j} for j, c in enumerate(caps) if not c.get("retailers")), _cap_display({})),
+                "caps": [_cap_display(c, today) for c in caps],
+                "rate_rows": _rate_rows(entry.get("retailer_rates") or {}, caps, today),
+                "cap_all": next(({**_cap_display(c, today), "cap_index": j} for j, c in enumerate(caps) if not c.get("retailers")), _cap_display({}, today)),
             })
     return out
 
 
-def _rate_rows(retailer_rates: dict, caps: list) -> list[dict]:
+def _rate_rows(retailer_rates: dict, caps: list, today: str | None = None) -> list[dict]:
     """The card's rates by retailer as ONE table: a row per retailer cap (its retailers share the row, the
     rate and the allowance), then a row per retailer rate without a cap."""
     from models.card import normalize_retailer
@@ -595,7 +595,7 @@ def _rate_rows(retailer_rates: dict, caps: list) -> list[dict]:
         keys = [normalize_retailer(str(r)) for r in retailers]
         rate = next((by_key[k][1] for k in keys if k in by_key), "")
         # the form's tick values are retailer_keys (models/retailers.py); the chips show the names
-        rows.append({**_cap_display(cap), "cap_index": cap_index,
+        rows.append({**_cap_display(cap, today), "cap_index": cap_index,
                      "retailers": ", ".join(retailers_module.key_of(str(r)) for r in retailers), "rate": rate})
         covered.update(keys)
     # retailers without a cap that share a rate share a row; the file stores a flat dict
@@ -604,18 +604,36 @@ def _rate_rows(retailer_rates: dict, caps: list) -> list[dict]:
         if key not in covered:
             grouped.setdefault(str(rate), (rate, []))[1].append(retailers_module.key_of(str(retailer)))
     for rate, keys in grouped.values():  # the rate as stored ("amazon-business" is not by_key's key)
-        rows.append({**_cap_display({}), "retailers": ", ".join(keys), "rate": rate})
+        rows.append({**_cap_display({}, today), "retailers": ", ".join(keys), "rate": rate})
     return rows
 
 
-def _cap_display(cap: dict) -> dict:
-    """A CashbackCap entry as the card's form shows it (models.card.CashbackCap)."""
+def _cap_display(cap: dict, today: str | None = None) -> dict:
+    """A CashbackCap entry as the card's form shows it (models.card.CashbackCap): the outside spend
+    as the dated log's rows plus the current period's total and bounds (`today` says which)."""
+    from datetime import date
+
+    from models import amount_log
+    from models.card import CashbackCap
+
     resets = str(cap.get("resets") or "calendar-year")
     anniversary = resets if resets not in ("calendar-year", "never") else ""
     retailers = cap.get("retailers") or []
     if isinstance(retailers, str):
         retailers = [retailers]
-    offsets = cap.get("outside_spend") or {}
+    today = today or date.today().isoformat()
+    try:  # the model reads every shape the file may hold and knows the period; a cap the model
+        # refuses (a typo in config.json) still shows its log, undated by period
+        fields = {k: v for k, v in cap.items() if k in ("retailers", "spend_limit", "fallback_rate", "resets", "outside_spend")}
+        model = CashbackCap(**{**fields, "spend_limit": fields.get("spend_limit") or 1})  # a row without a limit still has its period
+        entries, bounds = model.outside_spend, model.period_bounds(today)
+        current = model.outside_for(model.period_of(today))
+    except Exception:  # noqa: BLE001
+        try:
+            entries = amount_log.coerce(cap.get("outside_spend"), "1970-01-01")
+        except ValueError:
+            entries = []
+        bounds, current = None, amount_log.total(entries)
 
     def plain(value):  # 150000.0 shows as 150000
         return int(value) if isinstance(value, float) and value.is_integer() else value
@@ -626,7 +644,10 @@ def _cap_display(cap: dict) -> dict:
         "fallback_rate": cap.get("fallback_rate", ""),
         "resets": "anniversary" if anniversary else resets,
         "anniversary": anniversary,
-        "outside_spend": ", ".join(f"{k}: {plain(v)}" for k, v in offsets.items()) if isinstance(offsets, dict) else "",
+        "outside_entries": amount_log.display(entries),
+        "outside_total": current,
+        "period_start": bounds[0] if bounds else "",
+        "period_end": bounds[1] if bounds else "",
     }
 
 
@@ -749,7 +770,7 @@ def _warehouse_from_form(form: Mapping[str, str], base: dict) -> dict:
     return entry
 
 
-def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
+def _card_from_form(form: Mapping[str, str], base: dict, today: str | None = None) -> dict:
     entry = dict(base)
     entry["last4"] = _text(form, "last4")
     entry["name"] = _text(form, "name")
@@ -804,10 +825,10 @@ def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
         if value is not None:
             for r in names:
                 rates[r] = value
-        cap = _cap_from_form(form, f"rr.{i}", names)
+        cap = _cap_from_form(form, f"rr.{i}", names, today)
         if cap:
             caps.append(cap)
-    catch_all = _cap_from_form(form, "cap_all", [])
+    catch_all = _cap_from_form(form, "cap_all", [], today)
     if catch_all:
         caps.append(catch_all)
     if rates:
@@ -835,7 +856,7 @@ def _many(form: Mapping[str, str], name: str) -> list[str]:
     return out
 
 
-def _cap_from_form(form: Mapping[str, str], prefix: str, retailers: list) -> dict | None:
+def _cap_from_form(form: Mapping[str, str], prefix: str, retailers: list, today: str | None = None) -> dict | None:
     """A CashbackCap from a table row's fields, or None when the row has no spend limit."""
     limit = _text(form, f"{prefix}.spend_limit")
     if not limit:
@@ -845,17 +866,39 @@ def _cap_from_form(form: Mapping[str, str], prefix: str, retailers: list) -> dic
         resets = _text(form, f"{prefix}.anniversary")
     cap = {"retailers": list(retailers), "spend_limit": _money_value(limit),
            "fallback_rate": _rate_value(_text(form, f"{prefix}.fallback_rate")), "resets": resets}
-    offsets = {}
-    for part in re.split(r"[;,](?=\s*[^,;:]+:)", _text(form, f"{prefix}.outside_spend")):
-        if ":" in part:
-            period, amount = part.split(":", 1)
-            if period.strip() and amount.strip():
-                offsets[period.strip()] = _money_value(amount)
-    if offsets:
-        cap["outside_spend"] = offsets
+    from models import amount_log
+
+    if amount_log.has_fields(form, f"{prefix}.os"):  # the dated log's rows
+        entries = _log_rows(form, f"{prefix}.os", today)
+        if entries:
+            cap["outside_spend"] = entries
+    else:  # the older one-line form, "2026: 4,000, 2027: 0": the model dates each period at its start
+        offsets = {}
+        for part in re.split(r"[;,](?=\s*[^,;:]+:)", _text(form, f"{prefix}.outside_spend")):
+            if ":" in part:
+                period, amount = part.split(":", 1)
+                if period.strip() and amount.strip():
+                    offsets[period.strip()] = _money_value(amount)
+        if offsets:  # stored as the dated log (the model dates each period); a refused cap keeps the text for its message
+            try:
+                from models.card import CashbackCap
+
+                cap["outside_spend"] = CashbackCap(**{**cap, "outside_spend": offsets}).outside_spend
+            except Exception:  # noqa: BLE001
+                cap["outside_spend"] = offsets
     if cap["fallback_rate"] is None:
         cap.pop("fallback_rate")  # blank: the card's everywhere-else rate applies past the limit
     return cap
+
+
+def _log_rows(form: Mapping[str, str], prefix: str, today: str | None = None) -> list[dict]:
+    """The dated log's rows as posted; a bad amount is left as typed for the model to refuse by name."""
+    from models import amount_log
+
+    try:
+        return amount_log.parse(form, prefix, today=today)
+    except ValueError as exc:
+        raise SettingsError([str(exc)]) from None
 
 
 def _money_value(text: str):
@@ -882,7 +925,7 @@ def entry_label(path: str, entry: dict) -> str:
     return f"{name} \u2026{entry.get('last4', '')}" if entry.get("last4") else str(name)
 
 
-def apply_entry(path: str, index: int | None, form: Mapping[str, str]) -> tuple[int, str]:
+def apply_entry(path: str, index: int | None, form: Mapping[str, str], today: str | None = None) -> tuple[int, str]:
     """Add (index None) or replace one entry of a card section from its form. Returns the index
     it landed at and its label. Raises SettingsError, nothing written."""
     if path not in CARD_SECTIONS:
@@ -893,7 +936,7 @@ def apply_entry(path: str, index: int | None, form: Mapping[str, str]) -> tuple[
         raise SettingsError([f"{path}[{index}] does not exist (the page may be stale; reload it)"])
     base = dict(entries[index]) if index is not None and isinstance(entries[index], dict) else {}
     try:
-        entry = _BUILDERS[path](form, base)
+        entry = _card_from_form(form, base, today) if path == "cards" else _BUILDERS[path](form, base)  # a card's logs date a blank row today
         model.model_validate(strip_comments(entry))
     except SettingsError:
         raise

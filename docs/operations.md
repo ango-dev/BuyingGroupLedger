@@ -132,8 +132,9 @@ projected versus realized profit; the scheduler heartbeat is the pill in the hea
 sortable ledger table, one page per order, an Activity page (what every run
 and every dashboard change did, with the failure dossiers' reports rendered in place), an **Audit**
 page and a **Reconciliation** page (both the Orders view over the affected rows — see below), a
-**Taxes** page (the year on Schedule C, with the year's expense list, program cashback, card
-sign-up bonuses, cashback-site payouts and anything else you enter for it — see below), a Settings
+**Taxes** page (the year on Schedule C, with the year's expense list, program cashback and
+cashback-site payouts as dated logs, card sign-up bonuses and anything else you enter for it — see
+below), a Settings
 page (with backup and restore), a Tools menu, and `/health` as JSON for the container's
 healthcheck. FastAPI + Jinja2 + htmx, no build step; a light/dark toggle in
 the header (remembered per browser; follows the system until you choose). The dependencies are

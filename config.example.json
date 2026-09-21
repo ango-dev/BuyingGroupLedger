@@ -191,8 +191,8 @@
     { "last4": "8765", "name": "Citi Double Cash", "cashback_rate": "2%" },
     { "// profile": "Scopes a card to one profile, when two accounts each have a card ending in the same 4 digits.", "last4": "2222", "name": "Personal Amex Gold", "cashback_rate": "4%", "profile": "profile-1" },
     { "// virtual": "A virtual card number (another card's): earns cashback as usual, but the Taxes page does not ask for a sign-up bonus for it.", "last4": "9999", "name": "Citi Double Cash (virtual)", "cashback_rate": "2%", "virtual": true },
-    { "// caps": "Spend caps on the boosted rate: past `spend_limit` of spend in the period (within the cap's retailers, or every retailer when `retailers` is empty) purchases earn `fallback_rate`; the purchase that crosses the line earns the blend. `resets`: calendar-year, never, or an MM-DD. `outside_spend`: per period, spend on the card the ledger never sees.",
+    { "// caps": "Spend caps on the boosted rate: past `spend_limit` of spend in the period (within the cap's retailers, or every retailer when `retailers` is empty) purchases earn `fallback_rate`; the purchase that crosses the line earns the blend. `resets`: calendar-year, never, or an MM-DD. `outside_spend`: a dated log ({date, amount, note}) of spend on the card the ledger never sees; a negative amount takes it back.",
       "last4": "5555", "name": "Amazon Business Prime", "cashback_rate": "1%", "retailer_rates": { "Amazon": "5%", "Amazon Business": "5%" },
-      "caps": [ { "retailers": ["Amazon", "Amazon Business"], "spend_limit": 120000, "fallback_rate": "1%", "resets": "calendar-year", "outside_spend": { "2026": 0 } } ] }
+      "caps": [ { "retailers": ["Amazon", "Amazon Business"], "spend_limit": 120000, "fallback_rate": "1%", "resets": "calendar-year", "outside_spend": [] } ] }
   ]
 }

@@ -6,7 +6,7 @@ period resets. What counts as spend is what the card was charged for a row, the 
 basis: Total Cost + Shipping + Sales Tax - Gift Card - Rewards Used. A return gives its amount
 (Return Qty x Cost Per Item) back to the allowance in the period of its Return Date (the issuer's
 timing), or of the Order Date when there is none. Spend outside the ledger --
-personal purchases on the same card -- is a per-period offset on the cap (`outside_spend`).
+personal purchases on the same card -- is a dated log on the cap (`outside_spend`), summed per period.
 
 The rate a row gets: the card's rate at that retailer (config.cards.resolve_card's tiers) while the
 period's spend before this row is under the limit, the fallback once it is over, and the exact
@@ -70,15 +70,7 @@ def basis(cells) -> float:
 def period_key(cap: CashbackCap, when: str) -> str:
     """Which allowance a date falls in: "all" for a cap that never resets, the calendar year, or
     the year an anniversary period started (a cap resetting 03-15 puts 2026-03-01 in "2025")."""
-    when = str(when or "")[:10]
-    if cap.resets == "never":
-        return "all"
-    if len(when) < 10 or not when[:4].isdigit():
-        return when[:4] or "?"
-    if cap.resets == "calendar-year":
-        return when[:4]
-    year = int(when[:4])
-    return str(year if when[5:10] >= cap.resets else year - 1)
+    return cap.period_of(when)
 
 
 @dataclass(frozen=True)
@@ -178,7 +170,7 @@ def spend_before(events, cards: list[Card], card: Card, cap: CashbackCap, upto: 
     """The period's spend on this card -- its virtual numbers included -- within this cap's scope,
     before `upto` in date order, plus the period's outside-ledger offset."""
     period = period_key(cap, upto.when)
-    total = float(cap.outside_spend.get(period, 0.0))
+    total = cap.outside_for(period)
     for e in events:
         if _root_of(cards, e.card_last4, e.profile) is not card or card.cap_for(e.retailer) is not cap:
             continue
@@ -215,7 +207,7 @@ def allowance(events, cards: list[Card], card: Card, cap: CashbackCap, today: st
     every event of the period on this card (its virtual numbers included) within the cap's scope,
     plus the period's outside-ledger offset."""
     period = period_key(cap, today)
-    used = float(cap.outside_spend.get(period, 0.0))
+    used = cap.outside_for(period)
     for e in events:
         if _root_of(cards, e.card_last4, e.profile) is not card or card.cap_for(e.retailer) is not cap:
             continue

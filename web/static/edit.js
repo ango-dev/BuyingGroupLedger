@@ -1411,3 +1411,99 @@
     });
   });
 })();
+
+// --- The dated log (web/templates/_amount_log.html): the summary total follows
+// the rows as they are typed (only rows inside the period when the log names one, never a row
+// ticked for removal); once the row being added has an amount it becomes a numbered row and a
+// fresh one follows; an outside click or Escape closes the log. The page's own calendar
+// (picker.js, `data-date`) serves the date boxes, so a click inside it is not "outside".
+(function () {
+  "use strict";
+  function within(details, day) {
+    var start = details.dataset.periodStart, end = details.dataset.periodEnd;
+    if (!start || !end || !day) return true;
+    return day >= start && day <= end;
+  }
+  function money(sum) {
+    return (sum < 0 ? "-$" : "$") + Math.abs(sum).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function total(details) {
+    var sum = 0;
+    details.querySelectorAll("tr.entry").forEach(function (tr) {
+      var remove = tr.querySelector("input[name$='.remove']");
+      if (remove && remove.checked) return;
+      var amount = tr.querySelector("input[name$='.amount']"), day = tr.querySelector("input[name$='.date']");
+      var value = parseFloat((amount ? amount.value : "").replace(/[$,\s]/g, ""));
+      if (isNaN(value) || !within(details, day ? day.value : "")) return;
+      sum += value;
+    });
+    var out = details.querySelector(".summary-value");
+    if (out) out.textContent = money(sum);
+  }
+  function grow(details, tr) {
+    var n = parseInt(tr.dataset.index || "0", 10), prefix = details.dataset.log;
+    var fresh = tr.cloneNode(true);
+    tr.classList.remove("new");
+    tr.removeAttribute("data-index");
+    tr.querySelectorAll("input").forEach(function (input) { input.name = input.name.replace(prefix + ".new.", prefix + "." + n + "."); });
+    var cell = tr.lastElementChild, label = document.createElement("label"), box = document.createElement("input");
+    cell.textContent = "";
+    label.className = "remove"; label.title = "remove this entry on save";
+    box.type = "checkbox"; box.name = prefix + "." + n + ".remove"; box.value = "on";
+    label.appendChild(box);
+    var mark = document.createElement("span"); mark.textContent = "\u2715"; label.appendChild(mark);
+    cell.appendChild(label);
+    fresh.dataset.index = String(n + 1);
+    fresh.querySelectorAll("input").forEach(function (input) { if (/\.(amount|note)$/.test(input.name)) input.value = ""; });
+    tr.after(fresh);
+  }
+  document.addEventListener("input", function (e) {
+    var details = e.target.closest ? e.target.closest("details.log") : null;
+    if (!details) return;
+    var tr = e.target.closest("tr.entry");
+    if (tr && tr.classList.contains("new") && /\.amount$/.test(e.target.name || "") && e.target.value.trim()) grow(details, tr);
+    total(details);
+  });
+  document.addEventListener("change", function (e) {
+    var details = e.target.closest ? e.target.closest("details.log") : null;
+    if (details) total(details);
+  });
+  document.addEventListener("click", function (e) {
+    if (e.target.closest && e.target.closest(".pop")) return;  // the calendar serving a date box
+    document.querySelectorAll("details.log[open]").forEach(function (d) {
+      if (!d.contains(e.target)) d.removeAttribute("open");
+    });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    var details = e.target.closest ? e.target.closest("details.log[open]") : null;
+    if (details) { details.removeAttribute("open"); e.preventDefault(); }
+  });
+  // The menu is position: fixed (a sideways-scrolling table or the page's right edge would clip an
+  // absolute one): on open it hangs under the summary, pulled left to stay inside the window, and
+  // a scroll anywhere but inside the menu places it again, since a fixed box does not follow the page.
+  function place(details) {
+    var menu = details.querySelector(".menu"), summary = details.querySelector("summary");
+    if (!menu || !summary) return;
+    var at = summary.getBoundingClientRect();
+    menu.style.top = Math.round(at.bottom + 4) + "px";
+    menu.style.left = "0px";
+    var width = menu.getBoundingClientRect().width;
+    menu.style.left = Math.round(Math.max(8, Math.min(at.left, window.innerWidth - width - 8))) + "px";
+    menu.style.maxHeight = Math.max(120, Math.min(340, window.innerHeight - at.bottom - 12)) + "px";
+  }
+  document.addEventListener("toggle", function (e) {
+    var details = e.target;
+    if (!details.matches || !details.matches("details.log")) return;
+    if (details.open) place(details);
+  }, true);
+  document.addEventListener("scroll", function (e) {
+    document.querySelectorAll("details.log[open]").forEach(function (d) {
+      var menu = d.querySelector(".menu");
+      if (e.target === document || !(menu && menu.contains(e.target))) place(d);
+    });
+  }, true);
+  window.addEventListener("resize", function () {
+    document.querySelectorAll("details.log[open]").forEach(place);
+  });
+})();

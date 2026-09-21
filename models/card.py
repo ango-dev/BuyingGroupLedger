@@ -1,6 +1,9 @@
 import re
+from datetime import date, timedelta
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+
+from models import amount_log
 
 
 def normalize_retailer(text: str) -> str:
@@ -74,15 +77,17 @@ class CashbackCap(BaseModel):
       start receiving the default amount".
     - `resets`: "calendar-year" (the default), "never", or an "MM-DD" the period starts on each
       year (a cardmember anniversary).
-    - `outside_spend`: spend the ledger never sees -- personal purchases on the card -- per period
-      ("2026": 4000; "all" for a cap that never resets), taken off the allowance first.
+    - `outside_spend`: spend the ledger never sees -- personal purchases on the card -- as a dated
+      log of entries `{date, amount, note}` (models/amount_log.py; a negative amount takes spend
+      back), summed per period by `outside_for` and taken off the allowance first. The older
+      per-period dict ("2026": 4000) still loads, each period dated at its start.
     """
 
     retailers: list[str] = Field(default_factory=list)
     spend_limit: float
     fallback_rate: float | None = None
     resets: str = "calendar-year"
-    outside_spend: dict[str, float] = Field(default_factory=dict)
+    outside_spend: list[dict] = Field(default_factory=list)
 
     @field_validator("retailers", mode="before")
     @classmethod
@@ -103,16 +108,10 @@ class CashbackCap(BaseModel):
 
     @field_validator("outside_spend", mode="before")
     @classmethod
-    def _offsets(cls, v):
-        if isinstance(v, str):
-            pairs = {}
-            for part in re.split(r"[;,](?=\s*[^,;:]+:)", v):  # "2026: 4,000, 2027: 0": the thousands comma stays
-                if ":" in part:
-                    period, amount = part.split(":", 1)
-                    if period.strip():
-                        pairs[period.strip()] = amount
-            v = pairs
-        return {str(k).strip(): _money(amount) for k, amount in (v or {}).items()}
+    def _offsets(cls, v, info: ValidationInfo):
+        # a legacy period ("2026", "all", or the text "2026: 4,000") is dated at the period's start
+        resets = str((info.data or {}).get("resets") or "calendar-year").strip().lower()
+        return amount_log.coerce(v, lambda period: _period_start(resets, period))
 
     @model_validator(mode="after")
     def _validate(self):
@@ -124,13 +123,56 @@ class CashbackCap(BaseModel):
             raise ValueError(
                 f"A cashback cap's resets must be \"calendar-year\", \"never\" or an MM-DD, not {self.resets!r}.")
         self.resets = resets
-        for period, amount in self.outside_spend.items():
-            if amount < 0:
-                raise ValueError(f"Outside spend for {period} is negative ({amount}).")
         return self
 
     def covers(self, retailer: str) -> bool:
         return normalize_retailer(retailer) in self.retailers
+
+    def period_of(self, when: str) -> str:
+        """Which allowance a date falls in: "all" for a cap that never resets, the calendar year,
+        or the year an anniversary period started (a cap resetting 03-15 puts 2026-03-01 in "2025")."""
+        when = str(when or "")[:10]
+        if self.resets == "never":
+            return "all"
+        if len(when) < 10 or not when[:4].isdigit():
+            return when[:4] or "?"
+        if self.resets == "calendar-year":
+            return when[:4]
+        year = int(when[:4])
+        return str(year if when[5:10] >= self.resets else year - 1)
+
+    def period_bounds(self, today: str) -> tuple[str, str] | None:
+        """The first and last day of the period `today` falls in; None for a cap that never resets."""
+        period = self.period_of(today)
+        if self.resets == "never" or not period.isdigit():
+            return None
+        start = _as_date(_period_start(self.resets, period)).isoformat()
+        end = (_as_date(_period_start(self.resets, str(int(period) + 1))) - timedelta(days=1)).isoformat()
+        return start, end
+
+    def outside_for(self, period: str) -> float:
+        """The period's outside spend: every entry of the log dated inside it."""
+        return round(sum(float(e["amount"]) for e in self.outside_spend if self.period_of(e["date"]) == period), 2)
+
+
+def _period_start(resets: str, period: str) -> str:
+    """The day a legacy period key starts on: "2026" -> 2026-01-01, or 2026-03-15 for a cap that
+    resets 03-15; "all" (or anything else) -> the beginning of time."""
+    period = str(period or "").strip()
+    if period.isdigit() and len(period) == 4:
+        return f"{period}-{resets}" if re.fullmatch(r"\d\d-\d\d", resets or "") else f"{period}-01-01"
+    return period if re.fullmatch(r"\d{4}-\d\d-\d\d", period) else "1970-01-01"
+
+
+def _as_date(text: str) -> date:
+    """An ISO date; a day the month does not have (an "02-30" anniversary) is pulled back to the last it has."""
+    year, month, day = (int(part) for part in text.split("-"))
+    while day > 28:
+        try:
+            return date(year, month, day)
+        except ValueError:
+            day -= 1
+    return date(year, month, day)
 
 
 class Card(BaseModel):
