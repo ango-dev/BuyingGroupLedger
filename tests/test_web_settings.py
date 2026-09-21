@@ -578,6 +578,19 @@ class TestEntryCards:
         # the wizard's copy of the form still posts plainly
         assert "hx-post" not in client.get("/setup/cards").text.split('id="s-cards"')[-1].split("</section>")[0]
 
+    def test_the_rates_table_shows_what_is_left_of_each_limit(self, client, tmp_path, config):
+        """a spend-limit bar inline with the row, showing how much is left."""
+        import test_web as tw
+
+        config(cards=[{"last4": "0315", "name": "USB Prime Business", "cashback_rate": "1%",
+                       "retailer_rates": {"Amazon": "5%"},
+                       "caps": [{"retailers": ["Amazon"], "spend_limit": 3000, "fallback_rate": "1%"},
+                                {"retailers": [], "spend_limit": 100}]}])
+        tw.write_snapshot(tmp_path / "ledger_backup_20260918T000000Z.csv", *tw.LEDGER_ROWS)
+        body = client.get("/settings").text
+        assert "<th>Left This Period</th>" in body and 'class="cap-left' in body
+        assert "spent in 2026" in body and (" left</span>" in body or "limit reached" in body)
+
     def test_a_virtual_card_must_name_its_card(self, client):
         unlinked = client.post("/settings/section/cards/entry", data={"name": "Virtual", "last4": "9999", "virtual": "on"})
         assert unlinked.status_code == 400 and "virtual number of" in unlinked.text.lower()

@@ -574,7 +574,7 @@ def display_entries(path: str) -> list[dict]:
                 "retailer_rates": list((entry.get("retailer_rates") or {}).items()),
                 "caps": [_cap_display(c) for c in caps],
                 "rate_rows": _rate_rows(entry.get("retailer_rates") or {}, caps),
-                "cap_all": next((_cap_display(c) for c in caps if not c.get("retailers")), _cap_display({})),
+                "cap_all": next(({**_cap_display(c), "cap_index": j} for j, c in enumerate(caps) if not c.get("retailers")), _cap_display({})),
             })
     return out
 
@@ -586,7 +586,7 @@ def _rate_rows(retailer_rates: dict, caps: list) -> list[dict]:
 
     by_key = {normalize_retailer(str(r)): (r, rate) for r, rate in retailer_rates.items()}
     rows, covered = [], set()
-    for cap in caps:
+    for cap_index, cap in enumerate(caps):
         retailers = cap.get("retailers") or []
         if isinstance(retailers, str):
             retailers = [retailers]
@@ -595,7 +595,8 @@ def _rate_rows(retailer_rates: dict, caps: list) -> list[dict]:
         keys = [normalize_retailer(str(r)) for r in retailers]
         rate = next((by_key[k][1] for k in keys if k in by_key), "")
         # the form's tick values are retailer_keys (models/retailers.py); the chips show the names
-        rows.append({**_cap_display(cap), "retailers": ", ".join(retailers_module.key_of(str(r)) for r in retailers), "rate": rate})
+        rows.append({**_cap_display(cap), "cap_index": cap_index,
+                     "retailers": ", ".join(retailers_module.key_of(str(r)) for r in retailers), "rate": rate})
         covered.update(keys)
     for key, (retailer, rate) in by_key.items():
         if key not in covered:

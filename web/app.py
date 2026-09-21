@@ -1890,19 +1890,44 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return [(str(e["last4"]), f"{e['name']} …{e['last4']}")
                 for e in settings_form.display_entries("cards") if not e["virtual"]]
 
+    def cap_usage() -> dict:
+        """{(card index, cap index): allowance} over the ledger, for the bars on the card's form;
+        {} where there is no ledger yet or the cards do not load (a fresh install, a typo)."""
+        from config.cards import load_cards
+        from ledger.cashback_caps import allowances
+        from models.order import FIELDNAMES
+
+        try:
+            cards = load_cards()
+            if not any(c.caps for c in cards):
+                return {}
+            rows = [{f: row.text(f) for f in FIELDNAMES} for row in reader.load().rows]
+            return allowances(rows, cards, clock().date().isoformat())
+        except Exception:  # noqa: BLE001
+            log.exception("could not measure the cards' spend caps for the Settings page")
+            return {}
+
     def settings_context(*, open_section: str = "", section_texts: dict | None = None) -> dict:
         """What settings.html and the in-place section partial both render from."""
         rows_schema = settings_form.schema()
         texts = section_texts or {}
         forms = [(path, shape, help_text, texts.get(path, settings_form.section_text(path)))
                  for path, shape, _model, help_text in settings_form.SECTIONS]
+        entries = {path: settings_form.display_entries(path) for path in settings_form.CARD_SECTIONS}
+        usage = cap_usage()
+        for i, card in enumerate(entries.get("cards", [])):  # each cap row learns where its allowance stands
+            for row in card.get("rate_rows", []):
+                if "cap_index" in row:
+                    row["usage"] = usage.get((i, row["cap_index"]))
+            if "cap_index" in card.get("cap_all", {}):
+                card["cap_all"]["usage"] = usage.get((i, card["cap_all"]["cap_index"]))
         return dict(
             rows=settings_form.view(rows_schema, os.environ),
             sections=settings_form.sections_in_order(rows_schema), section_forms=forms,
             hidden_envs=settings_form.hidden_envs(), in_container=in_container,
             open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE),
             section_title=settings_form.section_title, field_label=settings_form.field_label,
-            entries={path: settings_form.display_entries(path) for path in settings_form.CARD_SECTIONS},
+            entries=entries,
             retailer_keys=settings_form.RETAILER_KEYS, auth_retailers=settings_form.AUTH_RETAILERS,
             retailer_names=retailers_module.NAMES,
             profile_labels=settings_form.profile_labels(), card_choices=card_choices(),

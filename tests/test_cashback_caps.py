@@ -130,6 +130,19 @@ class TestPeriodsAndEvents:
         assert rows[0]["order_id"] == "X9" and rows[0]["total_cost"] == "12.5"
 
 
+class TestAllowance:
+    def test_where_a_cap_stands_this_period(self):
+        c = card(caps=[{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": "1%", "outside_spend": {"2026": 100}}])
+        rows = [row(order_id="A0", order_date="2026-01-05", total_cost="700"),
+                row(order_id="Z1", order_date="2025-12-30", total_cost="900"),               # last period
+                row(order_id="B1", order_date="2026-02-02", total_cost="500", retailer="Best Buy"),  # out of scope
+                row(order_id="A1", order_date="2026-03-01", total_cost="50", return_quantity="1", cost_per_item="50")]  # net 0
+        a = caps.allowances(rows, [c], "2026-06-01")[(0, 0)]
+        assert a == {"period": "2026", "used": 800.0, "limit": 1000.0, "left": 200.0, "fraction": 0.8}
+        over = caps.allowances([row(order_id="A9", order_date="2026-01-05", total_cost="1500")], [c], "2026-06-01")[(0, 0)]
+        assert over["left"] == 0.0 and over["fraction"] == 1.0
+
+
 class TestCappedRate:
     def test_under_over_and_the_blend(self):
         c = cap(spend_limit=1000, fallback_rate="1%")

@@ -132,7 +132,13 @@
       <td class="narrow"><input type="text" name="{{ prefix }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="no limit"></td>
       <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="everywhere else" title="the rate past the limit; blank: the Everywhere Else rate"></td>
       <td class="resets"><span class="inline">{{ choose(prefix ~ '.resets', [('calendar-year', 'Each Calendar Year'), ('anniversary', 'On a Date Each Year'), ('never', 'Never')], cap.resets, '', 'cell') }}<input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></span></td>
-      <td class="outside"><input type="text" name="{{ prefix }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000 (spend the ledger never sees)"></td>
+      <td class="outside"><input type="text" name="{{ prefix }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000" title="spend the ledger never sees, per period"></td>
+      {#- where the allowance stands this period (ledger/cashback_caps.allowance) -#}
+      <td class="left">{% if cap.usage is defined and cap.usage %}{% set u = cap.usage %}{% set pct = (u.fraction * 100) | round(0, 'floor') | int %}
+        <span class="cap-left {{ 'bad' if u.fraction >= 1 else ('warn' if u.fraction >= 0.8 else 'ok') }}" title="{{ '{:,.0f}'.format(u.used) }} of {{ '{:,.0f}'.format(u.limit) }} spent in {{ u.period }}">
+          <span class="bar"><i style="width: {{ pct }}%"></i></span>
+          <span class="num">{% if u.left > 0 %}{{ '{:,.0f}'.format(u.left) }} left{% else %}limit reached{% endif %}</span>
+        </span>{% endif %}</td>
     {% endmacro %}
 
     {% macro card_fields(c) %}
@@ -161,7 +167,7 @@
       <div class="fblock rates-block" {{ 'hidden' if kind }}>
         <div class="ftitle">Rates <span class="muted">— by retailer (several share a row); a spend limit caps the rate: past it the fallback applies (blank: the Everywhere Else rate), the row that crosses it gets the blend. A limit on Amazon covers Amazon Business too, and the other way round. Blank the retailers to drop a row</span></div>
         <table class="entry-table rates">
-          <thead><tr><th>Retailer(s)</th><th>Rate</th><th>Spend Limit</th><th>Fallback</th><th>Resets</th><th>Outside Spend</th></tr></thead>
+          <thead><tr><th>Retailer(s)</th><th>Rate</th><th>Spend Limit</th><th>Fallback</th><th>Resets</th><th>Outside Spend</th><th>Left This Period</th></tr></thead>
           <tbody>
             <tr class="everywhere">
               <td class="muted">Everywhere Else</td>

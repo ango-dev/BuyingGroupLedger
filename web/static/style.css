@@ -613,7 +613,17 @@ table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-to
 /* the resets cell: the dropdown and, for "on a date each year", the MM-DD box inline beside it */
 table.entry-table.rates td.resets { width: 1%; white-space: nowrap; }  /* content-sized: no gap before outside spend */
 table.entry-table.rates td.resets .inline { display: inline-flex; align-items: center; gap: 6px; }
-table.entry-table.rates td.outside input { max-width: 300px; }
+table.entry-table.rates td.outside { width: 1%; }
+table.entry-table.rates td.outside input { width: 150px; }
+/* the allowance left this period: a bar and the amount, inline with the row */
+table.entry-table.rates td.left { white-space: nowrap; }
+.cap-left { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9em; }
+.cap-left .bar { display: inline-block; width: 110px; height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.cap-left .bar i { display: block; height: 100%; background: var(--ok); }
+.cap-left.warn .bar i { background: var(--warn); }
+.cap-left.bad .bar i { background: var(--bad); }
+.cap-left.warn .num { color: var(--warn); }
+.cap-left.bad .num { color: var(--bad); }
 table.entry-table.rates td.resets input.anniversary { width: 64px; }
 table.entry-table.rates td.resets input.anniversary[hidden] { display: none; }
 /* the card's rates table: the retailers and the

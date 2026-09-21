@@ -33,7 +33,7 @@ from ledger.sync import HEADER
 from models.card import Card, CashbackCap, normalize_last4, parse_rate
 from models.order import FIELDNAMES
 
-__all__ = ["SpendEvent", "apply_to_items", "basis", "capped_rate", "events_from_rows",
+__all__ = ["SpendEvent", "allowance", "allowances", "apply_to_items", "basis", "capped_rate", "events_from_rows",
            "period_key", "recompute", "rows_by_field", "spend_before"]
 
 #: Rows the post-sync recompute may rewrite: past shipped. Cancelled and
@@ -196,6 +196,33 @@ def capped_rate(rate: float, cap: CashbackCap, used: float, amount: float, fallb
     if room <= 0:
         return fallback
     return round((room * rate + (amount - room) * fallback) / amount, 4)
+
+
+def allowance(events, cards: list[Card], card: Card, cap: CashbackCap, today: str) -> dict:
+    """Where a cap stands in the period `today` falls in: {period, used, limit, left, fraction} --
+    every event of the period on this card (its virtual numbers included) within the cap's scope,
+    plus the period's outside-ledger offset."""
+    period = period_key(cap, today)
+    used = float(cap.outside_spend.get(period, 0.0))
+    for e in events:
+        if _root_of(cards, e.card_last4, e.profile) is not card or card.cap_for(e.retailer) is not cap:
+            continue
+        if period_key(cap, e.when) == period:
+            used += e.amount
+    used = round(used, 2)
+    left = round(cap.spend_limit - used, 2)
+    return {"period": period, "used": used, "limit": cap.spend_limit, "left": max(0.0, left),
+            "fraction": min(1.0, max(0.0, used / cap.spend_limit)) if cap.spend_limit else 0.0}
+
+
+def allowances(rows: list[dict], cards: list[Card], today: str) -> dict:
+    """{(card index, cap index): allowance} for every cap on every card, over the ledger's rows."""
+    events = events_from_rows(rows)
+    out = {}
+    for i, card in enumerate(cards):
+        for j, cap in enumerate(card.caps):
+            out[(i, j)] = allowance(events, cards, card, cap, today)
+    return out
 
 
 # --------------------------------------------------------------------------------------------------
