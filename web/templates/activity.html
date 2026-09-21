@@ -47,6 +47,7 @@
   <input type="hidden" name="unacked" value="1">
   {% endif %}
   {{ choose('dir', [('desc', 'newest first'), ('asc', 'oldest first')], 'desc' if filters.desc else 'asc', 'Order') }}
+  {{ choose('per', [(50, '50'), (100, '100'), (250, '250'), (500, '500'), (0, 'all')], filters.per, 'Per page') }}
   <noscript><button type="submit">Apply</button></noscript>
   <a class="button small reset" href="/activity?reset=1" title="clear the type, window, search, run and order (hidden types stay)">Reset</a>
 </form>

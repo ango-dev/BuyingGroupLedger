@@ -1,7 +1,7 @@
 {#- The Activity table (diagnostics/activity.py events), swapped into #activity-table by the filter
     form. A row's details expand in place; a run id filters to that run; a dossier row links to
     its report on the Failures page. -#}
-<p class="muted count">{{ events | length }} event(s){% if total != events | length %} of {{ total }}{% endif %}</p>
+<p class="muted count">{% if pager.total %}{{ pager.start }}–{{ pager.end }} of {% endif %}{{ pager.total }} event(s){% if total != pager.total %} · {{ total }} in the log{% endif %}</p>
 {% if events %}
 {#- A grid like the others: sheetlike, so edit.js selects and copies its cells,
     and each column's arrow sorts (web/activity_view.SORTS), one click a step. -#}
@@ -68,6 +68,19 @@
     {% endfor %}
   </tbody>
 </table>
+{% if pager.pages > 1 %}
+<nav class="pager" aria-label="pages">
+  <a class="{{ '' if pager.has_prev else 'disabled' }}" href="/activity?{{ filters.as_query(page=(pager.page - 1) if pager.has_prev else 1) | query }}"
+     hx-get="/activity?{{ filters.as_query(page=(pager.page - 1) if pager.has_prev else 1) | query }}" hx-target="#activity-table" hx-push-url="true">‹ prev</a>
+  {% for n in pager.window %}
+  <a class="{{ 'current' if n == pager.page }}" href="/activity?{{ filters.as_query(page=n) | query }}"
+     hx-get="/activity?{{ filters.as_query(page=n) | query }}" hx-target="#activity-table" hx-push-url="true">{{ n }}</a>
+  {% endfor %}
+  <a class="{{ '' if pager.has_next else 'disabled' }}" href="/activity?{{ filters.as_query(page=(pager.page + 1) if pager.has_next else pager.pages) | query }}"
+     hx-get="/activity?{{ filters.as_query(page=(pager.page + 1) if pager.has_next else pager.pages) | query }}" hx-target="#activity-table" hx-push-url="true">next ›</a>
+  <span class="muted small">page {{ pager.page }} of {{ pager.pages }}</span>
+</nav>
+{% endif %}
 {% else %}
 <p class="muted">Nothing recorded{% if total %} that matches{% else %} yet — the next scheduled run, alert or dashboard change will appear here{% endif %}.</p>
 {% endif %}

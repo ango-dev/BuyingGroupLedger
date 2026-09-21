@@ -1364,6 +1364,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return merged
 
     HIDE_COOKIE = "activity-hide"
+    ACTIVITY_PER_COOKIE = "activity-per"  # the page size, remembered like Orders' (never the page)
 
     @app.get("/activity", response_class=HTMLResponse)
     def activity_page(request: Request):
@@ -1380,16 +1381,30 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                                     samesite="lax")
             else:
                 response.delete_cookie(HIDE_COOKIE)  # "hide nothing": forget, rather than store ""
+        if request.query_params.get("per"):  # an explicit choice updates the memory
+            response.set_cookie(ACTIVITY_PER_COOKIE, str(filters.per), max_age=365 * 24 * 3600,
+                                samesite="lax")
         return response
 
     def activity_context(request: Request, params) -> tuple:
         """The Activity table for a query: (filters, template context). Shared by the page and by
         an acknowledgement's in-place answer."""
+        import dataclasses as _dc
+
+        from web.activity_view import PER_CHOICES as _per_choices
+
         filters = ActivityFilters.from_query(params)
         # The hidden types: what the form just said, else what this browser remembered.
         if not filters.hide_set:
             remembered_hidden = [k for k in request.cookies.get(HIDE_COOKIE, "").split(",") if k]
             filters = filters.with_hidden(remembered_hidden)
+        if not params.get("per"):  # a request that names no size uses this browser's remembered one
+            try:
+                remembered_per = int(request.cookies.get(ACTIVITY_PER_COOKIE, ""))
+            except ValueError:
+                remembered_per = -1
+            if remembered_per in _per_choices:
+                filters = _dc.replace(filters, per=remembered_per)
         events = with_dossiers(activity_module.read(activity_path))
         shown = activity_module.filter_events(events, kinds=filters.kinds, q=filters.q,
                                               days=filters.days, run_id=filters.run_id, now=clock(),
@@ -1403,7 +1418,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         if filters.sort and filters.sort != "at":  # a column's sort, stable over the time order
             field = "run_id" if filters.sort == "run" else filters.sort
             shown.sort(key=lambda e: str(e.get(field) or "").lower(), reverse=filters.desc)
-        context = {"events": shown, "total": len(events), "filters": filters,
+        # One page, never the whole log.
+        from web.queries import paginate as _paginate
+
+        pager = _paginate(shown, per=filters.per or max(1, len(shown)), page=filters.page)
+        context = {"events": pager["items"], "pager": pager, "total": len(events), "filters": filters,
                    "counts": activity_module.counts_by_kind(events), "unacked": unacked,
                    "activity_path": str(activity_path), "failures_dir": str(failures_dir)}
         return filters, context

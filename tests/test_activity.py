@@ -205,7 +205,7 @@ class TestThePage:
         body = client.get("/activity").text
         assert "<h1>Activity</h1>" in body and 'id="activity-filters"' in body
         assert body.count("<tr class=\"kind-") == 3  # the January event is outside the default 7 days
-        assert "3 event(s) of 4" in body
+        assert "1–3 of 3 event(s) · 4 in the log" in body
         assert "costco_p_20260917T080000Z" in body and 'href="/failures' not in body  # the Failures page is gone
         assert 'href="/orders/111-1"' in body  # an order id links to its page
         assert ">Alert<" in body and ">Failure dossier<" in body and ">Dashboard edit<" in body
@@ -315,6 +315,32 @@ class TestThePage:
     def test_an_empty_log_renders(self, client):
         body = client.get("/activity").text
         assert "Nothing recorded yet" in body and "0 event(s)" in body
+
+
+    def test_the_page_is_a_slice_with_a_pager_and_the_size_is_remembered(self, client):
+        """a sort click re-rendered every event (~2MB at 1300 of them). The page
+        holds one slice (100 by default, a preset dropdown up to all), the pager swaps in place,
+        every filter and sort link lands back on page 1, and the size is a cookie like Orders'."""
+        path = client.activity_path
+        for i in range(120):
+            activity.record("edit", f"Change {i}", {"n": i}, path=path,
+                            at=datetime(2026, 9, 17, 8, 0, i % 60, tzinfo=timezone.utc))
+        body = client.get("/activity", params={"days": "0"}).text
+        assert body.count('<tr class="kind-') == 100 and "1–100 of 120 event(s)" in body
+        assert 'class="pager"' in body and "page 1 of 2" in body
+        assert 'hx-get="/activity?page=2&amp;days=0"' in body or "page=2" in body
+        page2 = client.get("/activity", params={"days": "0", "page": "2"}).text
+        assert page2.count('<tr class="kind-') == 20 and "101–120 of 120 event(s)" in page2
+        # a sort link carries no page: sorting from page 2 lands on page 1
+        assert "page=2" not in page2.split('a class="sort"')[1].split(">")[0]
+        # the size: a preset only, remembered in a cookie, 0 = everything
+        small = client.get("/activity", params={"days": "0", "per": "50"})
+        assert small.text.count('<tr class="kind-') == 50
+        assert client.cookies.get("activity-per") == "50"
+        assert client.get("/activity", params={"days": "0"}).text.count('<tr class="kind-') == 50  # remembered
+        assert client.get("/activity", params={"days": "0", "per": "7"}).text.count('<tr class="kind-') == 100  # not a preset
+        everything = client.get("/activity", params={"days": "0", "per": "0"}).text
+        assert everything.count('<tr class="kind-') == 120 and 'class="pager"' not in everything
 
 
 def test_the_default_window_is_the_last_week():

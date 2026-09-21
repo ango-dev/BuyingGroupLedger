@@ -9,6 +9,9 @@ from diagnostics.activity import KINDS
 DEFAULT_DAYS = 7  # the last week by default
 DAY_CHOICES = (1, 7, 30, 90, 0)
 SORTS = ("at", "kind", "run", "summary")  # the table's sortable columns, by event field
+#: The page holds a slice, never the whole log. 0 = all of them, for whoever wants the old behaviour.
+PER_CHOICES = (50, 100, 250, 500, 0)
+DEFAULT_PER = 100
 
 
 def _values(params, name: str) -> tuple[str, ...]:
@@ -36,6 +39,11 @@ class ActivityFilters:
     hide_set: bool = False
     #: Only the alerts / dossiers still to acknowledge -- what the overview's card links to.
     unacked: bool = False
+    #: The page size (a preset from PER_CHOICES; 0 = everything) and the page. `as_query` never
+    #: carries the page, so every filter, sort and run link lands back on page 1 by itself; only
+    #: the pager's own links name one.
+    per: int = DEFAULT_PER
+    page: int = 1
 
     @classmethod
     def from_query(cls, params) -> "ActivityFilters":
@@ -45,8 +53,20 @@ class ActivityFilters:
             days = DEFAULT_DAYS
         if days not in DAY_CHOICES:
             days = DEFAULT_DAYS
+        try:
+            per = int(str(params.get("per", DEFAULT_PER) or 0))
+        except ValueError:
+            per = DEFAULT_PER
+        if per not in PER_CHOICES:
+            per = DEFAULT_PER
+        try:
+            page = max(1, int(str(params.get("page") or 1)))
+        except ValueError:
+            page = 1
         chosen = _values(params, "type") or _values(params, "kind")  # `kind` = an older link
         return cls(
+            per=per,
+            page=page,
             kinds=tuple(k for k in chosen if k in KINDS),
             days=days,
             q=str(params.get("q") or "").strip(),
@@ -66,6 +86,7 @@ class ActivityFilters:
     def as_query(self, **overrides) -> dict:
         values = {"type": list(self.kinds), "days": str(self.days) if self.days != DEFAULT_DAYS else "",
                   "q": self.q, "run": self.run_id, "dir": "" if self.desc else "asc", "sort": self.sort,
-                  "unacked": "1" if self.unacked else ""}
+                  "unacked": "1" if self.unacked else "",
+                  "per": str(self.per) if self.per != DEFAULT_PER else ""}
         values = {**values, **overrides}
         return {k: v for k, v in values.items() if v not in ("", None, [], ())}

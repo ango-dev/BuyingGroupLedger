@@ -941,3 +941,26 @@ def test_select_all_marks_the_headers_and_a_copy_carries_them_on_every_grid(serv
         "Array.from(document.querySelectorAll('body > textarea')).map(t => t.value).find(v => v) || ''")
     assert "Order Date" not in copied and "\t" not in copied
     assert page.errors == []
+
+
+def test_the_activity_pager_swaps_in_place(served, page, client, tmp_path):
+    """2026-09-21: the Activity table is one slice with a pager; page 2 arrives through htmx
+    without a reload, and the remembered size survives navigation."""
+    from datetime import datetime, timezone
+    from diagnostics import activity
+    log = tmp_path / "logs" / "activity.jsonl"
+    for i in range(60):
+        activity.record("edit", f"Change {i}", {"n": i}, path=log,
+                        at=datetime(2026, 9, 17, 8, 0, i % 60, tzinfo=timezone.utc))
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/activity?days=0&per=50")
+    page.wait_for_selector("table.activity tbody tr")
+    assert page.locator("table.activity tbody tr:not(.details-row)").count() == 50
+    page.evaluate("window.__loaded = true")  # a reload would lose it
+    page.locator(".pager a", has_text="2").click()
+    page.wait_for_url("**page=2**")
+    page.wait_for_selector("table.activity tbody tr")
+    assert page.locator("table.activity tbody tr:not(.details-row)").count() == 10
+    assert page.evaluate("window.__loaded === true")  # swapped, never reloaded
+    assert "51–60 of 60 event(s)" in page.locator("#activity-table .count").inner_text()
+    assert page.errors == []
