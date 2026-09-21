@@ -781,6 +781,8 @@ header nav details.nav-menu .menu a.current { color: var(--accent); font-weight:
 .tool-form button { align-self: end; }
 .tool-output { border-top: 1px solid var(--line); padding-top: 8px; }
 .job-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+.job-head .follow { margin-left: auto; color: var(--muted); }
+.job-head .follow.on { color: var(--accent); border-color: var(--accent); }
 .job-log { max-height: 320px; overflow: auto; margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 0.8em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .session { display: flex; flex-direction: column; gap: 8px; }
 .session-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

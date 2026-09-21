@@ -6,6 +6,9 @@
   <span class="mono small muted">{{ job.id }}</span>
   <time class="local small muted" datetime="{{ job.started_at.isoformat(timespec='seconds') }}">{{ job.started_at.strftime('%H:%M:%S') }}Z</time>
   {% if not job.running %}<a class="small" href="/tools?tool={{ job.tool_key }}&amp;clear={{ job.tool_key }}#t-{{ job.tool_key }}">clear</a>{% endif %}
+  {#- Follow: on, the console keeps to its newest line as it updates; off, it
+      stays where its scroll bar is. tools.html's script keeps the state across the polls. -#}
+  <button type="button" class="small follow on" data-follow="{{ job.id }}" title="keep the console at its newest line; off, it stays where you scrolled">Follow</button>
 </div>
 {% if job.error %}<p class="banner warn">{{ job.error }}</p>{% endif %}
-<pre class="job-log">{{ job.output() }}</pre>
+<pre class="job-log" data-job="{{ job.id }}">{{ job.output() }}</pre>

@@ -78,4 +78,36 @@
 </section>
 {% endif %}
 </div>
+<script>
+  // The job console. The poll swaps the whole output panel, which used to
+  // put a fresh <pre> at its top every two seconds. Follow is on by default and remembered per
+  // job across the swaps; off, the previous scroll position is put back on the new <pre>.
+  (function () {
+    "use strict";
+    var follow = {}, scrolled = {};
+    function on(id) { return !(id in follow) || follow[id]; }
+    function paint(button) { var id = button.dataset.follow; button.classList.toggle("on", on(id)); button.title = on(id) ? "following the newest line: click to stay where you scroll" : "staying where you scrolled: click to follow the newest line"; }
+    document.addEventListener("click", function (e) {
+      var button = e.target.closest ? e.target.closest("button[data-follow]") : null;
+      if (!button) return;
+      var id = button.dataset.follow;
+      follow[id] = !on(id);
+      paint(button);
+      var log = document.querySelector('pre.job-log[data-job="' + id + '"]');
+      if (log && on(id)) log.scrollTop = log.scrollHeight;
+    });
+    document.addEventListener("scroll", function (e) {
+      var log = e.target && e.target.matches && e.target.matches("pre.job-log") ? e.target : null;
+      if (log) scrolled[log.dataset.job] = log.scrollTop;
+    }, true);
+    document.addEventListener("htmx:afterSettle", function () {
+      document.querySelectorAll("pre.job-log[data-job]").forEach(function (log) {
+        var id = log.dataset.job;
+        log.scrollTop = on(id) ? log.scrollHeight : (scrolled[id] || 0);
+      });
+      document.querySelectorAll("button[data-follow]").forEach(paint);
+    });
+    document.querySelectorAll("pre.job-log[data-job]").forEach(function (log) { log.scrollTop = log.scrollHeight; });
+  })();
+</script>
 {% endblock %}
