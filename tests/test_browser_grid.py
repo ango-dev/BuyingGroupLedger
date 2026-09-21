@@ -790,3 +790,35 @@ def test_saving_one_card_keeps_another_cards_unsaved_edits(served, page):
     assert page.locator("#s-cards details.entry-card").first.locator("input[name='cashback_rate']").input_value() == "4%"
     assert second.locator("input[name='name']").input_value() == "Venmo Visa (edited, unsaved)"  # untouched by the swap
     assert page.errors == []
+
+
+def test_the_dark_theme_keeps_filled_controls_and_grid_lines_readable(served, page):
+    """2026-09-21: in dark mode a filled control (the accent) wore white text on the PALE dark
+    accent -- unreadable -- and the sheet's translucent-black grid lines vanished on uncoloured
+    rows. --on-accent and --grid-line-plain fix both; the pastel status rows keep the dark line."""
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/orders")
+    page.evaluate("document.documentElement.setAttribute('data-theme', 'dark')")
+    page.wait_for_selector("table.sheetlike tbody tr")
+    # a selected column's header: dark ink on the pale accent, never white
+    page.locator("table.sheetlike thead th.col-quantity .name").click()
+    page.wait_for_selector("th.col-quantity.sel-col")
+    assert page.evaluate(
+        "getComputedStyle(document.querySelector('th.sel-col')).color") == "rgb(21, 22, 26)"
+    # a primary button's text follows the same token
+    assert page.evaluate(
+        """(() => { const b = document.createElement('button'); b.className = 'primary';
+             document.body.appendChild(b); const c = getComputedStyle(b).color; b.remove(); return c; })()"""
+    ) == "rgb(21, 22, 26)"
+    # an uncoloured header cell draws a VISIBLE light grid line; a status row keeps the dark one
+    assert page.evaluate(
+        "getComputedStyle(document.querySelector('table.sheetlike thead th.col-quantity')).borderRightColor"
+    ) == "rgba(255, 255, 255, 0.1)"
+    assert page.evaluate(
+        "getComputedStyle(document.querySelector('table.sheetlike tbody tr[class*=status-] td')).borderRightColor"
+    ) == "rgba(0, 0, 0, 0.12)"
+    # and the light theme still reads white on the accent
+    page.evaluate("document.documentElement.setAttribute('data-theme', 'light')")
+    assert page.evaluate(
+        "getComputedStyle(document.querySelector('th.sel-col')).color") == "rgb(255, 255, 255)"
+    assert page.errors == []
