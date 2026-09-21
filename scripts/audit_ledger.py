@@ -1109,6 +1109,10 @@ def check_card_and_rate_coverage(sheet: Sheet, opts: Options) -> Result:
         last4s = sorted({str(u[-1] if isinstance(u, (tuple, list)) else u) for u in unresolved})
         details.append(f"{len(unresolved)} row(s) on card(s) not in the cards list ({', '.join('...' + x for x in last4s)}) -- "
                        "add them on Settings > Cards, or they earn the default rate and count against no spend limit")
+        # one line per row, "row N: ..." -- the Audit page maps those to the rows
+        for u in unresolved:
+            if isinstance(u, (tuple, list)) and len(u) == 2:
+                details.append(f"row {u[0]}: card ...{u[1]} is not in the cards list")
     summary = ("Card + Cashback Rate resolve cleanly" if status == "PASS"
                else ("cards on the ledger not in the cards list" if unresolved and not fills
                      else "cells the backfill could fill") if status == "WARN" else "known differences from the cards list")

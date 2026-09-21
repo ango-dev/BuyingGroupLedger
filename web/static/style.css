@@ -598,7 +598,9 @@ table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-to
 .entry-card summary .chip.switch.on { background: color-mix(in srgb, var(--ok) 18%, var(--card)); border-color: var(--ok); color: var(--ok); }
 .entry-card summary .chip.switch.off { background: var(--bg); color: var(--muted); text-decoration: line-through; }
 .entry-card summary .chip.switch:hover { border-color: var(--accent); }
-.entry-card .ftitle label.check.inline { display: inline-flex; margin-left: 12px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.entry-card .ftitle:has(label.check.inline) { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.entry-card .ftitle label.check.inline { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.entry-card .ftitle label.check.inline input { margin: 0; }
 /* A notification from the top after an in-place save on Settings: swapped in
    out of band, slides in, and settings.js lets it go after a few seconds. */
 #toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1200; pointer-events: none; }

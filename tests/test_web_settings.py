@@ -610,6 +610,21 @@ class TestEntryCards:
         body = client.get("/settings").text
         assert 'value="woot" data-text="Woot" checked>' in body and "Amazon, Woot 5% up to 1,000" in body
 
+    def test_amazon_and_amazon_business_on_their_own_rows_save_and_render(self, client):
+        """a lone Amazon Business row crashed the rows builder (its key has a dash)."""
+        response = client.post("/settings/section/cards/entry", data={
+            "name": "Chase Prime Visa", "last4": "4345", "cashback_rate": "1%", "profile": "",
+            "rr.0.retailers": ["amazon"], "rr.0.rate": "5%", "rr.0.spend_limit": "",
+            "rr.1.retailers": ["amazon-business"], "rr.1.rate": "1%", "rr.1.spend_limit": "",
+            "rr.2.retailers": [], "rr.2.spend_limit": ""}, follow_redirects=False)
+        assert response.status_code == 303 and "Added+card" in response.headers["location"]
+        assert config_value("cards")[1]["retailer_rates"] == {"Amazon": "5%", "Amazon Business": "1%"}
+        body = client.get("/settings").text
+        assert 'name="rr.0.retailers" value="amazon" data-text="Amazon" checked>' in body and 'name="rr.0.rate" value="5%"' in body
+        assert 'name="rr.1.retailers" value="amazon-business" data-text="Amazon Business" checked>' in body and 'name="rr.1.rate" value="1%"' in body
+        rows = settings_form._rate_rows({"Best Buy": "3%", "Woot": "2%"}, [])
+        assert [(r["retailers"], r["rate"]) for r in rows] == [("bestbuy", "3%"), ("woot", "2%")]
+
     def test_retailers_sharing_a_rate_share_a_row(self, client):
         from web.settings_form import _rate_rows
 

@@ -1944,7 +1944,8 @@ class TestOverviewAttention:
         body = client.get("/").text
         # the fixture ledger fails a check (cogs_inputs_complete) and short-pays an order
         assert 'aria-label="needs attention"' in body
-        assert ">Audit failures<" in body and 'href="/audit"' in body
+        # the card opens the rows the failing checks flag
+        assert ">Audit failures<" in body and 'href="/audit?check=' in body
         assert ">Short-paid<" in body and 'href="/recon?kind=short"' in body
         assert ">Alerts<" not in body and ">Failure dossiers<" not in body  # nothing loud yet
         activity.record("alert", "Costco [p]: deterministic path failed", {}, path=logs_dir / "activity.jsonl",

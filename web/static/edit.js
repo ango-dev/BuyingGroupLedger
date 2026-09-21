@@ -1297,6 +1297,7 @@
     var details = e.target.closest ? e.target.closest("details.multi[open]") : null;
     if (!details || details.classList.contains("nav-menu")) return;  // the Tools menu is links, not choices
     if (e.key === " " && e.target.tagName === "INPUT") return;  // Space still ticks a focused box
+    if (e.target.tagName === "INPUT" && e.target.type === "text" && e.key !== "Escape") return;  // the Add-a-retailer box keeps its keys; Escape still closes
     var typed = details.dataset.narrow || "";
     if (e.key === "Escape") {
       if (!typed) { details.removeAttribute("open"); return; }

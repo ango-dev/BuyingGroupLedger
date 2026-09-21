@@ -473,12 +473,17 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         try:
             report = audit_report(snapshot)
             counts = report.counts()
+
+            def audit_href(status: str) -> str:  # the rows those checks flag
+                names = [c["name"] for c in report.checks if c["status"] == status and c["rows"]]
+                return "/audit?" + urlencode([("check", n) for n in names]) if names else "/audit"
+
             if counts.get("FAIL"):
                 cards.append({"tone": "bad", "label": "Audit failures", "count": counts["FAIL"],
-                              "text": f"check(s) failing, {len(report.by_key)} row(s) flagged", "href": "/audit"})
+                              "text": f"check(s) failing, {len(report.by_key)} row(s) flagged", "href": audit_href("FAIL")})
             if counts.get("WARN"):
                 cards.append({"tone": "warn", "label": "Audit warnings", "count": counts["WARN"],
-                              "text": "check(s) worth a look", "href": "/audit"})
+                              "text": "check(s) worth a look", "href": audit_href("WARN")})
         except Exception:  # noqa: BLE001
             log.exception("could not audit the ledger for the overview")
         try:

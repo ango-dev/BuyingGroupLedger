@@ -602,9 +602,9 @@ def _rate_rows(retailer_rates: dict, caps: list) -> list[dict]:
     grouped: dict = {}
     for key, (retailer, rate) in by_key.items():
         if key not in covered:
-            grouped.setdefault(str(rate), []).append(retailers_module.key_of(str(retailer)))
-    for rate, keys in grouped.items():
-        rows.append({**_cap_display({}), "retailers": ", ".join(keys), "rate": by_key[keys[0]][1]})
+            grouped.setdefault(str(rate), (rate, []))[1].append(retailers_module.key_of(str(retailer)))
+    for rate, keys in grouped.values():  # the rate as stored ("amazon-business" is not by_key's key)
+        rows.append({**_cap_display({}), "retailers": ", ".join(keys), "rate": rate})
     return rows
 
 

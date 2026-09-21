@@ -296,6 +296,13 @@ def test_a_card_saves_in_place_and_the_anniversary_field_follows_the_reset(serve
     pickers.last.locator("label", has_text="Amazon").first.evaluate("l => l.hidden = false")
     pickers.last.locator("label", has_text="Amazon").first.locator("input").check()
     assert pickers.first.locator(".summary-value").inner_text() == "Amazon Business"
+    # typing into the Add-a-retailer box is typing, not the menu's type-to-narrow
+    box = pickers.last.locator("input.new-option")
+    box.click()
+    page.keyboard.type("Woo")
+    assert box.input_value() == "Woo" and pickers.last.locator(".menu .narrow").count() == 0
+    page.keyboard.press("Enter")
+    assert pickers.last.locator("label", has_text="Woo").locator("input").is_checked()
     page.keyboard.press("Escape")  # close the picker before the next save
     # a refused save shows in place too (a 400 htmx would otherwise drop; user: "it did nothing")
     saved.locator("input[name='cashback_rate']").fill("2")

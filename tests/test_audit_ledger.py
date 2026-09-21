@@ -1475,6 +1475,10 @@ class TestCardsNotOnTheList:
         assert result.status == "WARN"
         assert "...4331" in " ".join(result.details) and "Settings > Cards" in " ".join(result.details)
         assert "not in the cards list" in result.summary
+        # a "row N" line per row, so the Audit page shows them
+        assert "row 2: card ...4331 is not in the cards list" in result.details
+        from web.audit_view import rows_named
+        assert rows_named(result.details[-1]) == [2]
 
     def test_a_known_card_passes(self, monkeypatch):
         from models.card import Card
