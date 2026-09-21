@@ -151,6 +151,10 @@ TOOLS: tuple[Tool, ...] = (
          "Ledger Fixes", (APPLY, Field("--retailer", "Retailer", "select", choices=("", "amazon", "amazon-business")),
                           Field("--orders", "Orders", "list", "limit to these order numbers")),
          writes=True, spends="a cloud browser session"),
+    Tool("backfill_promo_rate", "scripts.backfill_promo_rate", "Fill Promo Rate from the ledger",
+         "Move the promo folded into an Amazon row's Cashback Rate (what sits above the card's configured rate) "
+         "into the Promo Rate column. Offline: no browser, no profile. Odd differences are listed, not guessed.",
+         "Ledger Fixes", (APPLY,), writes=True),
     Tool("backfill_amazon_promo", "scripts.backfill_amazon_promo", "Backfill Amazon promo cashback",
          "Fill the Amazon promo cashback and gift-card netting on rows already on the ledger.",
          "Ledger Fixes", (APPLY, Field("--retailer", "Retailer", "select", choices=("", "amazon", "amazon-business")),
