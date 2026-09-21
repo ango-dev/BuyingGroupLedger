@@ -1499,7 +1499,10 @@
     if (details) total(details);
   });
   document.addEventListener("click", function (e) {
-    if (e.target.closest && e.target.closest(".pop")) return;  // the calendar serving a date box
+    // the calendar serving a date box: a click inside it -- or on one of its month / year buttons,
+    // which it re-renders (the button is detached by now) -- is not a click outside the log
+    //
+    if (!e.target.isConnected || (e.target.closest && e.target.closest(".pop"))) return;
     var fold = e.target.closest ? e.target.closest("details.log tr.month, details.log tr.year") : null;
     if (fold) {  // a month's or a year's row folds what is under it away and back
       fold.classList.toggle("folded");
@@ -1512,9 +1515,10 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
+    if (document.querySelector(".pop.on")) return;  // the calendar is up: Escape closes it first
     var details = e.target.closest ? e.target.closest("details.log[open]") : null;
     if (details) { details.removeAttribute("open"); e.preventDefault(); }
-  });
+  }, true);  // capture: before picker.js has closed the calendar on the same key
   // The menu is position: fixed (a sideways-scrolling table or the page's right edge would clip an
   // absolute one): on open it hangs under the summary, pulled left to stay inside the window, and
   // a scroll anywhere but inside the menu places it again, since a fixed box does not follow the page.

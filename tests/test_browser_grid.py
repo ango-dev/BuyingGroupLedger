@@ -716,6 +716,19 @@ def test_the_dated_log_totals_live_grows_a_row_and_saves(served, page):
     assert log.locator(".summary-value").inner_text() == "-$500.00"
     log.locator("label.remove").first.click()  # and back
     assert log.locator(".summary-value").inner_text() == "$3,500.00"
+    # the page's calendar on a date box: walking its month and year grids stays inside the log
+
+    log.locator("input[name='cap_all.os.new.date']").click()
+    page.wait_for_selector(".pop.cal")
+    page.locator(".pop button[data-view='months']").click()
+    page.wait_for_timeout(50)
+    assert log.evaluate("d => d.open") and page.locator(".pop").count() == 1
+    page.locator(".pop button[data-view='years']").click() if page.locator(".pop button[data-view='years']").count() else None
+    page.wait_for_timeout(50)
+    assert log.evaluate("d => d.open")
+    page.keyboard.press("Escape")  # closes the calendar first
+    page.wait_for_timeout(50)
+    assert log.evaluate("d => d.open")
     page.mouse.click(5, 5)  # outside: closes
     assert not log.evaluate("d => d.open")
     card.locator("button", has_text="Save card").click()
