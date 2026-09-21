@@ -1883,8 +1883,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     from web import settings_form
 
     def card_choices() -> list[tuple[str, str]]:
-        """(last4, "name …last4") for every card: what a virtual number picks its card from."""
-        return [(str(e["last4"]), f"{e['name']} …{e['last4']}") for e in settings_form.display_entries("cards")]
+        """(last4, "name …last4") for every REAL card: what a virtual number picks its card from (a
+        virtual number cannot belong to another virtual number)."""
+        return [(str(e["last4"]), f"{e['name']} …{e['last4']}")
+                for e in settings_form.display_entries("cards") if not e["virtual"]]
 
     def settings_context(*, open_section: str = "", section_texts: dict | None = None) -> dict:
         """What settings.html and the in-place section partial both render from."""

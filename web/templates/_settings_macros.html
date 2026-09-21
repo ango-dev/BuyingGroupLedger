@@ -55,7 +55,7 @@
       <div class="fblock">
         <div class="ftitle">Logged into</div>
         <div class="chips">
-          {% for r in retailer_keys %}<label><input type="checkbox" name="retailers" value="{{ r }}" {{ 'checked' if p and r in p.retailers }}> {{ r }}</label>{% endfor %}
+          {% for r in retailer_keys %}<label><input type="checkbox" name="retailers" value="{{ r }}" {{ 'checked' if p and r in p.retailers }}> {{ retailer_title(r) }}</label>{% endfor %}
         </div>
       </div>
       <div class="fblock">
@@ -122,11 +122,16 @@
 
     {#- The reset's date sits inline in the resets cell and only when the reset is "on a date each
         year". -#}
+    {#- Title Case everywhere the page shows a name; the keys stay as saved -#}
+    {% set RETAILER_TITLES = {'amazon': 'Amazon', 'amazon-business': 'Amazon Business', 'bestbuy': 'Best Buy', 'costco': 'Costco'} %}
+    {% macro retailer_title(key) %}{{ RETAILER_TITLES.get(key, key | replace('-', ' ') | title) }}{% endmacro %}
+    {% macro limit_text(cap) %}{% if cap.spend_limit != '' %} up to {{ '{:,.0f}'.format(cap.spend_limit | float) }} then {{ cap.fallback_rate }}{% endif %}{% endmacro %}
+
     {% macro cap_cells(prefix, cap) %}
       <td class="narrow"><input type="text" name="{{ prefix }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="no limit"></td>
       <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="1%"></td>
-      <td class="resets"><span class="inline">{{ choose(prefix ~ '.resets', [('calendar-year', 'each calendar year'), ('anniversary', 'on a date each year'), ('never', 'never')], cap.resets, '', 'cell') }}<input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></span></td>
-      <td><input type="text" name="{{ prefix }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000 (spend the ledger never sees)"></td>
+      <td class="resets"><span class="inline">{{ choose(prefix ~ '.resets', [('calendar-year', 'Each Calendar Year'), ('anniversary', 'On a Date Each Year'), ('never', 'Never')], cap.resets, '', 'cell') }}<input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></span></td>
+      <td class="outside"><input type="text" name="{{ prefix }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000 (spend the ledger never sees)"></td>
     {% endmacro %}
 
     {% macro card_fields(c) %}
@@ -137,24 +142,28 @@
       <div class="fgrid four">
         <label>Name <input type="text" name="name" value="{{ c.name if c else '' }}" required placeholder="Chase Freedom Unlimited"></label>
         <label>Last 4 <input type="text" name="last4" value="{{ c.last4 if c else '' }}" required maxlength="4" pattern="[0-9]{4}" class="mono"></label>
-        <span class="lbl">Only for profile {{ choose('profile', [('', 'any account')] + (profile_labels | list), c.profile if c else '', '', 'field') }}</span>
+        <span class="lbl">Only for profile {{ choose('profile', [('', 'Any Account')] + (profile_labels | list), c.profile if c else '', '', 'field') }}</span>
+        {#- the card type: a regular card, a virtual number of another card, or an
+            employee card -- a virtual number with a sign-up bonus of its own -#}
+        {% set kind = 'employee' if c and c.own_bonus else ('virtual' if c and c.virtual else '') %}
+        <span class="lbl">Card type {{ choose('kind', [('', 'Regular Card'), ('virtual', 'Virtual Card'), ('employee', 'Employee Card')], kind, '', 'field') }}</span>
       </div>
-      {#- the card a virtual number belongs to: asked only once the box is ticked -#}
+      {#- the card a virtual number belongs to: real cards only -- a virtual number cannot belong to
+          another virtual number -#}
       {% set others = [] %}{% for last4, text in card_choices if not c or last4 != c.last4 %}{% set _ = others.append((last4, text)) %}{% endfor %}
       <div class="virtual-line">
-        <label class="check"><input type="checkbox" name="virtual" value="on" {{ 'checked' if c and c.virtual }}> Virtual card <span class="muted small">— a number of another card: it earns that card's rates and shares its spend limits</span></label>
-        <span class="virtual-of" {{ 'hidden' if not (c and c.virtual) }}>number of {{ choose('virtual_of', [('', '— pick the card —')] + others, c.virtual_of if c else '', '', 'cell') }}
-          <label class="check small"><input type="checkbox" name="own_bonus" value="on" {{ 'checked' if c and c.own_bonus }}> has its own sign-up bonus <span class="muted">(an employee card: the Taxes page asks for it)</span></label></span>
+        <span class="virtual-of" {{ 'hidden' if not kind }}><span class="muted">Shares limits with</span> {{ choose('virtual_of', [('', '— Pick the Card —')] + others, c.virtual_of if c else '', '', 'cell') }}</span>
+        <p class="muted small kind-help">A <b>virtual card</b> is a number of another card: it earns that card's rates and shares its limits, and the Taxes page asks it for no sign-up bonus. An <b>employee card</b> is a virtual card with a sign-up bonus of its own, which the Taxes page does ask for.</p>
       </div>
-      {% if c and c.virtual and not c.virtual_of %}<p class="warn small">This virtual card names no card it belongs to, so it stands on its own rates and its spend counts against no cap: pick one beside the box.</p>{% endif %}
+      {% if kind and not (c and c.virtual_of) %}<p class="warn small">Pick the card this number belongs to. Until then it earns its own rates and no limit applies.</p>{% endif %}
       {#- the rates are the original card's: hidden for a virtual number -#}
-      <div class="fblock rates-block" {{ 'hidden' if c and c.virtual }}>
+      <div class="fblock rates-block" {{ 'hidden' if kind }}>
         <div class="ftitle">Rates <span class="muted">— by retailer (several share a row); a spend limit caps the rate: past it the fallback applies, the row that crosses it gets the blend. Blank the retailers to drop a row</span></div>
         <table class="entry-table rates">
           <thead><tr><th>retailer(s)</th><th>rate</th><th>spend limit</th><th>fallback</th><th>resets</th><th>outside spend</th></tr></thead>
           <tbody>
             <tr class="everywhere">
-              <td class="muted">everywhere else</td>
+              <td class="muted">Everywhere Else</td>
               <td class="narrow"><input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="default rate"></td>
               {{ cap_cells('cap_all', c.cap_all if c else blank_cap) }}
             </tr>
@@ -162,8 +171,9 @@
             {% for r in rows %}
             {% set picked = r.retailers.split(', ') if r.retailers else [] %}
             {% set keys = (retailer_keys | list) + (picked | reject('in', retailer_keys) | list) %}
+            {% set options = [] %}{% for k in keys %}{% set _ = options.append((k, retailer_title(k) | trim)) %}{% endfor %}
             <tr class="{{ 'new-row' if loop.last }}">
-              <td>{{ pick_many('rr.' ~ loop.index0 ~ '.retailers', keys, picked, '— add —' if loop.last else '— remove —', 'cell') }}</td>
+              <td>{{ pick_many('rr.' ~ loop.index0 ~ '.retailers', options, picked, '— Add —' if loop.last else '— Remove —', 'cell') }}</td>
               <td class="narrow"><input type="text" name="rr.{{ loop.index0 }}.rate" value="{{ r.rate }}" placeholder="5%"></td>
               {{ cap_cells('rr.' ~ loop.index0, r) }}
             </tr>
@@ -177,11 +187,11 @@
           window.__resetsToggle = true;
           document.addEventListener("change", function (e) {
             var input = e.target;
-            if (input.name === "virtual") {  // a virtual number: pick its card, and its rates are that card's
-              var line = input.closest(".virtual-line"), pick = line && line.querySelector(".virtual-of");
-              if (pick) pick.hidden = !input.checked;
-              var form = input.closest("form"), rates = form && form.querySelector(".rates-block");
-              if (rates) rates.hidden = input.checked;
+            if (input.name === "kind") {  // a virtual or employee card: pick its card; its rates are that card's
+              var form = input.closest("form"), virtual = input.value !== "";
+              var pick = form && form.querySelector(".virtual-of"), rates = form && form.querySelector(".rates-block");
+              if (pick) pick.hidden = !virtual;
+              if (rates) rates.hidden = virtual;
               return;
             }
             if (!input.name || !/\.resets$/.test(input.name)) return;
@@ -207,12 +217,11 @@
       {% else %}
         <strong>{{ e.name or '(unnamed)' }}</strong> <span class="mono muted">…{{ e.last4 }}</span>
         {% if not e.virtual %}
-        <span class="chip">{{ e.cashback_rate if e.cashback_rate != '' else 'default rate' }}</span>
-        {% for r, rate in e.retailer_rates %}<span class="chip muted">{{ r }} {{ rate }}</span>{% endfor %}
-        {% for cap in e.caps %}<span class="chip warn" title="spend cap: past the limit the fallback rate applies">{{ cap.retailers or 'all' }} to {{ cap.spend_limit }} then {{ cap.fallback_rate }}</span>{% endfor %}
+        <span class="chip">{{ e.cashback_rate if e.cashback_rate != '' else 'Default Rate' }}{{ limit_text(e.cap_all) }}</span>
+        {% for r in e.rate_rows %}<span class="chip muted">{% for k in r.retailers.split(', ') %}{{ retailer_title(k) | trim }}{{ ', ' if not loop.last }}{% endfor %} {{ r.rate }}{{ limit_text(r) }}</span>{% endfor %}
         {% endif %}
         {% if e.profile %}<span class="chip">{{ e.profile }}</span>{% endif %}
-        {% if e.virtual %}<span class="chip virtual" title="a virtual number of another card: it earns that card's rates and shares its spend limits">virtual{% if e.virtual_of %} of …{{ e.virtual_of }}{% else %} — no card named{% endif %}</span>{% if e.own_bonus %}<span class="chip" title="an employee card: the Taxes page asks for its sign-up bonus">own bonus</span>{% endif %}{% endif %}
+        {% if e.virtual %}<span class="chip virtual" title="{{ 'an employee card: a virtual number with a sign-up bonus of its own' if e.own_bonus else 'a virtual number of another card: it earns that card\'s rates and shares its limits' }}">{{ 'Employee Card' if e.own_bonus else 'Virtual Card' }}{% if e.virtual_of %} of …{{ e.virtual_of }}{% else %} — No Card Named{% endif %}</span>{% endif %}
       {% endif %}
     {% endmacro %}
 

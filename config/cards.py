@@ -46,6 +46,9 @@ def _warn_about_unlinked_virtual_cards(cards: list[Card]) -> None:
         elif card.virtual_of and card.virtual_of not in known:
             log.warning("Card %r is a virtual number of ...%s, which no `cards` entry has.",
                         card.name, card.virtual_of)
+        elif card.virtual_of and any(c.last4 == card.virtual_of and c.virtual for c in cards):
+            log.warning("Card %r is a virtual number of ...%s, itself a virtual number: it belongs to a real card.",
+                        card.name, card.virtual_of)
 
 
 def _warn_about_unknown_retailer_rates(cards: list[Card]) -> None:

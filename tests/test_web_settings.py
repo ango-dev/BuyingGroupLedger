@@ -520,7 +520,9 @@ class TestEntryCards:
         assert 'name="cap_all.spend_limit" value="25000"' in body
         assert 'class="mono anniversary" hidden>' in body and "<th>on (MM-DD)</th>" not in body
         assert 'list="retailer-keys"' not in body  # no browser suggestion list
-        assert "all to 25000 then 1%" in body  # the entry's summary chip
+        assert '<span class="chip">1% up to 25,000 then 1%</span>' in body  # the overall chip carries the catch-all limit
+        assert '<span class="chip muted">Amazon, Amazon Business 5% up to 150,000 then 1%</span>' in body
+        assert '<span class="chip muted">Best Buy 3%</span>' in body
         # a cap with a bad reset date is refused and nothing is written
         bad = client.post("/settings/section/cards/entry/1", data={
             "name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%",
@@ -586,15 +588,28 @@ class TestEntryCards:
                                                                         "virtual_of": "0315", "own_bonus": "on"}, follow_redirects=False)
         assert employee.status_code == 303 and config_value("cards")[1]["own_bonus"] is True
         body = client.get("/settings").text
-        assert "virtual of …0315" in body
-        # the card picker shows only for a ticked virtual card
+        assert "Employee Card of …0315" in body  # the last save made it an employee card
+        # the card picker shows only for a virtual or employee card; the type is one menu
         cards_html = body[body.index('data-key="cards:0315"'):body.index('data-key="cards:9999"')]
-        assert '<span class="virtual-of" hidden>' in cards_html
+        assert '<span class="virtual-of" hidden>' in cards_html and 'name="kind" value="" checked' in cards_html
         virtual_html = body[body.index('data-key="cards:9999"'):]
         assert '<span class="virtual-of" >' in virtual_html and 'name="virtual_of" value="0315" checked' in virtual_html
-        assert 'class="fblock rates-block" hidden>' in virtual_html and 'name="own_bonus" value="on" checked' in virtual_html
+        assert 'class="fblock rates-block" hidden>' in virtual_html and 'name="kind" value="employee" checked' in virtual_html
         assert 'class="fblock rates-block" >' in cards_html  # a real card shows its rates
-        assert ">own bonus<" in virtual_html
+        assert ">Employee Card of …0315<" in virtual_html
+        # a virtual number belongs to a real card: the picker offers no virtual cards, a virtual parent is refused
+        assert 'name="virtual_of" value="9999"' not in body
+        nested = client.post("/settings/section/cards/entry", data={"name": "Nested", "last4": "3333", "virtual": "on", "virtual_of": "9999"})
+        assert nested.status_code == 400 and "itself a virtual number" in nested.text
+        # the menu's own values save the same flags
+        as_kind = client.post("/settings/section/cards/entry/1", data={"name": "Virtual", "last4": "9999", "kind": "virtual",
+                                                                       "virtual_of": "0315"}, follow_redirects=False)
+        assert as_kind.status_code == 303 and config_value("cards")[1] == {"last4": "9999", "name": "Virtual", "virtual": True, "virtual_of": "0315"}
+        as_kind = client.post("/settings/section/cards/entry/1", data={"name": "Virtual", "last4": "9999", "kind": "employee",
+                                                                       "virtual_of": "0315"}, follow_redirects=False)
+        assert as_kind.status_code == 303 and config_value("cards")[1]["own_bonus"] is True
+        regular = client.post("/settings/section/cards/entry/1", data={"name": "Virtual", "last4": "9999", "kind": ""}, follow_redirects=False)
+        assert regular.status_code == 303 and "virtual" not in config_value("cards")[1]
 
     def test_an_invalid_entry_is_400_and_writes_nothing(self, client):
         bad = client.post("/settings/section/cards/entry", data={"name": "Bare", "last4": "1111",

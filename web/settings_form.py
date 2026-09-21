@@ -735,15 +735,24 @@ def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
         entry["profile"] = profile
     else:
         entry.pop("profile", None)
-    virtual = str(form.get("virtual", "")).strip().lower() in ("on", "true", "1", "yes")
+    # the card type: `kind` (regular / virtual / employee) from the page; the older `virtual` and
+    # `own_bonus` ticks are still understood
+    kind = _text(form, "kind").lower()
+    virtual = kind in ("virtual", "employee") or str(form.get("virtual", "")).strip().lower() in ("on", "true", "1", "yes")
+    employee = kind == "employee" or str(form.get("own_bonus", "")).strip().lower() in ("on", "true", "1", "yes")
     virtual_of = _text(form, "virtual_of")
     if virtual or virtual_of:
         if not virtual_of:  # a virtual card must say which card it is a number of
             raise SettingsError(["A virtual card must name the card it is a number of (its spend counts "
                                  "against that card's caps): pick it under \"virtual number of\"."])
+        parent = next((e for e in _entries("cards") if isinstance(e, dict)
+                       and str(e.get("last4", "")) == virtual_of), None)
+        if parent is not None and (parent.get("virtual") or parent.get("virtual_of")):
+            raise SettingsError([f"{parent.get('name', virtual_of)} …{virtual_of} is itself a virtual number: a virtual "
+                                 "card belongs to a real card."])
         entry["virtual"] = True
         entry["virtual_of"] = virtual_of
-        if str(form.get("own_bonus", "")).strip().lower() in ("on", "true", "1", "yes"):
+        if employee:
             entry["own_bonus"] = True  # an employee card: the Taxes page still asks for its bonus
         else:
             entry.pop("own_bonus", None)

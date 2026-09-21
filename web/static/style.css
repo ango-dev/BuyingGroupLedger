@@ -601,10 +601,13 @@ table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-to
 @keyframes toast-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
 /* the Virtual card line: the box, and once ticked the card it is a number of, inline */
 .entry-card .virtual-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.entry-card .virtual-line .kind-help { flex: 1 1 100%; margin: 0; }
 .entry-card .virtual-line .virtual-of { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; color: var(--muted); }
 .entry-card .virtual-line .virtual-of[hidden] { display: none; }
 /* the resets cell: the dropdown and, for "on a date each year", the MM-DD box inline beside it */
+table.entry-table.rates td.resets { width: 1%; white-space: nowrap; }  /* content-sized: no gap before outside spend */
 table.entry-table.rates td.resets .inline { display: inline-flex; align-items: center; gap: 6px; }
+table.entry-table.rates td.outside input { max-width: 300px; }
 table.entry-table.rates td.resets input.anniversary { width: 64px; }
 table.entry-table.rates td.resets input.anniversary[hidden] { display: none; }
 /* the card's rates table: the retailers and the
@@ -717,6 +720,9 @@ details.multi.inline { display: inline-block; vertical-align: middle; }
 details.multi.inline summary { flex-direction: row; align-items: center; gap: 6px; }
 .add-form details.multi .summary-text { padding: 4px 8px; }
 .entry-card details.multi.field { font-size: 1em; color: var(--muted); min-width: 0; }
+/* the picker sits level with the inputs beside it: no grid, no padding of its own */
+.entry-card .fgrid .lbl details.multi.field { display: block; padding: 0; }
+.entry-card .fgrid .lbl details.multi.field summary { gap: 0; }
 .entry-card details.multi.field .summary-text { font-size: 1em; width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: 6px; }
 table.activity { width: 100%; min-width: 880px; table-layout: fixed; }
 table.activity col.c-when { width: 150px; } table.activity col.c-type { width: 130px; } table.activity col.c-run { width: 170px; }
