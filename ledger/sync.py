@@ -1066,6 +1066,7 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
         written_rows.extend(range(start_row, start_row + len(appends)))
 
     _reprorate_order_level(worksheet, touched_order_ids, raw_totals_by_order)
+    _recompute_cashback_caps(worksheet)
     for money_free_status, rows_to_clear in money_free_rows.items():
         _clear_money_for_status(worksheet, money_free_status, rows_to_clear)
     _write_profit_formulas(worksheet, written_rows)
@@ -1322,6 +1323,35 @@ def _clear_money_for_status(worksheet, status: str, row_numbers: list[int]) -> N
             "Could not clear the money cells on %d %s row(s); they may still show a cost until the "
             "next sync.", len(set(row_numbers)), status,
         )
+
+
+def _recompute_cashback_caps(worksheet) -> None:
+    """Rows PAST SHIPPED on a card with a spend cap follow the spend (ledger/cashback_caps.recompute;
+): a late order or a return moves the line, so their Cashback Rate cells are
+    re-derived and rewritten where they differ. Hand-edited cells are skipped. Fails soft: the
+    rows just synced are already written, and the next sync recomputes again."""
+    from config.cards import load_cards
+    from ledger.cashback_caps import recompute
+
+    try:
+        cards = load_cards()
+        if not any(c.caps for c in cards):
+            return
+        changes = recompute(worksheet.get_all_values(), cards, _protected_cells(worksheet),
+                            default_rate=settings.default_cashback_rate)
+        if not changes:
+            return
+        worksheet.batch_update(
+            [{"range": f"{_COL['cashback_rate']}{n}", "values": [[new]]} for n, new, _old in changes],
+            value_input_option="USER_ENTERED",
+        )
+        log.info("Cashback caps: %d rate cell(s) re-tiered on rows past shipped.", len(changes))
+        from diagnostics import activity
+
+        activity.record("ledger", f"Cashback caps: {len(changes)} rate(s) re-tiered",
+                        {"rows": [{"row": n, "from": old, "to": new} for n, new, old in changes[:50]]})
+    except Exception:
+        log.exception("Cashback caps: the recompute failed; the rate cells stand until the next sync.")
 
 
 def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:

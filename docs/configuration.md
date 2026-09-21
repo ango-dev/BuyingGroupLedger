@@ -196,4 +196,40 @@ Details:
   name you type by hand survives) and the default rate. No `cards` section at all = every row gets the
   default rate and no name.
 - Like the warehouse config, this is offline and free — editing it re-derives the columns for **open**
-  orders on the next run. Delivered rows are terminal and keep what they were tagged with.
+  orders on the next run. Delivered rows are terminal and keep what they were tagged with (except
+  under a spend cap, below).
+
+### Spend caps
+
+A boosted rate usually runs out: Amazon Business Prime's 5% covers $120k of Amazon spend a year,
+Aven's 5% catch-all covers $25k. **`caps`** on a card say so, and the cap is decided by **spend**,
+never by the rate:
+
+```json
+{ "last4": "5555", "name": "Amazon Business Prime", "cashback_rate": "1%",
+  "retailer_rates": { "Amazon": "5%", "Amazon Business": "5%" },
+  "caps": [ { "retailers": ["Amazon", "Amazon Business"], "spend_limit": 120000,
+              "fallback_rate": "1%", "resets": "calendar-year", "outside_spend": { "2026": 4000 } } ] }
+```
+
+- `retailers` is the cap's scope: these retailers share ONE allowance. An **empty** list is the
+  catch-all — every retailer without a cap of its own. A card may have several retailer caps and
+  one catch-all; a retailer can be in only one cap.
+- `spend_limit` is dollars of spend at the boosted rate per period. What counts as spend is what
+  the card was charged for a row, the COGS basis: Total Cost + Shipping + Sales Tax − Gift Card −
+  Rewards Used. A **return** gives Return Qty × Cost Per Item back to the allowance in the period of
+  its Return Date.
+- `fallback_rate` is the rate past the limit. The purchase that crosses the line gets the exact
+  blend: the remaining allowance at the boosted rate, the rest at the fallback.
+- `resets`: `calendar-year` (default), `never`, or an `MM-DD` the period starts on each year.
+- `outside_spend`: per period (`"2026"`, or `"all"` for a cap that never resets), spend on the card
+  the ledger never sees — personal purchases that also use up the allowance. Update it by hand.
+
+The rate is applied at scrape time, with the batch placed among the ledger's rows for that card
+and period in Order Date order. After every ledger sync, rows **past shipped** (delivered, paid,
+return) on a capped card are re-derived from the spend and rewritten where a late order or a
+return moved the line — the one exception to the rule that a rate cell is never refreshed, so keep
+a capped card's rates current. Ordered and shipped rows keep their scrape-time rate until they
+get there; a hand-typed rate cell is never touched. An Amazon promo (the "extra 1% back" the
+order page advertises) rides on top of the capped rate. The Settings page edits all of it on the
+card's entry.

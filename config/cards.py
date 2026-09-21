@@ -6,6 +6,7 @@ from models.card import Card, normalize_last4, normalize_retailer
 
 __all__ = [
     "KNOWN_RETAILERS",
+    "add_promos",
     "boosted_last4s",
     "load_cards",
     "normalize_last4",
@@ -38,7 +39,8 @@ def _warn_about_unknown_retailer_rates(cards: list[Card]) -> None:
     """Flag `retailer_rates` keys that name no real retailer — they'd never apply, silently."""
     known = {normalize_retailer(name) for name in KNOWN_RETAILERS}
     for card in cards:
-        unknown = sorted(key for key in card.retailer_rates if key not in known)
+        unknown = sorted({key for key in card.retailer_rates if key not in known}
+                         | {r for cap in card.caps for r in cap.retailers if r not in known})
         if unknown:
             log.warning(
                 "Card %r has retailer_rates for %s, which match no retailer this ledger scrapes "
@@ -140,15 +142,27 @@ def tag_cards(items, cards: list[Card], default_rate: float | None = None,
         name, rate = resolve_card(
             item.card_last4, cards, item.profile_label, item.retailer, default_rate
         )
-        promo = getattr(item, "_promo_cashback_rate", None)
-        if apply_promo and promo and rate is not None:
-            rate = round(rate + promo, 4)
-            log.info(
-                "%s order %s: +%.2f%% promo cashback from the order page (rate now %.2f%%).",
-                item.retailer, item.order_id, promo * 100, rate * 100,
-            )
         item.card_name = name
         item.cashback_rate = rate
         if normalize_last4(item.card_last4) and not name:
             unknown += 1
+    if apply_promo:
+        add_promos(items)
     return unknown
+
+
+def add_promos(items) -> int:
+    """The Amazon promo add-on, as its own step: main._tag_cards applies the cards' spend caps
+    between the rate and the promo (ledger/cashback_caps.py), so the promo rides on top of a capped
+    rate -- it is Amazon's, not the card's. Returns how many rows got one."""
+    added = 0
+    for item in items:
+        promo = getattr(item, "_promo_cashback_rate", None)
+        if promo and item.cashback_rate is not None:
+            item.cashback_rate = round(item.cashback_rate + promo, 4)
+            added += 1
+            log.info(
+                "%s order %s: +%.2f%% promo cashback from the order page (rate now %.2f%%).",
+                item.retailer, item.order_id, promo * 100, item.cashback_rate * 100,
+            )
+    return added

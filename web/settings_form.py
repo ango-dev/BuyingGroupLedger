@@ -567,8 +567,31 @@ def display_entries(path: str) -> list[dict]:
                 "profile": entry.get("profile", ""),
                 "virtual": bool(entry.get("virtual")),
                 "retailer_rates": list((entry.get("retailer_rates") or {}).items()),
+                "caps": [_cap_display(c) for c in (entry.get("caps") or []) if isinstance(c, dict)],
             })
     return out
+
+
+def _cap_display(cap: dict) -> dict:
+    """A CashbackCap entry as the card's form shows it (models.card.CashbackCap)."""
+    resets = str(cap.get("resets") or "calendar-year")
+    anniversary = resets if resets not in ("calendar-year", "never") else ""
+    retailers = cap.get("retailers") or []
+    if isinstance(retailers, str):
+        retailers = [retailers]
+    offsets = cap.get("outside_spend") or {}
+
+    def plain(value):  # 150000.0 shows as 150000
+        return int(value) if isinstance(value, float) and value.is_integer() else value
+
+    return {
+        "retailers": ", ".join(str(r) for r in retailers),
+        "spend_limit": plain(cap.get("spend_limit", "")),
+        "fallback_rate": cap.get("fallback_rate", ""),
+        "resets": "anniversary" if anniversary else resets,
+        "anniversary": anniversary,
+        "outside_spend": ", ".join(f"{k}: {plain(v)}" for k, v in offsets.items()) if isinstance(offsets, dict) else "",
+    }
 
 
 def profile_labels() -> list[str]:
@@ -698,7 +721,44 @@ def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
         entry["retailer_rates"] = rates
     else:
         entry.pop("retailer_rates", None)
+    caps = []
+    for i in _indexed(form, "cap"):
+        limit = _text(form, f"cap.{i}.spend_limit")
+        if not limit:
+            continue  # the blank "new cap" row, or a cap being dropped
+        resets = _text(form, f"cap.{i}.resets") or "calendar-year"
+        if resets == "anniversary":
+            resets = _text(form, f"cap.{i}.anniversary")
+        cap = {"retailers": [r.strip() for r in _text(form, f"cap.{i}.retailers").split(",") if r.strip()],
+               "spend_limit": _money_value(limit),
+               "fallback_rate": _rate_value(_text(form, f"cap.{i}.fallback_rate")),
+               "resets": resets}
+        offsets = {}
+        for part in re.split(r"[;,](?=\s*[^,;:]+:)", _text(form, f"cap.{i}.outside_spend")):
+            if ":" in part:
+                period, amount = part.split(":", 1)
+                if period.strip() and amount.strip():
+                    offsets[period.strip()] = _money_value(amount)
+        if offsets:
+            cap["outside_spend"] = offsets
+        if cap["fallback_rate"] is None:
+            cap.pop("fallback_rate")  # the model says what is missing
+        caps.append(cap)
+    if caps:
+        entry["caps"] = caps
+    else:
+        entry.pop("caps", None)
     return entry
+
+
+def _money_value(text: str):
+    """An amount as typed: "150,000" or "$150000" -> 150000.0; anything else stays text for the
+    model to refuse with its own message."""
+    cleaned = text.strip().replace("$", "").replace(",", "")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return text.strip()
 
 
 _BUILDERS = {"profiles": _profile_from_form, "warehouses": _warehouse_from_form,

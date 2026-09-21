@@ -491,6 +491,37 @@ class TestEntryCards:
         assert response.status_code == 303 and "Removed+card+USB" in response.headers["location"]
         assert [c["last4"] for c in config_value("cards")] == ["8765"]
 
+    def test_a_cards_spend_caps_round_trip_through_the_form(self, client):
+        """a maximum-cashback (spend cap) per retailer group and/or the catch-all."""
+        response = client.post("/settings/section/cards/entry", data={
+            "name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%", "profile": "",
+            "rate.0.retailer": "amazon", "rate.0.rate": "5%",
+            "cap.0.retailers": "amazon, amazon-business", "cap.0.spend_limit": "$150,000", "cap.0.fallback_rate": "1%",
+            "cap.0.resets": "anniversary", "cap.0.anniversary": "03-15", "cap.0.outside_spend": "2026: 4,000, 2027: 0",
+            "cap.1.retailers": "", "cap.1.spend_limit": "25000", "cap.1.fallback_rate": "1%", "cap.1.resets": "calendar-year",
+            "cap.2.retailers": "", "cap.2.spend_limit": "", "cap.2.fallback_rate": ""}, follow_redirects=False)
+        assert response.status_code == 303 and "Added+card" in response.headers["location"]
+        saved = config_value("cards")[1]
+        assert saved["caps"] == [
+            {"retailers": ["amazon", "amazon-business"], "spend_limit": 150000.0, "fallback_rate": "1%", "resets": "03-15",
+             "outside_spend": {"2026": 4000.0, "2027": 0.0}},
+            {"retailers": [], "spend_limit": 25000.0, "fallback_rate": "1%", "resets": "calendar-year"}]
+        body = client.get("/settings").text
+        assert 'name="cap.0.retailers" value="amazon, amazon-business"' in body and 'name="cap.0.anniversary" value="03-15"' in body
+        assert 'name="cap.0.outside_spend" value="2026: 4000, 2027: 0"' in body
+        assert "all to 25000 then 1%" in body  # the entry's summary chip
+        # a cap with a bad reset date, or a retailer in two caps, is refused and nothing is written
+        bad = client.post("/settings/section/cards/entry/1", data={
+            "name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%",
+            "cap.0.retailers": "amazon", "cap.0.spend_limit": "1", "cap.0.fallback_rate": "1%", "cap.0.resets": "anniversary",
+            "cap.0.anniversary": "13-40"})
+        assert bad.status_code == 400 and "resets" in bad.text
+        assert config_value("cards")[1]["caps"][0]["resets"] == "03-15"
+        # blanking the limit drops the cap
+        client.post("/settings/section/cards/entry/1", data={"name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%",
+                                                             "cap.0.spend_limit": "", "cap.1.spend_limit": ""}, follow_redirects=False)
+        assert "caps" not in config_value("cards")[1]
+
     def test_an_invalid_entry_is_400_and_writes_nothing(self, client):
         bad = client.post("/settings/section/cards/entry", data={"name": "Bare", "last4": "1111",
                                                                   "cashback_rate": "2"})

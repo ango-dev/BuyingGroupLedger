@@ -144,6 +144,25 @@
           </tbody>
         </table>
       </div>
+      <div class="fblock">
+        <div class="ftitle">Spend caps <span class="muted">— past the limit the fallback rate applies; the row that crosses it gets the blend. Blank retailers = the catch-all. Blank the limit to drop a row</span></div>
+        <table class="entry-table caps">
+          <thead><tr><th>retailers</th><th>spend limit</th><th>fallback rate</th><th>resets</th><th>on (MM-DD)</th><th>outside spend</th></tr></thead>
+          <tbody>
+            {% set caps = (c.caps if c else []) + [{'retailers': '', 'spend_limit': '', 'fallback_rate': '', 'resets': 'calendar-year', 'anniversary': '', 'outside_spend': ''}] %}
+            {% for cap in caps %}
+            <tr class="{{ 'new-row' if loop.last }}">
+              <td><input type="text" name="cap.{{ loop.index0 }}.retailers" value="{{ cap.retailers }}" placeholder="amazon, amazon-business (blank: every retailer)"></td>
+              <td class="narrow"><input type="text" name="cap.{{ loop.index0 }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="150000"></td>
+              <td class="narrow"><input type="text" name="cap.{{ loop.index0 }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="1%"></td>
+              <td>{{ choose('cap.' ~ loop.index0 ~ '.resets', [('calendar-year', 'each calendar year'), ('anniversary', 'on a date each year'), ('never', 'never')], cap.resets, '', 'cell') }}</td>
+              <td class="narrow"><input type="text" name="cap.{{ loop.index0 }}.anniversary" value="{{ cap.anniversary }}" placeholder="03-15" class="mono"></td>
+              <td><input type="text" name="cap.{{ loop.index0 }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000 (spend the ledger never sees)"></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     {% endmacro %}
 
     {% macro entry_summary(path, e) %}
@@ -162,6 +181,7 @@
         <strong>{{ e.name or '(unnamed)' }}</strong> <span class="mono muted">…{{ e.last4 }}</span>
         <span class="chip">{{ e.cashback_rate if e.cashback_rate != '' else 'default rate' }}</span>
         {% for r, rate in e.retailer_rates %}<span class="chip muted">{{ r }} {{ rate }}</span>{% endfor %}
+        {% for cap in e.caps %}<span class="chip warn" title="spend cap: past the limit the fallback rate applies">{{ cap.retailers or 'all' }} to {{ cap.spend_limit }} then {{ cap.fallback_rate }}</span>{% endfor %}
         {% if e.profile %}<span class="chip">{{ e.profile }}</span>{% endif %}
         {% if e.virtual %}<span class="chip virtual" title="a virtual number of another card: the Taxes page does not ask for a sign-up bonus for it">virtual</span>{% endif %}
       {% endif %}

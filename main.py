@@ -41,7 +41,7 @@ from functools import lru_cache  # noqa: E402
 
 from alerts.notifier import alert  # noqa: E402
 from diagnostics import activity  # noqa: E402
-from config.cards import load_cards, tag_cards  # noqa: E402
+from config.cards import add_promos, load_cards, tag_cards  # noqa: E402
 from config.profiles import load_profiles_for_retailer  # noqa: E402
 from config.settings import settings  # noqa: E402
 from config.warehouses import load_warehouses, tag_and_filter_personal  # noqa: E402
@@ -87,13 +87,38 @@ def _tag_cards(items: list, label: str) -> None:
     funnels through run_scrape. Unlike the warehouse classifier this never
     drops a row — an unrecognized card is only a missing profit input, not a reason to lose an order.
     """
-    unknown = tag_cards(items, _cards(), apply_promo=settings.amazon_promo_cashback_enabled)
+    cards = _cards()
+    unknown = tag_cards(items, cards, apply_promo=False)
     if unknown:
         log.info(
             "%s: %d row(s) have a card ending in digits not listed in config.json `cards` (default "
             "cashback rate applied).",
             label, unknown,
         )
+    _apply_cashback_caps(items, cards, label)
+    if settings.amazon_promo_cashback_enabled:
+        add_promos(items)  # on top of the capped rate: the promo is Amazon's, not the card's
+
+
+def _apply_cashback_caps(items: list, cards: list, label: str) -> None:
+    """The cards' spend caps (ledger/cashback_caps.py): the batch is placed among the ledger's rows
+    for each card and period, and a row past the limit gets the fallback rate. Fails soft -- a
+    ledger that cannot be read leaves the uncapped rates, and says so."""
+    if not any(c.caps for c in cards):
+        return
+    from ledger.cashback_caps import apply_to_items, rows_by_field
+    from ledger.sync import _get_worksheet
+
+    try:
+        rows = rows_by_field(_get_worksheet().get_all_values())
+        changes = apply_to_items(items, cards, rows)
+    except Exception:
+        log.exception("%s: the cashback caps could not be applied (the ledger could not be read); "
+                      "the rows keep their uncapped rates until the post-sync recompute.", label)
+        return
+    for item, before, after in changes:
+        log.info("%s order %s: cashback rate %.2f%% -> %.2f%% (spend cap on card ...%s).",
+                 label, item.order_id, (before or 0) * 100, after * 100, item.card_last4[-4:])
 
 
 def _classify_and_drop_personal(items: list, label: str) -> list:

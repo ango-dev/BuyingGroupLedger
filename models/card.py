@@ -48,6 +48,86 @@ def normalize_last4(text: str) -> str:
     return digits[-4:] if len(digits) >= 4 else ""
 
 
+def _money(value) -> float:
+    if isinstance(value, str):
+        cleaned = value.strip().replace("$", "").replace(",", "")
+        return float(cleaned) if cleaned else 0.0
+    return float(value)
+
+
+class CashbackCap(BaseModel):
+    """A SPEND cap on a card's boosted rate: once the period's spend within the
+    cap's scope passes `spend_limit`, purchases earn `fallback_rate` instead of the card's rate,
+    and the purchase that crosses the line earns the exact blend (ledger/cashback_caps.py).
+
+    - `retailers`: the scope -- these retailers share ONE allowance (Amazon Business Prime's 5% on
+      $120k covers Amazon and Amazon Business together); EMPTY means the catch-all, every retailer
+      without a cap of its own (Aven's 5% to $25k). Keys match through `normalize_retailer`.
+    - `spend_limit`: dollars of spend at the boosted rate per period.
+    - `fallback_rate`: the rate past the limit, a fraction or "1%" like every other rate.
+    - `resets`: "calendar-year" (the default), "never", or an "MM-DD" the period starts on each
+      year (a cardmember anniversary).
+    - `outside_spend`: spend the ledger never sees -- personal purchases on the card -- per period
+      ("2026": 4000; "all" for a cap that never resets), taken off the allowance first.
+    """
+
+    retailers: list[str] = Field(default_factory=list)
+    spend_limit: float
+    fallback_rate: float
+    resets: str = "calendar-year"
+    outside_spend: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("retailers", mode="before")
+    @classmethod
+    def _normalize_retailers(cls, v):
+        if isinstance(v, str):
+            v = [part for part in re.split(r"[,;]", v)]
+        return [normalize_retailer(r) for r in (v or []) if normalize_retailer(r)]
+
+    @field_validator("spend_limit", mode="before")
+    @classmethod
+    def _limit(cls, v):
+        return _money(v)
+
+    @field_validator("fallback_rate", mode="before")
+    @classmethod
+    def _fallback(cls, v):
+        return parse_rate(v)
+
+    @field_validator("outside_spend", mode="before")
+    @classmethod
+    def _offsets(cls, v):
+        if isinstance(v, str):
+            pairs = {}
+            for part in re.split(r"[;,](?=\s*[^,;:]+:)", v):  # "2026: 4,000, 2027: 0": the thousands comma stays
+                if ":" in part:
+                    period, amount = part.split(":", 1)
+                    if period.strip():
+                        pairs[period.strip()] = amount
+            v = pairs
+        return {str(k).strip(): _money(amount) for k, amount in (v or {}).items()}
+
+    @model_validator(mode="after")
+    def _validate(self):
+        if self.spend_limit <= 0:
+            raise ValueError(f"A cashback cap needs a spend limit above 0, not {self.spend_limit}.")
+        _check_rate(self.fallback_rate, "A cashback cap's fallback")
+        if self.fallback_rate is None:
+            raise ValueError("A cashback cap needs a fallback rate (the rate past the limit).")
+        resets = self.resets.strip().lower()
+        if resets not in ("calendar-year", "never") and not re.fullmatch(r"(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])", resets):
+            raise ValueError(
+                f"A cashback cap's resets must be \"calendar-year\", \"never\" or an MM-DD, not {self.resets!r}.")
+        self.resets = resets
+        for period, amount in self.outside_spend.items():
+            if amount < 0:
+                raise ValueError(f"Outside spend for {period} is negative ({amount}).")
+        return self
+
+    def covers(self, retailer: str) -> bool:
+        return normalize_retailer(retailer) in self.retailers
+
+
 class Card(BaseModel):
     """One credit card, matched to a ledger row by the last 4 digits the scraper already captures.
 
@@ -77,6 +157,9 @@ class Card(BaseModel):
     name: str
     cashback_rate: float | None = None
     retailer_rates: dict[str, float] = Field(default_factory=dict)
+    #: Spend caps on the boosted rate (CashbackCap): per retailer group and/or
+    #: one catch-all. Which cap a purchase counts against is `cap_for`.
+    caps: list[CashbackCap] = Field(default_factory=list)
     profile: str = ""  # matches ProfileConfig.label
     # A virtual card number (another card's, or a card with no account of its own): it earns
     # cashback like any card, but the Taxes page does not ask for a sign-up bonus for it.
@@ -109,7 +192,30 @@ class Card(BaseModel):
         _check_rate(self.cashback_rate, f"Card {self.name}'s")
         for retailer, rate in self.retailer_rates.items():
             _check_rate(rate, f"Card {self.name}'s {retailer}")
+        seen: dict[str, int] = {}
+        catch_alls = 0
+        for i, cap in enumerate(self.caps):
+            if not cap.retailers:
+                catch_alls += 1
+            for r in cap.retailers:
+                if r in seen:
+                    raise ValueError(f"Card {self.name}: {r!r} is in two cashback caps (#{seen[r] + 1} and #{i + 1}).")
+                seen[r] = i
+        if catch_alls > 1:
+            raise ValueError(f"Card {self.name} has {catch_alls} catch-all cashback caps; one at most.")
         return self
+
+    def cap_for(self, retailer: str):
+        """The cap a purchase at `retailer` counts against: the one naming it, else the catch-all,
+        else None (no cap: the rate applies without limit)."""
+        key = normalize_retailer(retailer)
+        for cap in self.caps:
+            if key in cap.retailers:
+                return cap
+        for cap in self.caps:
+            if not cap.retailers:
+                return cap
+        return None
 
     def rate_for(self, retailer: str) -> float | None:
         """This card's rate at `retailer`: the per-retailer override if one is set, else the card's
