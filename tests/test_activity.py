@@ -233,12 +233,12 @@ class TestThePage:
         # the columns sort from their header arrows, like the other tables
         import re as _re
         by_type = client.get("/activity", params={"sort": "kind", "dir": "asc", "days": "0"}).text
-        kinds = _re.findall(r'<tr class="kind-([a-z]+)"', by_type)
+        kinds = _re.findall(r'<tr class="kind-([a-z]+) has-num"', by_type)
         assert kinds == sorted(kinds) and len(kinds) == 4
         assert 'class="col-kind sorted"' in by_type and 'title="sort descending">▲</a>' in by_type
         assert 'href="/activity?days=0&amp;dir=desc&amp;sort=kind"' in by_type or 'href="/activity?days=0&amp;sort=kind&amp;dir=desc"' in by_type
         by_type_desc = client.get("/activity", params={"sort": "kind", "dir": "desc", "days": "0"}).text
-        assert _re.findall(r'<tr class="kind-([a-z]+)"', by_type_desc) == sorted(kinds, reverse=True)
+        assert _re.findall(r'<tr class="kind-([a-z]+) has-num"', by_type_desc) == sorted(kinds, reverse=True)
         assert 'class="grid compact activity sheetlike stacked"' in by_type
 
     def test_the_dashboard_records_its_own_changes(self, client):
@@ -264,7 +264,7 @@ class TestThePage:
         (unlogged / "response_1.txt").write_text("{}", encoding="utf-8")
 
         body = client.get("/activity", params={"days": "0"}).text
-        assert body.count('<tr class="kind-dossier">') == 2  # one logged + one only on disk, not doubled
+        assert body.count('<tr class="kind-dossier has-num">') == 2  # one logged + one only on disk, not doubled
         assert "<h2>What failed</h2>" in body and "<strong>Boom</strong>" in body  # the report, inline
         assert "<code>page_1.html</code>" in body and ">report<" in body
         assert "amazon [profile-2]: failure dossier" in body and "no report.md" in body
