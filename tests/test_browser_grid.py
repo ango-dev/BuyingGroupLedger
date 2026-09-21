@@ -829,6 +829,11 @@ def test_the_dark_theme_keeps_filled_controls_and_grid_lines_readable(served, pa
     page.evaluate("document.documentElement.setAttribute('data-theme', 'light')")
     assert page.evaluate(
         "getComputedStyle(document.querySelector('th.sel-col')).color") == "rgb(255, 255, 255)"
+    # the browser chrome's colour follows the toggle (theme-color mirrors --bg, 2026-09-21)
+    assert page.evaluate("document.querySelector('meta[name=theme-color]').content") == "#f5f5f7"
+    page.evaluate("toggleTheme()")
+    assert page.evaluate("document.querySelector('meta[name=theme-color]').content") == "#161618"
+    page.evaluate("toggleTheme()")
     assert page.errors == []
 
 

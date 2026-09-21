@@ -1186,6 +1186,8 @@ class TestThemeToggle:
         assert 'localStorage.getItem("ledger-theme")' in body
         # Applied in <head>, before the stylesheet-dependent body renders.
         assert body.index("ledger-theme") < body.index("<body")
+        # the phone browser's chrome follows the theme (2026-09-21)
+        assert '<meta name="theme-color" content="#f5f5f7">' in body and "syncThemeColor()" in body
         assert 'href="/settings"' in body and 'href="/backup"' not in body  # Backup lives in Settings
 
     def test_the_stylesheet_honours_the_attribute_over_the_system_preference(self):

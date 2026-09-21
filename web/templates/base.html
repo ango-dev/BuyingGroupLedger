@@ -3,17 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f5f7">{# mirrors --bg; the theme script keeps it in step #}
   <title>{% block title %}Ledger{% endblock %} · Buying Group Ledger</title>
   <link rel="icon" type="image/svg+xml" href="/static/logo.svg?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
   <script>
     // Theme: "light" | "dark" | unset (= follow the system). Applied before first paint so the
     // page never flashes the other theme; the choice lives in this browser's localStorage only.
+    // The phone browser's own chrome follows the page (theme-color mirrors --bg per theme).
+    function syncThemeColor() {
+      var m = document.querySelector('meta[name="theme-color"]');
+      if (!m) return;
+      var t = document.documentElement.getAttribute("data-theme");
+      if (!t) t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      m.setAttribute("content", t === "dark" ? "#161618" : "#f5f5f7");
+    }
     (function () {
       try {
         var t = localStorage.getItem("ledger-theme");
         if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
       } catch (e) {}
+      syncThemeColor();
     })();
     function toggleTheme() {
       var root = document.documentElement;
@@ -24,6 +34,7 @@
       var next = current === "dark" ? "light" : "dark";
       root.setAttribute("data-theme", next);
       try { localStorage.setItem("ledger-theme", next); } catch (e) {}
+      syncThemeColor();
     }
   </script>
   <script src="/static/htmx.min.js?v={{ asset_version }}" defer></script>
