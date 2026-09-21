@@ -520,4 +520,6 @@ class TestAmountLog:
         from models import amount_log
 
         rows = amount_log.display([{"date": "2026-01-01", "amount": 4000.0, "note": ""}, {"date": "2026-03-01", "amount": 12.5, "note": "n"}])
-        assert rows == [{"date": "2026-03-01", "amount": 12.5, "note": "n"}, {"date": "2026-01-01", "amount": 4000, "note": ""}]
+        assert rows == [{"date": "2026-03-01", "amount": 12.5, "note": "n", "month": "2026-03", "month_label": "March 2026"},
+                        {"date": "2026-01-01", "amount": 4000, "note": "", "month": "2026-01", "month_label": "January 2026"}]
+        assert amount_log.in_month(rows, "2026-03") == 12.5 and amount_log.month_label("x") == "x"

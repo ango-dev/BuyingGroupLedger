@@ -96,6 +96,22 @@ def extras_lifetime(inputs_by_year: dict) -> dict:
             "years": sorted(inputs_by_year or {})}
 
 
+def income_in_month(inputs_by_year: dict, month: str) -> dict:
+    """The Taxes page's program cashback and cashback-site payouts dated in the month: the logs'
+    entries alone -- an older single amount carries no date and stays a yearly figure. Shaped
+    like extras_lifetime, for period_tiles."""
+    from models import amount_log
+
+    parts = {"bonuses": 0.0, "programs": 0.0, "sites": 0.0, "other": 0.0}
+    for inputs in (inputs_by_year or {}).values():
+        for entries in inputs.program_entries.values():
+            parts["programs"] += amount_log.in_month(entries, month)
+        for entries in inputs.site_entries.values():
+            parts["sites"] += amount_log.in_month(entries, month)
+    parts = {k: round(v, 2) for k, v in parts.items()}
+    return {"income": round(sum(parts.values()), 2), "parts": parts}
+
+
 def expenses_in_month(inputs_by_year: dict, month: str) -> float:
     """The Taxes page's expenses dated in the month (an expense carries its date; the yearly
     lump sums do not, so they belong to Lifetime alone)."""
@@ -132,8 +148,8 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
                       f"Taxes page's entries ({income_scope}) included")
     else:
         net_detail = (f"realized profit {realized['profit']:,.2f} \u2212 expenses dated in the month "
-                      f"{expenses:,.2f}; sign-up bonuses, program cashback and cashback sites are "
-                      "entered per year and count under Lifetime")
+                      f"{expenses:,.2f}; sign-up bonuses and other income are entered per year and "
+                      "count under Lifetime")
     tiles = [
         _tile("Rows / orders", (len(placed), len({r.order_id for r in placed})), "pair",
               "all rows", link(), detail=f"every row {scope}"),
@@ -215,7 +231,7 @@ STATEMENT_ROWS: tuple[tuple[str, str], ...] = (  # the order the user asked for 
 def statement(columns: list[tuple[str, str, list[dict]]]) -> dict:
     """The tiles of several periods as one table: `columns` are (key, heading, tiles); a row is
     a tile label, its cells the matching tile per column (None where a period has no such
-    figure -- the month has no Other income, which is entered per year)."""
+    figure)."""
     rows = []
     for label, level in STATEMENT_ROWS:
         cells = [next((t for t in tiles if t["label"] == label), None) for _key, _heading, tiles in columns]
@@ -233,10 +249,11 @@ def monthly_series(rows: list[LedgerRow], inputs_by_year: dict | None, end_month
         placed = [r for r in rows if r.order_date.startswith(month)]
         realized = _money_block([r for r in placed if r.is_settled])["profit"]
         expenses = expenses_in_month(inputs_by_year or {}, month)
+        income = income_in_month(inputs_by_year or {}, month)["income"]  # dated cashback, in its month
         number = int(month[5:])
         label = calendar.month_abbr[number] + (f" '{month[2:4]}" if number == 1 or i == count - 1 else "")
-        out.append({"month": month, "label": label, "realized": realized, "expenses": expenses,
-                    "net": round(realized - expenses, 2), "href": f"/?month={month}"})
+        out.append({"month": month, "label": label, "realized": realized, "expenses": expenses, "income": income,
+                    "net": round(realized + income - expenses, 2), "href": f"/?month={month}"})
     return out
 
 
@@ -285,7 +302,8 @@ def month_chart(series: list[dict], selected: str) -> dict:
             "realized": s["realized"], "expenses": s["expenses"], "net": s["net"],
             "net_label": _compact_money(s["net"]),
             "title": (f"{month_label(s['month'])}: realized profit {_money_text(s['realized'])}, "
-                      f"expenses {_money_text(s['expenses'])}, net {_money_text(s['net'])}"),
+                      + (f"cashback dated in the month {_money_text(s['income'])}, " if s.get("income") else "")
+                      + f"expenses {_money_text(s['expenses'])}, net {_money_text(s['net'])}"),
             "x": round(x, 1), "w": round(w, 1), "cx": round(x + w / 2, 1),
             "realized_y": round(ry, 1), "realized_h": round(rh, 1),
             "expenses_y": round(ey, 1), "expenses_h": round(eh, 1),
@@ -319,6 +337,7 @@ def month_section(rows: list[LedgerRow], month: str, today_month: str,
         return _orders_link(month=month, **filters)
 
     tiles = period_tiles(placed, paid, f"placed in {month_label(month)}", link,
+                         extra_income=income_in_month(inputs_by_year or {}, month), income_scope="dated in the month",
                          expenses=expenses_in_month(inputs_by_year or {}, month), expenses_scope="dated in the month")
     dated = sorted({r.order_date[:7] for r in rows if len(r.order_date) >= 7})
     first = min(dated[0], today_month) if dated else today_month

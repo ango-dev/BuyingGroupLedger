@@ -522,6 +522,10 @@ class TestEntryCards:
         assert 'data-log="rr.0.os" data-period-start="2026-03-15" data-period-end="2027-03-14"' in body and "$4,000.00" in body
         assert 'name="rr.0.os.0.date" value="2027-03-15"' in body and 'name="rr.0.os.1.amount" value="4000"' in body
         assert 'name="rr.0.os.new.date" value="2026-09-17"' in body and 'name="rr.0.outside_spend"' not in body
+        # a row without a spend limit hides its log behind "with a limit" (the Best Buy row, the Add row)
+        assert body.count('class="needs-limit muted small" hidden') == 2  # the two limited rows; the rest wait for a limit
+        row = body[body.index('name="rr.1.spend_limit"'):body.index('name="rr.2.retailers"')]
+        assert 'class="with-limit" hidden' in row and 'data-log="rr.1.os"' in row
         assert 'name="rr.1.retailers" value="bestbuy" data-text="Best Buy" checked>' in body and 'name="rr.1.spend_limit" value=""' in body
         assert 'name="cap_all.spend_limit" value="25000"' in body
         assert 'class="mono anniversary" hidden>' in body and "<th>on (MM-DD)</th>" not in body
@@ -641,6 +645,12 @@ class TestEntryCards:
             {"date": "2026-09-17", "amount": -500.0, "note": "returned"}]  # a blank date is today
         body = client.get("/settings").text
         assert "$3,500.00" in body and "$3,600.00" not in body  # this period only
+        # three months: a fold per month with its subtotal, newest first
+        start = body.index('data-log="cap_all.os"', body.index('data-key="cards:1234"'))  # Aven's log, not the first card's
+        log = body[start:body.index('name="cap_all.os.new.date"', start)]
+        assert log.count('<tr class="month"') == 3 and log.index('data-month="2026-09"') < log.index('data-month="2026-02"') < log.index('data-month="2025-12"')
+        assert 'September 2026<span class="sum">-$500.00</span>' in log and 'February 2026<span class="sum">$4,000.00</span>' in log
+        assert '<tr class="entry" data-month="2026-02">' in log
         response = client.post("/settings/section/cards/entry/1", data={
             "name": "Aven", "last4": "1234", "cap_all.spend_limit": "25000", "cap_all.resets": "calendar-year",
             "cap_all.os.0.date": "2026-09-17", "cap_all.os.0.amount": "-500", "cap_all.os.0.remove": "on",

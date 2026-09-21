@@ -12,11 +12,12 @@ cap sums over lives on models.card.CashbackCap.
 
 from __future__ import annotations
 
+import calendar
 import re
 from collections.abc import Callable, Mapping
 from datetime import date
 
-__all__ = ["clean", "coerce", "display", "has_fields", "money", "parse", "total"]
+__all__ = ["clean", "coerce", "display", "has_fields", "in_month", "money", "month_label", "parse", "total"]
 
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _YEAR = re.compile(r"^\d{4}$")
@@ -135,11 +136,28 @@ def parse(form: Mapping, prefix: str, today: str | None = None) -> list[dict]:
 
 
 def display(entries) -> list[dict]:
-    """The rows the widget shows: newest first, amounts as typed-looking numbers (4000, 12.5)."""
+    """The rows the widget shows: newest first, amounts as typed-looking numbers (4000, 12.5),
+    each with its month ("2026-09") and the month's name, for the widget's month folds."""
     out = []
     for e in sorted(entries or [], key=lambda e: str(e.get("date") or ""), reverse=True):
         amount = e.get("amount", "")
         if isinstance(amount, float) and amount.is_integer():
             amount = int(amount)
-        out.append({"date": str(e.get("date") or ""), "amount": amount, "note": str(e.get("note") or "")})
+        when = str(e.get("date") or "")
+        out.append({"date": when, "amount": amount, "note": str(e.get("note") or ""),
+                    "month": when[:7], "month_label": month_label(when[:7])})
     return out
+
+
+def month_label(month: str) -> str:
+    """"2026-09" -> "September 2026"; anything else as given."""
+    try:
+        year, number = month.split("-")
+        return f"{calendar.month_name[int(number)]} {year}"
+    except (ValueError, IndexError):
+        return month
+
+
+def in_month(entries, month: str) -> float:
+    """The entries dated in a month ("2026-09"), summed."""
+    return round(sum(float(e.get("amount") or 0) for e in entries or [] if str(e.get("date") or "").startswith(month)), 2)

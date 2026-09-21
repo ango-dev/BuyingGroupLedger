@@ -500,8 +500,9 @@ class TestOverview:
         labels = [t["label"] for t in summary["lifetime"]]
         assert labels == ["Rows / orders", "Open rows", "Spend", "Weighted cashback rate", "Paid out",
                           "Floating", "Projected profit", "Realized profit", "Other income", "Expenses", "Net profit"]
-        # the month has no "Other income": bonuses, program cashback and sites are entered per year
-        assert [t["label"] for t in summary["month"]["tiles"]] == [l for l in labels if l != "Other income"]
+        # the month's "Other income" is the dated cashback logged in it; bonuses
+        # and other income are entered per year and count under Lifetime
+        assert [t["label"] for t in summary["month"]["tiles"]] == labels
         month_kinds = {t["label"]: t["kind"] for t in summary["month"]["tiles"]}
         assert all(month_kinds[t["label"]] == t["kind"] for t in summary["lifetime"] if t["label"] in month_kinds)
         # an overview: a few words under each number, the definition in the tooltip
@@ -554,7 +555,7 @@ class TestOverview:
         assert life["value"] == round(193.0 + 200.0 - 130.0, 2) and life["href"] == "/taxes"
         assert year["value"] == round(193.0 + 200.0 - 130.0, 2)  # every 2026 row is settled in 2026 here
         assert month["value"] == -119.0
-        assert by["Other income"][2] is None  # a month has no yearly lump sums
+        assert by["Other income"][2]["value"] == 0.0  # the month's dated cashback (none logged here)
         assert by["Other income"][1]["value"] == 200.0 and "in 2026" in by["Other income"][1]["detail"]
         assert by["Realized profit"][1]["href"] == "/orders?month=2026&state=settled"  # the year column links by year
         assert by["Rows / orders"][1]["value"][0] == len(LEDGER_ROWS)  # every fixture row was placed in 2026
@@ -596,10 +597,10 @@ class TestOverview:
         assert life["Net profit"]["hint"] == "income in, expenses out"
         assert life["Realized profit"]["value"] == 193.0  # the ledger's own figure is untouched
         month = {t["label"]: t for t in summary["month"]["tiles"]}
-        assert "Other income" not in month
+        assert month["Other income"]["value"] == 0.0 and "dated in the month" in month["Other income"]["detail"]
         assert month["Expenses"]["value"] == 119.0 and month["Expenses"]["hint"] == "dated in the month"
         assert month["Net profit"]["value"] == round(0.0 - 119.0, 2)  # nothing placed in September is settled
-        assert "entered per year" in month["Net profit"]["detail"]
+        assert "dated in the month" in month["Net profit"]["detail"]
 
     def test_the_month_section_is_by_order_date_alone(self, snapshot_path):
         september = overview(SnapshotReader(snapshot_path).load(), month="2026-09",
@@ -995,7 +996,9 @@ class TestFailuresPage:
         response = client.get("/activity", params={"type": "dossier", "days": "0"})
         assert response.status_code == 200
         body = response.text
-        assert body.count('<tr class="kind-dossier">') == 3  # dossiers on disk, never logged, still listed
+        assert body.count('<tr class="kind-dossier has-num">') == 3  # dossiers on disk, never logged, still listed
+        # numbered rows, like every other table
+        assert '<th class="rownum" title="select every cell">#</th>' in body and '<td class="rownum muted" title="event 1 ' in body
         newest = body.index("amazon_profile-charlie_20260914T160056Z")
         middle = body.index("bestbuy_profile-bravo_20260901T000000Z")
         oldest = body.index("costco_profile-bravo_20260830T070304Z")
@@ -2081,3 +2084,21 @@ class TestOverviewAttention:
                          settings=dataclasses.replace(settings, container_run_interval_hours=6, web_password=""))
         body = TestClient(app).get("/").text
         assert 'aria-label="needs attention"' not in body
+
+
+class TestDatedCashbackByMonth:
+
+    def test_the_logs_entries_count_in_their_month(self):
+        from web import summary
+        from web.tax_inputs import YearInputs
+
+        by_year = {2026: YearInputs(programs={"p": 42.5}, sites={"Rakuten": 1000.0, "Honey": 3.0},
+                                    program_entries={"p": [{"date": "2026-01-05", "amount": 30.0, "note": ""},
+                                                           {"date": "2026-09-02", "amount": 12.5, "note": ""}]},
+                                    site_entries={"Rakuten": [{"date": "2026-09-30", "amount": 1000.0, "note": ""}]})}
+        assert summary.income_in_month(by_year, "2026-09") == {"income": 1012.5, "parts": {"bonuses": 0.0, "programs": 12.5, "sites": 1000.0, "other": 0.0}}
+        assert summary.income_in_month(by_year, "2026-01")["income"] == 30.0
+        assert summary.income_in_month(by_year, "2026-02")["income"] == 0.0  # Honey's 3.00 has no date: a yearly figure only
+        series = summary.monthly_series([], by_year, "2026-09", count=2)
+        assert [(s["month"], s["income"], s["net"]) for s in series] == [("2026-08", 0.0, 0.0), ("2026-09", 1012.5, 1012.5)]
+        assert "cashback dated in the month $1,012.50" in summary.month_chart(series, "2026-09")["bars"][1]["title"]

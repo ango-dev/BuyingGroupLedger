@@ -1427,18 +1427,29 @@
   function money(sum) {
     return (sum < 0 ? "-$" : "$") + Math.abs(sum).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  function amountOf(tr) {  // a row's amount, or null when it is blank, not a number, or ticked away
+    var remove = tr.querySelector("input[name$='.remove']");
+    if (remove && remove.checked) return null;
+    var amount = tr.querySelector("input[name$='.amount']");
+    var value = parseFloat((amount ? amount.value : "").replace(/[$,\s]/g, ""));
+    return isNaN(value) ? null : value;
+  }
   function total(details) {
-    var sum = 0;
+    var sum = 0, byMonth = {};
     details.querySelectorAll("tr.entry").forEach(function (tr) {
-      var remove = tr.querySelector("input[name$='.remove']");
-      if (remove && remove.checked) return;
-      var amount = tr.querySelector("input[name$='.amount']"), day = tr.querySelector("input[name$='.date']");
-      var value = parseFloat((amount ? amount.value : "").replace(/[$,\s]/g, ""));
-      if (isNaN(value) || !within(details, day ? day.value : "")) return;
-      sum += value;
+      var day = tr.querySelector("input[name$='.date']"), when = day ? day.value.trim() : "";
+      tr.dataset.month = when.slice(0, 7);  // a re-dated row moves month
+      var value = amountOf(tr);
+      if (value === null) return;
+      byMonth[when.slice(0, 7)] = (byMonth[when.slice(0, 7)] || 0) + value;
+      if (within(details, when)) sum += value;
     });
     var out = details.querySelector(".summary-value");
     if (out) out.textContent = money(sum);
+    details.querySelectorAll("tr.month").forEach(function (tr) {  // the month folds' subtotals
+      var cell = tr.querySelector(".sum");
+      if (cell) cell.textContent = money(byMonth[tr.dataset.month] || 0);
+    });
   }
   function grow(details, tr) {
     var n = parseInt(tr.dataset.index || "0", 10), prefix = details.dataset.log;
@@ -1470,6 +1481,14 @@
   });
   document.addEventListener("click", function (e) {
     if (e.target.closest && e.target.closest(".pop")) return;  // the calendar serving a date box
+    var fold = e.target.closest ? e.target.closest("details.log tr.month") : null;
+    if (fold) {  // a month's row folds its entries away and back
+      var folded = fold.classList.toggle("folded"), month = fold.dataset.month;
+      fold.closest("details.log").querySelectorAll("tr.entry").forEach(function (tr) {
+        if (tr.dataset.month === month && !tr.classList.contains("new")) tr.hidden = folded;
+      });
+      return;
+    }
     document.querySelectorAll("details.log[open]").forEach(function (d) {
       if (!d.contains(e.target)) d.removeAttribute("open");
     });

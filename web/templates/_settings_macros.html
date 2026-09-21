@@ -138,8 +138,10 @@
       <td class="narrow"><input type="text" name="{{ prefix }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="no limit"></td>
       <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="{{ hint }}" title="the rate past the limit; blank: {{ hint }}, the everywhere-else rate (or its own fallback once its limit is reached)"></td>
       <td class="resets"><span class="inline">{{ choose(prefix ~ '.resets', [('calendar-year', 'Each Calendar Year'), ('anniversary', 'On a Date Each Year'), ('never', 'Never')], cap.resets, '', 'cell') }}<input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></span></td>
-      {#- spend the ledger never sees, as a dated log: the current period's total, the entries inside -#}
-      <td class="outside">{{ amount_log(prefix ~ '.os', cap.outside_entries, cap.outside_total, today, cap.period_start, cap.period_end) }}</td>
+      {#- spend the ledger never sees, as a dated log: the current period's total, the entries
+          inside. Only with a spend limit -- an offset means nothing without one; the script shows it as soon as a limit is typed -#}
+      {% set limited = cap.spend_limit != '' %}
+      <td class="outside"><span class="needs-limit muted small" {{ 'hidden' if limited }} title="outside spend counts against a spend limit: set one first">— with a limit —</span><span class="with-limit" {{ 'hidden' if not limited }}>{{ amount_log(prefix ~ '.os', cap.outside_entries, cap.outside_total, today, cap.period_start, cap.period_end) }}</span></td>
       {#- where the allowance stands this period (ledger/cashback_caps.allowance) -#}
       <td class="left">{% if cap.usage is defined and cap.usage %}{% set u = cap.usage %}{% set pct = (u.fraction * 100) | round(0, 'floor') | int %}
         <span class="cap-left {{ 'bad' if u.fraction >= 1 else ('warn' if u.fraction >= 0.8 else 'ok') }}" title="{{ '{:,.0f}'.format(u.used) }} of {{ '{:,.0f}'.format(u.limit) }} spent in {{ u.period }}">
@@ -272,6 +274,16 @@
             if (!input.name || !/\.resets$/.test(input.name)) return;
             var row = input.closest("tr"), day = row && row.querySelector("input.anniversary");
             if (day) day.hidden = input.value !== "anniversary";
+          });
+          // the outside-spend log appears once the row has a spend limit
+          document.addEventListener("input", function (e) {
+            var input = e.target;
+            if (!input.name || !/\.spend_limit$/.test(input.name)) return;
+            var row = input.closest("tr"), limited = input.value.trim() !== "";
+            if (!row) return;
+            var note = row.querySelector(".needs-limit"), log = row.querySelector(".with-limit");
+            if (note) note.hidden = limited;
+            if (log) log.hidden = !limited;
           });
         }
       </script>

@@ -699,6 +699,9 @@ def test_the_dated_log_totals_live_grows_a_row_and_saves(served, page):
     card = page.locator("#s-cards details.entry-card").first
     card.evaluate("d => d.open = true")
     log = card.locator("details.log[data-log='cap_all.os']")
+    assert not log.is_visible()  # no spend limit yet: no outside spend to log
+    card.locator("input[name='cap_all.spend_limit']").fill("25000")
+    assert log.is_visible()
     assert log.locator(".summary-value").inner_text() == "$0.00"
     log.locator("summary").click()
     assert log.evaluate("d => d.open")
@@ -715,7 +718,6 @@ def test_the_dated_log_totals_live_grows_a_row_and_saves(served, page):
     assert log.locator(".summary-value").inner_text() == "$3,500.00"
     page.mouse.click(5, 5)  # outside: closes
     assert not log.evaluate("d => d.open")
-    card.locator("input[name='cap_all.spend_limit']").fill("25000")  # a cap needs a limit to be kept
     card.locator("button", has_text="Save card").click()
     page.wait_for_selector("#toast .toast.ok")
     saved = page.locator("#s-cards details.entry-card").first.locator("details.log[data-log='cap_all.os']")

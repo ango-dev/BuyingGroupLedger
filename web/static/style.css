@@ -28,6 +28,9 @@
 .theme-toggle, button { font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line);
   border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 .theme-toggle:hover, button:hover { border-color: var(--accent); }
+/* an outlined button fills with its outline colour on hover, as the Backups' Delete does with red
+  */
+button:hover:not(:disabled):not(.primary):not(.danger):not(.chip):not(.ghost) { background: var(--accent); color: #fff; }
 .inline-form { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
 .small { font-size: 0.82em; }
 .settings-table th { width: 320px; font-weight: 500; vertical-align: top; }
@@ -610,11 +613,13 @@ table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-to
 #toast .toast.gone { opacity: 0; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
 /* a card's virtual and employee numbers, folded inside it */
-.entry-card details.sub-cards { margin: 4px 0 10px; border-top: 1px dashed var(--line); padding-top: 6px; }
-.entry-card details.sub-cards > summary { cursor: pointer; list-style: none; font-weight: 600; color: var(--muted); padding: 4px 2px; }
+/* the fold sits inside the card's own gutter (14px, the form's), its caret and title laid out
+   exactly like the card's summary line */
+.entry-card details.sub-cards { margin: 4px 14px 12px; border-top: 1px dashed var(--line); padding-top: 6px; }
+.entry-card details.sub-cards > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--muted); padding: 4px 0; }
 .entry-card details.sub-cards > summary::-webkit-details-marker { display: none; }
-.entry-card details.sub-cards > summary::before { content: "▸ "; }
-.entry-card details.sub-cards[open] > summary::before { content: "▾ "; }
+.entry-card details.sub-cards > summary::before { content: "▸"; color: var(--muted); font-size: 0.85em; width: 1em; flex: 0 0 auto; }
+.entry-card details.sub-cards[open] > summary::before { content: "▾"; }
 .entry-card .entry-list.sub { margin-left: 0; }  /* flush with the card's own content */
 .entry-card .entry-list.sub .entry-card { background: var(--bg); }
 /* the Virtual card line: the box, and once ticked the card it is a number of, inline */
@@ -641,7 +646,8 @@ table.entry-table.rates td.resets input.anniversary[hidden] { display: none; }
 /* the card's rates table: the retailers and the
    outside-spend columns take the room, the numbers stay narrow */
 table.entry-table.rates { max-width: none; }
-table.entry-table.rates td.narrow { width: 84px; }
+table.entry-table.rates td.narrow { width: 84px; min-width: 64px; }
+table.entry-table.rates td.narrow input { min-width: 56px; }
 table.entry-table.rates th:first-child, table.entry-table.rates td:first-child { width: 26%; min-width: 200px; white-space: nowrap; padding-right: 10px; }
 table.entry-table.rates details.multi .summary-text { min-width: 150px; }
 .entry-card details.multi.cell { font-size: 1em; color: var(--muted); }
@@ -1240,6 +1246,15 @@ details.log .summary-text { display: inline-flex; align-items: center; justify-c
   color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 96px; white-space: nowrap; }
 details.log[open] .summary-text { border-color: var(--accent); }
 details.log .summary-value { font-variant-numeric: tabular-nums; }
+/* on the Taxes page the log fills its cell, like the sign-up bonus boxes beside it */
+.tax-form details.log, .tax-form details.log summary, .tax-form details.log .summary-text { display: block; width: 100%; box-sizing: border-box; }
+.tax-form details.log .summary-text { display: flex; }
+/* entries grouped by month once they span more than one: a fold per month with its subtotal */
+details.log tr.month td { padding: 8px 4px 2px; font-weight: 600; color: var(--muted); cursor: pointer; white-space: nowrap; }
+details.log tr.month td .caret { display: inline-block; width: 1em; }
+details.log tr.month td .sum { float: right; font-weight: 500; font-variant-numeric: tabular-nums; margin-left: 12px; }
+details.log tr.month.folded td .caret { transform: rotate(-90deg); }
+details.log tr.entry[hidden] { display: none; }
 details.log .caret { color: var(--muted); flex: 0 0 auto; }
 /* the menu is FIXED and placed by edit.js: a rates table that scrolls sideways on a phone, or a
    cell at the page's right edge, would otherwise clip it (an overflow container clips absolute menus) */

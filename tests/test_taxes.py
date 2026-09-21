@@ -84,7 +84,7 @@ class TestStorage:
         programs, sites = tax_inputs.log_entries(load_year(path, 2027), 2027)
         assert programs["p"][0]["date"] == "2026-04-02" and sites["Rakuten"][0]["amount"] == 5
         programs, sites = tax_inputs.log_entries(YearInputs(programs={"q": 7.0}), 2025)  # an older single amount
-        assert programs == {"q": [{"date": "2025-01-01", "amount": 7, "note": ""}]} and sites == {}
+        assert [(e["date"], e["amount"], e["month_label"]) for e in programs["q"]] == [("2025-01-01", 7, "January 2025")] and sites == {}
 
     def test_a_damaged_file_or_entry_reads_as_empty(self, tmp_path):
         path = tmp_path / "tax_inputs.json"

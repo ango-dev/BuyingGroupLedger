@@ -12,8 +12,15 @@
     <table class="log-table">
       <thead><tr><th>Date</th><th>Amount</th><th>Note</th><th></th></tr></thead>
       <tbody>
+      {#- once the entries span more than one month, a fold per month with its subtotal; the rows are newest first, so the folds are too -#}
+      {% set months = entries | map(attribute='month') | unique | list %}
+      {% set grouped = months | length > 1 %}
       {% for e in entries %}
-      <tr class="entry">
+      {% if grouped and (loop.first or e.month != loop.previtem.month) %}
+      {% set ns = namespace(sum=0) %}{% for m in entries if m.month == e.month %}{% set ns.sum = ns.sum + (m.amount | float) %}{% endfor %}
+      <tr class="month" data-month="{{ e.month }}" title="fold this month"><td colspan="4"><span class="caret">▾</span>{{ e.month_label }}<span class="sum">{{ '-' if ns.sum < 0 }}${{ '{:,.2f}'.format(ns.sum | abs) }}</span></td></tr>
+      {% endif %}
+      <tr class="entry" data-month="{{ e.month }}">
         <td><input type="text" name="{{ prefix }}.{{ loop.index0 }}.date" value="{{ e.date }}" data-date autocomplete="off" placeholder="YYYY-MM-DD" class="mono date"></td>
         <td><input type="text" name="{{ prefix }}.{{ loop.index0 }}.amount" value="{{ e.amount }}" inputmode="decimal" class="amount"></td>
         <td><input type="text" name="{{ prefix }}.{{ loop.index0 }}.note" value="{{ e.note }}" placeholder="note"></td>
