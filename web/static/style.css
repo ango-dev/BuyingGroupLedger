@@ -613,7 +613,7 @@ table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-to
 .entry-card details.sub-cards > summary::-webkit-details-marker { display: none; }
 .entry-card details.sub-cards > summary::before { content: "▸ "; }
 .entry-card details.sub-cards[open] > summary::before { content: "▾ "; }
-.entry-card .entry-list.sub { margin-left: 14px; }
+.entry-card .entry-list.sub { margin-left: 0; }  /* flush with the card's own content */
 .entry-card .entry-list.sub .entry-card { background: var(--bg); }
 /* the Virtual card line: the box, and once ticked the card it is a number of, inline */
 .entry-card .virtual-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
