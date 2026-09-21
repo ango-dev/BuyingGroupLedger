@@ -8,7 +8,9 @@
 
 {# ---- one tool at a time, picked from the Tools menu in the header; the
    choice travels in ?tool= ---- #}
-<p class="muted small">Pick a tool from the <strong>Tools</strong> menu in the header{% if tool %} — showing <strong>{{ tool.group }} · {{ tool.title }}</strong>{% endif %}.</p>
+{#- The page lists its own tools (All Tools, below); the header menu is a shortcut, not the only
+    way in (2026-09-21: the old lead pointed at the menu and the page carried no list). -#}
+<p class="muted small">{% if tool %}Showing <strong>{{ tool.group }} · {{ tool.title }}</strong> — every{% else %}Every{% endif %} tool is listed under All Tools below.</p>
 
 <div id="tool-panel">
 {% if session %}
@@ -78,6 +80,22 @@
 </section>
 {% endif %}
 </div>
+
+{# ---- All Tools: the page's own directory, the same tools and groups as the header menu ---- #}
+<section class="panel tool-card" id="t-all-tools">
+  <header><h2>All Tools</h2></header>
+  <div class="tool-dir">
+    {% for group, items in nav_tools() %}
+    <div class="tool-group">
+      <h3>{{ group }}</h3>
+      {% for key, title in items %}
+      {% if key == 'import' %}<a href="/tools/import">{{ title }}</a>
+      {% else %}<a href="/tools?tool={{ key }}" class="{{ 'current' if key == selected }}">{{ title }}</a>{% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
 <script>
   // The job console. The poll swaps the whole output panel, which used to
   // put a fresh <pre> at its top every two seconds. Follow is on by default and remembered per

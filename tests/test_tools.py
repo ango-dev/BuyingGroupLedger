@@ -239,6 +239,19 @@ class TestTheRoutes:
         assert "Ledger Fixes · Backfill tracking numbers" in picked
         assert "Log a Profile In" in client.get("/tools", params={"tool": "nope"}).text
 
+    def test_the_landing_page_carries_its_own_tool_directory(self, client):
+        """2026-09-21: the page used to point at the header menu and list nothing itself. The
+        All Tools panel lists every tool the menu does, grouped the same, the shown one marked."""
+        body = client.get("/tools").text
+        panel = body[body.index('id="t-all-tools"'):body.index("</section>", body.index('id="t-all-tools"'))]
+        assert ">All Tools<" in panel and ">Run<" in panel and ">Accounts<" in panel and ">Import<" in panel
+        assert 'href="/tools/import"' in panel and 'href="/tools?tool=run_once"' in panel
+        assert 'href="/tools?tool=profile" class="current"' in panel  # the default pick is marked
+        assert "Pick a tool from the" not in body  # the old pointer sentence is gone
+        picked = client.get("/tools", params={"tool": "backfill_tracking"}).text
+        panel = picked[picked.index('id="t-all-tools"'):picked.index("</section>", picked.index('id="t-all-tools"'))]
+        assert 'href="/tools?tool=backfill_tracking" class="current"' in panel
+
     def test_running_a_tool_records_it_and_shows_its_output(self, client):
         response = client.post("/tools/run/preflight", data={"--strict": "on"}, follow_redirects=False)
         assert response.status_code == 303 and client.started[0][1:] == ["-m", "scripts.preflight", "--strict"]

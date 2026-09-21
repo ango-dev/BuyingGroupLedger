@@ -829,6 +829,13 @@ header nav details.nav-menu .menu a { display: block; padding: 5px 10px; border-
 header nav details.nav-menu .menu a:hover { background: var(--bg); }
 header nav details.nav-menu .menu a.current { color: var(--accent); font-weight: 600; }
 .session-panel { border-color: var(--accent); }
+/* All Tools: the landing page's own directory of the header menu's groups (2026-09-21) */
+.tool-dir { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px 20px; }
+.tool-dir .tool-group { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tool-dir h3 { margin: 0 0 2px; font-size: 0.82em; color: var(--muted); font-weight: 600; }
+.tool-dir a { color: var(--fg); padding: 3px 8px; margin-left: -8px; border-radius: var(--r-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-dir a:hover { background: var(--bg); color: var(--accent); text-decoration: none; }
+.tool-dir a.current { color: var(--accent); font-weight: 600; }
 .tool-card > p { margin: 0; font-size: 0.92em; }
 .tool-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
 .tool-form .field-block { display: flex; flex-direction: column; gap: 3px; font-size: 0.85em; color: var(--muted); }
