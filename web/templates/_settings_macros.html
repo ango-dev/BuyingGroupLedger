@@ -135,7 +135,7 @@
         cap's own fallback once its limit is reached -#}
     {% macro cap_cells(prefix, cap, hint='default rate') %}
       <td class="narrow"><input type="text" name="{{ prefix }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="no limit"></td>
-      <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="{{ hint }}" title="the rate past the limit; blank: {{ hint }}"></td>
+      <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="{{ hint }}" title="the rate past the limit; blank: {{ hint }}, the everywhere-else rate (or its own fallback once its limit is reached)"></td>
       <td class="resets"><span class="inline">{{ choose(prefix ~ '.resets', [('calendar-year', 'Each Calendar Year'), ('anniversary', 'On a Date Each Year'), ('never', 'Never')], cap.resets, '', 'cell') }}<input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></span></td>
       <td class="outside"><input type="text" name="{{ prefix }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000" title="spend the ledger never sees, per period"></td>
       {#- where the allowance stands this period (ledger/cashback_caps.allowance) -#}
@@ -181,7 +181,8 @@
             </tr>
             {% set all_reached = c and c.cap_all.usage is defined and c.cap_all.usage and c.cap_all.usage.fraction >= 1 and c.cap_all.fallback_rate != '' %}
             {% set base = (c.cashback_rate if c and c.cashback_rate != '' else default_rate_text) %}
-            {% set hint = (c.cap_all.fallback_rate ~ ' (everywhere else is at its limit)') if all_reached else (base ~ ' (everywhere else)') %}
+            {#- the placeholder is the rate alone (the box is narrow); the title says where it comes from -#}
+            {% set hint = c.cap_all.fallback_rate if all_reached else base %}
             {% set rows = (c.rate_rows if c else []) + [dict(blank_cap, retailers='', rate='')] %}
             {% for r in rows %}
             {% set picked = r.retailers.split(', ') if r.retailers else [] %}
@@ -318,11 +319,14 @@
         {% if message %}<div class="banner ok small">{{ message }}</div>{% endif %}
         {% if section_errors %}<div class="banner warn small"><strong>Nothing was saved.</strong><ul>{% for err in section_errors %}<li>{{ err }}</li>{% endfor %}</ul></div>{% endif %}
       </header>
-      <div class="entry-list" data-section="{{ path }}">
-        {% for e in items %}
+      {#- One entry's card: the summary line, the form, the hidden delete form. A card's virtual and
+          employee numbers render INSIDE their card, folded under Virtual Numbers; a number whose card is not on the
+          list stays at the top level, with its warning. -#}
+      {% macro entry_card(e, children=[]) %}
         {% set key = path ~ ':' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else e.last4)) %}
-        <details class="entry-card" data-key="{{ key }}"{% if open_index is defined and open_index == e.index %} open{% endif %}>
-          <summary>{{ entry_summary(path, e) }}</summary>
+        {% set child_open = open_index is defined and open_index is not none and (children | selectattr('index', 'equalto', open_index) | list) %}
+        <details class="entry-card{{ ' has-numbers' if children }}" data-key="{{ key }}"{% if (open_index is defined and open_index == e.index) or child_open %} open{% endif %}>
+          <summary>{{ entry_summary(path, e) }}{% if children %} <span class="chip muted" title="its virtual and employee numbers, inside">{{ children | length }} number{{ 's' if children | length != 1 }}</span>{% endif %}</summary>
           <form method="post" action="{{ base }}/entry/{{ e.index }}" class="entry-form" autocomplete="off"{% if inplace %} hx-post="{{ base }}/entry/{{ e.index }}" hx-target="#s-{{ path }}" hx-swap="outerHTML"{% endif %}>
             {{ fields(e) }}
             <footer>
@@ -333,7 +337,24 @@
           {% set ask = 'Remove ' ~ singular ~ ' ' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else (e.name ~ ' …' ~ e.last4))) ~ ' from config.json?' %}
           <form method="post" id="del-{{ path }}-{{ e.index }}" action="{{ base }}/entry/{{ e.index }}/delete" class="entry-delete" hidden
                 {% if inplace %}hx-post="{{ base }}/entry/{{ e.index }}/delete" hx-target="#s-{{ path }}" hx-swap="outerHTML" hx-confirm="{{ ask }}"{% else %}data-confirm="{{ ask }}"{% endif %}></form>
+          {% if children %}
+          <details class="sub-cards"{% if child_open %} open{% endif %}>
+            <summary>Virtual Numbers <span class="muted small">{{ children | length }}</span></summary>
+            <div class="entry-list sub">
+              {% for child in children %}{{ entry_card(child) }}{% endfor %}
+            </div>
+          </details>
+          {% endif %}
         </details>
+      {% endmacro %}
+      <div class="entry-list" data-section="{{ path }}">
+        {% set parents = (items | map(attribute='last4') | list) if path == 'cards' else [] %}
+        {% for e in items %}
+          {% if path == 'cards' and e.virtual and e.virtual_of in parents %}{# rendered inside its card #}
+          {% else %}
+            {% set children = (items | selectattr('virtual') | selectattr('virtual_of', 'equalto', e.last4) | list) if path == 'cards' else [] %}
+            {{ entry_card(e, children) }}
+          {% endif %}
         {% else %}
         <p class="settings-empty">No {{ path }} yet.</p>
         {% endfor %}

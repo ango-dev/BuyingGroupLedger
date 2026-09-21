@@ -644,6 +644,10 @@ class TestEntryCards:
         assert 'class="fblock rates-block" hidden>' in virtual_html and 'name="kind" value="employee" checked' in virtual_html
         assert 'class="fblock rates-block" >' in cards_html  # a real card shows its rates
         assert ">Employee Card of …0315<" in virtual_html
+        # a number lives inside its card: nested, folded under Virtual Numbers
+        parent_html = body[body.index('data-key="cards:0315"'):]
+        assert 'class="sub-cards"' in parent_html and parent_html.index('data-key="cards:9999"') > parent_html.index("Virtual Numbers")
+        assert body.count('data-key="cards:9999"') == 1 and ">1 number<" in parent_html
         # a virtual number belongs to a real card: the picker offers no virtual cards, a virtual parent is refused
         assert 'name="virtual_of" value="9999"' not in body
         nested = client.post("/settings/section/cards/entry", data={"name": "Nested", "last4": "3333", "virtual": "on", "virtual_of": "9999"})
