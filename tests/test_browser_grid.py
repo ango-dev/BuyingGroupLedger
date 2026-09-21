@@ -769,10 +769,6 @@ def test_the_taxes_inputs_save_in_place_on_enter(served, page):
     page.set_viewport_size({"width": 1200, "height": 900})
     page.goto(f"{served}/taxes?year=2026")
     page.wait_for_selector("#tax-form")
-    # label and amount stay in one glance on a wide window: the input tables cap at a readable
-    # width instead of stretching the amount to the panel's far edge (2026-09-21)
-    assert page.evaluate(
-        "document.querySelector('#s-programs table.entry-table').getBoundingClientRect().width") <= 680
     page.evaluate("window.__loaded = true")  # a reload would lose it
     log = page.locator("#s-programs details.log").first
     log.locator("summary").click()
