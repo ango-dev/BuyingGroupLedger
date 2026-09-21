@@ -897,3 +897,47 @@ def test_the_taxes_page_prints_as_the_preparers_artifact(served, page):
     assert not page.evaluate("document.querySelector('#s-programs').open")  # folded back
     page.evaluate("document.documentElement.setAttribute('data-theme', 'light')")
     assert page.errors == []
+
+
+def test_select_all_marks_the_headers_and_a_copy_carries_them_on_every_grid(served, page, client, tmp_path):
+    """on Activity the # corner selected every row but never highlighted the
+    column names (its hidden details rows split the selection into one range per visible row, and
+    the header mark only fired for a range spanning the whole body), and on EVERY table a copy of
+    a selection whose headers are marked left the column names out. The ranges carry an `all`
+    flag now, and selectionTsv leads with the marked headers."""
+    from diagnostics import activity
+    log = tmp_path / "logs" / "activity.jsonl"
+    activity.record("edit", "Orders: Quantity 2 -> 3", {"order_id": "111-0000001-0000001"}, path=log)
+    activity.record("backup", "Backup ledger_backup_1.zip", {}, path=log)
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/activity?days=0")
+    page.wait_for_selector("table.activity tbody tr")
+    page.locator("table.activity thead th.rownum").click()
+    page.wait_for_timeout(150)
+    assert page.locator("table.activity tbody input[name=sel]:checked").count() == 2
+    assert page.locator("table.activity thead th.sel-col").count() == 4  # When / Type / Run / What happened
+    page.keyboard.press("Control+c")
+    copied = page.evaluate(
+        "Array.from(document.querySelectorAll('body > textarea')).map(t => t.value).find(v => v) || ''")
+    assert copied.split("\n")[0].split("\t") == ["When", "Type", "Run", "What happened"]
+    assert "Backup ledger_backup_1.zip" in copied
+    # the same on a plain sheet: Ctrl+A on the view-only Orders grid marks the headers, and the
+    # copy's first line is the column names (blank over the row-number column)
+    page.goto(f"{served}/orders")
+    page.wait_for_selector("table.sheetlike tbody tr")
+    page.locator("h1").click()
+    page.keyboard.press("Control+a")
+    page.wait_for_timeout(100)
+    assert page.locator("table.sheetlike thead th.sel-col").count() > 0
+    page.keyboard.press("Control+c")
+    copied = page.evaluate(
+        "Array.from(document.querySelectorAll('body > textarea')).map(t => t.value).find(v => v) || ''")
+    assert copied.split("\n")[0].split("\t")[1:4] == ["Order Date", "Status", "Retailer"]
+    # a selection made by hand has no marked header and copies values alone
+    page.keyboard.press("Escape")
+    page.locator("table.sheetlike tbody tr").first.locator("td[data-field=quantity]").click()
+    page.keyboard.press("Control+c")
+    copied = page.evaluate(
+        "Array.from(document.querySelectorAll('body > textarea')).map(t => t.value).find(v => v) || ''")
+    assert "Order Date" not in copied and "\t" not in copied
+    assert page.errors == []

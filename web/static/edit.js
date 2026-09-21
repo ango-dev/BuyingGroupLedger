@@ -101,7 +101,11 @@
     // all cells in a column I do not want to automatically select the column name too").
     var t = table(), rows = t && t.tBodies[0] ? t.tBodies[0].rows.length : 0, head = t && t.tHead ? t.tHead.rows[0] : null;
     if (head && rows) ranges.forEach(function (range) {
-      if (!range.head || range.r1 !== 0 || range.r2 !== rows - 1) return;
+      // range.all: select-all on a table whose body holds hidden details rows (Activity) makes
+      // one range PER visible row, so no range spans the body -- the flag says it was the whole
+      // table all the same.
+      if (!range.head) return;
+      if (!range.all && (range.r1 !== 0 || range.r2 !== rows - 1)) return;
       for (var c = range.c1; c <= range.c2; c++) {
         var th = head.cells[c];
         if (th && !th.classList.contains("rownum")) th.classList.add("sel-col");
@@ -240,7 +244,7 @@
     }
     // Select all (Ctrl+A, the # corner) is the whole table: the headers show it too; the same rows ticked by a drag or
     // by hand do not ("that should only be for ctrl a")
-    if (e.detail && e.detail.all) ranges.forEach(function (range) { range.head = true; });
+    if (e.detail && e.detail.all) ranges.forEach(function (range) { range.head = true; range.all = true; });
     var tr = e.detail && e.detail.tr;
     active = { r: tr ? tr.sectionRowIndex : idx[0], c: 1 };
     anchor = active;
@@ -642,6 +646,18 @@
   }
   function selectionTsv() {  // each range as a block of lines; several ranges one after another
     var lines = [];
+    // Headers that are part of the selection (marked th.sel-col: select-all, or a column picked
+    // through its header) copy as the first line; a hand-made selection has no marked header and
+    // copies values alone.
+    var headRow = table() && table().tHead ? table().tHead.rows[0] : null;
+    if (headRow && headRow.querySelector("th.sel-col") && ranges.length) {
+      var names = [];
+      for (var hc = ranges[0].c1; hc <= ranges[0].c2; hc++) {
+        var th = headRow.cells[hc], label = th ? th.querySelector(".name") : null;
+        names.push(th && th.classList.contains("sel-col") ? (label ? label.textContent : th.textContent).trim() : "");
+      }
+      lines.push(names.join("\t"));
+    }
     ranges.forEach(function (range) {
       for (var r = range.r1; r <= range.r2; r++) {
         var row = table() && table().tBodies[0] ? table().tBodies[0].rows[r] : null;
