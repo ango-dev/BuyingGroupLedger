@@ -2095,10 +2095,12 @@ class TestDatedCashbackByMonth:
         by_year = {2026: YearInputs(programs={"p": 42.5}, sites={"Rakuten": 1000.0, "Honey": 3.0},
                                     program_entries={"p": [{"date": "2026-01-05", "amount": 30.0, "note": ""},
                                                            {"date": "2026-09-02", "amount": 12.5, "note": ""}]},
-                                    site_entries={"Rakuten": [{"date": "2026-09-30", "amount": 1000.0, "note": ""}]})}
-        assert summary.income_in_month(by_year, "2026-09") == {"income": 1012.5, "parts": {"bonuses": 0.0, "programs": 12.5, "sites": 1000.0, "other": 0.0}}
+                                    site_entries={"Rakuten": [{"date": "2026-09-30", "amount": 1000.0, "note": ""}]},
+                                    bonuses={"bonus:0315": 750.0}, bonus_entries={"bonus:0315": [{"date": "2026-09-09", "amount": 750.0, "note": ""}]},
+                                    other=[{"label": "refund", "amount": 8.0, "kind": "income", "entries": [{"date": "2026-09-10", "amount": 8.0, "note": ""}]}])}
+        assert summary.income_in_month(by_year, "2026-09") == {"income": 1770.5, "parts": {"bonuses": 750.0, "programs": 12.5, "sites": 1000.0, "other": 8.0}}
         assert summary.income_in_month(by_year, "2026-01")["income"] == 30.0
         assert summary.income_in_month(by_year, "2026-02")["income"] == 0.0  # Honey's 3.00 has no date: a yearly figure only
         series = summary.monthly_series([], by_year, "2026-09", count=2)
-        assert [(s["month"], s["income"], s["net"]) for s in series] == [("2026-08", 0.0, 0.0), ("2026-09", 1012.5, 1012.5)]
-        assert "cashback dated in the month $1,012.50" in summary.month_chart(series, "2026-09")["bars"][1]["title"]
+        assert [(s["month"], s["income"], s["net"]) for s in series] == [("2026-08", 0.0, 0.0), ("2026-09", 1770.5, 1770.5)]
+        assert "cashback dated in the month $1,770.50" in summary.month_chart(series, "2026-09")["bars"][1]["title"]

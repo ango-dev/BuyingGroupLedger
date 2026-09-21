@@ -11,37 +11,13 @@
 <h1>Taxes</h1>
 {% if notice %}<div class="banner ok">{{ notice }}</div>{% endif %}
 {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
+<div id="toast"></div>
 
 <p class="muted small tax-years">Tax year:
   {% for y in years %}<a class="button small {{ 'primary' if y == year }}" href="/taxes?year={{ y }}">{{ y }}</a> {% endfor %}
 </p>
 
-<details class="panel" id="s-schedule-c" open>
-  <summary><h2>Schedule C Summary — {{ year }}</h2></summary><header>
-    <p class="muted">Cash basis: income by Payout Date, cost of goods and insurance by Order Date. A summary for your preparer, not tax advice.</p></header>
-  <table class="grid compact schedule">
-    <thead><tr><th>Part</th><th>Line</th><th>Item</th><th class="num">Amount</th><th>What it holds</th></tr></thead>
-    <tbody>
-      {% for l in summary.lines %}
-      <tr class="{{ 'total' if l.line in ('7', '28', '31', '42') }}">
-        <td class="muted">{{ l.part }}</td><td class="mono">{{ l.line }}</td><td>{{ l.name }}</td>
-        <td class="num {{ 'neg' if l.amount < 0 }}">{{ l.amount | money }}</td><td class="muted small">{{ l.what }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% set s = summary.straddling %}
-  <p class="muted small">Straddling the year boundary:
-    {{ s.ordered_this_year_not_yet_paid.rows }} row(s) ordered in {{ year }} not paid yet ({{ s.ordered_this_year_not_yet_paid.cogs | money }} of COGS);
-    {{ s.ordered_this_year_paid_in_a_later_year.rows }} paid in a later year ({{ s.ordered_this_year_paid_in_a_later_year.payouts | money }});
-    {{ s.paid_this_year_for_orders_from_other_years.rows }} paid this year for orders from other years ({{ s.paid_this_year_for_orders_from_other_years.payouts | money }});
-    {{ s.gift_card_purchases_never_paid.rows }} gift-card purchase row(s) ({{ s.gift_card_purchases_never_paid.cogs | money }}), funding orders rather than paid out themselves.
-    {%- if s.paid_with_no_payout_date and s.paid_with_no_payout_date.rows %}
-    <br><strong class="warn-text">{{ s.paid_with_no_payout_date.rows }} paid row(s) have no Payout Date ({{ s.paid_with_no_payout_date.payouts | money }}) and count as income in no year until the date is filled — <a href="/audit">Audit</a> lists them.</strong>
-    {%- endif %}
-  </p>
-</details>
-
+{% include "_tax_summary.html" %}
 <details class="panel" id="s-expenses" open>
   <summary><h2>Expenses — {{ year }}</h2></summary><header>
     <p class="muted">Business spending beyond the ledger's purchases: supplies, memberships, card annual fees. Each needs a date, an amount, who paid and a receipt. Line 27a.</p></header>
@@ -100,64 +76,6 @@
   {% endif %}
 </details>
 
-<form method="post" action="/taxes/save" class="tax-form">
-  <input type="hidden" name="year" value="{{ year }}">
-
-  <details class="panel" id="s-programs" open>
-    <summary><h2>Program Cashback</h2></summary><header><p class="muted">What Prime, Prime Business and Costco Executive paid you in {{ year }}, per retailer login: open an amount for its dated log. Line 6.</p></header>
-    {% if program_prompts %}
-    <table class="entry-table"><thead><tr><th>Program</th><th>Cashback</th></tr></thead><tbody>
-      {% for p in program_prompts %}
-      <tr><td>{{ p.label }}</td>
-          <td class="narrow">{{ amount_log(p.key, program_logs.get(p.key, []), inputs.programs.get(p.key, 0), today, by_years=false) }}</td></tr>
-      {% endfor %}
-    </tbody></table>
-    {% else %}<p class="muted small">No profiles with a Costco, Amazon or Amazon Business login in config.json, so nothing to ask.</p>{% endif %}
-  </details>
-
-  <details class="panel" id="s-cards" open>
-    <summary><h2>Cards</h2></summary><header><p class="muted">Every card on {{ year }}'s orders, virtual cards left out: the sign-up bonus received in {{ year }}. Line 6. Annual fees go in Expenses.</p></header>
-    {% if card_prompts %}
-    <table class="entry-table"><thead><tr><th>Card</th><th>Sign-up Bonus</th></tr></thead><tbody>
-      {% for p in card_prompts %}
-      <tr><td>{{ p.label }}</td>
-          <td class="narrow"><input type="text" name="bonus:{{ p.last4 }}" value="{{ inputs.bonuses.get('bonus:' ~ p.last4, '') }}" placeholder="0.00" inputmode="decimal"></td></tr>
-      {% endfor %}
-    </tbody></table>
-    {% else %}<p class="muted small">No card appears on an order placed in {{ year }}.</p>{% endif %}
-  </details>
-
-  <details class="panel" id="s-sites" open>
-    <summary><h2>Cashback Sites</h2></summary><header><p class="muted">Portal cashback paid out in {{ year }}: TopCashback, Rakuten and the like. Add a site in the empty row; blank a name to drop it. Line 6.</p></header>
-    <table class="entry-table"><thead><tr><th>Site</th><th>Cashback</th></tr></thead><tbody>
-      {% for name in site_names %}
-      <tr><td><input type="text" name="site.{{ loop.index0 }}.name" value="{{ name }}"></td>
-          <td class="narrow">{{ amount_log('site.' ~ loop.index0 ~ '.amount', site_logs.get(name, []), inputs.sites.get(name, 0), today, by_years=false) }}</td></tr>
-      {% endfor %}
-      <tr class="new-row"><td><input type="text" name="site.{{ site_names | length }}.name" placeholder="another site"></td>
-          <td class="narrow">{{ amount_log('site.' ~ (site_names | length) ~ '.amount', [], 0, today, by_years=false) }}</td></tr>
-    </tbody></table>
-  </details>
-
-  <details class="panel" id="s-other" open>
-    <summary><h2>Other Income</h2></summary><header><p class="muted">Anything else the business earned in {{ year }}. Blank a label to drop the row. Line 6.</p></header>
-    <table class="entry-table"><thead><tr><th>What</th><th>Amount</th></tr></thead><tbody>
-      {% for o in inputs.other %}
-      <tr><td><input type="text" name="other.{{ loop.index0 }}.label" value="{{ o.label }}"></td>
-          <td class="narrow"><input type="text" name="other.{{ loop.index0 }}.amount" value="{{ o.amount }}" inputmode="decimal"></td></tr>
-      {% endfor %}
-      {% set n = inputs.other | length %}
-      <tr class="new-row"><td><input type="text" name="other.{{ n }}.label" placeholder="e.g. a refund received"></td>
-          <td class="narrow"><input type="text" name="other.{{ n }}.amount" placeholder="0.00" inputmode="decimal"></td></tr>
-    </tbody></table>
-    <label class="field-block">Notes for the preparer <textarea name="notes" rows="3" class="json">{{ inputs.notes }}</textarea></label>
-  </details>
-
-  <div class="inline-form">
-    <button type="submit" class="primary">Save {{ year }}</button>
-    <span class="muted small">Saved to <code>data/tax_inputs.json</code> (inside every backup). The summary above updates on save.</span>
-  </div>
-</form>
-
+{% include "_tax_form.html" %}
 {% include "_confirm_dialog.html" %}
 {% endblock %}

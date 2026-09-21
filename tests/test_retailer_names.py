@@ -47,7 +47,7 @@ class TestTheProxySwitch:
         body = client.get("/settings").text
         assert 'hx-post="/settings/section/profiles/entry/0/proxy"' in body and ">Proxy On<" in body
         off = client.post("/settings/section/profiles/entry/0/proxy", headers={"HX-Request": "true"})
-        assert off.status_code == 200 and off.text.lstrip().startswith('<section class="panel" id="s-profiles">')
+        assert off.status_code == 200 and off.text.lstrip().startswith('<details class="entry-card" data-key="profiles:p1"')  # that profile's card alone (2026-09-20)
         assert ">Proxy Off<" in off.text and "Proxy off for profile p1" in off.text
         assert config_value("profiles")[0]["proxy"] == {"host": "h", "port": 1, "username": "u", "password": "pw", "enabled": False}
         on = client.post("/settings/section/profiles/entry/0/proxy", headers={"HX-Request": "true"})

@@ -79,6 +79,7 @@ class YearInputs:
     #: entry dated the year's first day. The totals stay for every reader (the summary, the report).
     program_entries: dict[str, list[dict]] = field(default_factory=dict)
     site_entries: dict[str, list[dict]] = field(default_factory=dict)
+    bonus_entries: dict[str, list[dict]] = field(default_factory=dict)  # "bonus:<last4>" -> [{date earned, amount, note}]
     expenses: list[dict] = field(default_factory=list)         # see add_expense
     other: list[dict] = field(default_factory=list)            # {label, amount, kind}
     notes: str = ""
@@ -110,6 +111,7 @@ class YearInputs:
     def to_json(self) -> dict:
         return {"programs": self.programs, "bonuses": self.bonuses, "sites": self.sites,
                 "program_entries": self.program_entries, "site_entries": self.site_entries,
+                "bonus_entries": self.bonus_entries,
                 "expenses": self.expenses, "other": self.other, "notes": self.notes}
 
     @classmethod
@@ -131,8 +133,12 @@ class YearInputs:
                 amount = round(float(o.get("amount") or 0), 2)
             except (TypeError, ValueError):
                 continue
+            try:
+                entries = amount_log.coerce(o.get("entries"), "")
+            except ValueError:
+                entries = []
             other.append({"label": str(o["label"]).strip(), "amount": amount,
-                          "kind": "income" if o.get("kind") == "income" else "expense"})
+                          "kind": "income" if o.get("kind") == "income" else "expense", "entries": entries})
         expenses = []
         for e in payload.get("expenses") or []:
             if not isinstance(e, dict) or not e.get("id") or not e.get("date"):
@@ -161,6 +167,7 @@ class YearInputs:
 
         return cls(programs=amounts("programs"), bonuses=amounts("bonuses"),
                    sites=amounts("sites"), program_entries=logs("program_entries"), site_entries=logs("site_entries"),
+                   bonus_entries=logs("bonus_entries"),
                    expenses=expenses, other=other, notes=str(payload.get("notes") or ""))
 
 
@@ -252,9 +259,10 @@ def _amount(text) -> float | None:
     return round(float(text), 2)
 
 
-def log_entries(inputs: YearInputs, year: int) -> tuple[dict[str, list[dict]], dict[str, list[dict]]]:
-    """The dated logs' rows for the page, newest first: (by prompt key, by site name). A total
-    without a log shows as one entry dated the year's first day."""
+def log_entries(inputs: YearInputs, year: int) -> tuple[dict[str, list[dict]], dict[str, list[dict]], dict[str, list[dict]]]:
+    """The dated logs' rows for the page, newest first: (by program key, by site name, by bonus
+    key). A total without a log shows as one entry dated the year's first day. A sign-up bonus is
+    usually one entry -- the date it was earned and the amount."""
     first = f"{int(year)}-01-01"
 
     def rows(totals: dict, logs: dict) -> dict[str, list[dict]]:
@@ -264,7 +272,15 @@ def log_entries(inputs: YearInputs, year: int) -> tuple[dict[str, list[dict]], d
             out[key] = amount_log.display(entries)
         return out
 
-    return rows(inputs.programs, inputs.program_entries), rows(inputs.sites, inputs.site_entries)
+    return (rows(inputs.programs, inputs.program_entries), rows(inputs.sites, inputs.site_entries),
+            rows(inputs.bonuses, inputs.bonus_entries))
+
+
+def other_logs(inputs: YearInputs, year: int) -> list[list[dict]]:
+    """The other-income rows' logs, one list per row in order."""
+    first = f"{int(year)}-01-01"
+    return [amount_log.display(o.get("entries") or ([{"date": first, "amount": o.get("amount") or 0, "note": ""}] if o.get("amount") else []))
+            for o in inputs.other]
 
 
 def _logged(form: Mapping[str, str], key: str, today: str | None) -> tuple[float | None, list[dict] | None]:
@@ -292,16 +308,19 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
     other: list[dict] = []
     program_entries: dict[str, list[dict]] = {}
     site_entries: dict[str, list[dict]] = {}
+    bonus_entries: dict[str, list[dict]] = {}
     for p in prompts:
         if p.kind == "card":
             key = f"bonus:{p.last4}"
             try:
-                value = _amount(form.get(key))
+                value, entries = _logged(form, key, today)
             except ValueError:
                 errors.append(f"{p.label} sign-up bonus: not a number")
                 continue
             if value is not None:
                 bonuses[key] = value
+                if entries:
+                    bonus_entries[key] = entries
             continue
         try:
             value, entries = _logged(form, p.key, today)
@@ -330,21 +349,21 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
         if not label:
             continue
         try:
-            value = _amount(form.get(f"other.{i}.amount")) or 0.0
+            value, entries = _logged(form, f"other.{i}.amount", today)
         except ValueError:
             errors.append(f"{label}: not a number")
             continue
-        other.append({"label": label, "amount": value, "kind": "income"})
+        other.append({"label": label, "amount": value or 0.0, "kind": "income", "entries": entries or []})
     if errors:
         raise ValueError("; ".join(errors))
-    return programs, bonuses, sites, other, str(form.get("notes") or "").strip(), program_entries, site_entries
+    return programs, bonuses, sites, other, str(form.get("notes") or "").strip(), program_entries, site_entries, bonus_entries
 
 
 def apply_form(inputs: YearInputs, form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None = None) -> YearInputs:
     """The saved year: the form's amounts, the expense list as stored. A key posted as the dated
     log keeps those entries; one posted as a plain amount keeps its stored log while the total is
     unchanged and drops it when the total moved (the page then shows the new total as one entry)."""
-    programs, bonuses, sites, other, notes, program_entries, site_entries = _parse(form, prompts, today)
+    programs, bonuses, sites, other, notes, program_entries, site_entries, bonus_entries = _parse(form, prompts, today)
 
     def kept(totals: dict, posted: dict, stored_totals: dict, stored: dict) -> dict:
         out = {}
@@ -355,9 +374,15 @@ def apply_form(inputs: YearInputs, form: Mapping[str, str], prompts: Iterable[Pr
                 out[key] = list(stored[key])
         return out
 
+    stored_other = {o.get("label"): o for o in inputs.other}
+    for o in other:
+        was = stored_other.get(o["label"])
+        if not o["entries"] and was and was.get("entries") and was.get("amount") == o["amount"]:
+            o["entries"] = list(was["entries"])
     return YearInputs(programs=programs, bonuses=bonuses, sites=sites,
                       program_entries=kept(programs, program_entries, inputs.programs, inputs.program_entries),
                       site_entries=kept(sites, site_entries, inputs.sites, inputs.site_entries),
+                      bonus_entries=kept(bonuses, bonus_entries, inputs.bonuses, inputs.bonus_entries),
                       expenses=list(inputs.expenses), other=other, notes=notes)
 
 

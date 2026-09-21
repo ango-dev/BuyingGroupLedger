@@ -97,7 +97,7 @@ def extras_lifetime(inputs_by_year: dict) -> dict:
 
 
 def income_in_month(inputs_by_year: dict, month: str) -> dict:
-    """The Taxes page's program cashback and cashback-site payouts dated in the month: the logs'
+    """The Taxes page's program cashback, cashback-site payouts and sign-up bonuses dated in the month: the logs'
     entries alone -- an older single amount carries no date and stays a yearly figure. Shaped
     like extras_lifetime, for period_tiles."""
     from models import amount_log
@@ -108,6 +108,11 @@ def income_in_month(inputs_by_year: dict, month: str) -> dict:
             parts["programs"] += amount_log.in_month(entries, month)
         for entries in inputs.site_entries.values():
             parts["sites"] += amount_log.in_month(entries, month)
+        for entries in inputs.bonus_entries.values():
+            parts["bonuses"] += amount_log.in_month(entries, month)
+        for o in inputs.other:
+            if o.get("kind") == "income":
+                parts["other"] += amount_log.in_month(o.get("entries") or [], month)
     parts = {k: round(v, 2) for k, v in parts.items()}
     return {"income": round(sum(parts.values()), 2), "parts": parts}
 
@@ -148,8 +153,7 @@ def period_tiles(placed: list[LedgerRow], paid: list[LedgerRow], scope: str,
                       f"Taxes page's entries ({income_scope}) included")
     else:
         net_detail = (f"realized profit {realized['profit']:,.2f} \u2212 expenses dated in the month "
-                      f"{expenses:,.2f}; sign-up bonuses and other income are entered per year and "
-                      "count under Lifetime")
+                      f"{expenses:,.2f}")
     tiles = [
         _tile("Rows / orders", (len(placed), len({r.order_id for r in placed})), "pair",
               "all rows", link(), detail=f"every row {scope}"),

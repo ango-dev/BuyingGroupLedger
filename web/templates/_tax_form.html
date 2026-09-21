@@ -1,0 +1,62 @@
+{#- The inputs form: it posts in place (htmx) and swaps itself, the summary and the toast -#}
+{% from "_select.html" import choose %}
+{% from "_amount_log.html" import amount_log %}
+<form method="post" action="/taxes/save" class="tax-form" id="tax-form" hx-post="/taxes/save" hx-target="#tax-form" hx-swap="outerHTML">
+  <input type="hidden" name="year" value="{{ year }}">
+
+  <details class="panel" id="s-programs" open>
+    <summary><h2>Program Cashback</h2></summary><header><p class="muted">What Prime, Prime Business and Costco Executive paid you in {{ year }}, per retailer login: open an amount for its dated log. Line 6.</p></header>
+    {% if program_prompts %}
+    <table class="entry-table"><thead><tr><th>Program</th><th>Cashback</th></tr></thead><tbody>
+      {% for p in program_prompts %}
+      <tr><td>{{ p.label }}</td>
+          <td class="narrow">{{ amount_log(p.key, program_logs.get(p.key, []), inputs.programs.get(p.key, 0), today, by_years=false) }}</td></tr>
+      {% endfor %}
+    </tbody></table>
+    {% else %}<p class="muted small">No profiles with a Costco, Amazon or Amazon Business login in config.json, so nothing to ask.</p>{% endif %}
+  </details>
+
+  <details class="panel" id="s-cards" open>
+    <summary><h2>Cards</h2></summary><header><p class="muted">Every card on {{ year }}'s orders, virtual cards left out: the sign-up bonus received in {{ year }}, dated the day it was earned. Line 6. Annual fees go in Expenses.</p></header>
+    {% if card_prompts %}
+    <table class="entry-table"><thead><tr><th>Card</th><th>Sign-up Bonus</th></tr></thead><tbody>
+      {% for p in card_prompts %}
+      <tr><td>{{ p.label }}</td>
+          {#- the same log as the other amounts -- usually one row, the day the bonus was earned -#}
+          <td class="narrow">{{ amount_log('bonus:' ~ p.last4, bonus_logs.get('bonus:' ~ p.last4, []), inputs.bonuses.get('bonus:' ~ p.last4, 0), today, by_years=false, date_label='Earned') }}</td></tr>
+      {% endfor %}
+    </tbody></table>
+    {% else %}<p class="muted small">No card appears on an order placed in {{ year }}.</p>{% endif %}
+  </details>
+
+  <details class="panel" id="s-sites" open>
+    <summary><h2>Cashback Sites</h2></summary><header><p class="muted">Portal cashback paid out in {{ year }}: TopCashback, Rakuten and the like. Add a site in the empty row; blank a name to drop it. Line 6.</p></header>
+    <table class="entry-table"><thead><tr><th>Site</th><th>Cashback</th></tr></thead><tbody>
+      {% for name in site_names %}
+      <tr><td><input type="text" name="site.{{ loop.index0 }}.name" value="{{ name }}"></td>
+          <td class="narrow">{{ amount_log('site.' ~ loop.index0 ~ '.amount', site_logs.get(name, []), inputs.sites.get(name, 0), today, by_years=false) }}</td></tr>
+      {% endfor %}
+      <tr class="new-row"><td><input type="text" name="site.{{ site_names | length }}.name" placeholder="another site"></td>
+          <td class="narrow">{{ amount_log('site.' ~ (site_names | length) ~ '.amount', [], 0, today, by_years=false) }}</td></tr>
+    </tbody></table>
+  </details>
+
+  <details class="panel" id="s-other" open>
+    <summary><h2>Other Income</h2></summary><header><p class="muted">Anything else the business earned in {{ year }}. Blank a label to drop the row. Line 6.</p></header>
+    <table class="entry-table"><thead><tr><th>What</th><th>Amount</th></tr></thead><tbody>
+      {% for o in inputs.other %}
+      <tr><td><input type="text" name="other.{{ loop.index0 }}.label" value="{{ o.label }}"></td>
+          <td class="narrow">{{ amount_log('other.' ~ loop.index0 ~ '.amount', other_logs[loop.index0], o.amount, today, by_years=false, date_label='Received') }}</td></tr>
+      {% endfor %}
+      {% set n = inputs.other | length %}
+      <tr class="new-row"><td><input type="text" name="other.{{ n }}.label" placeholder="e.g. a refund received"></td>
+          <td class="narrow">{{ amount_log('other.' ~ n ~ '.amount', [], 0, today, by_years=false, date_label='Received') }}</td></tr>
+    </tbody></table>
+    <label class="field-block">Notes for the preparer <textarea name="notes" rows="3" class="json">{{ inputs.notes }}</textarea></label>
+  </details>
+
+  <div class="inline-form">
+    <button type="submit" class="primary">Save {{ year }}</button>
+    <span class="muted small">Saved to <code>data/tax_inputs.json</code> (inside every backup). The summary above updates on save.</span>
+  </div>
+</form>

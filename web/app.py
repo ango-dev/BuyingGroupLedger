@@ -748,6 +748,15 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                 tax_inputs.card_prompts(snapshot.rows, year, cards))
 
     def taxes_page(request: Request, year: int, **extra):
+        return page(request, "taxes.html", **taxes_context(request, year, **extra))
+
+    def taxes_swap(request: Request, year: int, *, message: str = "", error: str = "", status: int = 200):
+        """An in-place save's answer: the inputs form, the summary (out of band) and the toast."""
+        response = page_no_snapshot(request, "_tax_swap.html", message=message, **taxes_context(request, year, error=error))
+        response.status_code = status
+        return response
+
+    def taxes_context(request: Request, year: int, **extra) -> dict:
         from web.settings_form import profile_labels
 
         snapshot = load(request)
@@ -755,7 +764,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         inputs = load_tax_inputs(year)
         programs, cards = tax_prompts(snapshot, year)
         summary = tax_inputs.schedule_c(tax_report_for(snapshot, year), inputs)
-        program_logs, site_logs = tax_inputs.log_entries(inputs, year)  # the dated logs' rows
+        program_logs, site_logs, bonus_logs = tax_inputs.log_entries(inputs, year)  # the dated logs' rows
         try:
             labels = profile_labels()
         except Exception:  # noqa: BLE001
@@ -763,10 +772,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         draft = extra.pop("draft", None)  # a refused add re-renders the form with what was typed
         esort = str(request.query_params.get("esort") or "").strip()  # the expenses table's header sort
         edir = "asc" if str(request.query_params.get("edir") or "").lower() == "asc" else "desc"
-        return page(request, "taxes.html", snapshot=snapshot, year=year, years=years,
+        return dict(snapshot=snapshot, year=year, years=years,
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
-                    program_logs=program_logs, site_logs=site_logs, today=clock().date().isoformat(),
+                    program_logs=program_logs, site_logs=site_logs, bonus_logs=bonus_logs,
+                    other_logs=tax_inputs.other_logs(inputs, year), today=clock().date().isoformat(),
                     draft=draft or {}, expense_choices=tax_inputs.expense_choices(inputs),
                     expenses=tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True),
                     esort=esort, edir=edir, **extra)
@@ -790,14 +800,19 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         year = requested_year(request, clock().year, form)
         programs, cards = tax_prompts(load(request), year)
         inputs = load_tax_inputs(year)
+        in_place = request.headers.get("HX-Request", "").lower() == "true"
         try:
             inputs = tax_inputs.apply_form(inputs, form, programs + cards, today=clock().date().isoformat())
         except ValueError as exc:
+            if in_place:
+                return taxes_swap(request, year, error=str(exc), status=400)
             return taxes_page(request, year, error=str(exc))
         tax_inputs.save_year(tax_inputs_path, year, inputs)
         act("settings", f"Tax inputs for {year} saved",
             {"year": year, "programs": inputs.program_total, "bonuses": inputs.bonus_total,
              "sites": inputs.site_total, "other": len(inputs.other)})
+        if in_place:  # the form swaps itself, the summary follows, a toast says so
+            return taxes_swap(request, year, message=f"Saved {year}")
         return RedirectResponse(url=f"/taxes?year={year}&notice=Saved+{year}", status_code=303)
 
     async def expense_form(request: Request):
@@ -2001,6 +2016,38 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         response.status_code = status
         return response
 
+    def settings_card(request: Request, path: str, index: int, old_key: str, *, message: str = "",
+                      errors: list[str] | None = None, status: int = 200):
+        """One entry's card, re-rendered for htmx to swap in place of that card alone (HX-Retarget
+        by its key before the save), so the other cards keep their unsaved edits."""
+        context = settings_context()
+        items = context["entries"][path]
+        context["entries"] = {}
+        item = next((e for e in items if e["index"] == index), None)
+        if item is None:  # gone, or a shape the page cannot place: the whole section
+            return settings_section(request, path, message=message, errors=errors, open_index=index, status=status)
+        children = []
+        if path == "cards":
+            children = sorted((e for e in items if e["virtual"] and e["virtual_of"] == item["last4"]), key=lambda e: e["own_bonus"])
+        response = page_no_snapshot(
+            request, "_settings_card.html", path=path, singular=path[:-1], item=item, children=children,
+            message=message, card_errors=errors or [], open_index=index, errors=[], **context)
+        response.status_code = status
+        response.headers["HX-Retarget"] = f'#s-{path} details.entry-card[data-key="{old_key}"]'
+        response.headers["HX-Reswap"] = "outerHTML"
+        return response
+
+    def entry_key_at(path: str, index: int | None) -> str:
+        entries = settings_form.display_entries(path)
+        return settings_form.entry_key(path, entries[index]) if index is not None and 0 <= index < len(entries) else ""
+
+    def moved_in_tree(path: str, before: dict, after: dict) -> bool:
+        """Did the save change where the card sits: its key, or (a card) the card it belongs to?"""
+        if settings_form.entry_key(path, before) != settings_form.entry_key(path, after):
+            return True
+        return path == "cards" and (bool(before.get("virtual_of")) != bool(after.get("virtual_of"))
+                                    or before.get("virtual_of") != after.get("virtual_of"))
+
     def wants_fragment(request: Request) -> bool:
         return request.headers.get("HX-Request", "").lower() == "true"
 
@@ -2009,12 +2056,26 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return settings_page(request, message=request.query_params.get("message", ""),
                              restart=request.query_params.get("restart", ""))
 
+    def settings_scalar_swap(request: Request, *, message: str = "", errors: list[str] | None = None,
+                             restart: str = "", status: int = 200):
+        """An in-place scalar save's answer: the form, the save bar, the restart
+        banner and the toast."""
+        response = page_no_snapshot(
+            request, "_settings_scalar_swap.html", message=message, errors=errors or [],
+            restart=restart if restart in ("container", "dashboard") else "",
+            **settings_context(), **backup_context())
+        response.status_code = status
+        return response
+
     @app.post("/settings", response_class=HTMLResponse)
     async def settings_save(request: Request):
         form = await request.form()
+        in_place = request.headers.get("HX-Request", "").lower() == "true"
         try:
             changes = settings_form.apply_scalars(form, skip=settings_form.hidden_envs())
         except settings_form.SettingsError as exc:
+            if in_place:
+                return settings_scalar_swap(request, errors=exc.errors, status=400)
             return settings_page(request, errors=exc.errors, status=400)
         message = (f"Saved {len(changes)} changed setting(s): {', '.join(sorted(changes))}"
                    if changes else "Saved; nothing had changed.")
@@ -2022,6 +2083,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             act("settings", f"Settings saved: {', '.join(sorted(changes))}",
                 {"changed": sorted(changes)})  # paths only: a value here may be a secret
         restart_kind = settings_form.restart_needed(changes)
+        if in_place:
+            return settings_scalar_swap(request, message=message, restart=restart_kind)
         url = f"/settings?message={message.replace(' ', '+')}"
         if restart_kind:
             url += f"&restart={restart_kind}"
@@ -2043,17 +2106,24 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     # One entry of a card section: add, replace, delete. Errors re-render the page with the section open and nothing written.
     async def _save_entry(request: Request, path: str, index: int | None):
         form = await request.form()
+        before = settings_form.display_entries(path)[index] if index is not None else None
+        old_key = settings_form.entry_key(path, before) if before else ""
         try:
             landed, label = settings_form.apply_entry(path, index, form, today=clock().date().isoformat())
         except settings_form.SettingsError as exc:
+            if wants_fragment(request) and before is not None:  # the one card, its errors inside; the others untouched
+                return settings_card(request, path, index, old_key, errors=exc.errors, status=400)
             if wants_fragment(request):
                 return settings_section(request, path, errors=exc.errors, open_index=index, open_new=index is None, status=400)
             return settings_page(request, errors=exc.errors, open_section=path, status=400)
         verb = "Added" if index is None else "Saved"
         message = f"{verb} {path[:-1]} {label}."
         act("settings", f"Settings: {verb.lower()} {path[:-1]} {label}", {"path": path, "entry": label})
-        if wants_fragment(request):  # the section swaps in place; the saved entry stays open
-            return settings_section(request, path, message=message, open_index=landed)
+        if wants_fragment(request):  # in place; the saved entry stays open
+            after = next((e for e in settings_form.display_entries(path) if e["index"] == landed), None)
+            if before is not None and after is not None and not moved_in_tree(path, before, after):
+                return settings_card(request, path, landed, old_key, message=message)  # that card alone
+            return settings_section(request, path, message=message, open_index=landed)  # added, or moved: the section
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
                                 status_code=303)
 
@@ -2077,8 +2147,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return settings_page(request, errors=exc.errors, open_section="profiles", status=400)
         message = f"Proxy {'on' if on else 'off'} for profile {label}."
         act("settings", f"Settings: proxy {'on' if on else 'off'} for profile {label}", {"path": "profiles", "entry": label})
-        if wants_fragment(request):
-            return settings_section(request, "profiles", message=message)
+        if wants_fragment(request):  # that profile's card alone: the others keep their edits
+            return settings_card(request, "profiles", index, f"profiles:{label}", message=message)
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-profiles", status_code=303)
 
     @app.post("/settings/section/{path}/entry/{index}/delete", response_class=HTMLResponse)

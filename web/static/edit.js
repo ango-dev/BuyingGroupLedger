@@ -1522,10 +1522,14 @@
     var menu = details.querySelector(".menu"), summary = details.querySelector("summary");
     if (!menu || !summary) return;
     var at = summary.getBoundingClientRect();
-    menu.style.top = Math.round(at.bottom + 4) + "px";
+    // measured, not assumed: an animated ancestor (a card htmx just swapped in) makes a fixed box
+    // position against it, so the menu is put at 0,0 first and moved by the difference
+    menu.style.top = "0px";
     menu.style.left = "0px";
-    var width = menu.getBoundingClientRect().width;
-    menu.style.left = Math.round(Math.max(8, Math.min(at.left, window.innerWidth - width - 8))) + "px";
+    var zero = menu.getBoundingClientRect(), width = zero.width;
+    var left = Math.max(8, Math.min(at.left, window.innerWidth - width - 8));
+    menu.style.left = Math.round(left - zero.left) + "px";
+    menu.style.top = Math.round(at.bottom + 4 - zero.top) + "px";
     menu.style.maxHeight = Math.max(120, Math.min(340, window.innerHeight - at.bottom - 12)) + "px";
   }
   document.addEventListener("toggle", function (e) {

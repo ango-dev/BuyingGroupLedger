@@ -1,0 +1,17 @@
+{#- Every scalar setting, derived from config/settings.py (see web/settings_form.py). The form
+    posts in place and swaps itself; the save bar and the restart banner follow out of band.
+   -#}
+{% from "_settings_macros.html" import setting_row, secret_cell with context %}
+    <form method="post" action="/settings" class="settings" id="scalar-form" hx-post="/settings" hx-target="#scalar-form" hx-swap="outerHTML">
+      {% for section in sections %}
+      {% set title, blurb = section_title(section) %}
+      <section class="panel" id="s-{{ section }}">
+        <header><h2>{{ title }}</h2>{% if blurb %}<p class="muted">{{ blurb }}</p>{% endif %}</header>
+        <div class="fields">
+          {% set ns = namespace(group='') %}
+          {% for row in rows if row.setting.section == section and row.setting.env not in hidden_envs and not row.setting.advanced %}
+{{ setting_row(row, section, ns) }}          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+    </form>

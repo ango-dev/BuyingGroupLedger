@@ -320,6 +320,37 @@
         in place, so a save never reloads the page; the wizard's copies post
         plainly. `open_index` (context) keeps the entry just saved open; `message` / `section_errors`
         show the outcome inside the section. -#}
+  {#- One entry's card (a top-level macro: a save answers with the one card, so the other cards keep
+    their unsaved edits): the summary line, the form, the hidden delete form. A card's virtual and
+      employee numbers render INSIDE their card, folded under Virtual Numbers; a number whose card is not on the
+      list stays at the top level, with its warning. -#}
+  {% macro entry_card(path, singular, e, children, fields, base, inplace, card_errors=[]) %}
+    {% set key = path ~ ':' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else e.last4)) %}
+    {% set child_open = open_index is defined and open_index is not none and (children | selectattr('index', 'equalto', open_index) | list) %}
+    <details class="entry-card{{ ' has-numbers' if children }}" data-key="{{ key }}"{% if (open_index is defined and open_index == e.index) or child_open %} open{% endif %}>
+      <summary>{{ entry_summary(path, e) }}{% if children %} <span class="chip muted" title="its virtual and employee numbers, inside">{{ children | length }} number{{ 's' if children | length != 1 }}</span>{% endif %}</summary>
+      {% if card_errors %}<div class="banner warn small"><strong>Nothing was saved.</strong><ul>{% for err in card_errors %}<li>{{ err }}</li>{% endfor %}</ul></div>{% endif %}
+      <form method="post" action="{{ base }}/entry/{{ e.index }}" class="entry-form" autocomplete="off"{% if inplace %} hx-post="{{ base }}/entry/{{ e.index }}" hx-target="#s-{{ path }}" hx-swap="outerHTML"{% endif %}>
+        {{ fields(e) }}
+        <footer>
+          <button type="submit" class="small primary">Save {{ singular }}</button>
+          <button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="remove this {{ singular }} from config.json">✕ Remove</button>
+        </footer>
+      </form>
+      {% set ask = 'Remove ' ~ singular ~ ' ' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else (e.name ~ ' …' ~ e.last4))) ~ ' from config.json?' %}
+      <form method="post" id="del-{{ path }}-{{ e.index }}" action="{{ base }}/entry/{{ e.index }}/delete" class="entry-delete" hidden
+            {% if inplace %}hx-post="{{ base }}/entry/{{ e.index }}/delete" hx-target="#s-{{ path }}" hx-swap="outerHTML" hx-confirm="{{ ask }}"{% else %}data-confirm="{{ ask }}"{% endif %}></form>
+      {% if children %}
+      <details class="sub-cards"{% if child_open %} open{% endif %}>
+        <summary>Virtual Numbers <span class="muted small">{{ children | length }}</span></summary>
+        <div class="entry-list sub">
+          {% for child in children %}{{ entry_card(path, singular, child, [], fields, base, inplace) }}{% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    </details>
+  {% endmacro %}
+
     {% macro entry_section(path, singular, items, fields, action_base='', show_json=true, message='', section_errors=[]) %}
     {% set title, blurb = section_title(path) %}
     {% set base = action_base or ('/settings/section/' ~ path) %}
@@ -333,41 +364,14 @@
         {% if message %}<div class="banner ok small">{{ message }}</div>{% endif %}
         {% if section_errors %}<div class="banner warn small"><strong>Nothing was saved.</strong><ul>{% for err in section_errors %}<li>{{ err }}</li>{% endfor %}</ul></div>{% endif %}
       </header>
-      {#- One entry's card: the summary line, the form, the hidden delete form. A card's virtual and
-          employee numbers render INSIDE their card, folded under Virtual Numbers; a number whose card is not on the
-          list stays at the top level, with its warning. -#}
-      {% macro entry_card(e, children=[]) %}
-        {% set key = path ~ ':' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else e.last4)) %}
-        {% set child_open = open_index is defined and open_index is not none and (children | selectattr('index', 'equalto', open_index) | list) %}
-        <details class="entry-card{{ ' has-numbers' if children }}" data-key="{{ key }}"{% if (open_index is defined and open_index == e.index) or child_open %} open{% endif %}>
-          <summary>{{ entry_summary(path, e) }}{% if children %} <span class="chip muted" title="its virtual and employee numbers, inside">{{ children | length }} number{{ 's' if children | length != 1 }}</span>{% endif %}</summary>
-          <form method="post" action="{{ base }}/entry/{{ e.index }}" class="entry-form" autocomplete="off"{% if inplace %} hx-post="{{ base }}/entry/{{ e.index }}" hx-target="#s-{{ path }}" hx-swap="outerHTML"{% endif %}>
-            {{ fields(e) }}
-            <footer>
-              <button type="submit" class="small primary">Save {{ singular }}</button>
-              <button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="remove this {{ singular }} from config.json">✕ Remove</button>
-            </footer>
-          </form>
-          {% set ask = 'Remove ' ~ singular ~ ' ' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else (e.name ~ ' …' ~ e.last4))) ~ ' from config.json?' %}
-          <form method="post" id="del-{{ path }}-{{ e.index }}" action="{{ base }}/entry/{{ e.index }}/delete" class="entry-delete" hidden
-                {% if inplace %}hx-post="{{ base }}/entry/{{ e.index }}/delete" hx-target="#s-{{ path }}" hx-swap="outerHTML" hx-confirm="{{ ask }}"{% else %}data-confirm="{{ ask }}"{% endif %}></form>
-          {% if children %}
-          <details class="sub-cards"{% if child_open %} open{% endif %}>
-            <summary>Virtual Numbers <span class="muted small">{{ children | length }}</span></summary>
-            <div class="entry-list sub">
-              {% for child in children %}{{ entry_card(child) }}{% endfor %}
-            </div>
-          </details>
-          {% endif %}
-        </details>
-      {% endmacro %}
       <div class="entry-list" data-section="{{ path }}">
         {% set parents = (items | map(attribute='last4') | list) if path == 'cards' else [] %}
         {% for e in items %}
           {% if path == 'cards' and e.virtual and e.virtual_of in parents %}{# rendered inside its card #}
           {% else %}
-            {% set children = (items | selectattr('virtual') | selectattr('virtual_of', 'equalto', e.last4) | list) if path == 'cards' else [] %}
-            {{ entry_card(e, children) }}
+            {#- its numbers, the virtual cards first and then the employee cards -#}
+            {% set children = (items | selectattr('virtual') | selectattr('virtual_of', 'equalto', e.last4) | sort(attribute='own_bonus') | list) if path == 'cards' else [] %}
+            {{ entry_card(path, singular, e, children, fields, base, inplace) }}
           {% endif %}
         {% else %}
         <p class="settings-empty">No {{ path }} yet.</p>

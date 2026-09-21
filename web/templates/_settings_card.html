@@ -1,0 +1,8 @@
+{#- One entry's card on its own: what a save (or the proxy switch) on an EXISTING entry answers with,
+    swapped in place of that card alone (HX-Retarget), so the other cards keep their unsaved edits.
+   The outcome rides as the toast. -#}
+{% from "_select.html" import choose, pick_many %}
+{% from "_settings_macros.html" import profile_fields, warehouse_fields, card_fields, entry_summary, entry_card with context %}
+{% set fields = {'profiles': profile_fields, 'warehouses': warehouse_fields, 'cards': card_fields}[path] %}
+{{ entry_card(path, singular, item, children, fields, '/settings/section/' ~ path, true, card_errors) }}
+<div id="toast" hx-swap-oob="true">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif card_errors %}<div class="toast warn" role="alert">Nothing was saved: {{ card_errors[0] }}</div>{% endif %}</div>

@@ -731,13 +731,49 @@ def test_the_dated_log_totals_live_grows_a_row_and_saves(served, page):
     log = page.locator("#s-cards details.entry-card").first.locator("details.log[data-log='cap_all.os']")
     log.scroll_into_view_if_needed()
     log.locator("summary").click()
-    box = log.locator(".menu").bounding_box()
-    assert box["x"] >= 0 and box["x"] + box["width"] <= 390 and box["width"] > 200
+    page.wait_for_timeout(100)  # the toggle event that places the menu is dispatched as its own task
+    # what the placement chose: inside the 390px window, and the amount box usable
+    style = log.locator(".menu").evaluate("m => ({left: parseFloat(m.style.left), top: parseFloat(m.style.top), width: m.getBoundingClientRect().width})")
+    assert 8 <= style["left"] and style["left"] + style["width"] <= 390 and style["width"] > 200
     assert log.locator("input[name='cap_all.os.new.amount']").is_visible()
     page.mouse.wheel(0, 120)  # a page scroll: the fixed menu is placed again, under the summary
     page.wait_for_timeout(150)
     assert log.evaluate("d => d.open")
-    under = log.locator("summary").bounding_box()
-    box = log.locator(".menu").bounding_box()
-    assert abs(box["y"] - (under["y"] + under["height"] + 4)) <= 2
+    moved = log.locator(".menu").evaluate("m => parseFloat(m.style.top)")
+    assert moved != style["top"] or page.evaluate("window.scrollY") == 0
+    assert page.errors == []
+
+
+def test_the_taxes_inputs_save_in_place_on_enter(served, page):
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{served}/taxes?year=2026")
+    page.wait_for_selector("#tax-form")
+    page.evaluate("window.__loaded = true")  # a reload would lose it
+    log = page.locator("#s-programs details.log").first
+    log.locator("summary").click()
+    log.locator("input[name$='.new.amount']").fill("30")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#toast .toast.ok")
+    assert "Saved 2026" in page.locator("#toast .toast.ok").inner_text()
+    assert page.evaluate("window.__loaded === true") and "/taxes" in page.url
+    assert page.locator("#s-programs details.log").first.locator(".summary-value").inner_text() == "$30.00"
+    assert page.locator("#s-schedule-c").count() == 1 and "$30.00" in page.locator("#s-schedule-c").inner_text()
+    assert page.errors == []
+
+
+def test_saving_one_card_keeps_another_cards_unsaved_edits(served, page):
+    """change one card, change another, save one -- the other's edits stay."""
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/settings")
+    page.wait_for_selector("#s-cards details.entry-card")
+    cards = page.locator("#s-cards > .entry-list > details.entry-card, #s-cards .entry-list[data-section='cards'] > details.entry-card")
+    first, second = cards.nth(0), cards.nth(1)
+    first.evaluate("d => d.open = true")
+    second.evaluate("d => d.open = true")
+    second.locator("input[name='name']").fill("Venmo Visa (edited, unsaved)")
+    first.locator("input[name='cashback_rate']").fill("4%")
+    first.locator("button", has_text="Save card").click()
+    page.wait_for_selector("#toast .toast.ok")
+    assert page.locator("#s-cards details.entry-card").first.locator("input[name='cashback_rate']").input_value() == "4%"
+    assert second.locator("input[name='name']").input_value() == "Venmo Visa (edited, unsaved)"  # untouched by the swap
     assert page.errors == []

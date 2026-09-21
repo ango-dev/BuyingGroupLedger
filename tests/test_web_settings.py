@@ -560,7 +560,7 @@ class TestEntryCards:
         saved = client.post("/settings/section/cards/entry/0", headers=hx, data={
             "name": "USB Prime Business", "last4": "0315", "cashback_rate": "5%"})
         assert saved.status_code == 200 and "<html" not in saved.text
-        assert saved.text.lstrip().startswith('<section class="panel" id="s-cards">')
+        assert saved.text.lstrip().startswith('<details class="entry-card" data-key="cards:0315"')  # that card alone (2026-09-20)
         assert 'data-key="cards:0315" open>' in saved.text
         # the outcome is a notification from the top (out of band), not a banner in the section
         assert '<div id="toast" hx-swap-oob="true"><div class="toast ok" role="status">Saved card USB Prime Business' in saved.text
@@ -573,7 +573,7 @@ class TestEntryCards:
         assert limited.status_code == 200 and config_value("cards")[0]["caps"] == [{"retailers": ["Amazon"], "spend_limit": 1000.0, "resets": "calendar-year"}]
         assert "Amazon 5% up to 1,000 then 5%" in limited.text  # the everywhere-else rate, as a number
         refused = client.post("/settings/section/cards/entry/0", headers=hx, data={"name": "USB", "last4": "0315", "cashback_rate": "2"})
-        assert refused.status_code == 400 and refused.text.lstrip().startswith('<section') and "outside 0-1" in refused.text
+        assert refused.status_code == 400 and refused.text.lstrip().startswith('<details class="entry-card"') and "outside 0-1" in refused.text
         assert '<div class="toast warn" role="alert">Nothing was saved:' in refused.text
         # profiles and warehouses save in place the same way, with the same notification
         for path, data, label in (("profiles", {"label": "alpha", "profile_id": "", "retailers": "costco"}, "profile alpha"),
@@ -618,6 +618,58 @@ class TestEntryCards:
         assert config_value("cards")[0]["caps"][0]["retailers"] == ["Amazon", "Woot"]
         body = client.get("/settings").text
         assert 'value="woot" data-text="Woot" checked>' in body and "Amazon, Woot 5% up to 1,000" in body
+
+    def test_a_saved_card_comes_back_alone_so_the_other_cards_keep_their_edits(self, client, config):
+        """a save on an existing entry answers with
+        that card only, retargeted; an add, or a move in the tree, still swaps the section."""
+        config(cards=[{"last4": "0315", "name": "USB Prime Business", "cashback_rate": "5%"},
+                      {"last4": "9999", "name": "USB virtual", "virtual_of": "0315"},
+                      {"last4": "7777", "name": "USB employee", "virtual_of": "0315", "own_bonus": True},
+                      {"last4": "8765", "name": "Citi", "cashback_rate": "2%"}],
+               profiles=[{"label": "p1", "proxy": {"host": "h", "port": 1, "enabled": True}}])
+        saved = client.post("/settings/section/cards/entry/3", data={"name": "Citi Double Cash", "last4": "8765", "cashback_rate": "2%"},
+                            headers={"HX-Request": "true"})
+        assert saved.status_code == 200 and saved.headers["HX-Retarget"] == '#s-cards details.entry-card[data-key="cards:8765"]'
+        assert saved.headers["HX-Reswap"] == "outerHTML" and "<section" not in saved.text
+        assert saved.text.count('data-key="cards:') == 1 and 'data-key="cards:8765" open>' in saved.text
+        assert '<div class="toast ok" role="status">Saved card Citi Double Cash …8765.</div>' in saved.text
+        # a parent card comes back with its numbers inside, the virtual cards before the employee cards
+        parent = client.post("/settings/section/cards/entry/0", data={"name": "USB Prime Business", "last4": "0315", "cashback_rate": "5%"},
+                             headers={"HX-Request": "true"}).text
+        assert parent.count('data-key="cards:') == 3 and parent.index('data-key="cards:9999"') < parent.index('data-key="cards:7777"')
+        page = client.get("/settings").text
+        assert page.index('data-key="cards:9999"') < page.index('data-key="cards:7777"')
+        # a refusal: the card alone, its errors inside, 400
+        refused = client.post("/settings/section/cards/entry/3", data={"name": "Citi", "last4": "8765", "cashback_rate": "2"},
+                              headers={"HX-Request": "true"})
+        assert refused.status_code == 400 and refused.headers["HX-Retarget"].endswith('[data-key="cards:8765"]')
+        assert '<div class="banner warn small"><strong>Nothing was saved.</strong>' in refused.text and "outside 0-1" in refused.text
+        # a change of last 4 or of the card it belongs to: the section (the card moved)
+        moved = client.post("/settings/section/cards/entry/3", data={"name": "Citi", "last4": "8766", "cashback_rate": "2%"},
+                            headers={"HX-Request": "true"})
+        assert moved.status_code == 200 and "HX-Retarget" not in moved.headers and '<section class="panel" id="s-cards">' in moved.text
+        nested = client.post("/settings/section/cards/entry/3", data={"name": "Citi", "last4": "8766", "kind": "virtual", "virtual_of": "0315"},
+                             headers={"HX-Request": "true"})
+        assert nested.status_code == 200 and "HX-Retarget" not in nested.headers and '<section class="panel" id="s-cards">' in nested.text
+        # the proxy switch: that profile's card alone
+        flipped = client.post("/settings/section/profiles/entry/0/proxy", headers={"HX-Request": "true"})
+        assert flipped.status_code == 200 and flipped.headers["HX-Retarget"] == '#s-profiles details.entry-card[data-key="profiles:p1"]'
+        assert "Proxy Off" in flipped.text and "<section" not in flipped.text
+
+    def test_the_scalar_settings_save_in_place(self, client):
+        """the scalar form too:
+        the form swaps itself, the save bar and the restart banner follow out of band, a toast says so."""
+        response = client.post("/settings", data={"LOOKBACK_DAYS": "4"}, headers={"HX-Request": "true"})
+        assert response.status_code == 200
+        body = response.text
+        assert 'id="scalar-form" hx-post="/settings" hx-target="#scalar-form" hx-swap="outerHTML"' in body and "<html" not in body
+        assert 'id="savebar" hx-swap-oob="true"' in body and '<div id="restart-banner" hx-swap-oob="true">' in body
+        assert '<div class="toast ok" role="status">Saved ' in body and 'lookback_days' in body
+        assert config_value("scraping.lookback_days") == 4
+        refused = client.post("/settings", data={"LOOKBACK_DAYS": "many"}, headers={"HX-Request": "true"})
+        assert refused.status_code == 400 and "Nothing was saved:" in refused.text and 'id="scalar-form"' in refused.text
+        page = client.get("/settings").text
+        assert page.count('id="scalar-form"') == 1 and page.count('id="savebar"') == 1 and 'hx-swap-oob' not in page
 
     def test_rates_stored_as_fractions_read_as_percents(self, client, config):
         """the page shows a percent however the file spells it."""

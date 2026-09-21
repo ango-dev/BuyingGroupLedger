@@ -1,0 +1,22 @@
+{#- The fixed save bar: Save, the unsaved-changes note, the restarts; `oob` set: swapped out of band after an in-place save -#}
+<div class="savebar fixed" id="savebar"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <div class="left">
+    <button type="submit" form="scalar-form" class="primary">Save settings</button>
+    <span class="dirty" id="dirty">No unsaved changes</span>
+    <span class="needs" id="needs"></span>
+  </div>
+  <div class="right">
+    {% if restart == 'dashboard' %}<span class="restart-due">Saved — restart the dashboard to apply it</span>
+    {% elif restart == 'container' %}<span class="restart-due">Saved — restart the container to apply it</span>{% endif %}
+    <form method="post" action="/settings/restart" class="inline-form"
+          data-confirm="Restart the dashboard process now? It re-reads config.json for the web and database settings; the scheduler is untouched. In Docker it comes back within seconds; run `python -m web` again on a desktop.">
+      <button type="submit" class="{{ 'primary attention' if restart == 'dashboard' }}" title="re-reads config.json for the dashboard's settings; the scheduler is untouched">Restart dashboard</button>
+    </form>
+    {% if in_container %}
+    <form method="post" action="/settings/restart-container" class="inline-form"
+          data-confirm="Restart the whole container now? The schedule, the timezone and every other setting are re-read on the way up; the scheduler and the dashboard come back in about half a minute. It is refused while a run is in progress, so nothing is aborted.">
+      <button type="submit" class="danger {{ 'attention' if restart == 'container' }}" title="re-reads every setting on the way up; refused while a run is in progress">Restart container</button>
+    </form>
+    {% endif %}
+  </div>
+</div>

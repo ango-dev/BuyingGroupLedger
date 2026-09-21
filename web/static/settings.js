@@ -2,9 +2,11 @@
 // scalar form has unsaved edits, and every "remove" / "delete" form asks through the in-page
 // dialog rather than the browser's own prompt.
 (function () {
+  function bindScalarForm() {  // again after an in-place save swaps the form
   var form = document.getElementById("scalar-form");
   var dirty = document.getElementById("dirty");
-  if (form && dirty) {
+  if (form && dirty && !form.dataset.bound) {
+    form.dataset.bound = "1";
     var snapshot = function () {  // {name: value} over the form, including controls bound to it from outside
       var out = {};
       new FormData(form).forEach(function (v, k) { out[k] = String(v); });
@@ -37,6 +39,9 @@
     });
     form.addEventListener("submit", function () { dirty.classList.remove("on"); if (needs) needs.textContent = ""; });
   }
+  }
+  bindScalarForm();
+  document.addEventListener("htmx:afterSettle", bindScalarForm);
 
   // Side index: highlight the panel nearest the top of the viewport.
   var links = Array.prototype.slice.call(document.querySelectorAll(".settings-nav a[href^='#']"));
@@ -88,33 +93,7 @@
   }
 })();
 
-// A refused save answers 400 with the section re-rendered (the errors inside it, a warning from
-// the top). htmx leaves a 4xx response unswapped unless told otherwise, which looked like the
-// Save button doing nothing.
-document.addEventListener("htmx:beforeSwap", function (e) {
-  var d = e.detail || {};
-  var elt = d.requestConfig && d.requestConfig.elt;
-  if (d.xhr && d.xhr.status === 400 && elt && elt.closest && elt.closest(".entry-form, .entry-delete")) {
-    d.shouldSwap = true;
-    d.isError = false;
-  }
-});
-
-// The notification from the top after an in-place save (#toast, swapped in out of band by the
-// section partial): fades after a few seconds, then goes.
-(function () {
-  "use strict";
-  function arm() {
-    var toast = document.querySelector("#toast .toast");
-    if (!toast || toast.dataset.armed) return;
-    toast.dataset.armed = "1";
-    setTimeout(function () { toast.classList.add("gone"); }, 3500);
-    setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 4100);
-  }
-  document.addEventListener("htmx:afterSettle", arm);
-  document.addEventListener("htmx:oobAfterSwap", arm);
-  arm();
-})();
+// (the 400 swap and the toast live in static/inplace.js, shared with the Taxes page)
 
 // Collapsible entries (Profiles / Warehouses / Cards): every entry starts closed on each load --
 // nothing is remembered across a reload or a restart. The old `settings-open` cookie is

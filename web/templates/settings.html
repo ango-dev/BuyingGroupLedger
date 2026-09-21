@@ -6,7 +6,7 @@
 <h1>Settings</h1>
 <div id="toast"></div>
 {% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
-{% include "_restart_banner.html" %}
+<div id="restart-banner">{% include "_restart_banner.html" %}</div>
 {% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
 
 <p class="muted">Edits <code>{{ config_path }}</code> in place. Most changes apply to the next run; <span class="tag">container restart</span> and <span class="tag">dashboard restart</span> say when one is needed, and <span class="tag stale">env override</span> means the environment wins for the running process.</p>
@@ -27,20 +27,7 @@
 
   <div class="settings-main">
     {# ---- every scalar setting, derived from config/settings.py (see web/settings_form.py) ---- #}
-    <form method="post" action="/settings" class="settings" id="scalar-form">
-      {% for section in sections %}
-      {% set title, blurb = section_title(section) %}
-      <section class="panel" id="s-{{ section }}">
-        <header><h2>{{ title }}</h2>{% if blurb %}<p class="muted">{{ blurb }}</p>{% endif %}</header>
-        <div class="fields">
-          {% set ns = namespace(group='') %}
-          {% for row in rows if row.setting.section == section and row.setting.env not in hidden_envs and not row.setting.advanced %}
-{{ setting_row(row, section, ns) }}          {% endfor %}
-        </div>
-      </section>
-      {% endfor %}
-    </form>
-
+    {% include "_scalar_form.html" %}
 
     {{ entry_section('profiles', 'profile', entries['profiles'], profile_fields) }}
     {{ entry_section('warehouses', 'warehouse', entries['warehouses'], warehouse_fields) }}
@@ -75,27 +62,7 @@
 {#- The bottom bar follows the scroll: Save on one side, the two restarts on the
     other. While editing it says which restart the changed fields will need (their data-restart);
     after a save that needs one it says so and marks the button. -#}
-<div class="savebar fixed" id="savebar">
-  <div class="left">
-    <button type="submit" form="scalar-form" class="primary">Save settings</button>
-    <span class="dirty" id="dirty">No unsaved changes</span>
-    <span class="needs" id="needs"></span>
-  </div>
-  <div class="right">
-    {% if restart == 'dashboard' %}<span class="restart-due">Saved — restart the dashboard to apply it</span>
-    {% elif restart == 'container' %}<span class="restart-due">Saved — restart the container to apply it</span>{% endif %}
-    <form method="post" action="/settings/restart" class="inline-form"
-          data-confirm="Restart the dashboard process now? It re-reads config.json for the web and database settings; the scheduler is untouched. In Docker it comes back within seconds; run `python -m web` again on a desktop.">
-      <button type="submit" class="{{ 'primary attention' if restart == 'dashboard' }}" title="re-reads config.json for the dashboard's settings; the scheduler is untouched">Restart dashboard</button>
-    </form>
-    {% if in_container %}
-    <form method="post" action="/settings/restart-container" class="inline-form"
-          data-confirm="Restart the whole container now? The schedule, the timezone and every other setting are re-read on the way up; the scheduler and the dashboard come back in about half a minute. It is refused while a run is in progress, so nothing is aborted.">
-      <button type="submit" class="danger {{ 'attention' if restart == 'container' }}" title="re-reads every setting on the way up; refused while a run is in progress">Restart container</button>
-    </form>
-    {% endif %}
-  </div>
-</div>
+{% include "_savebar.html" %}
 <dialog id="settings-confirm" class="confirm">
   <form method="dialog">
     <p class="question"></p>

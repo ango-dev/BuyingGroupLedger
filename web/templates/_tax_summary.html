@@ -1,0 +1,26 @@
+{#- The Schedule C summary panel; `oob` set: swapped out of band after an in-place save -#}
+<details class="panel" id="s-schedule-c" open{% if oob %} hx-swap-oob="true"{% endif %}>
+  <summary><h2>Schedule C Summary — {{ year }}</h2></summary><header>
+    <p class="muted">Cash basis: income by Payout Date, cost of goods and insurance by Order Date. A summary for your preparer, not tax advice.</p></header>
+  <table class="grid compact schedule">
+    <thead><tr><th>Part</th><th>Line</th><th>Item</th><th class="num">Amount</th><th>What it holds</th></tr></thead>
+    <tbody>
+      {% for l in summary.lines %}
+      <tr class="{{ 'total' if l.line in ('7', '28', '31', '42') }}">
+        <td class="muted">{{ l.part }}</td><td class="mono">{{ l.line }}</td><td>{{ l.name }}</td>
+        <td class="num {{ 'neg' if l.amount < 0 }}">{{ l.amount | money }}</td><td class="muted small">{{ l.what }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% set s = summary.straddling %}
+  <p class="muted small">Straddling the year boundary:
+    {{ s.ordered_this_year_not_yet_paid.rows }} row(s) ordered in {{ year }} not paid yet ({{ s.ordered_this_year_not_yet_paid.cogs | money }} of COGS);
+    {{ s.ordered_this_year_paid_in_a_later_year.rows }} paid in a later year ({{ s.ordered_this_year_paid_in_a_later_year.payouts | money }});
+    {{ s.paid_this_year_for_orders_from_other_years.rows }} paid this year for orders from other years ({{ s.paid_this_year_for_orders_from_other_years.payouts | money }});
+    {{ s.gift_card_purchases_never_paid.rows }} gift-card purchase row(s) ({{ s.gift_card_purchases_never_paid.cogs | money }}), funding orders rather than paid out themselves.
+    {%- if s.paid_with_no_payout_date and s.paid_with_no_payout_date.rows %}
+    <br><strong class="warn-text">{{ s.paid_with_no_payout_date.rows }} paid row(s) have no Payout Date ({{ s.paid_with_no_payout_date.payouts | money }}) and count as income in no year until the date is filled — <a href="/audit">Audit</a> lists them.</strong>
+    {%- endif %}
+  </p>
+</details>

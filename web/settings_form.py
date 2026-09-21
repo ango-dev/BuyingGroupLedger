@@ -924,6 +924,13 @@ _BUILDERS = {"profiles": _profile_from_form, "warehouses": _warehouse_from_form,
              "cards": _card_from_form}
 
 
+def entry_key(path: str, entry: dict) -> str:
+    """The key a card on the page carries (data-key): "profiles:<label>", "warehouses:<group>", "cards:<last4>"."""
+    entry = entry if isinstance(entry, dict) else {}
+    field = {"profiles": "label", "warehouses": "buying_group"}.get(path, "last4")
+    return f"{path}:{entry.get(field, '')}"
+
+
 def entry_label(path: str, entry: dict) -> str:
     entry = entry if isinstance(entry, dict) else {}
     if path == "profiles":

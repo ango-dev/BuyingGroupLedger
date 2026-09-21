@@ -66,7 +66,7 @@ class TestStorage:
     def test_round_trip_per_year(self, tmp_path):
         path = tmp_path / "data" / "tax_inputs.json"
         inputs = YearInputs(programs={"program:a:costco": 130.0}, bonuses={"bonus:0315": 200.0},
-                            sites={"Rakuten": 55.5}, other=[{"label": "refund", "amount": 3.0, "kind": "income"}],
+                            sites={"Rakuten": 55.5}, other=[{"label": "refund", "amount": 3.0, "kind": "income", "entries": []}],
                             expenses=[{"id": "abc", "date": "2026-02-01", "description": "boxes", "amount": 12.0,
                                        "category": "", "profile": "alpha", "email": "a@b.co",
                                        "receipt": {"url": "https://x"}, "added_at": "2026-09-18"}],
@@ -81,9 +81,10 @@ class TestStorage:
                             sites={"Rakuten": 5.0}, site_entries={"Rakuten": [{"date": "2026-02-02", "amount": 5.0, "note": ""}]})
         save_year(path, 2027, logged)
         assert load_year(path, 2027) == logged
-        programs, sites = tax_inputs.log_entries(load_year(path, 2027), 2027)
+        programs, sites, _bonuses = tax_inputs.log_entries(load_year(path, 2027), 2027)
         assert programs["p"][0]["date"] == "2026-04-02" and sites["Rakuten"][0]["amount"] == 5
-        programs, sites = tax_inputs.log_entries(YearInputs(programs={"q": 7.0}), 2025)  # an older single amount
+        programs, sites, bonuses = tax_inputs.log_entries(YearInputs(programs={"q": 7.0}, bonuses={"bonus:1": 2.0}), 2025)  # an older single amount
+        assert bonuses == {"bonus:1": [{"date": "2025-01-01", "amount": 2, "note": "", "year": "2025", "month": "2025-01", "month_label": "January 2025"}]}
         assert [(e["date"], e["amount"], e["month_label"]) for e in programs["q"]] == [("2025-01-01", 7, "January 2025")] and sites == {}
 
     def test_a_damaged_file_or_entry_reads_as_empty(self, tmp_path):
@@ -109,7 +110,7 @@ class TestStorage:
              "program:a:costco.new.date": "2026-05-05", "program:a:costco.new.amount": "5",
              "site.0.name": "Rakuten", "site.0.amount.new.amount": "2"}, prompts, today="2026-09-18")
         assert programs == {"program:a:costco": 5.0} and sites == {"Rakuten": 2.0}
-        assert other == [{"label": "refund", "amount": 3.0, "kind": "income"}]  # income only
+        assert other == [{"label": "refund", "amount": 3.0, "kind": "income", "entries": []}]  # income only
         with pytest.raises(ValueError, match="Costco Executive — a: not a number"):
             parse_form({"program:a:costco": "lots"}, prompts)
         with pytest.raises(ValueError, match="USB …0315 sign-up bonus: not a number"):
@@ -213,7 +214,7 @@ class TestTaxesPage:
         assert "cashback the program paid this year" not in body
         # the year's cards: 0315 (rows 2, 9), 4331 (rows 3, 4); 4351 is virtual in the settings; row 8 has none
         assert "USB Prime Business …0315" in body and "Amex Business Gold …4331" in body
-        assert 'name="bonus:0315"' in body and "Sign-up Bonus" in body
+        assert 'data-log="bonus:0315"' in body and "Sign-up Bonus" in body  # the bonus is a dated log (2026-09-20)
         assert 'name="fee:0315"' not in body and "Annual Fee" not in body  # a fee is an expense, with a receipt
         assert "Annual fees go in Expenses" in body  # the panel says where they go (shortened 2026-09-19)
         # the Add-an-Expense form is one four-column grid
@@ -242,6 +243,21 @@ class TestTaxesPage:
         bad = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "lots"})
         assert bad.status_code == 200 and "Costco Executive Cashback — alpha: not a number" in bad.text
         assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["programs"] == {"program:alpha:costco": 30.0}
+
+    def test_the_inputs_save_in_place(self, client, tmp_path):
+        """an htmx
+        post answers with the form, the summary out of band and a toast; a refusal the same, 400."""
+        response = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "30"}, headers={"HX-Request": "true"})
+        assert response.status_code == 200
+        body = response.text
+        assert body.startswith('<form method="post" action="/taxes/save" class="tax-form" id="tax-form" hx-post="/taxes/save"') or 'id="tax-form" hx-post="/taxes/save" hx-target="#tax-form" hx-swap="outerHTML"' in body
+        assert '<details class="panel" id="s-schedule-c" open hx-swap-oob="true">' in body and "$30.00" in body
+        assert '<div id="toast" hx-swap-oob="true"><div class="toast ok" role="status">Saved 2026</div></div>' in body
+        assert "<html" not in body and json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["programs"] == {"program:alpha:costco": 30.0}
+        refused = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "lots"}, headers={"HX-Request": "true"})
+        assert refused.status_code == 400 and "Nothing was saved: Costco Executive Cashback — alpha: not a number" in refused.text
+        page = client.get("/taxes", params={"year": "2026"}).text  # the page itself: one summary, one form, a toast slot
+        assert page.count('id="s-schedule-c"') == 1 and page.count('id="tax-form"') == 1 and '<div id="toast"></div>' in page and 'hx-swap-oob' not in page
 
     def test_a_year_with_saved_inputs_stays_on_the_list(self, client):
         """this
@@ -288,6 +304,24 @@ class TestTaxesPage:
         assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["program_entries"] == {}
         bad = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco.new.amount": "lots"})
         assert bad.status_code == 200 and "Costco Executive Cashback — alpha: not a number" in bad.text
+        # a sign-up bonus is the same log, usually one row: the day it was earned
+        response = client.post("/taxes/save", data={
+            "year": "2026", "bonus:0315.new.date": "2026-03-09", "bonus:0315.new.amount": "750", "bonus:0315.new.note": "after $4k"}, follow_redirects=False)
+        assert response.status_code == 303
+        saved = json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]
+        assert saved["bonuses"] == {"bonus:0315": 750.0} and saved["bonus_entries"] == {"bonus:0315": [{"date": "2026-03-09", "amount": 750.0, "note": "after $4k"}]}
+        body = client.get("/taxes", params={"year": "2026"}).text
+        assert 'data-log="bonus:0315"' in body and "<th>Earned</th>" in body and 'name="bonus:0315.0.date" value="2026-03-09"' in body
+        # other income too: each row's amount is a log dated the day it was received
+        response = client.post("/taxes/save", data={
+            "year": "2026", "other.0.label": "refund", "other.0.amount.new.date": "2026-05-05", "other.0.amount.new.amount": "8"}, follow_redirects=False)
+        assert response.status_code == 303
+        saved = json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]
+        assert saved["other"] == [{"label": "refund", "amount": 8.0, "kind": "income", "entries": [{"date": "2026-05-05", "amount": 8.0, "note": ""}]}]
+        body = client.get("/taxes", params={"year": "2026"}).text
+        assert 'data-log="other.0.amount"' in body and "<th>Received</th>" in body and 'name="other.0.amount.0.date" value="2026-05-05"' in body
+        client.post("/taxes/save", data={"year": "2026", "other.0.label": "refund", "other.0.amount": "8"}, follow_redirects=False)  # a plain amount keeps the log
+        assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["other"][0]["entries"] == [{"date": "2026-05-05", "amount": 8.0, "note": ""}]
 
     def test_an_expense_with_an_uploaded_receipt(self, client, tmp_path):
         response = client.post("/taxes/expense", params={"year": "2026"},
