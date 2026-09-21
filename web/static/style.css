@@ -185,7 +185,7 @@ input.month { font: inherit; color: var(--fg); background: var(--card); border: 
 .charts .chart-body { display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1; }
 .charts svg { flex: 1 1 auto; min-width: 0; max-width: 100%; height: auto; }
 .charts .donut svg { flex: 0 0 auto; }
-.charts .legend { flex: 0 0 auto; }
+.charts .legend { flex: 0 1 auto; min-width: 0; }
 .charts .track { stroke: var(--line); }
 .charts a.slice circle, .charts a.slice rect { transition: opacity .12s; }
 .charts a.slice:hover circle, .charts a.slice:hover rect, .charts a.slice:focus circle, .charts a.slice:focus rect { opacity: 0.8; }
@@ -193,7 +193,8 @@ input.month { font: inherit; color: var(--fg); background: var(--card); border: 
 
 
 .charts .legend { list-style: none; margin: 0; padding: 0; font-size: 0.9em; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.charts .legend li { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.charts .legend li { display: flex; align-items: center; gap: 6px; white-space: nowrap; min-width: 0; }
+.charts .legend li a, .charts .legend li > span:not(.swatch):not(.num):not(.small) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .charts .legend .num { min-width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; }
 .charts .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
 .bars text { font-size: 13px; fill: var(--fg); }

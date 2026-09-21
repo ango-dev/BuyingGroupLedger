@@ -822,3 +822,25 @@ def test_the_dark_theme_keeps_filled_controls_and_grid_lines_readable(served, pa
     assert page.evaluate(
         "getComputedStyle(document.querySelector('th.sel-col')).color") == "rgb(255, 255, 255)"
     assert page.errors == []
+
+
+def test_the_chart_legends_stay_inside_their_cards_on_a_phone(served, phone):
+    """2026-09-21: at 360px the donut legends' nowrap entries overflowed the card's right edge
+    ("Amazon Business  1  11%" clipped outside Rows by Retailer). The legend shrinks and the
+    label ellipsizes; the counts and percents stay whole."""
+    phone.goto(f"{served}/")
+    phone.wait_for_selector(".charts figure")
+    overflow = phone.evaluate(
+        """(() => {
+             const out = [];
+             for (const fig of document.querySelectorAll('.charts figure')) {
+               const edge = fig.getBoundingClientRect().right;
+               for (const li of fig.querySelectorAll('.legend li'))
+                 if (li.getBoundingClientRect().right > edge + 0.5)
+                   out.push(fig.getAttribute('aria-label') + ': ' + li.textContent.trim());
+             }
+             return out;
+           })()""")
+    assert overflow == [], overflow
+    assert phone.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+    assert phone.errors == []
