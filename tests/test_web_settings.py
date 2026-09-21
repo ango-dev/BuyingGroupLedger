@@ -619,6 +619,17 @@ class TestEntryCards:
         body = client.get("/settings").text
         assert 'value="woot" data-text="Woot" checked>' in body and "Amazon, Woot 5% up to 1,000" in body
 
+    def test_rates_stored_as_fractions_read_as_percents(self, client, config):
+        """the page shows a percent however the file spells it."""
+        config(cards=[{"last4": "0315", "name": "USB Prime Business", "cashback_rate": 0.02,
+                       "retailer_rates": {"Amazon": 0.05, "Best Buy": "3%"},
+                       "caps": [{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": 0.015}]}])
+        body = client.get("/settings").text
+        assert 'name="cashback_rate" value="2%"' in body and 'name="rr.0.rate" value="5%"' in body
+        assert 'name="rr.0.fallback_rate" value="1.5%"' in body and 'name="rr.1.rate" value="3%"' in body
+        assert '<span class="chip">2%</span>' in body and "Amazon 5% up to 1,000 then 1.5%" in body
+        assert settings_form._rate_text("junk") == "junk" and settings_form._rate_text("") == ""
+
     def test_the_outside_spend_log_round_trips_through_its_rows(self, client):
         """the dated log -- add, take back, remove; the period's total on the summary."""
         response = client.post("/settings/section/cards/entry", data={
@@ -648,9 +659,13 @@ class TestEntryCards:
         # three months: a fold per month with its subtotal, newest first
         start = body.index('data-log="cap_all.os"', body.index('data-key="cards:1234"'))  # Aven's log, not the first card's
         log = body[start:body.index('name="cap_all.os.new.date"', start)]
-        assert log.count('<tr class="month"') == 3 and log.index('data-month="2026-09"') < log.index('data-month="2026-02"') < log.index('data-month="2025-12"')
+        assert log.count('<tr class="month') == 3 and log.index('data-month="2026-09"') < log.index('data-month="2026-02"') < log.index('data-month="2025-12"')
         assert 'September 2026<span class="sum">-$500.00</span>' in log and 'February 2026<span class="sum">$4,000.00</span>' in log
         assert '<tr class="entry" data-month="2026-02">' in log
+        # and two years: a fold per year above the months
+        assert log.count('<tr class="year"') == 2 and log.index('data-year="2026" title') < log.index('data-year="2025" title')
+        assert '2026<span class="sum">$3,500.00</span>' in log and '2025<span class="sum">$100.00</span>' in log
+        assert '<tr class="month under" data-month="2026-09" data-year="2026"' in log
         response = client.post("/settings/section/cards/entry/1", data={
             "name": "Aven", "last4": "1234", "cap_all.spend_limit": "25000", "cap_all.resets": "calendar-year",
             "cap_all.os.0.date": "2026-09-17", "cap_all.os.0.amount": "-500", "cap_all.os.0.remove": "on",

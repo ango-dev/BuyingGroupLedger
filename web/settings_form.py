@@ -566,12 +566,12 @@ def display_entries(path: str, today: str | None = None) -> list[dict]:
             caps = [c for c in (entry.get("caps") or []) if isinstance(c, dict)]
             out.append({
                 "index": index, "last4": entry.get("last4", ""), "name": entry.get("name", ""),
-                "cashback_rate": entry.get("cashback_rate", ""),
+                "cashback_rate": _rate_text(entry.get("cashback_rate", "")),
                 "profile": entry.get("profile", ""),
                 "virtual": bool(entry.get("virtual")) or bool(entry.get("virtual_of")),
                 "virtual_of": str(entry.get("virtual_of") or ""),
                 "own_bonus": bool(entry.get("own_bonus")),
-                "retailer_rates": list((entry.get("retailer_rates") or {}).items()),
+                "retailer_rates": [(r, _rate_text(v)) for r, v in (entry.get("retailer_rates") or {}).items()],
                 "caps": [_cap_display(c, today) for c in caps],
                 "rate_rows": _rate_rows(entry.get("retailer_rates") or {}, caps, today),
                 "cap_all": next(({**_cap_display(c, today), "cap_index": j} for j, c in enumerate(caps) if not c.get("retailers")), _cap_display({}, today)),
@@ -584,7 +584,7 @@ def _rate_rows(retailer_rates: dict, caps: list, today: str | None = None) -> li
     rate and the allowance), then a row per retailer rate without a cap."""
     from models.card import normalize_retailer
 
-    by_key = {normalize_retailer(str(r)): (r, rate) for r, rate in retailer_rates.items()}
+    by_key = {normalize_retailer(str(r)): (r, _rate_text(rate)) for r, rate in retailer_rates.items()}
     rows, covered = [], set()
     for cap_index, cap in enumerate(caps):
         retailers = cap.get("retailers") or []
@@ -641,7 +641,7 @@ def _cap_display(cap: dict, today: str | None = None) -> dict:
     return {
         "retailers": ", ".join(str(r) for r in retailers),
         "spend_limit": plain(cap.get("spend_limit", "")),
-        "fallback_rate": cap.get("fallback_rate", ""),
+        "fallback_rate": _rate_text(cap.get("fallback_rate", "")),
         "resets": "anniversary" if anniversary else resets,
         "anniversary": anniversary,
         "outside_entries": amount_log.display(entries),
@@ -665,6 +665,15 @@ def _secret(form: Mapping[str, str], name: str, stored) -> str:
         return ""
     typed = str(form.get(name, "") or "")
     return typed.strip() if typed.strip() else str(stored or "")
+
+
+def _rate_text(value) -> str:
+    """A stored rate as the page shows it: a percent, however the file spells it. Anything the
+    normaliser cannot read is shown as stored."""
+    if value is None or value == "":
+        return ""
+    shown = _rate_value(str(value))
+    return shown if isinstance(shown, str) else str(value)
 
 
 def _rate_value(text: str):

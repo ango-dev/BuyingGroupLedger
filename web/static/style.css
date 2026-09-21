@@ -760,7 +760,7 @@ details.multi.inline summary { flex-direction: row; align-items: center; gap: 6p
 .entry-card .fgrid .lbl details.multi.field summary { gap: 0; }
 .entry-card details.multi.field .summary-text { font-size: 1em; width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: 6px; }
 table.activity { width: 100%; min-width: 880px; table-layout: fixed; }
-table.activity col.c-when { width: 150px; } table.activity col.c-type { width: 130px; } table.activity col.c-run { width: 170px; }
+table.activity col.c-num { width: 40px; } table.activity col.c-when { width: 150px; } table.activity col.c-type { width: 130px; } table.activity col.c-run { width: 170px; }
 table.activity col.c-act { width: 250px; }
 table.activity td, table.activity th { overflow-wrap: anywhere; }
 table.activity th.col-act { cursor: default; padding-right: 6px; }  /* the buttons' column: nothing to sort */
@@ -1228,11 +1228,11 @@ main .setup-steps + h1 { margin-top: 6px; }
   table.expenses.stacked tbody td[data-field="receipt_url"]::before { content: "Receipt"; }
   table.expenses.stacked tbody td[data-field="amount"]::before { content: "Amount"; }
   /* the activity table */
-  table.activity.stacked tbody tr:not(.details-row) td:nth-child(1)::before { content: "When"; }
-  table.activity.stacked tbody tr:not(.details-row) td:nth-child(2)::before { content: "Type"; }
-  table.activity.stacked tbody tr:not(.details-row) td:nth-child(3)::before { content: "Run"; }
-  table.activity.stacked tbody tr:not(.details-row) td:nth-child(4)::before { content: "What happened"; }
-  table.activity.stacked tbody tr:not(.details-row) td:nth-child(5)::before { content: none; }
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(2)::before { content: "When"; }
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(3)::before { content: "Type"; }
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(4)::before { content: "Run"; }
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(5)::before { content: "What happened"; }
+  table.activity.stacked tbody tr:not(.details-row) td:nth-child(6)::before { content: none; }
   table.activity.stacked tbody td.when { font-size: 0.85em; }
   table.activity.stacked tbody tr.details-row { display: block; }
   table.activity.stacked tbody tr.details-row[hidden] { display: none; }
@@ -1253,8 +1253,13 @@ details.log .summary-value { font-variant-numeric: tabular-nums; }
 details.log tr.month td { padding: 8px 4px 2px; font-weight: 600; color: var(--muted); cursor: pointer; white-space: nowrap; }
 details.log tr.month td .caret { display: inline-block; width: 1em; }
 details.log tr.month td .sum { float: right; font-weight: 500; font-variant-numeric: tabular-nums; margin-left: 12px; }
-details.log tr.month.folded td .caret { transform: rotate(-90deg); }
-details.log tr.entry[hidden] { display: none; }
+details.log tr.month.folded td .caret, details.log tr.year.folded td .caret { transform: rotate(-90deg); }
+details.log tr.entry[hidden], details.log tr.month[hidden] { display: none; }
+/* the year folds above the months: a shade stronger, the months stepped in under them */
+details.log tr.year td { padding: 10px 4px 2px; font-weight: 700; color: var(--fg); cursor: pointer; white-space: nowrap; border-top: 1px solid var(--line); }
+details.log tr.year td .caret { display: inline-block; width: 1em; }
+details.log tr.year td .sum { float: right; font-weight: 500; font-variant-numeric: tabular-nums; margin-left: 12px; }
+details.log tr.month.under td { padding-left: 1.2em; }
 details.log .caret { color: var(--muted); flex: 0 0 auto; }
 /* the menu is FIXED and placed by edit.js: a rates table that scrolls sideways on a phone, or a
    cell at the page's right edge, would otherwise clip it (an overflow container clips absolute menus) */

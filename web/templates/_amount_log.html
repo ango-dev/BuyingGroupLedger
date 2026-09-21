@@ -5,20 +5,26 @@
     rows post as `<prefix>.<i>.date|amount|note|remove` and `<prefix>.new.*`; edit.js keeps the total
     live, grows a fresh row once the new one has an amount, and closes the log on an outside click.
     Not `details.multi`: the dropdown handler in edit.js would rewrite the summary. -#}
-{% macro amount_log(prefix, entries, total, today, period_start='', period_end='') -%}
+{% macro amount_log(prefix, entries, total, today, period_start='', period_end='', by_years=true) -%}
 <details class="log" data-log="{{ prefix }}" data-period-start="{{ period_start }}" data-period-end="{{ period_end }}">
   <summary title="{{ 'the total for ' ~ period_start ~ ' to ' ~ period_end ~ '; open the log to add or take back' if period_start else 'the total; open the log to add or take back' }}"><span class="summary-text"><span class="summary-value">{{ '-' if total < 0 }}${{ '{:,.2f}'.format(total | abs) }}</span><span class="caret">▾</span></span></summary>
   <div class="menu">
     <table class="log-table">
       <thead><tr><th>Date</th><th>Amount</th><th>Note</th><th></th></tr></thead>
       <tbody>
-      {#- once the entries span more than one month, a fold per month with its subtotal; the rows are newest first, so the folds are too -#}
+      {#- once the entries span more than one month, a fold per month with its subtotal, and once they span more than one year, a fold per year above those; the rows are newest first, so the folds are too -#}
       {% set months = entries | map(attribute='month') | unique | list %}
+      {% set years = entries | map(attribute='year') | unique | list %}
       {% set grouped = months | length > 1 %}
+      {% set by_year = by_years and years | length > 1 %}{# the Taxes page is one year already: cards only #}
       {% for e in entries %}
+      {% if by_year and (loop.first or e.year != loop.previtem.year) %}
+      {% set ys = namespace(sum=0) %}{% for m in entries if m.year == e.year %}{% set ys.sum = ys.sum + (m.amount | float) %}{% endfor %}
+      <tr class="year" data-year="{{ e.year }}" title="fold this year"><td colspan="4"><span class="caret">▾</span>{{ e.year }}<span class="sum">{{ '-' if ys.sum < 0 }}${{ '{:,.2f}'.format(ys.sum | abs) }}</span></td></tr>
+      {% endif %}
       {% if grouped and (loop.first or e.month != loop.previtem.month) %}
       {% set ns = namespace(sum=0) %}{% for m in entries if m.month == e.month %}{% set ns.sum = ns.sum + (m.amount | float) %}{% endfor %}
-      <tr class="month" data-month="{{ e.month }}" title="fold this month"><td colspan="4"><span class="caret">▾</span>{{ e.month_label }}<span class="sum">{{ '-' if ns.sum < 0 }}${{ '{:,.2f}'.format(ns.sum | abs) }}</span></td></tr>
+      <tr class="month{{ ' under' if by_year }}" data-month="{{ e.month }}" data-year="{{ e.year }}" title="fold this month"><td colspan="4"><span class="caret">▾</span>{{ e.month_label }}<span class="sum">{{ '-' if ns.sum < 0 }}${{ '{:,.2f}'.format(ns.sum | abs) }}</span></td></tr>
       {% endif %}
       <tr class="entry" data-month="{{ e.month }}">
         <td><input type="text" name="{{ prefix }}.{{ loop.index0 }}.date" value="{{ e.date }}" data-date autocomplete="off" placeholder="YYYY-MM-DD" class="mono date"></td>

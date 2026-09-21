@@ -243,6 +243,14 @@ class TestTaxesPage:
         assert bad.status_code == 200 and "Costco Executive Cashback — alpha: not a number" in bad.text
         assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["programs"] == {"program:alpha:costco": 30.0}
 
+    def test_a_year_with_saved_inputs_stays_on_the_list(self, client):
+        """this
+        year is always offered; a year with saved inputs but no rows stays too."""
+        assert 'href="/taxes?year=2026"' in client.get("/taxes").text
+        assert 'href="/taxes?year=2023"' not in client.get("/taxes").text
+        client.post("/taxes/save", data={"year": "2023", "site.0.name": "Rakuten", "site.0.amount": "5"}, follow_redirects=False)
+        assert 'href="/taxes?year=2023"' in client.get("/taxes").text
+
     def test_the_amounts_keep_a_dated_log(self, client, tmp_path):
         """program cashback and cashback sites change often -- a log of what was
         added or taken back and when, the total kept for the summary."""

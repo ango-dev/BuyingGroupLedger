@@ -15,7 +15,7 @@
 <table class="grid compact activity sheetlike stacked">
   {#- Fixed columns: the widths are the stylesheet's, not the rows', so a search or a filter never
       reflows them. -#}
-  <colgroup><col class="c-when"><col class="c-type"><col class="c-run"><col class="c-what"><col class="c-act"></colgroup>
+  <colgroup><col class="c-num"><col class="c-when"><col class="c-type"><col class="c-run"><col class="c-what"><col class="c-act"></colgroup>
   <thead>
     <tr><th class="rownum" title="select every cell">#</th>{{ sort_th(filters, 'at', 'When') }}{{ sort_th(filters, 'kind', 'Type') }}{{ sort_th(filters, 'run', 'Run') }}{{ sort_th(filters, 'summary', 'What happened') }}<th class="col-act"></th></tr>
   </thead>

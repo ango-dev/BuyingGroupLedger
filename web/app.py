@@ -599,8 +599,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         / "data" / tax_inputs.FILE_NAME
 
     def tax_years(snapshot) -> list[int]:
-        """Every year the ledger touches (by Order Date or Payout Date) plus this one, newest first."""
-        years = {clock().year}
+        """Every year the ledger touches (by Order Date or Payout Date), every year with saved
+        inputs, and this one, newest first -- a new year appears on its own on January 1."""
+        years = {clock().year} | set(tax_inputs.load_all(tax_inputs_path))
         for row in snapshot.rows:
             for name in ("order_date", "payout_date"):
                 text = row.text(name)[:4]

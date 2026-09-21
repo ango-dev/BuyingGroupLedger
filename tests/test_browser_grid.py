@@ -727,6 +727,7 @@ def test_the_dated_log_totals_live_grows_a_row_and_saves(served, page):
     # the menu stays inside the window: at a phone width the rates table scrolls sideways and would
     # clip an absolute menu; at the page's right edge it would run off it
     page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(150)  # the layout settles before the menu is placed
     log = page.locator("#s-cards details.entry-card").first.locator("details.log[data-log='cap_all.os']")
     log.scroll_into_view_if_needed()
     log.locator("summary").click()

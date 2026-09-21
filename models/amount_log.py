@@ -137,7 +137,7 @@ def parse(form: Mapping, prefix: str, today: str | None = None) -> list[dict]:
 
 def display(entries) -> list[dict]:
     """The rows the widget shows: newest first, amounts as typed-looking numbers (4000, 12.5),
-    each with its month ("2026-09") and the month's name, for the widget's month folds."""
+    each with its year, its month ("2026-09") and the month's name, for the widget's folds."""
     out = []
     for e in sorted(entries or [], key=lambda e: str(e.get("date") or ""), reverse=True):
         amount = e.get("amount", "")
@@ -145,7 +145,7 @@ def display(entries) -> list[dict]:
             amount = int(amount)
         when = str(e.get("date") or "")
         out.append({"date": when, "amount": amount, "note": str(e.get("note") or ""),
-                    "month": when[:7], "month_label": month_label(when[:7])})
+                    "year": when[:4], "month": when[:7], "month_label": month_label(when[:7])})
     return out
 
 

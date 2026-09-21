@@ -109,7 +109,7 @@
     <table class="entry-table"><thead><tr><th>Program</th><th>Cashback</th></tr></thead><tbody>
       {% for p in program_prompts %}
       <tr><td>{{ p.label }}</td>
-          <td class="narrow">{{ amount_log(p.key, program_logs.get(p.key, []), inputs.programs.get(p.key, 0), today) }}</td></tr>
+          <td class="narrow">{{ amount_log(p.key, program_logs.get(p.key, []), inputs.programs.get(p.key, 0), today, by_years=false) }}</td></tr>
       {% endfor %}
     </tbody></table>
     {% else %}<p class="muted small">No profiles with a Costco, Amazon or Amazon Business login in config.json, so nothing to ask.</p>{% endif %}
@@ -132,10 +132,10 @@
     <table class="entry-table"><thead><tr><th>Site</th><th>Cashback</th></tr></thead><tbody>
       {% for name in site_names %}
       <tr><td><input type="text" name="site.{{ loop.index0 }}.name" value="{{ name }}"></td>
-          <td class="narrow">{{ amount_log('site.' ~ loop.index0 ~ '.amount', site_logs.get(name, []), inputs.sites.get(name, 0), today) }}</td></tr>
+          <td class="narrow">{{ amount_log('site.' ~ loop.index0 ~ '.amount', site_logs.get(name, []), inputs.sites.get(name, 0), today, by_years=false) }}</td></tr>
       {% endfor %}
       <tr class="new-row"><td><input type="text" name="site.{{ site_names | length }}.name" placeholder="another site"></td>
-          <td class="narrow">{{ amount_log('site.' ~ (site_names | length) ~ '.amount', [], 0, today) }}</td></tr>
+          <td class="narrow">{{ amount_log('site.' ~ (site_names | length) ~ '.amount', [], 0, today, by_years=false) }}</td></tr>
     </tbody></table>
   </details>
 

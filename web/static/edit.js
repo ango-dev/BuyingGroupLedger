@@ -1446,9 +1446,28 @@
     });
     var out = details.querySelector(".summary-value");
     if (out) out.textContent = money(sum);
+    var byYear = {};
+    Object.keys(byMonth).forEach(function (month) { byYear[month.slice(0, 4)] = (byYear[month.slice(0, 4)] || 0) + byMonth[month]; });
     details.querySelectorAll("tr.month").forEach(function (tr) {  // the month folds' subtotals
       var cell = tr.querySelector(".sum");
       if (cell) cell.textContent = money(byMonth[tr.dataset.month] || 0);
+    });
+    details.querySelectorAll("tr.year").forEach(function (tr) {  // and the years'
+      var cell = tr.querySelector(".sum");
+      if (cell) cell.textContent = money(byYear[tr.dataset.year] || 0);
+    });
+  }
+  function applyFolds(details) {  // a folded year hides its months and entries; a folded month its entries
+    var years = {}, months = {};
+    details.querySelectorAll("tr.year.folded").forEach(function (tr) { years[tr.dataset.year] = true; });
+    details.querySelectorAll("tr.month").forEach(function (tr) {
+      tr.hidden = !!years[tr.dataset.year];
+      if (tr.classList.contains("folded")) months[tr.dataset.month] = true;
+    });
+    details.querySelectorAll("tr.entry").forEach(function (tr) {
+      if (tr.classList.contains("new")) return;
+      var month = tr.dataset.month || "";
+      tr.hidden = !!(years[month.slice(0, 4)] || months[month]);
     });
   }
   function grow(details, tr) {
@@ -1481,12 +1500,10 @@
   });
   document.addEventListener("click", function (e) {
     if (e.target.closest && e.target.closest(".pop")) return;  // the calendar serving a date box
-    var fold = e.target.closest ? e.target.closest("details.log tr.month") : null;
-    if (fold) {  // a month's row folds its entries away and back
-      var folded = fold.classList.toggle("folded"), month = fold.dataset.month;
-      fold.closest("details.log").querySelectorAll("tr.entry").forEach(function (tr) {
-        if (tr.dataset.month === month && !tr.classList.contains("new")) tr.hidden = folded;
-      });
+    var fold = e.target.closest ? e.target.closest("details.log tr.month, details.log tr.year") : null;
+    if (fold) {  // a month's or a year's row folds what is under it away and back
+      fold.classList.toggle("folded");
+      applyFolds(fold.closest("details.log"));
       return;
     }
     document.querySelectorAll("details.log[open]").forEach(function (d) {
