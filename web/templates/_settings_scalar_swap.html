@@ -4,4 +4,4 @@
 {% include "_scalar_form.html" %}
 {% include "_savebar.html" %}
 <div id="restart-banner" hx-swap-oob="true">{% include "_restart_banner.html" %}</div>
-<div id="toast" hx-swap-oob="true">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif errors %}<div class="toast warn" role="alert">Nothing was saved: {{ errors[0] }}</div>{% endif %}</div>
+<div id="toast" hx-swap-oob="innerHTML">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif errors %}<div class="toast warn" role="alert">Nothing was saved: {{ errors[0] }}</div>{% endif %}</div>

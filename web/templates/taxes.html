@@ -11,7 +11,7 @@
 <h1>Taxes</h1>
 {% if notice %}<div class="banner ok">{{ notice }}</div>{% endif %}
 {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 {#- a div, not a <p>: a <form> inside a <p> closes it, and the forms fell out of the row -#}
 <div class="muted tax-years">Tax year:

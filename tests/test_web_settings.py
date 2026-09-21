@@ -563,7 +563,7 @@ class TestEntryCards:
         assert saved.text.lstrip().startswith('<details class="entry-card" data-key="cards:0315"')  # that card alone (2026-09-20)
         assert 'data-key="cards:0315" open>' in saved.text
         # the outcome is a notification from the top (out of band), not a banner in the section
-        assert '<div id="toast" hx-swap-oob="true"><div class="toast ok" role="status">Saved card USB Prime Business' in saved.text
+        assert '<div id="toast" hx-swap-oob="innerHTML"><div class="toast ok" role="status">Saved card USB Prime Business' in saved.text
         assert 'class="banner ok' not in saved.text.split('id="toast"')[0]
         assert config_value("cards")[0]["cashback_rate"] == "5%"
         # a spend limit with no fallback is fine: the everywhere-else rate applies past it

@@ -4,7 +4,7 @@
 {% block title %}Settings{% endblock %}
 {% block content %}
 <h1>Settings</h1>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 {% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
 <div id="restart-banner">{% include "_restart_banner.html" %}</div>
 {% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}

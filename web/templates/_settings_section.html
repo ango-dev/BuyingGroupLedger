@@ -6,4 +6,4 @@
 {% from "_settings_macros.html" import profile_fields, warehouse_fields, card_fields, entry_summary, entry_section with context %}
 {% set fields = {'profiles': profile_fields, 'warehouses': warehouse_fields, 'cards': card_fields}[path] %}
 {{ entry_section(path, singular, items, fields, section_errors=section_errors) }}
-<div id="toast" hx-swap-oob="true">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif section_errors %}<div class="toast warn" role="alert">Nothing was saved: {{ section_errors[0] }}</div>{% endif %}</div>
+<div id="toast" hx-swap-oob="innerHTML">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif section_errors %}<div class="toast warn" role="alert">Nothing was saved: {{ section_errors[0] }}</div>{% endif %}</div>

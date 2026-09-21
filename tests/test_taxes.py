@@ -252,12 +252,13 @@ class TestTaxesPage:
         body = response.text
         assert body.startswith('<form method="post" action="/taxes/save" class="tax-form" id="tax-form" hx-post="/taxes/save"') or 'id="tax-form" hx-post="/taxes/save" hx-target="#tax-form" hx-swap="outerHTML"' in body
         assert '<details class="panel" id="s-schedule-c" open hx-swap-oob="true">' in body and "$30.00" in body
-        assert '<div id="toast" hx-swap-oob="true"><div class="toast ok" role="status">Saved 2026</div></div>' in body
+        # innerHTML swap: the announcement lands INSIDE the page's persistent live region (2026-09-21)
+        assert '<div id="toast" hx-swap-oob="innerHTML"><div class="toast ok" role="status">Saved 2026</div></div>' in body
         assert "<html" not in body and json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2026"]["programs"] == {"program:alpha:costco": 30.0}
         refused = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "lots"}, headers={"HX-Request": "true"})
         assert refused.status_code == 400 and "Nothing was saved: Costco Executive Cashback — alpha: not a number" in refused.text
         page = client.get("/taxes", params={"year": "2026"}).text  # the page itself: one summary, one form, a toast slot
-        assert page.count('id="s-schedule-c"') == 1 and page.count('id="tax-form"') == 1 and '<div id="toast"></div>' in page and 'hx-swap-oob' not in page
+        assert page.count('id="s-schedule-c"') == 1 and page.count('id="tax-form"') == 1 and '<div id="toast" role="status" aria-live="polite"></div>' in page and 'hx-swap-oob' not in page
 
     def test_an_expense_adds_in_place(self, client, tmp_path):
         """the expense add posts in place -- the panel, the summary and a toast; a refusal keeps what was typed."""

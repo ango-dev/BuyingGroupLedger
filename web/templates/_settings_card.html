@@ -9,4 +9,4 @@
     the count changes (the card itself is deleted by the swap) -#}
 {% if count is defined %}<span class="muted small" id="count-{{ path }}" hx-swap-oob="true">{{ count }}</span>{% endif %}
 {% if reset_add %}{{ add_card(path, singular, fields, '/settings/section/' ~ path, true, false, true) }}{% endif %}
-<div id="toast" hx-swap-oob="true">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif card_errors %}<div class="toast warn" role="alert">Nothing was saved: {{ card_errors[0] }}</div>{% endif %}</div>
+<div id="toast" hx-swap-oob="innerHTML">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif card_errors %}<div class="toast warn" role="alert">Nothing was saved: {{ card_errors[0] }}</div>{% endif %}</div>

@@ -3,4 +3,4 @@
 {% include "_tax_expenses.html" %}
 {% set oob = true %}
 {% include "_tax_summary.html" %}
-<div id="toast" hx-swap-oob="true">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif error %}<div class="toast warn" role="alert">Nothing was added: {{ error }}</div>{% endif %}</div>
+<div id="toast" hx-swap-oob="innerHTML">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif error %}<div class="toast warn" role="alert">Nothing was added: {{ error }}</div>{% endif %}</div>

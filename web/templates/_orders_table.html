@@ -3,8 +3,8 @@
    editable cell is a <td class="edit"> the inline editor (static/edit.js) posts to /orders/cell.
    SELECTION is Sheets-style: the row-number cell is the row's handle (click, shift-click a range,
    click the # header for all); the hidden checkbox inside it is what the #bulk form posts. #}
-{% if notice %}<div class="banner ok">{{ notice }}</div>{% endif %}
-{% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
+{% if notice %}<div class="banner ok" role="status">{{ notice }}</div>{% endif %}
+{% if error %}<div class="banner warn" role="alert">{{ error }}</div>{% endif %}
 {#- The how-it-works prose sits behind the hint pill's tooltip, on the right; the counter and the keep-my-edits switch stay in view. -#}
 {#- A div, not a <p>: the hidden hint blocks are divs, and a <p> would close before them, dropping
     the pill out of the line (it drifted left). -#}
