@@ -248,9 +248,15 @@ class TestTheRoutes:
         assert 'href="/tools/import"' in panel and 'href="/tools?tool=run_once"' in panel
         assert 'href="/tools?tool=profile" class="current"' in panel  # the default pick is marked
         assert "Pick a tool from the" not in body  # the old pointer sentence is gone
+        # the groups fold: the everyday three open by default, the rarer ones take a click
+
+        assert panel.count('<details class="tool-group" open>') == 3
+        assert panel.count('<details class="tool-group">') == 3  # Checks / Ledger Fixes / Config
         picked = client.get("/tools", params={"tool": "backfill_tracking"}).text
         panel = picked[picked.index('id="t-all-tools"'):picked.index("</section>", picked.index('id="t-all-tools"'))]
         assert 'href="/tools?tool=backfill_tracking" class="current"' in panel
+        # a fold holding the shown tool opens itself: Ledger Fixes joins the three defaults
+        assert panel.count('<details class="tool-group" open>') == 4
 
     def test_running_a_tool_records_it_and_shows_its_output(self, client):
         response = client.post("/tools/run/preflight", data={"--strict": "on"}, follow_redirects=False)

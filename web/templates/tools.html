@@ -84,15 +84,18 @@
 {# ---- All Tools: the page's own directory, the same tools and groups as the header menu ---- #}
 <section class="panel tool-card" id="t-all-tools">
   <header><h2>All Tools</h2></header>
+  {#- Each group folds; the everyday ones (Import, Run, Accounts) open by default, the rarer
+      Checks / Ledger Fixes / Config take one deliberate click -- the Settings Advanced idiom.
+     A group holding the tool on show opens regardless. -#}
   <div class="tool-dir">
     {% for group, items in nav_tools() %}
-    <div class="tool-group">
-      <h3>{{ group }}</h3>
+    <details class="tool-group"{% if group in ('Import', 'Run', 'Accounts') or (items | selectattr(0, 'equalto', selected) | list) %} open{% endif %}>
+      <summary><h3>{{ group }}</h3></summary>
       {% for key, title in items %}
       {% if key == 'import' %}<a href="/tools/import">{{ title }}</a>
       {% else %}<a href="/tools?tool={{ key }}" class="{{ 'current' if key == selected }}">{{ title }}</a>{% endif %}
       {% endfor %}
-    </div>
+    </details>
     {% endfor %}
   </div>
 </section>

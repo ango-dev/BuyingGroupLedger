@@ -830,9 +830,18 @@ header nav details.nav-menu .menu a:hover { background: var(--bg); }
 header nav details.nav-menu .menu a.current { color: var(--accent); font-weight: 600; }
 .session-panel { border-color: var(--accent); }
 /* All Tools: the landing page's own directory of the header menu's groups (2026-09-21) */
-.tool-dir { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px 20px; }
-.tool-dir .tool-group { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.tool-dir h3 { margin: 0 0 2px; font-size: 0.82em; color: var(--muted); font-weight: 600; }
+.tool-dir { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 20px; align-items: start; }
+/* each group folds (Import / Run / Accounts open by default; a fold opens itself when it holds
+   the tool on show) -- the caret is the entry cards' */
+.tool-dir details.tool-group { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tool-dir details.tool-group > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 2px 0; border-radius: var(--r-1); }
+.tool-dir details.tool-group > summary::-webkit-details-marker { display: none; }
+.tool-dir details.tool-group > summary::before { content: "▸"; color: var(--muted); font-size: 0.75em; width: 1em; flex: 0 0 auto; }
+.tool-dir details.tool-group[open] > summary::before { content: "▾"; }
+.tool-dir details.tool-group > summary:hover h3 { color: var(--fg); }
+.tool-dir details.tool-group[open] > :not(summary) { animation: fade-in var(--enter) var(--ease) backwards; }
+.tool-dir h3 { display: inline; margin: 0; font-size: 0.82em; color: var(--muted); font-weight: 600; }
+.tool-dir details.tool-group a { margin-left: calc(1em + 6px - 8px); }
 .tool-dir a { color: var(--fg); padding: 3px 8px; margin-left: -8px; border-radius: var(--r-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-dir a:hover { background: var(--bg); color: var(--accent); text-decoration: none; }
 .tool-dir a.current { color: var(--accent); font-weight: 600; }
