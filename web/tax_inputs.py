@@ -283,24 +283,37 @@ def other_logs(inputs: YearInputs, year: int) -> list[list[dict]]:
             for o in inputs.other]
 
 
-def _logged(form: Mapping[str, str], key: str, today: str | None) -> tuple[float | None, list[dict] | None]:
+def log_default_date(year: int, today: str) -> str:
+    """The date a log's new row starts with on a year's page: today when today falls in the year,
+    else the year's last day."""
+    return today if str(today or "").startswith(str(int(year))) else f"{int(year)}-12-31"
+
+
+def _logged(form: Mapping[str, str], key: str, today: str | None, year: int | None = None) -> tuple[float | None, list[dict] | None]:
     """A prompt's or site's amount as posted: the dated log's rows when the widget posted them
-    (its total, the entries), else the plain amount (the entries None: whoever saves decides)."""
+    (its total, the entries), else the plain amount (the entries None: whoever saves decides).
+    On a year's page every entry must fall in that year: one outside it raises ValueError naming the date."""
     if amount_log.has_fields(form, key):
         entries = amount_log.parse(form, key, today=today)
+        if year is not None:
+            for e in entries:
+                if not e["date"].startswith(str(int(year))):
+                    raise ValueError(f"{e['date']} is not in {int(year)}")
         return (amount_log.total(entries) if entries else None), entries
     return _amount(form.get(key)), None
 
 
-def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None = None) -> tuple[dict, dict, dict, list, str]:
+def parse_form(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None = None, year: int | None = None) -> tuple[dict, dict, dict, list, str]:
     """The save form's amounts -> (programs, bonuses, sites, other, notes). A blank amount
     is "none"; a bad one raises ValueError naming the field. The expense list is not on this form
     (it has its own add / delete routes) and is left as stored. The open list is income only.
     A program's or site's amount may arrive as the dated log's rows (`_logged`)."""
-    return _parse(form, prompts, today)[:5]
+    return _parse(form, prompts, today, year)[:5]
 
 
-def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None = None) -> tuple:
+def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None = None, year: int | None = None) -> tuple:
+    if year is not None:
+        today = log_default_date(year, today or f"{int(year)}-12-31")  # a blank date lands in the year
     errors: list[str] = []
     programs: dict[str, float] = {}
     bonuses: dict[str, float] = {}
@@ -313,9 +326,9 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
         if p.kind == "card":
             key = f"bonus:{p.last4}"
             try:
-                value, entries = _logged(form, key, today)
-            except ValueError:
-                errors.append(f"{p.label} sign-up bonus: not a number")
+                value, entries = _logged(form, key, today, year)
+            except ValueError as exc:
+                errors.append(f"{p.label} sign-up bonus: {exc if 'not in' in str(exc) else 'not a number'}")
                 continue
             if value is not None:
                 bonuses[key] = value
@@ -323,9 +336,9 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
                     bonus_entries[key] = entries
             continue
         try:
-            value, entries = _logged(form, p.key, today)
-        except ValueError:
-            errors.append(f"{p.label}: not a number")
+            value, entries = _logged(form, p.key, today, year)
+        except ValueError as exc:
+            errors.append(f"{p.label}: {exc if 'not in' in str(exc) else 'not a number'}")
             continue
         if value is not None:
             programs[p.key] = value
@@ -336,9 +349,9 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
         if not name:
             continue
         try:
-            value, entries = _logged(form, f"site.{i}.amount", today)
-        except ValueError:
-            errors.append(f"{name}: not a number")
+            value, entries = _logged(form, f"site.{i}.amount", today, year)
+        except ValueError as exc:
+            errors.append(f"{name}: {exc if 'not in' in str(exc) else 'not a number'}")
             continue
         if value is not None:
             sites[name] = value
@@ -349,9 +362,9 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
         if not label:
             continue
         try:
-            value, entries = _logged(form, f"other.{i}.amount", today)
-        except ValueError:
-            errors.append(f"{label}: not a number")
+            value, entries = _logged(form, f"other.{i}.amount", today, year)
+        except ValueError as exc:
+            errors.append(f"{label}: {exc if 'not in' in str(exc) else 'not a number'}")
             continue
         other.append({"label": label, "amount": value or 0.0, "kind": "income", "entries": entries or []})
     if errors:
@@ -359,11 +372,12 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
     return programs, bonuses, sites, other, str(form.get("notes") or "").strip(), program_entries, site_entries, bonus_entries
 
 
-def apply_form(inputs: YearInputs, form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None = None) -> YearInputs:
+def apply_form(inputs: YearInputs, form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None = None,
+               year: int | None = None) -> YearInputs:
     """The saved year: the form's amounts, the expense list as stored. A key posted as the dated
     log keeps those entries; one posted as a plain amount keeps its stored log while the total is
     unchanged and drops it when the total moved (the page then shows the new total as one entry)."""
-    programs, bonuses, sites, other, notes, program_entries, site_entries, bonus_entries = _parse(form, prompts, today)
+    programs, bonuses, sites, other, notes, program_entries, site_entries, bonus_entries = _parse(form, prompts, today, year)
 
     def kept(totals: dict, posted: dict, stored_totals: dict, stored: dict) -> dict:
         out = {}

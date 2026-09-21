@@ -776,7 +776,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
                     program_logs=program_logs, site_logs=site_logs, bonus_logs=bonus_logs,
-                    other_logs=tax_inputs.other_logs(inputs, year), today=clock().date().isoformat(),
+                    other_logs=tax_inputs.other_logs(inputs, year),
+                    today=tax_inputs.log_default_date(year, clock().date().isoformat()),  # the logs' new row: in the year
                     draft=draft or {}, expense_choices=tax_inputs.expense_choices(inputs),
                     expenses=tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True),
                     esort=esort, edir=edir, **extra)
@@ -802,7 +803,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         inputs = load_tax_inputs(year)
         in_place = request.headers.get("HX-Request", "").lower() == "true"
         try:
-            inputs = tax_inputs.apply_form(inputs, form, programs + cards, today=clock().date().isoformat())
+            inputs = tax_inputs.apply_form(inputs, form, programs + cards, today=clock().date().isoformat(), year=year)
         except ValueError as exc:
             if in_place:
                 return taxes_swap(request, year, error=str(exc), status=400)

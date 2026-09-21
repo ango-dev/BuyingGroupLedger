@@ -259,6 +259,23 @@ class TestTaxesPage:
         page = client.get("/taxes", params={"year": "2026"}).text  # the page itself: one summary, one form, a toast slot
         assert page.count('id="s-schedule-c"') == 1 and page.count('id="tax-form"') == 1 and '<div id="toast"></div>' in page and 'hx-swap-oob' not in page
 
+    def test_a_years_logs_stay_inside_the_year(self, client, tmp_path):
+        """a past year's page offered a 2026 date; "it should not be possible to
+        set dates for different years"."""
+        body = client.get("/taxes", params={"year": "2025"}).text
+        assert 'name="program:alpha:costco.new.date" value="2025-12-31"' in body  # today (2026) is not in 2025
+        assert 'name="program:alpha:costco.new.date" value="2026-09-18"' in client.get("/taxes", params={"year": "2026"}).text
+        bad = client.post("/taxes/save", data={"year": "2025", "program:alpha:costco.new.date": "2026-01-05", "program:alpha:costco.new.amount": "5"})
+        assert bad.status_code == 200 and "Costco Executive Cashback — alpha: 2026-01-05 is not in 2025" in bad.text
+        assert "2025" not in json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8")) if (tmp_path / "data" / "tax_inputs.json").exists() else True
+        ok = client.post("/taxes/save", data={"year": "2025", "program:alpha:costco.new.date": "", "program:alpha:costco.new.amount": "5"}, follow_redirects=False)
+        assert ok.status_code == 303
+        assert json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))["2025"]["program_entries"] == {
+            "program:alpha:costco": [{"date": "2025-12-31", "amount": 5.0, "note": ""}]}  # a blank date: the year's last day
+        # any year opens from the box, orders or not
+        assert '<form method="get" action="/taxes" class="inline-form open-year">' in body
+        assert client.get("/taxes", params={"year": "2021"}).status_code == 200
+
     def test_a_year_with_saved_inputs_stays_on_the_list(self, client):
         """this
         year is always offered; a year with saved inputs but no rows stays too."""
