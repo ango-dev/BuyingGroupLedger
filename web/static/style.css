@@ -945,6 +945,10 @@ table.schedule td.neg { color: var(--bad); }
 @media (max-width: 900px) { .expense-form .egrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tax-form .entry-table input[type=text] { width: 100%; box-sizing: border-box; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-1); padding: 4px 7px; }
 .tax-form .entry-table td.narrow { width: 160px; }
+/* label and amount read in one glance: the input tables and the notes stop at a readable
+   width instead of pushing the amount to the panel's far edge */
+.tax-form table.entry-table { max-width: 680px; }
+.tax-form label.field-block { display: flex; flex-direction: column; gap: 4px; max-width: 680px; }
 .tax-form textarea.json { margin-top: 4px; }
 table.expenses { width: 100%; }
 table.expenses td.num, table.expenses th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
