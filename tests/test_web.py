@@ -998,7 +998,8 @@ class TestFailuresPage:
         body = response.text
         assert body.count('<tr class="kind-dossier has-num">') == 3  # dossiers on disk, never logged, still listed
         # numbered rows, like every other table
-        assert '<th class="rownum" title="select every cell">#</th>' in body and '<td class="rownum muted" title="event 1 ' in body
+        assert '<th class="rownum" title="select / unselect every row"><input type="checkbox" id="sel-all" hidden' in body
+        assert '<td class="rownum muted" title="event 1 — click to select the row"><input type="checkbox" name="sel" value="1" hidden' in body  # rows select like every grid
         newest = body.index("amazon_profile-charlie_20260914T160056Z")
         middle = body.index("bestbuy_profile-bravo_20260901T000000Z")
         oldest = body.index("costco_profile-bravo_20260830T070304Z")

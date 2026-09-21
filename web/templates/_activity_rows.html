@@ -17,14 +17,15 @@
       reflows them. -#}
   <colgroup><col class="c-num"><col class="c-when"><col class="c-type"><col class="c-run"><col class="c-what"></colgroup>
   <thead>
-    <tr><th class="rownum" title="select every cell">#</th>{{ sort_th(filters, 'at', 'When') }}{{ sort_th(filters, 'kind', 'Type') }}{{ sort_th(filters, 'run', 'Run') }}{{ sort_th(filters, 'summary', 'What happened') }}</tr>
+    <tr><th class="rownum" title="select / unselect every row"><input type="checkbox" id="sel-all" hidden aria-label="select all">#</th>{{ sort_th(filters, 'at', 'When') }}{{ sort_th(filters, 'kind', 'Type') }}{{ sort_th(filters, 'run', 'Run') }}{{ sort_th(filters, 'summary', 'What happened') }}</tr>
   </thead>
   <tbody>
     {% for e in events %}
     {% set n = loop.index %}
     <tr class="kind-{{ e.kind }} has-num">
       {#- numbered like every other table -#}
-      <td class="rownum muted" title="event {{ n }} — click to select the row">{{ n }}</td>
+      {#- the hidden boxes are what the grid script selects rows with -#}
+      <td class="rownum muted" title="event {{ n }} — click to select the row"><input type="checkbox" name="sel" value="{{ n }}" hidden aria-label="select event {{ n }}">{{ n }}</td>
       <td class="mono when"><time class="local" datetime="{{ e.at }}" title="{{ e.at }}">{{ e.at | replace('T', ' ') | replace('+00:00', 'Z') }}</time></td>
       <td><span class="tag kind kind-{{ e.kind }}">{{ KINDS.get(e.kind, e.kind) }}</span></td>
       <td class="mono small">{% if e.run_id %}<a href="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-get="/activity?{{ filters.as_query(run=e.run_id) | query }}" hx-target="#activity-table" hx-push-url="true" title="only this run"><time class="local run" datetime="{{ run_started_at(e.run_id) }}">{{ run_label(e.run_id) }}</time></a>{% elif e.kind in ('edit', 'backup', 'settings', 'ack', 'signin') %}<span class="muted">dashboard</span>{% else %}<span class="muted">—</span>{% endif %}</td>
