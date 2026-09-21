@@ -19,6 +19,31 @@ NOW = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
 
 
 class TestTheLog:
+    def test_read_parses_the_file_once_per_change(self, tmp_path, monkeypatch):
+        """2026-09-21: the nav badges read the log on EVERY page render, so an unchanged log is
+        answered from a cache keyed on the file's (mtime_ns, size) -- the `loud_summary` stamp --
+        and an append re-reads. Every caller gets a fresh list, so a sort never leaks back."""
+        log = tmp_path / "a.jsonl"
+        activity.record("edit", "one", path=log)
+        first = activity.read(log)
+        assert [e["summary"] for e in first] == ["one"]
+        real_open = Path.open
+
+        def refuse(self, *args, **kwargs):
+            if self == log:
+                raise AssertionError("re-parsed an unchanged log")
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", refuse)
+        again = activity.read(log)
+        assert again == first and again is not first  # served from the cache, as a fresh list
+        monkeypatch.undo()
+        activity.record("edit", "two", path=log)  # the append changes the stamp
+        assert [e["summary"] for e in activity.read(log)] == ["two", "one"]
+        mine = activity.read(log)
+        mine.reverse()  # a caller's own ordering never reaches the cache
+        assert [e["summary"] for e in activity.read(log)] == ["two", "one"]
+
     def test_record_appends_json_lines_and_read_is_newest_first(self, tmp_path):
         path = tmp_path / "a.jsonl"
         first = activity.record("alert", "one", {"message": "m"}, path=path,

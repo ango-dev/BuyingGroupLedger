@@ -113,11 +113,26 @@ def record(kind: str, summary: str, details: dict | None = None, *, path: Path |
     return event
 
 
+#: One parse per change of the file: {path: ((mtime_ns, size), events)}. The nav badges read the
+#: log on EVERY page render, so an unchanged log must not be re-parsed per request (2026-09-21;
+#: the same stamp `loud_summary` caches on). Callers get a FRESH list of the same event dicts --
+#: sort, reverse or slice it freely; never change an event dict in place.
+_READ_CACHE: dict[str, tuple[tuple[int, int], list[dict]]] = {}
+
+
 def read(path: Path | None = None) -> list[dict]:
     """Every event, NEWEST FIRST. A line that is not JSON is skipped, never fatal."""
     target = Path(path) if path else ACTIVITY_FILE
     if not target.is_file():
         return []
+    try:
+        stat = target.stat()
+    except OSError:
+        return []
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    cached = _READ_CACHE.get(str(target))
+    if cached and cached[0] == stamp:
+        return list(cached[1])
     events: list[dict] = []
     with target.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -134,7 +149,8 @@ def read(path: Path | None = None) -> list[dict]:
                 event.setdefault("details", {})
                 events.append(event)
     events.reverse()
-    return events
+    _READ_CACHE[str(target)] = (stamp, events)
+    return list(events)
 
 
 def filter_events(events: list[dict], *, kinds: tuple[str, ...] = (), q: str = "", days: int = 0,
