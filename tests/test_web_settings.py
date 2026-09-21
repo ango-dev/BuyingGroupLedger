@@ -512,11 +512,11 @@ class TestEntryCards:
         # one table: the capped row with its retailers (the page's own dropdown), the plain rate
         # row, the catch-all on "everywhere else"; the date inline in the resets cell, only shown
         # for "on a date each year"
-        assert 'name="rr.0.retailers" value="amazon" checked>' in body and 'name="rr.0.retailers" value="amazon-business" checked>' in body
-        assert 'name="rr.0.retailers" value="bestbuy" >' in body and 'name="rr.0.rate" value="5%"' in body
+        assert 'name="rr.0.retailers" value="amazon" data-text="Amazon" checked>' in body and 'name="rr.0.retailers" value="amazon-business" data-text="Amazon Business" checked>' in body
+        assert 'name="rr.0.retailers" value="bestbuy" data-text="Best Buy" >' in body and 'name="rr.0.rate" value="5%"' in body
         assert 'name="rr.0.anniversary" value="03-15" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" >' in body
         assert 'name="rr.0.outside_spend" value="2026: 4000, 2027: 0"' in body
-        assert 'name="rr.1.retailers" value="bestbuy" checked>' in body and 'name="rr.1.spend_limit" value=""' in body
+        assert 'name="rr.1.retailers" value="bestbuy" data-text="Best Buy" checked>' in body and 'name="rr.1.spend_limit" value=""' in body
         assert 'name="cap_all.spend_limit" value="25000"' in body
         assert 'class="mono anniversary" hidden>' in body and "<th>on (MM-DD)</th>" not in body
         assert 'list="retailer-keys"' not in body  # no browser suggestion list
@@ -561,7 +561,7 @@ class TestEntryCards:
             "name": "USB Prime Business", "last4": "0315", "cashback_rate": "5%", "rr.0.retailers": "amazon", "rr.0.rate": "5%",
             "rr.0.spend_limit": "1000"})
         assert limited.status_code == 200 and config_value("cards")[0]["caps"] == [{"retailers": ["Amazon"], "spend_limit": 1000.0, "resets": "calendar-year"}]
-        assert "Amazon 5% up to 1,000 then Everywhere Else" in limited.text
+        assert "Amazon 5% up to 1,000 then 5%" in limited.text  # the everywhere-else rate, as a number
         refused = client.post("/settings/section/cards/entry/0", headers=hx, data={"name": "USB", "last4": "0315", "cashback_rate": "2"})
         assert refused.status_code == 400 and refused.text.lstrip().startswith('<section') and "outside 0-1" in refused.text
         assert '<div class="toast warn" role="alert">Nothing was saved:' in refused.text
@@ -589,7 +589,35 @@ class TestEntryCards:
         tw.write_snapshot(tmp_path / "ledger_backup_20260918T000000Z.csv", *tw.LEDGER_ROWS)
         body = client.get("/settings").text
         assert "<th>Left This Period</th>" in body and 'class="cap-left' in body
-        assert "spent in 2026" in body and (" left</span>" in body or "limit reached" in body)
+        assert "spent in 2026" in body and (" left (" in body or "limit reached" in body)  # dollars and the percent left
+
+    def test_the_picker_offers_the_ledgers_retailers_and_keeps_a_typed_one(self, client, tmp_path, config):
+        """the dropdown includes any retailer the user adds, such as Woot."""
+        import test_web as tw
+
+        rows = list(tw.LEDGER_ROWS) + [tw.row(order_date="2026-09-09", status="paid", retailer="Woot", item_name="A Woot deal",
+                                              shipment="1", quantity="1", order_id="W1", card_last4="0315")]
+        tw.write_snapshot(tmp_path / "ledger_backup_20260918T000000Z.csv", *rows)
+        body = client.get("/settings").text
+        assert 'value="woot" data-text="Woot" >' in body and 'class="new-option" placeholder="Add a retailer' in body
+        saved = client.post("/settings/section/cards/entry/0", data={"name": "USB Prime Business", "last4": "0315",
+                                                                     "rr.0.retailers": ["amazon", "woot"], "rr.0.rate": "5%",
+                                                                     "rr.0.spend_limit": "1000"}, follow_redirects=False)
+        assert saved.status_code == 303
+        assert config_value("cards")[0]["retailer_rates"] == {"Amazon": "5%", "Woot": "5%"}
+        assert config_value("cards")[0]["caps"][0]["retailers"] == ["Amazon", "Woot"]
+        body = client.get("/settings").text
+        assert 'value="woot" data-text="Woot" checked>' in body and "Amazon, Woot 5% up to 1,000" in body
+
+    def test_retailers_sharing_a_rate_share_a_row(self, client):
+        from web.settings_form import _rate_rows
+
+        rows = _rate_rows({"Amazon": "7%", "Amazon Business": "7%", "Best Buy": "3%", "Costco": "7%"}, [])
+        assert [(r["retailers"], r["rate"]) for r in rows] == [("amazon, amazon-business, costco", "7%"), ("bestbuy", "3%")]
+        # a capped group keeps its own row even at the same rate
+        rows = _rate_rows({"Amazon": "7%", "Amazon Business": "7%", "Best Buy": "7%"},
+                          [{"retailers": ["Amazon", "Amazon Business"], "spend_limit": 100}])
+        assert [r["retailers"] for r in rows] == ["amazon, amazon-business", "bestbuy"]
 
     def test_a_virtual_card_must_name_its_card(self, client):
         unlinked = client.post("/settings/section/cards/entry", data={"name": "Virtual", "last4": "9999", "virtual": "on"})

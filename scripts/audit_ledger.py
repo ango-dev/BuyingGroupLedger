@@ -1096,18 +1096,22 @@ def check_card_and_rate_coverage(sheet: Sheet, opts: Options) -> Result:
         status = "WARN"
         details.append(f"{len(fills)} cell(s) never filled though the card is known -- run `python -m scripts.backfill_profit_columns`")
     # A rate that disagrees with the cards list is not a fault: rate cells record the rate AT
-    # PURCHASE TIME and the list holds only the current one (standing ruling, the design notes). A last 4 the
-    # list does not know is a retired card. Both are information, never a warning (2026-09-18).
+    # PURCHASE TIME and the list holds only the current one (standing ruling, the design notes) -- information.
+    # A last 4 the list does not know IS worth a warning: its rows earn the default
+    # rate and count against no spend limit until the card is added on Settings > Cards.
     changes = plan.get("changes") or []
     if changes:
         status = status if status == "WARN" else "INFO"
         details.append(f"{len(changes)} rate cell(s) differ from the cards list -- rates are era-specific, leave them")
     unresolved = plan.get("unresolved") or []
     if unresolved:
-        status = status if status == "WARN" else "INFO"
-        details.append(f"{len(unresolved)} card last-4(s) not in the cards list (retired cards)")
+        status = "WARN"
+        last4s = sorted({str(u[-1] if isinstance(u, (tuple, list)) else u) for u in unresolved})
+        details.append(f"{len(unresolved)} row(s) on card(s) not in the cards list ({', '.join('...' + x for x in last4s)}) -- "
+                       "add them on Settings > Cards, or they earn the default rate and count against no spend limit")
     summary = ("Card + Cashback Rate resolve cleanly" if status == "PASS"
-               else "cells the backfill could fill" if status == "WARN" else "known differences from the cards list")
+               else ("cards on the ledger not in the cards list" if unresolved and not fills
+                     else "cells the backfill could fill") if status == "WARN" else "known differences from the cards list")
     return Result("card_and_rate_coverage", status, summary, _truncate(details, opts.max_detail))
 
 

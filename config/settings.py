@@ -77,6 +77,8 @@ ENV_TO_CONFIG = {
     "GMAIL_ADDRESS": "alerts.gmail_address",
     "GMAIL_APP_PASSWORD": "alerts.gmail_app_password",
     "ALERT_EMAIL_TO": "alerts.email_to",
+    "CASHBACK_CAP_WARN_PERCENT": "alerts.cap_warn_percent",
+    "CASHBACK_CAP_WARN_DOLLARS": "alerts.cap_warn_dollars",
     "BUYING_GROUP_SYNC_ENABLED": "buying_groups.sync_enabled",
     "BFMR_API_BASE_URL": "buying_groups.bfmr.api_base_url",
     "BFMR_API_KEY": "buying_groups.bfmr.api_key",
@@ -262,6 +264,11 @@ class Settings:
         default=_get_str("GMAIL_APP_PASSWORD"), repr=False)
     alert_email_to: str = (_get_str("ALERT_EMAIL_TO")
                            or _get_str("GMAIL_ADDRESS"))
+    # A card's spend cap getting close: alert -- and a card on the overview --
+    # once this much of a limit is spent in the period, or once this little is left. Either
+    # triggers; 0 switches that one off. Alerted once per state (close, reached) per period.
+    cap_warn_percent: int = _get_int("CASHBACK_CAP_WARN_PERCENT", 80)
+    cap_warn_dollars: float = _get_float("CASHBACK_CAP_WARN_DOLLARS", 0)
 
     # --- Buying groups (see buying_groups/) -----------------------------------------------------
     # Master switch for the scheduled buying-group sync in main.run_buying_group_sync. OFF by

@@ -68,6 +68,21 @@ class TestTheModel:
         assert bare.fallback_for(bare.caps[0], default_rate=0.015) == 0.015
         assert caps.capped_rate(0.05, c.caps[0], used=100, amount=50, fallback=c.fallback_for(c.caps[0])) == 0.02
 
+    def test_a_reached_everywhere_else_limit_lends_its_fallback(self):
+        c = card(cashback_rate="2%", caps=[{"retailers": ["Amazon"], "spend_limit": 1000},          # no fallback: everywhere else
+                                           {"retailers": [], "spend_limit": 500, "fallback_rate": "1%"}])
+        # the spend that fills the limits (shipped: counted, not recomputed here)
+        amazon = [row(order_id="A0", order_date="2026-01-05", total_cost="1000", status="shipped")]  # the Amazon limit is used up
+        under = amazon + [row(order_id="B0", order_date="2026-01-06", total_cost="100", retailer="Best Buy", status="shipped")]
+        grid = values(*under, row(order_id="A1", order_date="2026-02-01", total_cost="100", cashback_rate="0.05", status="paid"))
+        assert caps.recompute(grid, [c], {}, default_rate=0.015) == [(4, 0.02, 0.05)]           # everywhere else's rate
+        over = amazon + [row(order_id="B0", order_date="2026-01-06", total_cost="600", retailer="Best Buy", status="shipped")]  # everywhere else reached
+        grid = values(*over, row(order_id="A1", order_date="2026-02-01", total_cost="100", cashback_rate="0.05", status="paid"))
+        assert caps.recompute(grid, [c], {}, default_rate=0.015) == [(4, 0.01, 0.05)]           # its fallback takes over
+        assert c.fallback_for(c.catch_all(), default_rate=0.015) == 0.01
+        bare = card(cashback_rate="2%", caps=[{"retailers": [], "spend_limit": 500}])
+        assert bare.fallback_for(bare.catch_all(), default_rate=0.015) == 0.015                   # the catch-all's blank fallback: the default
+
     def test_an_amazon_limit_covers_amazon_business_and_back(self):
         c = card(caps=[{"retailers": ["Amazon"], "spend_limit": 100, "fallback_rate": "1%"}])
         assert c.cap_for("Amazon Business") is c.caps[0] and c.cap_for("amazon-business") is c.caps[0]
@@ -141,6 +156,54 @@ class TestAllowance:
         assert a == {"period": "2026", "used": 800.0, "limit": 1000.0, "left": 200.0, "fraction": 0.8}
         over = caps.allowances([row(order_id="A9", order_date="2026-01-05", total_cost="1500")], [c], "2026-06-01")[(0, 0)]
         assert over["left"] == 0.0 and over["fraction"] == 1.0
+
+
+class TestAllowancePools:
+    def test_a_virtual_and_an_employee_number_count_toward_their_card(self):
+        real = card(caps=[{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": "1%"}])
+        virtual = Card(last4="9999", name="ABP virtual", virtual_of="5555")
+        employee = Card(last4="7777", name="ABP employee", virtual_of="5555", own_bonus=True)
+        rows = [row(order_id="V1", order_date="2026-01-05", total_cost="300", card_last4="9999"),
+                row(order_id="E1", order_date="2026-01-06", total_cost="200", card_last4="7777"),
+                row(order_id="A1", order_date="2026-01-07", total_cost="100")]
+        a = caps.allowances(rows, [real, virtual, employee], "2026-06-01")
+        assert a[(0, 0)]["used"] == 600.0 and a[(0, 0)]["left"] == 400.0
+        assert (1, 0) not in a and (2, 0) not in a  # the numbers carry no caps of their own
+
+    def test_a_retailer_the_user_added_counts_by_its_name(self):
+        c = card(caps=[{"retailers": ["Amazon", "Woot"], "spend_limit": 1000, "fallback_rate": "1%"}])
+        rows = [row(order_id="W1", order_date="2026-01-05", total_cost="400", retailer="Woot"),
+                row(order_id="A1", order_date="2026-01-07", total_cost="100")]
+        assert caps.allowances(rows, [c], "2026-06-01")[(0, 0)]["used"] == 500.0
+        assert c.cap_for("woot") is c.caps[0] and c.cap_for("WOOT") is c.caps[0]
+
+
+class TestTheThresholds:
+    """alert when a limit is close (a percent spent, or dollars left) and when crossed,
+    once each per period, acknowledgeable like a dossier."""
+
+    def test_the_state_of_an_allowance(self):
+        usage = {"used": 850.0, "limit": 1000.0, "left": 150.0, "fraction": 0.85}
+        assert caps.threshold_state(usage, 80, 0) == "close"
+        assert caps.threshold_state(usage, 90, 0) is None
+        assert caps.threshold_state(usage, 0, 200) == "close" and caps.threshold_state(usage, 0, 100) is None
+        assert caps.threshold_state({"used": 1000.0, "limit": 1000.0, "left": 0.0, "fraction": 1.0}, 0, 0) == "reached"
+
+    def test_alerts_are_due_once_per_state_per_period_and_escalate(self):
+        cards = [card(caps=[{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": "1%"}])]
+        rows = [row(order_id="A0", order_date="2026-01-05", total_cost="850")]
+        due, memory = caps.alerts_due(rows, cards, "2026-06-01", 80, 0, {})
+        assert [d["state"] for d in due] == ["close"] and memory == {"5555:0:2026": "close"}
+        assert "ABP: Amazon spend limit close (850 of 1,000 spent in 2026, 150 left)" == due[0]["summary"]
+        again, memory2 = caps.alerts_due(rows, cards, "2026-06-01", 80, 0, memory)
+        assert again == [] and memory2 == memory
+        rows.append(row(order_id="A1", order_date="2026-02-01", total_cost="200"))
+        due, memory = caps.alerts_due(rows, cards, "2026-06-01", 80, 0, memory)
+        assert [d["state"] for d in due] == ["reached"] and memory == {"5555:0:2026": "reached"}
+        assert due[0]["summary"].startswith("ABP: Amazon spend limit reached (1,050 of 1,000 in 2026) -- 1% applies")
+        # a new period starts clean
+        due, memory = caps.alerts_due(rows, cards, "2027-01-15", 80, 0, memory)
+        assert due == [] and "5555:0:2027" not in memory
 
 
 class TestCappedRate:
@@ -316,6 +379,30 @@ class TestTheSyncRecomputes:
         assert float(by_id["A0"]) == round((500 * 0.05 + 200 * 0.01) / 700, 4)  # crosses the line
         assert float(by_id["A2"]) == 0.01                                          # past it
         assert any("re-tiered" in summary for _kind, summary in recorded)
+
+    def test_the_sync_alerts_a_limit_once_and_remembers_it(self, monkeypatch, tmp_path):
+        from test_ledger_sync import FakeWorksheet, write_csv_file
+
+        ws = FakeWorksheet()
+        ws.rows = [list(HEADER)] + [[r.get(f, "") for f in FIELDNAMES] for r in (
+            row(order_id="A0", order_date="2026-01-05", total_cost="900", cashback_rate="0.05", status="paid"),
+        )]
+        monkeypatch.setattr(ledger_sync, "_get_worksheet", lambda: ws)
+        monkeypatch.setattr("config.cards.load_cards", lambda: [
+            card(caps=[{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": "1%"}])])
+        state: dict = {}
+        monkeypatch.setattr("config.loader.load_state", lambda: dict(state))
+        monkeypatch.setattr("config.loader.save_state", lambda data: state.update(data))
+        sent = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, message, *, kind="alert": sent.append((kind, subject)))
+        monkeypatch.setattr(ledger_sync, "settings", dataclasses.replace(ledger_sync.settings, cap_warn_percent=80, cap_warn_dollars=0))
+        path = write_csv_file(tmp_path, dict(retailer="Amazon", order_id="N1", order_date="2026-03-01", item_name="New",
+                                             shipment="1", status="ordered", card_last4="5555"))
+        ledger_sync.sync_csv_to_ledger(path)
+        assert [k for k, _ in sent] == ["cap"] and "spend limit close" in sent[0][1]
+        assert list(state["cap_alerts"].values()) == ["close"]
+        ledger_sync.sync_csv_to_ledger(path)  # nothing new: no second alert
+        assert len(sent) == 1
 
     def test_no_capped_card_means_no_read_and_no_write(self, monkeypatch):
         calls = []

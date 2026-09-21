@@ -598,9 +598,13 @@ def _rate_rows(retailer_rates: dict, caps: list) -> list[dict]:
         rows.append({**_cap_display(cap), "cap_index": cap_index,
                      "retailers": ", ".join(retailers_module.key_of(str(r)) for r in retailers), "rate": rate})
         covered.update(keys)
+    # retailers without a cap that share a rate share a row; the file stores a flat dict
+    grouped: dict = {}
     for key, (retailer, rate) in by_key.items():
         if key not in covered:
-            rows.append({**_cap_display({}), "retailers": retailers_module.key_of(str(retailer)), "rate": rate})
+            grouped.setdefault(str(rate), []).append(retailers_module.key_of(str(retailer)))
+    for rate, keys in grouped.items():
+        rows.append({**_cap_display({}), "retailers": ", ".join(keys), "rate": by_key[keys[0]][1]})
     return rows
 
 

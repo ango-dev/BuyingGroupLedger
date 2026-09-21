@@ -1462,3 +1462,23 @@ class TestImpossibleValues:
         assert result_for(gift, "impossible_values").status == "PASS"
         odd = result_for(build(row_cells(2, **{"Buying Group": Cell("MOD"), "Insurance": Cell(2.0, fmt="currency")})), "impossible_values")
         assert odd.status == "WARN" and "Insurance on a MaxOutDeals row" in odd.details[0]
+
+
+class TestCardsNotOnTheList:
+
+    def test_an_unknown_last4_warns_and_names_the_card(self, monkeypatch):
+        from models.card import Card
+
+        monkeypatch.setattr("config.cards.load_cards", lambda: [Card(last4="1111", name="Known", cashback_rate="2%")])
+        sheet = build(row_cells(2, **{"Card Last 4": Cell("4331"), "Card": Cell(""), "Cashback Rate": Cell(0.02, fmt="percent")}))
+        result = result_for(sheet, "card_and_rate_coverage")
+        assert result.status == "WARN"
+        assert "...4331" in " ".join(result.details) and "Settings > Cards" in " ".join(result.details)
+        assert "not in the cards list" in result.summary
+
+    def test_a_known_card_passes(self, monkeypatch):
+        from models.card import Card
+
+        monkeypatch.setattr("config.cards.load_cards", lambda: [Card(last4="4331", name="Amex Business Gold", cashback_rate="4%")])
+        sheet = build(row_cells(2, **{"Card Last 4": Cell("4331"), "Card": Cell("Amex Business Gold"), "Cashback Rate": Cell(0.04, fmt="percent")}))
+        assert result_for(sheet, "card_and_rate_coverage").status == "PASS"

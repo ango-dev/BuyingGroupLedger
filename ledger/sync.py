@@ -1340,6 +1340,7 @@ def _recompute_cashback_caps(worksheet) -> None:
             return
         changes = recompute(worksheet.get_all_values(), cards, _protected_cells(worksheet),
                             default_rate=settings.default_cashback_rate)
+        _alert_cashback_caps(worksheet, cards)
         if not changes:
             return
         worksheet.batch_update(
@@ -1353,6 +1354,33 @@ def _recompute_cashback_caps(worksheet) -> None:
                         {"rows": [{"row": n, "from": old, "to": new} for n, new, old in changes[:50]]})
     except Exception:
         log.exception("Cashback caps: the recompute failed; the rate cells stand until the next sync.")
+
+
+def _alert_cashback_caps(worksheet, cards) -> None:
+    """A card's spend limit close or reached: alerted once per state per period
+    -- the memory is `cap_alerts` in .state.json -- through the usual channels, as its own
+    activity kind (`cap`) so the overview's card and the acknowledgement work like a dossier's.
+    Fails soft."""
+    from datetime import date
+
+    from alerts.notifier import alert
+    from config import loader
+    from ledger.cashback_caps import alerts_due, rows_by_field
+
+    try:
+        state = loader.load_state()
+        due, memory = alerts_due(rows_by_field(worksheet.get_all_values()), cards, date.today().isoformat(),
+                                 settings.cap_warn_percent, settings.cap_warn_dollars, state.get("cap_alerts") or {})
+        for item in due:
+            alert(item["summary"],
+                  f"Card ...{item['last4']}, {item['period']}: {item['used']:,.2f} of {item['limit']:,.2f} spent, "
+                  f"{item['left']:,.2f} left. The Settings page's card shows the limit; acknowledge the card on the overview.",
+                  kind="cap")
+        if memory != (state.get("cap_alerts") or {}):
+            state["cap_alerts"] = memory
+            loader.save_state(state)
+    except Exception:
+        log.exception("Cashback caps: the threshold check failed; it runs again after the next sync.")
 
 
 def _write_profit_formulas(worksheet, row_numbers: list[int]) -> None:

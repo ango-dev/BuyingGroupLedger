@@ -432,6 +432,8 @@ details.multi .menu label:hover { background: var(--bg); }
 details.multi .menu label[hidden] { display: none; }  /* narrowed away by typing (edit.js) */
 details.multi .menu .narrow { padding: 2px 6px 4px; margin-bottom: 3px; border-bottom: 1px solid var(--line); font-size: 0.85em; color: var(--muted); white-space: nowrap; }
 details.multi .menu label.all { border-bottom: 1px solid var(--line); padding-bottom: 5px; margin-bottom: 3px; }
+details.multi .menu label.add-one { border-top: 1px solid var(--line); margin-top: 3px; padding-top: 5px; }
+details.multi .menu label.add-one input { width: 100%; box-sizing: border-box; font: inherit; font-size: 0.9em; padding: 3px 6px; }
 
 /* --- The row list inside a card: the same editable cells as the big table, in a scroll box the
    card owns, so a wide list never spills into the neighbouring card ------------------------------ */
@@ -718,6 +720,7 @@ table.activity tr.details-row td { background: var(--bg); }
 .tag.kind-run { background: #d9dde8; } .tag.kind-scrape { background: #cfe3f7; } .tag.kind-ledger { background: #cde9d3; }
 .tag.kind-sync { background: #e3d5f5; } .tag.kind-reply { background: #d9ecf2; } .tag.kind-alert { background: #f7d2cf; }
 .tag.kind-dossier { background: #f4c7c3; } .tag.kind-mirror { background: #e2e2e2; } .tag.kind-edit { background: #fbe6b8; }
+.tag.kind-cap { background: #f9dcb8; }  /* a card's spend limit close or reached (2026-09-20) */
 .tag.kind-backup { background: #dfe8d0; } .tag.kind-settings { background: #e8dccf; }
 .tag.kind-health { background: #bfe3dc; }  /* teal: not the bare white it fell back to */
 .event-details { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 4px 0; font-size: 0.88em; }

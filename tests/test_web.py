@@ -1910,6 +1910,27 @@ class TestNavBadges:
 
 
 class TestActivityLayout:
+    def test_a_spend_limit_alert_is_a_card_of_its_own_and_acknowledgeable(self, client, logs_dir):
+        """a special kind of alert like failure dossiers, acknowledgeable."""
+        from datetime import timedelta
+        from diagnostics import activity
+
+        path = logs_dir / "activity.jsonl"
+        activity.record("cap", "ABP: Amazon spend limit close (850 of 1,000 spent in 2026, 150 left)", {"state": "close"},
+                        path=path, at=NOW - timedelta(hours=1))
+        body = client.get("/").text
+        assert ">Spend limits<" in body and "card limit(s) getting close" in body and 'name="kind" value="cap"' in body
+        nav = body[body.index("<nav"):body.index("</nav>")]
+        assert ">Activity <span class=\"badge\"" in nav or ">Activity<" not in nav
+        activity.record("cap", "ABP: Amazon spend limit reached (1,050 of 1,000 in 2026) -- 1% applies", {"state": "reached"},
+                        path=path, at=NOW - timedelta(minutes=30))
+        body = client.get("/").text
+        assert "card limit(s) reached" in body
+        response = client.post("/activity/acknowledge", data={"kind": "cap"}, follow_redirects=False)
+        assert response.status_code in (200, 303)
+        assert ">Spend limits<" not in client.get("/").text
+        assert ">Spend limit<" in client.get("/activity", params={"type": "cap", "days": "0"}).text
+
     def test_activity_uses_the_orders_layout(self, client):
         body = client.get("/activity").text
         assert '<body class="wide">' in body

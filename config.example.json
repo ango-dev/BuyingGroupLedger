@@ -18,7 +18,11 @@
     "gmail_address": "",
     "gmail_app_password": "",
     "// email_to": "ALERT_EMAIL_TO — defaults to gmail_address.",
-    "email_to": ""
+    "email_to": "",
+    "// cap_warn_percent": "CASHBACK_CAP_WARN_PERCENT — alert (and a card on the overview) once this percent of a card's spend limit is spent in the period; 0 = off.",
+    "cap_warn_percent": 80,
+    "// cap_warn_dollars": "CASHBACK_CAP_WARN_DOLLARS — alert once this little of a card's spend limit is left in the period; 0 = off. Either threshold triggers.",
+    "cap_warn_dollars": 0
   },
 
   "scraping": {

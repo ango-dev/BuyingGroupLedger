@@ -247,11 +247,21 @@ class Card(BaseModel):
                 return cap
         return None
 
-    def fallback_for(self, cap, default_rate: float | None = None):
-        """The rate past a cap's limit: the cap's own, else this card's everywhere-else rate, else
-        the global default."""
+    def catch_all(self):
+        """The everywhere-else cap, or None."""
+        return next((cap for cap in self.caps if not cap.retailers), None)
+
+    def fallback_for(self, cap, default_rate: float | None = None, catch_all_reached: bool = False):
+        """The rate past a cap's limit: the cap's own; else, for the everywhere-else cap, the
+        global default; else this card's everywhere-else rate -- unless the everywhere-else cap has
+        reached ITS limit too, when that cap's fallback takes over."""
         if cap.fallback_rate is not None:
             return cap.fallback_rate
+        catch_all = self.catch_all()
+        if cap is catch_all:
+            return default_rate
+        if catch_all is not None and catch_all_reached:
+            return catch_all.fallback_rate if catch_all.fallback_rate is not None else default_rate
         return self.cashback_rate if self.cashback_rate is not None else default_rate
 
     def rate_for(self, retailer: str) -> float | None:

@@ -270,6 +270,33 @@ def test_a_card_saves_in_place_and_the_anniversary_field_follows_the_reset(serve
     assert page.evaluate("window.__loaded === true") and page.url.endswith("/settings")
     saved = page.locator("#s-cards details.entry-card").first
     assert saved.evaluate("d => d.open") and saved.locator("input[name='cashback_rate']").input_value() == "3%"
+    # a retailer sits on one row: picking it on the Add row takes it from the row that had it, and the
+    # other rows' pickers hide it
+    add = saved.locator("details.multi[data-param$='.retailers']").last
+    add.locator("summary").click()
+    add.locator("label", has_text="Amazon").first.locator("input").check()
+    add.locator("label", has_text="Amazon Business").locator("input").check()
+    page.keyboard.press("Escape")
+    saved.locator("input[name$='.rate']").last.fill("7%")  # a row needs a rate to be kept
+    saved.locator("button", has_text="Save card").click()
+    page.wait_for_selector("#toast .toast.ok")
+    saved = page.locator("#s-cards details.entry-card").first
+    pickers = saved.locator("details.multi[data-param$='.retailers']")
+    page.wait_for_timeout(250)  # the pickers sync once the swapped section settles
+    assert pickers.count() == 2  # the saved row and the Add row: both retailers on ONE row
+    assert pickers.first.locator(".summary-value").inner_text() == "Amazon, Amazon Business"
+    assert pickers.last.locator("label", has_text="Amazon Business").evaluate("l => l.hidden")  # held by the row above
+    assert not pickers.last.locator("label", has_text="Best Buy").evaluate("l => l.hidden")
+    pickers.last.locator("summary").click()
+    pickers.last.locator("label", has_text="Best Buy").locator("input").check()
+    page.keyboard.press("Escape")
+    assert pickers.first.locator("label", has_text="Best Buy").evaluate("l => l.hidden")
+    # and picking Amazon on the Add row (made visible for the test) takes it from the first row
+    pickers.last.locator("summary").click()
+    pickers.last.locator("label", has_text="Amazon").first.evaluate("l => l.hidden = false")
+    pickers.last.locator("label", has_text="Amazon").first.locator("input").check()
+    assert pickers.first.locator(".summary-value").inner_text() == "Amazon Business"
+    page.keyboard.press("Escape")  # close the picker before the next save
     # a refused save shows in place too (a 400 htmx would otherwise drop; user: "it did nothing")
     saved.locator("input[name='cashback_rate']").fill("2")
     saved.locator("button", has_text="Save card").click()

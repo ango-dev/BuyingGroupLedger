@@ -124,20 +124,25 @@
 
     {#- The reset's date sits inline in the resets cell and only when the reset is "on a date each
         year". -#}
-    {#- The one spelling of a retailer (models/retailers.py, `retailer_names` in the context) -#}
-    {% macro retailer_title(key) %}{{ retailer_names.get(key, key | replace('-', ' ') | title) }}{% endmacro %}
-    {% macro limit_text(cap) %}{% if cap.spend_limit != '' %} up to {{ '{:,.0f}'.format(cap.spend_limit | float) }} then {{ cap.fallback_rate if cap.fallback_rate != '' else 'Everywhere Else' }}{% endif %}{% endmacro %}
+    {#- The one spelling of a retailer (models/retailers.py, `retailer_names` in the context; a
+        retailer the user added -- Woot -- by its name in `retailer_options`) -#}
+    {% macro retailer_title(key) %}{{ retailer_names.get(key, (dict(retailer_options) if retailer_options is defined else {}).get(key, key | replace('-', ' ') | title)) }}{% endmacro %}
+    {#- "up to 1,000 then 1%": the rate past the limit as a number -- the cap's own, else the card's
+        everywhere-else rate, else the default -#}
+    {% macro limit_text(cap, base) %}{% if cap.spend_limit != '' %} up to {{ '{:,.0f}'.format(cap.spend_limit | float) }} then {{ cap.fallback_rate if cap.fallback_rate != '' else base }}{% endif %}{% endmacro %}
 
-    {% macro cap_cells(prefix, cap) %}
+    {#- `hint`: what a blank fallback means for this card -- the Everywhere Else rate, or that
+        cap's own fallback once its limit is reached -#}
+    {% macro cap_cells(prefix, cap, hint='default rate') %}
       <td class="narrow"><input type="text" name="{{ prefix }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="no limit"></td>
-      <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="everywhere else" title="the rate past the limit; blank: the Everywhere Else rate"></td>
+      <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="{{ hint }}" title="the rate past the limit; blank: {{ hint }}"></td>
       <td class="resets"><span class="inline">{{ choose(prefix ~ '.resets', [('calendar-year', 'Each Calendar Year'), ('anniversary', 'On a Date Each Year'), ('never', 'Never')], cap.resets, '', 'cell') }}<input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></span></td>
       <td class="outside"><input type="text" name="{{ prefix }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000" title="spend the ledger never sees, per period"></td>
       {#- where the allowance stands this period (ledger/cashback_caps.allowance) -#}
       <td class="left">{% if cap.usage is defined and cap.usage %}{% set u = cap.usage %}{% set pct = (u.fraction * 100) | round(0, 'floor') | int %}
         <span class="cap-left {{ 'bad' if u.fraction >= 1 else ('warn' if u.fraction >= 0.8 else 'ok') }}" title="{{ '{:,.0f}'.format(u.used) }} of {{ '{:,.0f}'.format(u.limit) }} spent in {{ u.period }}">
           <span class="bar"><i style="width: {{ pct }}%"></i></span>
-          <span class="num">{% if u.left > 0 %}{{ '{:,.0f}'.format(u.left) }} left{% else %}limit reached{% endif %}</span>
+          <span class="num">{% if u.left > 0 %}${{ '{:,.0f}'.format(u.left) }} left ({{ ((1 - u.fraction) * 100) | round(0, 'floor') | int }}%){% else %}limit reached{% endif %}</span>
         </span>{% endif %}</td>
     {% endmacro %}
 
@@ -171,18 +176,24 @@
           <tbody>
             <tr class="everywhere">
               <td class="muted">Everywhere Else</td>
-              <td class="narrow"><input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="default rate"></td>
-              {{ cap_cells('cap_all', c.cap_all if c else blank_cap) }}
+              <td class="narrow"><input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="Default Rate"></td>
+              {{ cap_cells('cap_all', c.cap_all if c else blank_cap, default_rate_text) }}
             </tr>
+            {% set all_reached = c and c.cap_all.usage is defined and c.cap_all.usage and c.cap_all.usage.fraction >= 1 and c.cap_all.fallback_rate != '' %}
+            {% set base = (c.cashback_rate if c and c.cashback_rate != '' else default_rate_text) %}
+            {% set hint = (c.cap_all.fallback_rate ~ ' (everywhere else is at its limit)') if all_reached else (base ~ ' (everywhere else)') %}
             {% set rows = (c.rate_rows if c else []) + [dict(blank_cap, retailers='', rate='')] %}
             {% for r in rows %}
             {% set picked = r.retailers.split(', ') if r.retailers else [] %}
-            {% set keys = (retailer_keys | list) + (picked | reject('in', retailer_keys) | list) %}
+            {#- every retailer a row may name: the scrapers', the ledger's, the cards' (retailer_options),
+                this row's own, and a typed one (the picker's Add a retailer box) -#}
+            {% set known = (retailer_options | map(attribute=0) | list) if retailer_options is defined else (retailer_keys | list) %}
+            {% set keys = known + (picked | reject('in', known) | list) %}
             {% set options = [] %}{% for k in keys %}{% set _ = options.append((k, retailer_title(k) | trim)) %}{% endfor %}
             <tr class="{{ 'new-row' if loop.last }}">
-              <td>{{ pick_many('rr.' ~ loop.index0 ~ '.retailers', options, picked, '— Add —' if loop.last else '— Remove —', 'cell') }}</td>
+              <td>{{ pick_many('rr.' ~ loop.index0 ~ '.retailers', options, picked, '— Add —' if loop.last else '— Remove —', 'cell', addable=true) }}</td>
               <td class="narrow"><input type="text" name="rr.{{ loop.index0 }}.rate" value="{{ r.rate }}" placeholder="5%"></td>
-              {{ cap_cells('rr.' ~ loop.index0, r) }}
+              {{ cap_cells('rr.' ~ loop.index0, r, hint) }}
             </tr>
             {% endfor %}
           </tbody>
@@ -192,6 +203,60 @@
         // the anniversary field only when the reset is "on a date each year"
         if (!window.__resetsToggle) {
           window.__resetsToggle = true;
+          // A retailer sits on ONE row of a card's Rates table: a row's picker
+          // hides what the other rows hold, and picking a retailer held elsewhere takes it from
+          // that row (which reads "Remove" once empty).
+          function syncRetailerRows(table) {
+            var pickers = table.querySelectorAll("details.multi[data-param$='.retailers']");
+            var taken = {};
+            pickers.forEach(function (d) { d.querySelectorAll("input:checked").forEach(function (b) { taken[b.value] = d; }); });
+            pickers.forEach(function (d) {
+              d.querySelectorAll("label").forEach(function (l) {
+                var b = l.querySelector("input");
+                if (b) l.hidden = !!(taken[b.value] && taken[b.value] !== d);
+              });
+            });
+          }
+          function syncAllRetailerRows() { document.querySelectorAll("table.entry-table.rates").forEach(syncRetailerRows); }
+          document.addEventListener("change", function (e) {
+            var box = e.target;
+            if (box.type !== "checkbox" || !box.name || !/\.retailers$/.test(box.name)) return;
+            var own = box.closest("details.multi"), table = box.closest("table");
+            if (!table) return;
+            if (box.checked) {
+              table.querySelectorAll("details.multi[data-param$='.retailers']").forEach(function (other) {
+                if (other === own) return;
+                var same = other.querySelector('input[value="' + box.value + '"]');
+                if (same && same.checked) { same.checked = false; same.dispatchEvent(new Event("change", { bubbles: true })); }
+              });
+            }
+            syncRetailerRows(table);
+          });
+          // a retailer typed into a picker's Add box:
+          // Enter adds it as a ticked option; the save writes it by name
+          document.addEventListener("keydown", function (e) {
+            var box = e.target;
+            if (!box.classList || !box.classList.contains("new-option") || e.key !== "Enter") return;
+            e.preventDefault();
+            var text = box.value.trim();
+            if (!text) return;
+            var details = box.closest("details.multi"), name = details.dataset.param;
+            var key = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+            var title = text.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+            var input = details.querySelector('input[value="' + key + '"]');
+            if (!input) {
+              var label = document.createElement("label");
+              input = document.createElement("input");
+              input.type = "checkbox"; input.name = name; input.value = key; input.dataset.text = title;
+              label.appendChild(input); label.appendChild(document.createTextNode(" " + title));
+              box.closest("label").before(label);
+            }
+            input.checked = true;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            box.value = "";
+          });
+          document.addEventListener("htmx:afterSettle", syncAllRetailerRows);
+          if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", syncAllRetailerRows); else syncAllRetailerRows();
           document.addEventListener("change", function (e) {
             var input = e.target;
             if (input.name === "kind") {  // a virtual or employee card: pick its card; its rates are that card's
@@ -226,8 +291,10 @@
       {% else %}
         <strong>{{ e.name or '(unnamed)' }}</strong> <span class="mono muted">…{{ e.last4 }}</span>
         {% if not e.virtual %}
-        <span class="chip">{{ e.cashback_rate if e.cashback_rate != '' else 'Default Rate' }}{{ limit_text(e.cap_all) }}</span>
-        {% for r in e.rate_rows %}<span class="chip muted">{% for k in r.retailers.split(', ') %}{{ retailer_title(k) | trim }}{{ ', ' if not loop.last }}{% endfor %} {{ r.rate }}{{ limit_text(r) }}</span>{% endfor %}
+        {#- the raw default rate, never the words, except as a placeholder -#}
+        {% set base = e.cashback_rate if e.cashback_rate != '' else default_rate_text %}
+        <span class="chip">{{ base }}{{ limit_text(e.cap_all, default_rate_text) }}</span>
+        {% for r in e.rate_rows %}<span class="chip muted">{% for k in r.retailers.split(', ') %}{{ retailer_title(k) | trim }}{{ ', ' if not loop.last }}{% endfor %} {{ r.rate }}{{ limit_text(r, base) }}</span>{% endfor %}
         {% endif %}
         {% if e.profile %}<span class="chip">{{ e.profile }}</span>{% endif %}
         {% if e.virtual %}<span class="chip virtual" title="{{ 'an employee card: a virtual number with a sign-up bonus of its own' if e.own_bonus else 'a virtual number of another card: it earns that card\'s rates and shares its limits' }}">{{ 'Employee Card' if e.own_bonus else 'Virtual Card' }}{% if e.virtual_of %} of …{{ e.virtual_of }}{% else %} — No Card Named{% endif %}</span>{% endif %}

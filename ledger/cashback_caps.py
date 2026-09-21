@@ -32,6 +32,9 @@ from datetime import date
 from ledger.sync import HEADER
 from models.card import Card, CashbackCap, normalize_last4, parse_rate
 from models.order import FIELDNAMES
+from models.retailers import NAMES as _NAMES
+
+NAMES_BY_KEY = {k.replace("-", ""): v for k, v in _NAMES.items()}  # cap retailers are normalized keys
 
 __all__ = ["SpendEvent", "allowance", "allowances", "apply_to_items", "basis", "capped_rate", "events_from_rows",
            "period_key", "recompute", "rows_by_field", "spend_before"]
@@ -185,6 +188,15 @@ def spend_before(events, cards: list[Card], card: Card, cap: CashbackCap, upto: 
     return round(total, 2)
 
 
+def _catch_all_reached(events, cards: list[Card], card: Card, cap: CashbackCap, upto: SpendEvent) -> bool:
+    """Has the card's everywhere-else cap reached its own limit before `upto`? Then a retailer
+    cap without a fallback of its own falls back to that cap's fallback (Card.fallback_for)."""
+    catch_all = card.catch_all()
+    if catch_all is None or catch_all is cap or cap.fallback_rate is not None:
+        return False
+    return spend_before(events, cards, card, catch_all, upto) >= catch_all.spend_limit
+
+
 def capped_rate(rate: float, cap: CashbackCap, used: float, amount: float, fallback: float | None = None) -> float:
     """The rate a purchase of `amount` earns with `used` of the allowance already spent. `fallback`
     is the rate past the limit (Card.fallback_for); a cap's own when not given."""
@@ -213,6 +225,48 @@ def allowance(events, cards: list[Card], card: Card, cap: CashbackCap, today: st
     left = round(cap.spend_limit - used, 2)
     return {"period": period, "used": used, "limit": cap.spend_limit, "left": max(0.0, left),
             "fraction": min(1.0, max(0.0, used / cap.spend_limit)) if cap.spend_limit else 0.0}
+
+
+def threshold_state(usage: dict, warn_percent: float, warn_dollars: float) -> str | None:
+    """Where an allowance stands against the thresholds: "reached" past the limit, "close" once
+    `warn_percent` of it is spent or `warn_dollars` or less is left (either; 0 switches one off),
+    else None."""
+    if usage["used"] >= usage["limit"]:
+        return "reached"
+    if warn_percent and usage["fraction"] * 100 >= warn_percent:
+        return "close"
+    if warn_dollars and usage["left"] <= warn_dollars:
+        return "close"
+    return None
+
+
+_RANK = {None: 0, "close": 1, "reached": 2}
+
+
+def alerts_due(rows: list[dict], cards: list[Card], today: str, warn_percent: float, warn_dollars: float,
+               memory: dict) -> tuple[list[dict], dict]:
+    """The spend-limit alerts to send now, and the memory to keep: one per (card, cap, period)
+    per state, escalating close -> reached, never repeated. `memory` is {"<last4>:<cap index>:<period>": state}."""
+    due: list[dict] = []
+    memory = dict(memory or {})
+    for (i, j), usage in allowances(rows, cards, today).items():
+        card, cap = cards[i], cards[i].caps[j]
+        state = threshold_state(usage, warn_percent, warn_dollars)
+        key = f"{card.last4}:{j}:{usage['period']}"
+        if _RANK[state] <= _RANK.get(memory.get(key)):
+            continue
+        memory[key] = state
+        scope = ", ".join(NAMES_BY_KEY.get(r, r) for r in cap.retailers) if cap.retailers else "everywhere else"
+        fallback = card.fallback_for(cap)
+        rate_text = (f"{fallback * 100:.2f}".rstrip("0").rstrip(".") + "% applies") if fallback is not None else "the default rate applies"
+        if state == "reached":
+            summary = f"{card.name}: {scope} spend limit reached ({usage['used']:,.0f} of {usage['limit']:,.0f} in {usage['period']}) -- {rate_text}"
+        else:
+            summary = (f"{card.name}: {scope} spend limit close ({usage['used']:,.0f} of {usage['limit']:,.0f} spent in "
+                       f"{usage['period']}, {usage['left']:,.0f} left)")
+        due.append({"summary": summary, "state": state, "card": card.name, "last4": card.last4, "cap": j,
+                    "period": usage["period"], "used": usage["used"], "limit": usage["limit"], "left": usage["left"]})
+    return due, memory
 
 
 def allowances(rows: list[dict], cards: list[Card], today: str) -> dict:
@@ -262,7 +316,8 @@ def apply_to_items(items: list, cards: list[Card], ledger_rows: list[dict], *, d
         if cap is None:
             continue
         used = spend_before(all_events, cards, card, cap, e)
-        new = capped_rate(float(it.cashback_rate), cap, used, e.amount, card.fallback_for(cap, default_rate))
+        fallback = card.fallback_for(cap, default_rate, _catch_all_reached(all_events, cards, card, cap, e))
+        new = capped_rate(float(it.cashback_rate), cap, used, e.amount, fallback)
         if abs(new - float(it.cashback_rate)) > 5e-5:
             changes.append((it, it.cashback_rate, new))
             it.cashback_rate = new
@@ -313,7 +368,8 @@ def recompute(values: list[list], cards: list[Card], protected: dict | None = No
             continue
         used = spend_before(events, cards, card, cap, purchase)
         promo = _num(cells.get("promo_rate"))  # Amazon's extra rides on top, outside the cap
-        new = round(capped_rate(float(rate), cap, used, purchase.amount, card.fallback_for(cap, default_rate)) + promo, 4)
+        fallback = card.fallback_for(cap, default_rate, _catch_all_reached(events, cards, card, cap, purchase))
+        new = round(capped_rate(float(rate), cap, used, purchase.amount, fallback) + promo, 4)
         old = parse_rate(cells.get("cashback_rate")) if str(cells.get("cashback_rate") or "").strip() else None
         try:
             old = float(old) if old is not None else None

@@ -1231,7 +1231,9 @@
   function refresh(details) {
     var all = details.querySelector(".all-box");
     var boxes = Array.prototype.slice.call(details.querySelectorAll('input[name]'));
-    var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+    // the summary words a pick by its shown name where the box carries one (data-text: the page's
+    // pick_many dropdowns), else by its value
+    var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.dataset.text || b.value; });
     if (all) all.checked = picked.length === 0;
     var text = details.querySelector(".summary-value") || details.querySelector(".summary-text");
     var empty = details.dataset.empty || "all";  // a "Hide" dropdown reads "none" when nothing is ticked

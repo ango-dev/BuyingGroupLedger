@@ -46,6 +46,8 @@ fails closed on a typo rather than turning itself on.
 | `DISCORD_WEBHOOK_URL` | `alerts.discord_webhook_url` |
 | `GMAIL_ALERTS_ENABLED` † | `alerts.gmail_enabled` |
 | `ALERT_EMAIL_TO` | `alerts.email_to` |
+| `CASHBACK_CAP_WARN_PERCENT` | `alerts.cap_warn_percent` |
+| `CASHBACK_CAP_WARN_DOLLARS` | `alerts.cap_warn_dollars` |
 | `GMAIL_ADDRESS` | `alerts.gmail_address` |
 | `GMAIL_APP_PASSWORD` | `alerts.gmail_app_password` |
 | `AMAZON_GIFT_CARD_NETTING_ENABLED` † | `scraping.amazon_gift_card_netting_enabled` |
@@ -237,6 +239,13 @@ never by the rate:
 - `resets`: `calendar-year` (default), `never`, or an `MM-DD` the period starts on each year.
 - `outside_spend`: per period (`"2026"`, or `"all"` for a cap that never resets), spend on the card
   the ledger never sees — personal purchases that also use up the allowance. Update it by hand.
+
+**Getting close.** After every sync the run measures each cap against the period's spend and
+alerts once per state per period — *close* when `CASHBACK_CAP_WARN_PERCENT` of the limit is spent
+or `CASHBACK_CAP_WARN_DOLLARS` or less is left (either triggers; 0 switches one off), *reached*
+once the limit is passed. The alert is its own activity kind, *Spend limit*, with a card on the
+overview and the nav's Activity badge, acknowledgeable like a failure dossier. The Settings page
+shows what is left of every limit on the card's row.
 
 The rate is applied at scrape time, with the batch placed among the ledger's rows for that card
 and period in Order Date order. After every ledger sync, rows **past shipped** (delivered, paid,

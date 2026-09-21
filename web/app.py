@@ -375,7 +375,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         response.delete_cookie(auth_module.COOKIE, path="/")
         return response
 
-    LOUD_KINDS = ("alert", "dossier")
+    LOUD_KINDS = ("alert", "dossier", "cap")  # cap: a card's spend limit close or reached (2026-09-20)
     LOUD_DAYS = 7
     _loud_cache: dict = {}
 
@@ -464,6 +464,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             cards.append({"tone": "bad", "label": "Failure dossiers", "count": loud["dossier"]["count"],
                           "text": "runs that recorded nothing", "href": "/activity?type=dossier&days=7&unacked=1",
                           "ack": {"kind": "dossier", "through": loud["dossier"]["newest"]}})
+        if loud["cap"]["count"]:  # a card's spend limit close or reached
+            reached = any("limit reached" in e["summary"] for e in loud["cap"]["events"])
+            cards.append({"tone": "bad" if reached else "warn", "label": "Spend limits", "count": loud["cap"]["count"],
+                          "text": "card limit(s) reached" if reached else "card limit(s) getting close",
+                          "href": "/activity?type=cap&days=7&unacked=1",
+                          "ack": {"kind": "cap", "through": loud["cap"]["newest"]}})
         try:
             report = audit_report(snapshot)
             counts = report.counts()
@@ -1651,7 +1657,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             hidden_envs=settings_form.hidden_envs(), section_title=settings_form.section_title,
             field_label=settings_form.field_label, retailer_keys=settings_form.RETAILER_KEYS,
             auth_retailers=settings_form.AUTH_RETAILERS, profile_labels=settings_form.profile_labels(),
-            retailer_names=retailers_module.NAMES,
+            retailer_names=retailers_module.NAMES, default_rate_text=default_rate_text(),
+            retailer_options=retailer_options(),
             card_choices=card_choices(), section_forms=[], in_container=in_container, auth_on=auth_on,
             restart=setup_wizard.pending_restart(), configured=setup_wizard.is_configured(), **extra)
         response.status_code = status
@@ -1929,9 +1936,37 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             section_title=settings_form.section_title, field_label=settings_form.field_label,
             entries=entries,
             retailer_keys=settings_form.RETAILER_KEYS, auth_retailers=settings_form.AUTH_RETAILERS,
-            retailer_names=retailers_module.NAMES,
+            retailer_names=retailers_module.NAMES, default_rate_text=default_rate_text(),
+            retailer_options=retailer_options(),
             profile_labels=settings_form.profile_labels(), card_choices=card_choices(),
         )
+
+    def retailer_options() -> list[tuple[str, str]]:
+        """(key, name) for every retailer a card's rates and caps may name: the scrapers' own,
+        then every other Retailer on the ledger and every other one the cards already name."""
+        known = dict(retailers_module.NAMES)
+        extra: dict[str, str] = {}
+
+        def add(name: str) -> None:
+            key = retailers_module.key_of(name)
+            if key and key not in known and key not in extra:
+                extra[key] = retailers_module.name_of(name)
+
+        try:
+            for row in reader.load().rows:
+                add(row.text("retailer"))
+        except Exception:  # noqa: BLE001 -- no ledger yet
+            pass
+        for entry in settings_form.display_entries("cards"):
+            for r, _rate in entry.get("retailer_rates", []):
+                add(str(r))
+        return list(known.items()) + sorted(extra.items(), key=lambda kv: kv[1])
+
+    def default_rate_text() -> str:
+        """The global default cashback rate as the page shows it ("2%"): what a card without a
+        rate of its own earns."""
+        rate = settings.default_cashback_rate or 0
+        return f"{rate * 100:g}%"
 
     def settings_page(request: Request, *, message: str = "", errors: list[str] | None = None,
                       open_section: str = "", section_texts: dict | None = None, status: int = 200,
@@ -1947,10 +1982,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                          open_index=None, open_new: bool = False, status: int = 200):
         """One entry section, re-rendered for an htmx save / add / remove to swap in place."""
         context = settings_context(open_section=path if open_new else "")
+        items = context["entries"][path]  # the decorated entries (a card's rows know their allowance)
         context["entries"] = {}  # the partial renders one section from `items`
         response = page_no_snapshot(
             request, "_settings_section.html", path=path, singular=path[:-1],
-            items=settings_form.display_entries(path), message=message, section_errors=errors or [],
+            items=items, message=message, section_errors=errors or [],
             open_index=open_index, errors=[], **context)
         response.status_code = status
         return response
