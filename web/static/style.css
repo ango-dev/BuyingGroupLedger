@@ -1245,7 +1245,7 @@ main .setup-steps + h1 { margin-top: 6px; }
   table.stacked thead th.sel-col { border-color: var(--accent); }
   table.stacked tbody { display: block; }
   table.stacked tbody tr { display: grid; grid-template-columns: 1fr; gap: 0 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
-  table.stacked tbody tr.has-num { grid-template-columns: 30px 1fr; }
+  table.stacked tbody tr.has-num { grid-template-columns: 46px 1fr; }  /* the track fits the 46px rownum cell exactly (2026-09-21: a 30px track let it overhang the first field) */
   table.stacked tbody td { display: block; border: 0; padding: 3px 6px; min-width: 0; grid-column: 1; }
   table.stacked tbody tr.has-num td { grid-column: 2; }
   table.stacked tbody tr.has-num td.rownum { grid-column: 1; grid-row: 1 / span 12; position: static; border-right: 1px solid var(--line); text-align: center; padding-top: 6px; }

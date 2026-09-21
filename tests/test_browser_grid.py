@@ -221,6 +221,13 @@ def test_the_expenses_and_activity_tables_stack_on_a_phone(served, phone, client
     assert page.evaluate("getComputedStyle(document.querySelector('table.expenses tbody tr')).display") == "grid"
     assert page.evaluate("getComputedStyle(document.querySelector('table.expenses td[data-field=amount]'), '::before').content") == '"Amount"'
     assert page.evaluate("document.querySelector('table.expenses').getBoundingClientRect().width <= innerWidth")
+    # the 46px number cell fits its track: it never overhangs the first field
+    gap_after_rownum = """(sel => {
+        const tr = document.querySelector(sel), num = tr.querySelector('td.rownum');
+        const first = [...tr.querySelectorAll('td')].find(td => td !== num && td.offsetParent);
+        return first.getBoundingClientRect().left - num.getBoundingClientRect().right;
+    })"""
+    assert page.evaluate(gap_after_rownum, "table.expenses tbody tr.has-num") >= 0
     chips = page.locator("table.expenses thead th")
     assert chips.filter(has_text="Amount").is_visible() and not page.locator("table.expenses thead th.rownum").is_visible()
     chips.filter(has_text="Amount").locator("a.sort").click()   # the chip's arrow still sorts
@@ -233,6 +240,7 @@ def test_the_expenses_and_activity_tables_stack_on_a_phone(served, phone, client
     assert page.evaluate("getComputedStyle(document.querySelector('table.activity tbody tr')).display") == "grid"
     assert page.evaluate("getComputedStyle(document.querySelector('table.activity tbody td.what'), '::before').content") == '"What happened"'
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+    assert page.evaluate(gap_after_rownum, "table.activity tbody tr.has-num") >= 0  # same 46px track
     row = page.locator("table.activity tbody tr.kind-edit")
     row.locator("button", has_text="details").tap()
     details = page.locator("table.activity tbody tr.kind-edit + tr.details-row")  # the row's own details
