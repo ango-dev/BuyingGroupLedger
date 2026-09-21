@@ -1333,3 +1333,24 @@ details.log .menu p { margin: 6px 2px 0; }
   details.log table.log-table input[type="text"] { width: 96px; }
   details.log table.log-table td:nth-child(3) input { width: 110px; }
 }
+
+/* ---- Print (2026-09-21): the Taxes page is "a summary for your preparer" -- printed, it is the
+   artifact handed over. The chrome goes, the surfaces go white whatever the theme (the semantic
+   colours stay for a colour printer), scroll regions open up, and edit.js opens the folded
+   panels on beforeprint. Applies site-wide: no page needs its buttons or menus on paper. ---- */
+@media print {
+  :root, :root[data-theme="dark"] {
+    --bg: #fff; --card: #fff; --fg: #1a1a1a; --muted: #555; --line: #ccc;
+    --accent: #4361b2; --committed: #7c5cbf; --ok: #2f7d4f; --warn: #a8622a; --bad: #b3423f;
+    --ok-bg: #fff; --warn-bg: #fff; --grid-line-plain: #ccc;
+  }
+  header.top, #toast, .savebar, .banner, dialog, .tip, .ctx, .pop, .sel-handle, .hint-mark,
+  button, .theme-toggle, a.sort, a.button, .tax-years form, .pager, .filters, .add-row { display: none !important; }
+  body { background: #fff; }
+  main { max-width: none; padding: 0 4px; animation: none; }
+  .scroll, .panel .sheet, .card-rows-wrap, .statement-wrap { overflow: visible !important; }
+  .panel, .charts figure, .tile, figure.months { box-shadow: none; }
+  tr { break-inside: avoid; }
+  details.panel { break-inside: avoid-page; }
+  a { color: inherit; }
+}

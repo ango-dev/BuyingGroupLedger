@@ -878,3 +878,26 @@ def test_a_360px_phone_fits_every_page_and_the_schedule_table_scrolls_inside_its
     assert wrap.count() == 1
     assert page.evaluate("el => el.scrollWidth > el.clientWidth", wrap.element_handle())  # the table pans here
     assert page.errors == []
+
+
+def test_the_taxes_page_prints_as_the_preparers_artifact(served, page):
+    """2026-09-21: printed, the Taxes page is what the tax preparer receives. The chrome goes,
+    the surfaces print white even from the dark theme, the schedule opens out of its scroll box,
+    and a folded panel opens for the print and folds back after."""
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{served}/taxes?year=2026")
+    page.wait_for_selector("#s-schedule-c")
+    page.evaluate("document.documentElement.setAttribute('data-theme', 'dark')")
+    page.evaluate("document.querySelector('#s-programs').open = false")
+    page.evaluate("window.dispatchEvent(new Event('beforeprint'))")
+    assert page.evaluate("document.querySelector('#s-programs').open")  # opened for the print
+    page.emulate_media(media="print")
+    assert page.evaluate("getComputedStyle(document.querySelector('header.top')).display") == "none"
+    assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(255, 255, 255)"
+    assert page.evaluate("getComputedStyle(document.querySelector('#s-schedule-c .scroll')).overflow") == "visible"
+    assert page.evaluate("getComputedStyle(document.querySelector('.tax-years form.open-year')).display") == "none"
+    page.emulate_media(media="screen")
+    page.evaluate("window.dispatchEvent(new Event('afterprint'))")
+    assert not page.evaluate("document.querySelector('#s-programs').open")  # folded back
+    page.evaluate("document.documentElement.setAttribute('data-theme', 'light')")
+    assert page.errors == []

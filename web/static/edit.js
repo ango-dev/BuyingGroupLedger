@@ -1551,3 +1551,20 @@
     document.querySelectorAll("details.log[open]").forEach(place);
   });
 })();
+
+// ---- Printing (2026-09-21): a printed page shows everything its panels hold. The folded
+// panels open for the print and fold back after; the print stylesheet hides the chrome.
+(function () {
+  window.addEventListener("beforeprint", function () {
+    document.querySelectorAll("details.panel:not([open])").forEach(function (d) {
+      d.dataset.printOpened = "1";
+      d.open = true;
+    });
+  });
+  window.addEventListener("afterprint", function () {
+    document.querySelectorAll("details.panel[data-print-opened]").forEach(function (d) {
+      delete d.dataset.printOpened;
+      d.open = false;
+    });
+  });
+})();

@@ -1647,7 +1647,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
                        "table.activity { width: 100%", ".dropzone.dragover",
                        ".filters { display: flex; flex-wrap: wrap", ".filters label.search {",
-                       "@keyframes rise-in", ".just-in {", "prefers-reduced-motion"):
+                       "@keyframes rise-in", ".just-in {", "prefers-reduced-motion", "@media print"):
             assert needle in css, f"style.css lost its {needle!r} rules"
         # motion stays cheap: nothing transitions "all", and no layout property is ever animated
         motion = css[css.index("/* ---- Motion"):]
