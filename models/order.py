@@ -187,6 +187,13 @@ FIELDNAMES = [
     # (a partial re-check), so _merge_row preserves what the first full extraction recorded.
     "card_name",
     "cashback_rate",
+    # Added 2026-09-20 BESIDE Cashback Rate -- a migration, not an append: the ledger file
+    # rebuilds its table by column name on open (ledger_db/store.py) and the formula letters follow
+    # HEADER. The Amazon promo the order page advertises ("... plus an extra 1% back ...") on its
+    # own, as the mapping read it; Cashback Rate stays the TOTAL the card earns (card rate, capped,
+    # plus this). Kept apart so a spend cap's recompute (ledger/cashback_caps.py) can take it off,
+    # judge the remainder against the cap and put it back. Blank = no promo.
+    "promo_rate",
     # DERIVED IN THE LEDGER like total_profit below, and for the same reason. Cost of Goods Sold for
     # this row, net of the card rebate:
     #
@@ -287,6 +294,9 @@ class OrderItem(BaseModel):
     # Derived from card_last4 by config.cards.tag_cards; blank when card_last4 is blank.
     card_name: str = ""
     cashback_rate: float | None = None  # decimal fraction (0.02 = 2%)
+    # Amazon only: the per-order promo the order page advertises, as the mapping read it (see
+    # FIELDNAMES); config.cards.add_promos adds it on top of the (capped) card rate.
+    promo_rate: float | None = None
     # User-entered / BFMR-filled. Always blank from a scraper — see FIELDNAMES.
     insurance: float | None = None
     payout_date: str = ""
@@ -323,20 +333,13 @@ class OrderItem(BaseModel):
     # must round-trip with its zeros — and blank when the mapping has none for this row.
     package_id: str = ""
 
-    # TRANSIENT, Amazon only: a per-order promo the order page advertises under the payment method
-    # ("... plus an extra 1% back ..."), which config.cards.tag_cards ADDS to the card's own rate when
-    # filling cashback_rate. Deliberately a PrivateAttr rather than a field: every OrderItem field must
-    # appear in FIELDNAMES (tests/test_schema.py enforces it both ways), and this is summed into the
-    # existing Cashback Rate column instead of claiming a column of its own. It only has to survive
-    # from the mapping to tag_cards inside one run — nothing rebuilds an OrderItem in between.
-    _promo_cashback_rate: float | None = PrivateAttr(default=None)
     # The block's "Sold by" merchant, read by the Amazon mappings so two same-titled lines in ONE
     # shipment (two sellers, two prices -- 114-9990029-9990029, 2026-09-08) can be told apart.
     # Mapping-internal like the promo rate: it feeds the Item Name suffix, never a column.
     _seller: str = PrivateAttr(default="")
 
     @field_validator("quantity", "cost_per_item", "shipping", "total_cost",
-                     "cashback_rate", "insurance", "payout_amount", "cogs", "total_profit",
+                     "cashback_rate", "promo_rate", "insurance", "payout_amount", "cogs", "total_profit",
                      "return_quantity", "gift_card", "sales_tax", "rewards_used",
                      "expected_payout", mode="before")
     @classmethod

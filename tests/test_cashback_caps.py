@@ -236,6 +236,18 @@ class TestRecompute:
         # A0 crosses the line on its own (100 of room, 600 past it); A1 is protected; F1 has no cap
         assert changes == [(2, round((100 * 0.05 + 600 * 0.01) / 700, 4), 0.05)]
 
+    def test_a_promo_row_keeps_its_promo_on_top_of_the_capped_rate(self):
+        """The Promo Rate column (2026-09-20): the recompute takes it off, judges the remainder
+        against the cap, and puts it back -- a 6% cell (5% + 1% promo) past the cap becomes 2%."""
+        cards = [card(caps=[{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": "1%"}])]
+        grid = values(
+            row(order_id="A0", order_date="2026-01-05", total_cost="1000", cashback_rate="0.05", status="paid"),
+            row(order_id="A1", order_date="2026-02-01", total_cost="100", cashback_rate="0.06", promo_rate="0.01", status="paid"),
+            row(order_id="A2", order_date="2026-02-02", total_cost="100", cashback_rate="0.02", promo_rate="0.01", status="paid"),
+        )
+        changes = caps.recompute(grid, cards, {}, default_rate=0.02)
+        assert changes == [(3, 0.02, 0.06)]  # A2 already reads 1% + 1%: untouched
+
     def test_a_percent_text_rate_reads_as_a_number(self):
         cards = [card(caps=[{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": "1%"}])]
         grid = values(row(order_id="A0", order_date="2026-01-05", total_cost="700", cashback_rate="5%", status="paid"))
@@ -299,7 +311,7 @@ class TestTheRunOrder:
 
         monkeypatch.setattr(ledger_sync, "_get_worksheet", lambda: Ledger())
         it = item(order_id="N1", total_cost=500, cashback_rate=None)
-        it._promo_cashback_rate = 0.01
+        it.promo_rate = 0.01
         main._tag_cards([it], "Amazon [p]")
         capped = round((100 * 0.05 + 400 * 0.01) / 500, 4)
         assert it.cashback_rate == round(capped + 0.01, 4) and it.card_name == "ABP"

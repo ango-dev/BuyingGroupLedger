@@ -144,6 +144,7 @@ def row_cells(row_number: int, **overrides) -> list[Cell]:
         "Total Cost": Cell(798.0),
         "Card": Cell("Amex Business Gold"),
         "Cashback Rate": Cell(0.04, fmt="percent"),
+        "Promo Rate": Cell("", fmt="percent"),
         "Insurance": Cell("", fmt="currency"),
         "Actual Payout": Cell("", fmt="currency"),
         "Payout Date": Cell(""),

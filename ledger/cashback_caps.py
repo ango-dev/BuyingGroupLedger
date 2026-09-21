@@ -282,7 +282,8 @@ def recompute(values: list[list], cards: list[Card], protected: dict | None = No
         if rate is None:
             continue
         used = spend_before(events, cards, card, cap, purchase)
-        new = capped_rate(float(rate), cap, used, purchase.amount)
+        promo = _num(cells.get("promo_rate"))  # Amazon's extra rides on top, outside the cap
+        new = round(capped_rate(float(rate), cap, used, purchase.amount) + promo, 4)
         old = parse_rate(cells.get("cashback_rate")) if str(cells.get("cashback_rate") or "").strip() else None
         try:
             old = float(old) if old is not None else None

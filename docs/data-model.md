@@ -16,7 +16,7 @@ rarely-scanned reference/audit columns parked at the end:
 
 `Order Date · Status · Retailer · Item Name · Shipment · Quantity ·
 Order ID · Tracking Number · Tracking Submitted · Delivery Date · Buying Group ·
-Cost Per Item · Total Cost · Shipping · Sales Tax · Gift Card · Rewards Used · Card · Cashback Rate · COGS ·
+Cost Per Item · Total Cost · Shipping · Sales Tax · Gift Card · Rewards Used · Card · Cashback Rate · Promo Rate · COGS ·
 Insurance · Expected Payout · Actual Payout · Payout Date · Return Qty · Return Date · Total Profit ·
 Profile · Order Link · Tracking Link · Receipt Link · Delivery Address · Card Last 4 · Package ID · Last Scraped At`
 
@@ -142,8 +142,10 @@ etc.) — they're never resold, so they never hit the ledger.
   gap stays visible — but still gets your `DEFAULT_CASHBACK_RATE` so profit stays computable. The rate
   is the only cashback column; the dollar amount isn't stored, it's folded into Total Profit.
   On **Amazon**, if the order page advertises a bonus under the payment method ("Earn 5% back … plus an
-  extra 1% back"), that extra is **added** to the card's configured rate for that order, so the single
-  Cashback Rate cell carries the true total (`AMAZON_PROMO_CASHBACK_ENABLED=false` turns it off).
+  extra 1% back"), that extra is **added** to the card's configured rate for that order, so the
+  Cashback Rate cell carries the true total (`AMAZON_PROMO_CASHBACK_ENABLED=false` turns it off) —
+  and, since 2026-09-20, **Promo Rate** beside it records the extra on its own, so a card's spend cap
+  can be re-derived later with the promo taken off and put back. Blank means no promo.
 - **Gift cards earn no cashback**, so when one pays part of an Amazon or Amazon Business order the
   amount lands in the **Gift Card** column (each row gets its cost-weighted share of the order
   total, like Shipping) and the COGS formula subtracts it — the cost basis and the cashback it

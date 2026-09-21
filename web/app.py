@@ -96,7 +96,7 @@ def cell(row, name: str) -> str:
     if name in ("total_cost", "insurance", "payout_amount", "expected_payout", "cost_per_item",
                 "shipping", "sales_tax", "gift_card", "rewards_used"):
         return money(row.number(name))
-    if name == "cashback_rate":
+    if name in ("cashback_rate", "promo_rate"):
         return percent(row.number(name))
     if name == "tracking_submitted":
         return "✓" if row.tracking_submitted else ""

@@ -6,7 +6,7 @@
 {%- set raw = row.cells.get(field, '') if row else '' -%}
 {%- set kind = 'check' if field == 'tracking_submitted' else 'date' if field in DATE_FIELDS or field == 'order_date' else 'choice' if field in CHOICE_FIELDS else 'text' -%}
 {%- set can_edit = editable and field != 'total_cost' -%}
-<td class="{{ 'num' if field in MONEY_FIELDS or field in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }}{{ ' mono' if field in ('order_id', 'tracking_number', 'package_id', 'card_last4') }}{{ ' item' if field == 'item_name' }}{{ ' edit' if can_edit }}{{ ' gap' if field in gaps }}{{ ' error' if error }}" data-field="{{ field }}" data-entry-id="{{ entry_id }}" data-raw="{{ raw }}"{% if can_edit %} tabindex="0" data-kind="{{ kind }}"{% endif %}{% if error %} data-error="{{ error }}"{% endif %}{% if field in gaps %} title="still needed"{% endif %}>
+<td class="{{ 'num' if field in MONEY_FIELDS or field in ('quantity', 'shipment', 'cashback_rate', 'promo_rate', 'return_quantity') }}{{ ' mono' if field in ('order_id', 'tracking_number', 'package_id', 'card_last4') }}{{ ' item' if field == 'item_name' }}{{ ' edit' if can_edit }}{{ ' gap' if field in gaps }}{{ ' error' if error }}" data-field="{{ field }}" data-entry-id="{{ entry_id }}" data-raw="{{ raw }}"{% if can_edit %} tabindex="0" data-kind="{{ kind }}"{% endif %}{% if error %} data-error="{{ error }}"{% endif %}{% if field in gaps %} title="still needed"{% endif %}>
   {%- if error %}<span class="cell-error" title="{{ error }}">⚠ {{ error }}</span> {% endif -%}
   {%- if row -%}
     {%- if field == 'tracking_submitted' -%}<input type="checkbox" class="cell-check" {{ 'checked' if raw.lower() in ('true', '1', 'yes') }} {{ '' if can_edit else 'disabled' }} aria-label="tracking submitted">

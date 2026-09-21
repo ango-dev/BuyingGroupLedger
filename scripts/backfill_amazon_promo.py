@@ -51,7 +51,7 @@ log = logging.getLogger("backfill_amazon_promo")
 
 # Only these cells are ever touched. Everything else on the row is left exactly as it is — this
 # script corrects money columns, it is not a re-scrape.
-TARGET_FIELDS = ("cashback_rate", "cost_per_item", "total_cost", "shipping")
+TARGET_FIELDS = ("cashback_rate", "promo_rate", "cost_per_item", "total_cost", "shipping")  # Promo Rate since 2026-09-20
 _HEADER_FOR_FIELD = dict(zip(FIELDNAMES, HEADER))
 
 # retailer -> (retailer key in profiles.json, the mapping module that parses its pages)
@@ -83,7 +83,7 @@ def _cell_number(field: str, value):
     this wrong reports every already-correct row as a change (the same trap
     backfill_profit_columns._same_rate guards against).
     """
-    if field == "cashback_rate":
+    if field in ("cashback_rate", "promo_rate"):
         try:
             return parse_rate(value if isinstance(value, str) else str(value))
         except ValueError:
@@ -202,7 +202,7 @@ def rebuild_orders(retailer: str, profile_label: str, order_ids: list[str], card
             for r in rows:
                 rebuilt[_key(r.order_id, r.order_date, r.item_name, r.shipment)] = r
             log.info("%s %s: rebuilt %d row(s), promo=%s, rate=%s", retailer, oid, len(rows),
-                     rows[0]._promo_cashback_rate, rows[0].cashback_rate)
+                     rows[0].promo_rate, rows[0].cashback_rate)
     return rebuilt
 
 

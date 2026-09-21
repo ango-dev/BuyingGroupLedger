@@ -40,13 +40,14 @@ class TestFormulaShape:
 
     def test_formula_shape_is_pinned(self):
         # Pinned literally so an accidental column insert (which shifts every letter) fails loudly
-        # (Expected Payout moved before Actual Payout on 2026-09-18: V->W, X->Y, deliberately)
+        # (Expected Payout moved before Actual Payout on 2026-09-18: V->W, X->Y, deliberately;
+        # Promo Rate inserted after Cashback Rate on 2026-09-20: every letter from T on shifts one)
         # here rather than quietly producing wrong money on the ledger.
         assert ledger_sync._cogs_formula(7) == (
-            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-Y7*L7-P7+N7+O7-Q7)*(1-S7)+Q7,"")))'
+            '=IF(B7="cancelled","",IF(M7="","",IFERROR((M7-Z7*L7-P7+N7+O7-Q7)*(1-S7)+Q7,"")))'
         )
         assert ledger_sync._profit_formula(7) == (
-            '=IF(B7="cancelled","",IF(W7="","",IFERROR(W7-T7-U7,"")))'
+            '=IF(B7="cancelled","",IF(X7="","",IFERROR(X7-U7-V7,"")))'
         )
 
     def test_profit_is_algebraically_what_it_always_was(self):

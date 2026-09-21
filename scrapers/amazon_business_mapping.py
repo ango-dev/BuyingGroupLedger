@@ -1289,5 +1289,5 @@ def build_order_items(
     # AMAZON_PROMO_CASHBACK_ENABLED toggle already gates BOTH Amazons at the tag_cards call site.
     promo = _promo_cashback_rate(region)
     for row in rows:
-        row._promo_cashback_rate = promo
+        row.promo_rate = promo
     return rows

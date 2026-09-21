@@ -58,7 +58,7 @@ MONEY_FIELDS = ("cost_per_item", "total_cost", "shipping", "sales_tax", "gift_ca
 #: Sorted as numbers (blank last), everything else as text.
 NUMERIC_SORT = {
     "quantity", "shipment", "total_cost", "cost_per_item", "shipping", "sales_tax", "gift_card",
-    "rewards_used", "cashback_rate", "cogs", "insurance", "payout_amount", "return_quantity",
+    "rewards_used", "cashback_rate", "promo_rate", "cogs", "insurance", "payout_amount", "return_quantity",
     "total_profit", "expected_payout",
 }
 

@@ -404,7 +404,7 @@ def stage_rows(raw_rows: list[dict], mapping: Mapping[str, str], *, date_order: 
                 else:
                     cells[f] = str(int(number))
         quantity = int(cells["quantity"]) if cells["quantity"] else None
-        for f in MONEY_FIELDS + ("cashback_rate",):
+        for f in MONEY_FIELDS + ("cashback_rate", "promo_rate"):
             text = get(f)
             if text:
                 number = ih.money(text)

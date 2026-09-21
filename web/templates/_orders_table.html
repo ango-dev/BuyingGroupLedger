@@ -45,7 +45,7 @@
       {% else %}{% set link = filters.as_query(sort='', dir='') %}{% set says = 'clear the sort' %}{% endif %}
       {#- The name selects the column (edit.js); the arrow at the right is the sort link: one click
           a step, ascending, descending, then clear. -#}
-      <th class="col-{{ name }} {{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }} {{ 'sorted' if active }}">
+      <th class="col-{{ name }} {{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'promo_rate', 'return_quantity') }} {{ 'sorted' if active }}">
         <span class="name">{{ heading }}</span><a class="sort" href="{{ base }}{% if link %}?{{ link | query }}{% endif %}"
            hx-get="{{ base }}{% if link %}?{{ link | query }}{% endif %}"
            hx-target="#orders-table" hx-push-url="true" title="{{ says }}">{{ ('▼' if filters.desc else '▲') if active else '⇅' }}</a>

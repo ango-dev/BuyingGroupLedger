@@ -65,7 +65,7 @@
   <div class="card-rows-wrap">
   {% include "_cell_tips.html" %}
   <table class="grid compact order-rows sheetlike">
-    <thead><tr>{% for name, heading in columns %}<th class="col-{{ name }} {{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'return_quantity') }}">{{ heading }}</th>{% endfor %}</tr></thead>
+    <thead><tr>{% for name, heading in columns %}<th class="col-{{ name }} {{ 'num' if name in MONEY_FIELDS or name in ('quantity', 'shipment', 'cashback_rate', 'promo_rate', 'return_quantity') }}">{{ heading }}</th>{% endfor %}</tr></thead>
     <tbody>
       {% for row in s.rows %}
       {% set key = {'order_id': row.order_id, 'order_date': row.order_date, 'item_name': row.item_name, 'shipment': row.shipment} %}

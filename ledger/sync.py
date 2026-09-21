@@ -59,6 +59,7 @@ HEADER = [
                      # tender the card never spent. See models/order.py.
     "Card",  # derived from Card Last 4 (config.cards.resolve_card)
     "Cashback Rate",  # decimal fraction (0.02) — format the column as a percentage to taste
+    "Promo Rate",     # Amazon's per-order extra on its own (2026-09-20); Cashback Rate already includes it
     "COGS",  # DERIVED: the adapter computes it per row (_cogs_formula is the definition): cost + shipping, net of cashback
     # --- what came back ---
     "Insurance",  # a buying-group premium — an EXPENSE, deliberately not part of COGS
@@ -94,7 +95,7 @@ HEADER = [
 # number returns None for it and _coerce leaves it as text untouched — no data is lost.
 _NUMERIC_FIELDS = {
     "quantity", "cost_per_item", "shipping", "total_cost",
-    "cashback_rate", "insurance", "payout_amount", "expected_payout",
+    "cashback_rate", "promo_rate", "insurance", "payout_amount", "expected_payout",
     "shipment", "return_quantity", "gift_card", "sales_tax", "rewards_used",
 }
 
@@ -492,7 +493,7 @@ def _ensure_grid_cols(worksheet) -> None:
 
 #: The fields that describe the CARD an order was paid with -- one card pays an order, so a value
 #: the user corrected on one of its rows holds for every row of it, whichever retailer.
-_ORDER_CARD_FIELDS = ("cashback_rate", "card_name", "card_last4")
+_ORDER_CARD_FIELDS = ("cashback_rate", "promo_rate", "card_name", "card_last4")
 
 
 def _inherit_hand_edited_card_fields(worksheet, appends: list[list], existing: list[list],

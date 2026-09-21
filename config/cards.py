@@ -170,7 +170,7 @@ def add_promos(items) -> int:
     rate -- it is Amazon's, not the card's. Returns how many rows got one."""
     added = 0
     for item in items:
-        promo = getattr(item, "_promo_cashback_rate", None)
+        promo = getattr(item, "promo_rate", None)
         if promo and item.cashback_rate is not None:
             item.cashback_rate = round(item.cashback_rate + promo, 4)
             added += 1

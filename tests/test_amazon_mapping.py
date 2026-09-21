@@ -325,12 +325,12 @@ def _one_item_order(**kwargs) -> str:
 
 def test_promo_extra_percent_is_parsed():
     html = _one_item_order(earn="Earn 5% back (cap applies) plus an extra 1% back on select items")
-    assert build_order_items(html)[0]._promo_cashback_rate == 0.01
+    assert build_order_items(html)[0].promo_rate == 0.01
 
 
 def test_promo_amazon_day_wording_is_parsed():
     html = _one_item_order(earn="Earns 5% back and extra 1% on items using Amazon Day delivery.")
-    assert build_order_items(html)[0]._promo_cashback_rate == 0.01
+    assert build_order_items(html)[0].promo_rate == 0.01
 
 
 @pytest.mark.parametrize("earn", [
@@ -342,11 +342,11 @@ def test_promo_amazon_day_wording_is_parsed():
 ])
 def test_earn_line_without_an_extra_is_not_a_promo(earn):
     # The base rate is cards.json's job — an earn line with no "extra N%" must not become a bonus.
-    assert build_order_items(_one_item_order(earn=earn))[0]._promo_cashback_rate is None
+    assert build_order_items(_one_item_order(earn=earn))[0].promo_rate is None
 
 
 def test_no_earn_line_means_no_promo():
-    assert build_order_items(_one_item_order())[0]._promo_cashback_rate is None
+    assert build_order_items(_one_item_order())[0].promo_rate is None
 
 
 def test_promo_outside_order_details_is_ignored():
@@ -356,7 +356,7 @@ def test_promo_outside_order_details_is_ignored():
         '<div id="rhf"><li class="pmts-payments-instrument-supplemental-box-paystationpaymentmethod">'
         "<span>Get an extra 9% back today</span></li>",
     )
-    assert build_order_items(html)[0]._promo_cashback_rate is None
+    assert build_order_items(html)[0].promo_rate is None
 
 
 # --- gift card + sales tax ----------------------------------------------------------------------

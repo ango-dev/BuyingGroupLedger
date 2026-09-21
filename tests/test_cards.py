@@ -238,7 +238,7 @@ class TestPromoCashback:
         kwargs.setdefault("card_last4", "4321")
         kwargs.setdefault("retailer", "Amazon")
         row = item(**kwargs)
-        row._promo_cashback_rate = promo
+        row.promo_rate = promo
         return row
 
     def test_promo_is_added_to_the_cards_own_rate(self):

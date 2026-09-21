@@ -1226,5 +1226,5 @@ def build_order_items(
     # Rides to config.cards.tag_cards, which folds it into cashback_rate (see OrderItem).
     promo = _promo_cashback_rate(region)
     for row in rows:
-        row._promo_cashback_rate = promo
+        row.promo_rate = promo
     return rows
