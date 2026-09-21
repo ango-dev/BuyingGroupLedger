@@ -894,11 +894,15 @@ table.sheetlike td.hand, table.card-rows td.hand, table.order-rows td.hand { bor
 
 /* ---- the Taxes page ---- */
 .tax-years .button.primary { color: #fff; }
-.tax-years .year-nav { vertical-align: middle; margin-right: 6px; }
-.tax-years .year-nav .year-label { min-width: 3.4em; }
-.tax-years form.open-year { display: inline-flex; gap: 6px; margin: 0 0 0 8px; vertical-align: middle; }
-.tax-years form.open-year input { width: 64px; padding: 2px 6px; font-size: 0.95em; }
-.tax-years form.close-year { display: inline-flex; margin: 0 0 0 6px; vertical-align: middle; }
+/* the year row: one centred line -- the label, the stepper with a bigger year, the Open year box and
+   Close year beside it */
+.tax-years { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font-size: 0.95em; margin: 6px 0 12px; }
+.tax-years .year-nav { font-size: 1em; margin: 0; vertical-align: baseline; }
+.tax-years .year-nav .year-label { min-width: 3em; font-size: 1.55em; font-weight: 700; color: var(--fg); line-height: 1; }
+.tax-years .year-nav .button { font-size: 1.15em; padding: 2px 9px; }
+.tax-years form.open-year { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.tax-years form.open-year input { width: 64px; padding: 3px 6px; font-size: 0.95em; }
+.tax-years form.close-year { display: inline-flex; align-items: center; margin: 0; }
 .tax-years form.close-year button:disabled { opacity: 0.45; cursor: not-allowed; }
 table.schedule { width: 100%; }
 table.schedule td.num, table.schedule th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
