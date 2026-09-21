@@ -509,13 +509,17 @@ class TestEntryCards:
              "outside_spend": {"2026": 4000.0, "2027": 0.0}},
             {"retailers": [], "spend_limit": 25000.0, "fallback_rate": "1%", "resets": "calendar-year"}]
         body = client.get("/settings").text
-        # one table: the capped row with its retailers, the plain rate row, the catch-all on "everywhere else"
-        assert 'name="rr.0.retailers" value="amazon, amazon-business"' in body and 'name="rr.0.rate" value="5%"' in body
-        assert 'name="rr.0.anniversary" value="03-15" placeholder="03-15" class="mono anniversary" >' in body  # shown: anniversary
+        # one table: the capped row with its retailers (the page's own dropdown), the plain rate
+        # row, the catch-all on "everywhere else"; the date inline in the resets cell, only shown
+        # for "on a date each year"
+        assert 'name="rr.0.retailers" value="amazon" checked>' in body and 'name="rr.0.retailers" value="amazon-business" checked>' in body
+        assert 'name="rr.0.retailers" value="bestbuy" >' in body and 'name="rr.0.rate" value="5%"' in body
+        assert 'name="rr.0.anniversary" value="03-15" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" >' in body
         assert 'name="rr.0.outside_spend" value="2026: 4000, 2027: 0"' in body
-        assert 'name="rr.1.retailers" value="bestbuy"' in body and 'name="rr.1.spend_limit" value=""' in body
+        assert 'name="rr.1.retailers" value="bestbuy" checked>' in body and 'name="rr.1.spend_limit" value=""' in body
         assert 'name="cap_all.spend_limit" value="25000"' in body
-        assert 'name="cap_all.anniversary" value="" placeholder="03-15" class="mono anniversary" hidden>' in body  # hidden: calendar year
+        assert 'class="mono anniversary" hidden>' in body and "<th>on (MM-DD)</th>" not in body
+        assert 'list="retailer-keys"' not in body  # no browser suggestion list
         assert "all to 25000 then 1%" in body  # the entry's summary chip
         # a cap with a bad reset date is refused and nothing is written
         bad = client.post("/settings/section/cards/entry/1", data={
@@ -529,6 +533,12 @@ class TestEntryCards:
                                                              "rr.0.retailers": "amazon", "rr.0.rate": "5%", "rr.0.spend_limit": "",
                                                              "cap_all.spend_limit": ""}, follow_redirects=False)
         assert "caps" not in config_value("cards")[1] and config_value("cards")[1]["retailer_rates"] == {"amazon": "5%"}
+        # the dropdown posts one value per tick
+        ticked = client.post("/settings/section/cards/entry/1", data={
+            "name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%",
+            "rr.0.retailers": ["amazon", "costco"], "rr.0.rate": "4%"}, follow_redirects=False)
+        assert ticked.status_code == 303, ticked.text[ticked.text.find("Nothing was saved"):][:400]
+        assert config_value("cards")[1]["retailer_rates"] == {"amazon": "4%", "costco": "4%"}
 
     def test_a_save_from_the_page_swaps_the_section_in_place(self, client):
         hx = {"HX-Request": "true"}
@@ -539,10 +549,20 @@ class TestEntryCards:
             "name": "USB Prime Business", "last4": "0315", "cashback_rate": "5%"})
         assert saved.status_code == 200 and "<html" not in saved.text
         assert saved.text.lstrip().startswith('<section class="panel" id="s-cards">')
-        assert "Saved card USB Prime Business" in saved.text and 'data-key="cards:0315" open>' in saved.text
+        assert 'data-key="cards:0315" open>' in saved.text
+        # the outcome is a notification from the top (out of band), not a banner in the section
+        assert '<div id="toast" hx-swap-oob="true"><div class="toast ok" role="status">Saved card USB Prime Business' in saved.text
+        assert 'class="banner ok' not in saved.text.split('id="toast"')[0]
         assert config_value("cards")[0]["cashback_rate"] == "5%"
         refused = client.post("/settings/section/cards/entry/0", headers=hx, data={"name": "USB", "last4": "0315", "cashback_rate": "2"})
         assert refused.status_code == 400 and refused.text.lstrip().startswith('<section') and "outside 0-1" in refused.text
+        assert '<div class="toast warn" role="alert">Nothing was saved:' in refused.text
+        # profiles and warehouses save in place the same way, with the same notification
+        for path, data, label in (("profiles", {"label": "alpha", "profile_id": "", "retailers": "costco"}, "profile alpha"),
+                                  ("warehouses", {"buying_group": "BFMR", "jig.0.label": "BFMR", "jig.0.zip": "12345"}, "warehouse BFMR")):
+            resp = client.post(f"/settings/section/{path}/entry", headers=hx, data=data)
+            assert resp.status_code == 200 and resp.text.lstrip().startswith(f'<section class="panel" id="s-{path}">'), resp.text[:300]
+            assert f'<div class="toast ok" role="status">Added {label}.</div>' in resp.text
         added = client.post("/settings/section/cards/entry", headers=hx, data={"name": "Second", "last4": "2222"})
         assert added.status_code == 200 and 'data-key="cards:2222" open>' in added.text
         removed = client.post("/settings/section/cards/entry/1/delete", headers=hx)
@@ -555,11 +575,26 @@ class TestEntryCards:
         assert unlinked.status_code == 400 and "virtual number of" in unlinked.text.lower()
         assert len(config_value("cards")) == 1
         linked = client.post("/settings/section/cards/entry", data={"name": "Virtual", "last4": "9999", "virtual": "on",
-                                                                     "virtual_of": "0315"}, follow_redirects=False)
+                                                                     "virtual_of": "0315", "cashback_rate": "2%",
+                                                                     "rr.0.retailers": "amazon", "rr.0.rate": "5%", "rr.0.spend_limit": "10"},
+                             follow_redirects=False)
         assert linked.status_code == 303
+        # a virtual number keeps no rates or caps of its own: they are the card's it names
         assert config_value("cards")[1] == {"last4": "9999", "name": "Virtual", "virtual": True, "virtual_of": "0315"}
+        # an employee card: virtual, sharing the limits, but with a sign-up bonus of its own
+        employee = client.post("/settings/section/cards/entry/1", data={"name": "Virtual", "last4": "9999", "virtual": "on",
+                                                                        "virtual_of": "0315", "own_bonus": "on"}, follow_redirects=False)
+        assert employee.status_code == 303 and config_value("cards")[1]["own_bonus"] is True
         body = client.get("/settings").text
         assert "virtual of …0315" in body
+        # the card picker shows only for a ticked virtual card
+        cards_html = body[body.index('data-key="cards:0315"'):body.index('data-key="cards:9999"')]
+        assert '<span class="virtual-of" hidden>' in cards_html
+        virtual_html = body[body.index('data-key="cards:9999"'):]
+        assert '<span class="virtual-of" >' in virtual_html and 'name="virtual_of" value="0315" checked' in virtual_html
+        assert 'class="fblock rates-block" hidden>' in virtual_html and 'name="own_bonus" value="on" checked' in virtual_html
+        assert 'class="fblock rates-block" >' in cards_html  # a real card shows its rates
+        assert ">own bonus<" in virtual_html
 
     def test_an_invalid_entry_is_400_and_writes_nothing(self, client):
         bad = client.post("/settings/section/cards/entry", data={"name": "Bare", "last4": "1111",

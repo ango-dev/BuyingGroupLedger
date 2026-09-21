@@ -131,8 +131,19 @@ def resolve_card(
             [c.name for c in matches if c.specificity() == best.specificity()],
             last4, profile_label, best.name,
         )
-    rate = best.rate_for(retailer)
+    rate = _rates_of(best, cards).rate_for(retailer)  # a virtual number earns its card's rates
     return best.name, rate if rate is not None else default_rate
+
+
+def _rates_of(card: Card, cards: list[Card]) -> Card:
+    """The entry whose rates a purchase on `card` earns: the card it is a virtual number of,
+   else itself."""
+    if card.virtual_of:
+        parents = [c for c in cards if c.last4 == card.virtual_of and (not c.profile or c.profile == card.profile)]
+        if parents:
+            parents.sort(key=lambda c: -c.specificity())
+            return parents[0]
+    return card
 
 
 def tag_cards(items, cards: list[Card], default_rate: float | None = None,

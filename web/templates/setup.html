@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_select.html" import choose %}
+{% from "_select.html" import choose, pick_many %}
 {% from "_settings_macros.html" import setting_row, profile_fields, warehouse_fields, card_fields, entry_section with context %}
 {% from "_dropzone.html" import dropzone %}
 {% block title %}Setup · {{ step.title }}{% endblock %}

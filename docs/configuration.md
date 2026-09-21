@@ -185,10 +185,12 @@ Details:
   key. A key that names **no** retailer this ledger scrapes logs a warning at load — a typo'd override
   would otherwise never apply and nothing would say so.
 - **`virtual: true`** marks a virtual card number (one issued off another card): it earns cashback
-  like any entry, and the dashboard's Taxes page does not ask for a sign-up bonus for it. It also
-  names the card it belongs to in **`virtual_of`** (that card's last 4): its spend counts against
-  that card's spend caps and those caps apply to it. The Settings page insists on the link; an
-  older entry without it loads with a warning and pools nothing.
+  and names the card it belongs to in **`virtual_of`** (that card's last 4). It earns that card's
+  rates, its spend counts against that card's spend caps and those caps apply to it, so a virtual
+  entry carries no rates or caps of its own (the Settings page hides the table). The Taxes page
+  does not ask for a sign-up bonus for it — unless **`own_bonus: true`**, an Amex employee card:
+  a virtual number that shares the limits but earned a bonus of its own. The Settings page insists
+  on the link; an older entry without it loads with a warning and stands on its own rates.
 - `last4` is matched **normalized**, so it doesn't matter that Amazon says "ending in 4321", Best Buy
   sends `************4321`, and Costco sends `xxxx4321`.
 - Two *different* cards can genuinely share a last 4 across accounts. Add an optional **`profile`** (a

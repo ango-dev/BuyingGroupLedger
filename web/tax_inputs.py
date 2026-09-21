@@ -167,7 +167,9 @@ def card_prompts(rows: Iterable, year: int, cards: Iterable = ()) -> list[Prompt
     """One per card USED in `year`: every distinct Card Last 4 on rows placed in the year (with
     the card name the ledger recorded, or the settings' name), minus the last-4s the Cards
     settings mark virtual. Each takes two amounts: `bonus:<last4>` and `fee:<last4>`."""
-    virtual = {str(getattr(c, "last4", "")).strip() for c in cards if getattr(c, "virtual", False)}
+    # a virtual number has no bonus of its own -- unless it does (an Amex employee card: own_bonus)
+    virtual = {str(getattr(c, "last4", "")).strip() for c in cards
+               if getattr(c, "virtual", False) and not getattr(c, "own_bonus", False)}
     names = {str(getattr(c, "last4", "")).strip(): str(getattr(c, "name", "")) for c in cards}
     seen: dict[str, str] = {}
     for row in rows:

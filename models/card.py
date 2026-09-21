@@ -164,10 +164,15 @@ class Card(BaseModel):
     # A virtual card number (another card's, or a card with no account of its own): it earns
     # cashback like any card, but the Taxes page does not ask for a sign-up bonus for it.
     virtual: bool = False
-    #: The last 4 of the card this virtual number belongs to: its spend counts against that card's caps, and that card's caps apply to
-    #: it. The Settings page insists on it for a virtual card; an older config without it loads
-    #: with a warning (config.cards.load_cards) and pools nothing.
+    #: The last 4 of the card this virtual number belongs to: it earns that card's rates, its spend counts against that card's caps
+    #: and those caps apply to it (config.cards.resolve_card, ledger/cashback_caps). The Settings
+    #: page insists on it for a virtual card; an older config without it loads with a warning
+    #: (config.cards.load_cards) and stands on its own rates.
     virtual_of: str = ""
+    #: A virtual number with a sign-up bonus of its own -- an Amex employee card: it shares the
+    #: card's rates and limits like any virtual number, but the Taxes page still asks for its bonus.
+    #:Only meaningful with `virtual`.
+    own_bonus: bool = False
 
     @field_validator("last4", mode="before")
     @classmethod

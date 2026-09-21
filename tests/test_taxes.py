@@ -52,6 +52,7 @@ class TestPrompts:
             _row(order_date="2026-08-02", card_last4="", card_name="", status="paid"),
         ]
         cards = [Card(last4="0315", name="USB Prime Business"), Card(last4="9999", name="Citi", virtual=True),
+                 Card(last4="7777", name="Amex employee", virtual_of="0315", own_bonus=True),  # asked: its own bonus
                  Card(last4="4444", name="From settings")]
         prompts = card_prompts(rows, 2026, cards)
         assert [p.label for p in prompts] == ["From settings …4444", "USB Prime Business …0315"]

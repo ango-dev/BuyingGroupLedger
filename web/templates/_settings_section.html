@@ -1,7 +1,9 @@
 {#- One entry section (Profiles / Warehouses / Cards) on its own: what a save, add or remove on the
     Settings page swaps in place of the section, so the page never reloads. The
-    outcome rides inside the section: `message` on success, `section_errors` on a refusal. -#}
-{% from "_select.html" import choose %}
+    outcome rides as a notification from the top of the page (#toast, swapped out of band) and,
+    for a refusal, as the list inside the section. -#}
+{% from "_select.html" import choose, pick_many %}
 {% from "_settings_macros.html" import profile_fields, warehouse_fields, card_fields, entry_summary, entry_section with context %}
 {% set fields = {'profiles': profile_fields, 'warehouses': warehouse_fields, 'cards': card_fields}[path] %}
-{{ entry_section(path, singular, items, fields, message=message, section_errors=section_errors) }}
+{{ entry_section(path, singular, items, fields, section_errors=section_errors) }}
+<div id="toast" hx-swap-oob="true">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif section_errors %}<div class="toast warn" role="alert">Nothing was saved: {{ section_errors[0] }}</div>{% endif %}</div>

@@ -591,6 +591,22 @@ table.entry-table td.rm { width: 1%; white-space: nowrap; color: var(--muted); f
 table.entry-table td.rm label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
 table.entry-table td input[type=text], table.entry-table td input[type=password] { width: 100%; box-sizing: border-box; padding: 4px 7px; }
 table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-top: 6px; }
+/* A notification from the top after an in-place save on Settings: swapped in
+   out of band, slides in, and settings.js lets it go after a few seconds. */
+#toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1200; pointer-events: none; }
+#toast .toast { padding: 10px 18px; border-radius: 10px; background: var(--card); border: 1px solid var(--ok); color: var(--fg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22); font-weight: 500; white-space: nowrap; animation: toast-in .22s ease-out; transition: opacity .5s; }
+#toast .toast.warn { border-color: var(--warn); }
+#toast .toast.gone { opacity: 0; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+/* the Virtual card line: the box, and once ticked the card it is a number of, inline */
+.entry-card .virtual-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.entry-card .virtual-line .virtual-of { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; color: var(--muted); }
+.entry-card .virtual-line .virtual-of[hidden] { display: none; }
+/* the resets cell: the dropdown and, for "on a date each year", the MM-DD box inline beside it */
+table.entry-table.rates td.resets .inline { display: inline-flex; align-items: center; gap: 6px; }
+table.entry-table.rates td.resets input.anniversary { width: 64px; }
+table.entry-table.rates td.resets input.anniversary[hidden] { display: none; }
 /* the card's rates table: the retailers and the
    outside-spend columns take the room, the numbers stay narrow */
 table.entry-table.rates { max-width: none; }

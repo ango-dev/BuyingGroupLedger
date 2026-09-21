@@ -568,6 +568,7 @@ def display_entries(path: str) -> list[dict]:
                 "profile": entry.get("profile", ""),
                 "virtual": bool(entry.get("virtual")) or bool(entry.get("virtual_of")),
                 "virtual_of": str(entry.get("virtual_of") or ""),
+                "own_bonus": bool(entry.get("own_bonus")),
                 "retailer_rates": list((entry.get("retailer_rates") or {}).items()),
                 "caps": [_cap_display(c) for c in caps],
                 "rate_rows": _rate_rows(entry.get("retailer_rates") or {}, caps),
@@ -742,15 +743,24 @@ def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
                                  "against that card's caps): pick it under \"virtual number of\"."])
         entry["virtual"] = True
         entry["virtual_of"] = virtual_of
+        if str(form.get("own_bonus", "")).strip().lower() in ("on", "true", "1", "yes"):
+            entry["own_bonus"] = True  # an employee card: the Taxes page still asks for its bonus
+        else:
+            entry.pop("own_bonus", None)
+        # a virtual number shares the card's rates and limits: nothing of its own is kept
+        for key in ("cashback_rate", "retailer_rates", "caps"):
+            entry.pop(key, None)
+        return entry
     else:
         entry.pop("virtual", None)
         entry.pop("virtual_of", None)
+        entry.pop("own_bonus", None)
     # one table of rates and caps: a row's retailers share its rate, and its
     # allowance when it has a spend limit; the "everywhere else" row carries the catch-all cap
     rates: dict = {}
     caps: list = []
     for i in _indexed(form, "rr"):
-        retailers = [r.strip() for r in _text(form, f"rr.{i}.retailers").split(",") if r.strip()]
+        retailers = _many(form, f"rr.{i}.retailers")
         if not retailers:
             continue  # the blank "new" row, or a row being dropped
         value = _rate_value(_text(form, f"rr.{i}.rate"))
@@ -772,6 +782,20 @@ def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
     else:
         entry.pop("caps", None)
     return entry
+
+
+def _many(form: Mapping[str, str], name: str) -> list[str]:
+    """Every value a field carries: the dropdown's ticks (one value each), or a comma-separated
+    string from a hand-made post; blanks and repeats dropped."""
+    raw = form.getlist(name) if hasattr(form, "getlist") else form.get(name, [])
+    if isinstance(raw, str):
+        raw = [raw]
+    out: list[str] = []
+    for value in raw or []:
+        for part in str(value).split(","):
+            if part.strip() and part.strip() not in out:
+                out.append(part.strip())
+    return out
 
 
 def _cap_from_form(form: Mapping[str, str], prefix: str, retailers: list) -> dict | None:

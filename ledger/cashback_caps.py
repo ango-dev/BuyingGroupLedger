@@ -276,7 +276,7 @@ def recompute(values: list[list], cards: list[Card], protected: dict | None = No
         cap = card.cap_for(purchase.retailer) if card else None
         if cap is None or own is None:
             continue
-        rate = own.rate_for(purchase.retailer)  # the row's own card says what it earns
+        rate = card.rate_for(purchase.retailer)  # a virtual number earns its card's rates
         if rate is None:
             rate = default_rate
         if rate is None:

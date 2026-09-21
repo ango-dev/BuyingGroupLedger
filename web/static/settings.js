@@ -88,6 +88,22 @@
   }
 })();
 
+// The notification from the top after an in-place save (#toast, swapped in out of band by the
+// section partial): fades after a few seconds, then goes.
+(function () {
+  "use strict";
+  function arm() {
+    var toast = document.querySelector("#toast .toast");
+    if (!toast || toast.dataset.armed) return;
+    toast.dataset.armed = "1";
+    setTimeout(function () { toast.classList.add("gone"); }, 3500);
+    setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 4100);
+  }
+  document.addEventListener("htmx:afterSettle", arm);
+  document.addEventListener("htmx:oobAfterSwap", arm);
+  arm();
+})();
+
 // Collapsible entries (Profiles / Warehouses / Cards): every entry starts closed on each load --
 // nothing is remembered across a reload or a restart. The old `settings-open` cookie is
 // dropped if a browser still carries it.

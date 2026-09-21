@@ -263,8 +263,10 @@ def test_a_card_saves_in_place_and_the_anniversary_field_follows_the_reset(serve
     assert not day.is_visible()
     card.locator("input[name='cashback_rate']").fill("3%")
     card.locator("button", has_text="Save card").click()
-    page.wait_for_selector("#s-cards .banner.ok")
-    assert "Saved card" in page.locator("#s-cards .banner.ok").inner_text()
+    page.wait_for_selector("#toast .toast.ok")  # the notification from the top
+    assert "Saved card" in page.locator("#toast .toast.ok").inner_text()
+    box = page.locator("#toast .toast.ok").bounding_box()
+    assert box["y"] < 60
     assert page.evaluate("window.__loaded === true") and page.url.endswith("/settings")
     saved = page.locator("#s-cards details.entry-card").first
     assert saved.evaluate("d => d.open") and saved.locator("input[name='cashback_rate']").input_value() == "3%"

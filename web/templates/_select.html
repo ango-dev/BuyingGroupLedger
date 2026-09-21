@@ -19,3 +19,19 @@
   </div>
 </details>
 {%- endmacro %}
+
+{#- The page's multi-choice dropdown: the same <details class="multi"> the filters use, checkbox inputs, so it submits one
+    `name=value` per pick. edit.js words the summary as picks change; `empty` is what it says with
+    nothing picked. -#}
+{% macro pick_many(name, options, chosen, empty='— none —', klass='') -%}
+{%- set ns = namespace(pairs=[], picked=[]) -%}
+{%- for item in options %}{% if item is string or item is number %}{% set ns.pairs = ns.pairs + [(item, item)] %}{% else %}{% set ns.pairs = ns.pairs + [(item[0], item[1])] %}{% endif %}{% endfor -%}
+{%- for value, text in ns.pairs %}{% if value | string in chosen %}{% set ns.picked = ns.picked + [text] %}{% endif %}{% endfor -%}
+<details class="multi {{ klass }}" data-param="{{ name }}" data-empty="{{ empty }}">
+  <summary><span class="summary-text"><span class="summary-value">{{ empty if not ns.picked else (ns.picked | join(', ') if ns.picked | length <= 2 else (ns.picked | length) ~ ' selected') }}</span><span class="caret">▾</span></span></summary>
+  <div class="menu">
+    {% for value, text in ns.pairs %}<label><input type="checkbox" name="{{ name }}" value="{{ value }}" {{ 'checked' if value | string in chosen }}> {{ text }}</label>
+    {% endfor %}
+  </div>
+</details>
+{%- endmacro %}

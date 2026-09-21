@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% from "_select.html" import choose %}
+{% from "_select.html" import choose, pick_many %}
 {% from "_settings_macros.html" import setting_row, secret_cell, profile_fields, warehouse_fields, card_fields, entry_summary, entry_section with context %}
 {% block title %}Settings{% endblock %}
 {% block content %}
 <h1>Settings</h1>
+<div id="toast"></div>
 {% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
 {% include "_restart_banner.html" %}
 {% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}

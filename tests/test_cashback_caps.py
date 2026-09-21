@@ -152,6 +152,14 @@ class TestCappedRate:
         items = [item(order_id="V2", order_date="2026-03-01", total_cost=500, card_last4="9999")]
         caps.apply_to_items(items, cards, [row(order_id="A0", order_date="2026-01-01", total_cost="900")])
         assert items[0].cashback_rate == round((100 * 0.05 + 400 * 0.01) / 500, 4)
+        # the virtual number earns the card's rates (config.cards.resolve_card), with none of its own
+        from config.cards import resolve_card
+
+        bare = Card(last4="8888", name="ABP virtual 2", virtual_of="5555")
+        assert resolve_card("8888", [real, bare], "p", "Amazon") == ("ABP virtual 2", 0.05)
+        assert resolve_card("8888", [real, bare], "p", "Costco") == ("ABP virtual 2", 0.01)
+        grid = values(row(order_id="V9", order_date="2026-02-01", total_cost="100", cashback_rate="0.02", status="paid", card_last4="8888"))
+        assert caps.recompute(grid, [real, bare], {}, default_rate=0.02) == [(2, 0.05, 0.02)]
 
     def test_a_return_gives_its_spend_back_in_its_own_period(self):
         c = card()
