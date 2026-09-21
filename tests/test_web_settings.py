@@ -476,14 +476,14 @@ class TestEntryCards:
     def test_a_card_can_be_added_edited_and_removed(self, client):
         response = client.post("/settings/section/cards/entry", data={
             "name": "Citi Double Cash", "last4": "8765", "cashback_rate": "2%", "profile": "",
-            "rate.0.retailer": "amazon", "rate.0.rate": "5%", "rate.1.retailer": "", "rate.1.rate": ""},
+            "rr.0.retailers": "amazon", "rr.0.rate": "5%", "rr.1.retailers": "", "rr.1.rate": ""},
             follow_redirects=False)
         assert response.status_code == 303 and "Added+card" in response.headers["location"]
         assert config_value("cards")[1] == {"last4": "8765", "name": "Citi Double Cash",
                                             "cashback_rate": "2%", "retailer_rates": {"amazon": "5%"}}
         response = client.post("/settings/section/cards/entry/1", data={
             "name": "Citi Double Cash", "last4": "8765", "cashback_rate": "0.02", "profile": "p1",
-            "rate.0.retailer": "", "rate.0.rate": "5%"}, follow_redirects=False)
+            "rr.0.retailers": "", "rr.0.rate": "5%"}, follow_redirects=False)
         assert response.status_code == 303 and "Saved+card" in response.headers["location"]
         assert config_value("cards")[1] == {"last4": "8765", "name": "Citi Double Cash",
                                             "cashback_rate": 0.02, "profile": "p1"}
@@ -495,32 +495,71 @@ class TestEntryCards:
         """a maximum-cashback (spend cap) per retailer group and/or the catch-all."""
         response = client.post("/settings/section/cards/entry", data={
             "name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%", "profile": "",
-            "rate.0.retailer": "amazon", "rate.0.rate": "5%",
-            "cap.0.retailers": "amazon, amazon-business", "cap.0.spend_limit": "$150,000", "cap.0.fallback_rate": "1%",
-            "cap.0.resets": "anniversary", "cap.0.anniversary": "03-15", "cap.0.outside_spend": "2026: 4,000, 2027: 0",
-            "cap.1.retailers": "", "cap.1.spend_limit": "25000", "cap.1.fallback_rate": "1%", "cap.1.resets": "calendar-year",
-            "cap.2.retailers": "", "cap.2.spend_limit": "", "cap.2.fallback_rate": ""}, follow_redirects=False)
+            "rr.0.retailers": "amazon, amazon-business", "rr.0.rate": "5%", "rr.0.spend_limit": "$150,000",
+            "rr.0.fallback_rate": "1%", "rr.0.resets": "anniversary", "rr.0.anniversary": "03-15",
+            "rr.0.outside_spend": "2026: 4,000, 2027: 0",
+            "rr.1.retailers": "bestbuy", "rr.1.rate": "3%", "rr.1.spend_limit": "",
+            "cap_all.spend_limit": "25000", "cap_all.fallback_rate": "1%", "cap_all.resets": "calendar-year",
+            "rr.2.retailers": "", "rr.2.spend_limit": ""}, follow_redirects=False)
         assert response.status_code == 303 and "Added+card" in response.headers["location"]
         saved = config_value("cards")[1]
+        assert saved["retailer_rates"] == {"amazon": "5%", "amazon-business": "5%", "bestbuy": "3%"}
         assert saved["caps"] == [
             {"retailers": ["amazon", "amazon-business"], "spend_limit": 150000.0, "fallback_rate": "1%", "resets": "03-15",
              "outside_spend": {"2026": 4000.0, "2027": 0.0}},
             {"retailers": [], "spend_limit": 25000.0, "fallback_rate": "1%", "resets": "calendar-year"}]
         body = client.get("/settings").text
-        assert 'name="cap.0.retailers" value="amazon, amazon-business"' in body and 'name="cap.0.anniversary" value="03-15"' in body
-        assert 'name="cap.0.outside_spend" value="2026: 4000, 2027: 0"' in body
+        # one table: the capped row with its retailers, the plain rate row, the catch-all on "everywhere else"
+        assert 'name="rr.0.retailers" value="amazon, amazon-business"' in body and 'name="rr.0.rate" value="5%"' in body
+        assert 'name="rr.0.anniversary" value="03-15" placeholder="03-15" class="mono anniversary" >' in body  # shown: anniversary
+        assert 'name="rr.0.outside_spend" value="2026: 4000, 2027: 0"' in body
+        assert 'name="rr.1.retailers" value="bestbuy"' in body and 'name="rr.1.spend_limit" value=""' in body
+        assert 'name="cap_all.spend_limit" value="25000"' in body
+        assert 'name="cap_all.anniversary" value="" placeholder="03-15" class="mono anniversary" hidden>' in body  # hidden: calendar year
         assert "all to 25000 then 1%" in body  # the entry's summary chip
-        # a cap with a bad reset date, or a retailer in two caps, is refused and nothing is written
+        # a cap with a bad reset date is refused and nothing is written
         bad = client.post("/settings/section/cards/entry/1", data={
             "name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%",
-            "cap.0.retailers": "amazon", "cap.0.spend_limit": "1", "cap.0.fallback_rate": "1%", "cap.0.resets": "anniversary",
-            "cap.0.anniversary": "13-40"})
+            "rr.0.retailers": "amazon", "rr.0.spend_limit": "1", "rr.0.fallback_rate": "1%", "rr.0.resets": "anniversary",
+            "rr.0.anniversary": "13-40"})
         assert bad.status_code == 400 and "resets" in bad.text
         assert config_value("cards")[1]["caps"][0]["resets"] == "03-15"
-        # blanking the limit drops the cap
+        # blanking the limits drops the caps, the rates stay
         client.post("/settings/section/cards/entry/1", data={"name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%",
-                                                             "cap.0.spend_limit": "", "cap.1.spend_limit": ""}, follow_redirects=False)
-        assert "caps" not in config_value("cards")[1]
+                                                             "rr.0.retailers": "amazon", "rr.0.rate": "5%", "rr.0.spend_limit": "",
+                                                             "cap_all.spend_limit": ""}, follow_redirects=False)
+        assert "caps" not in config_value("cards")[1] and config_value("cards")[1]["retailer_rates"] == {"amazon": "5%"}
+
+    def test_a_save_from_the_page_swaps_the_section_in_place(self, client):
+        hx = {"HX-Request": "true"}
+        body = client.get("/settings").text
+        assert 'hx-post="/settings/section/cards/entry/0" hx-target="#s-cards" hx-swap="outerHTML"' in body
+        assert 'hx-post="/settings/section/cards/entry/0/delete" hx-target="#s-cards" hx-swap="outerHTML" hx-confirm="Remove card' in body
+        saved = client.post("/settings/section/cards/entry/0", headers=hx, data={
+            "name": "USB Prime Business", "last4": "0315", "cashback_rate": "5%"})
+        assert saved.status_code == 200 and "<html" not in saved.text
+        assert saved.text.lstrip().startswith('<section class="panel" id="s-cards">')
+        assert "Saved card USB Prime Business" in saved.text and 'data-key="cards:0315" open>' in saved.text
+        assert config_value("cards")[0]["cashback_rate"] == "5%"
+        refused = client.post("/settings/section/cards/entry/0", headers=hx, data={"name": "USB", "last4": "0315", "cashback_rate": "2"})
+        assert refused.status_code == 400 and refused.text.lstrip().startswith('<section') and "outside 0-1" in refused.text
+        added = client.post("/settings/section/cards/entry", headers=hx, data={"name": "Second", "last4": "2222"})
+        assert added.status_code == 200 and 'data-key="cards:2222" open>' in added.text
+        removed = client.post("/settings/section/cards/entry/1/delete", headers=hx)
+        assert removed.status_code == 200 and "Removed card Second" in removed.text and 'data-key="cards:2222"' not in removed.text
+        # the wizard's copy of the form still posts plainly
+        assert "hx-post" not in client.get("/setup/cards").text.split('id="s-cards"')[-1].split("</section>")[0]
+
+    def test_a_virtual_card_must_name_its_card(self, client):
+        unlinked = client.post("/settings/section/cards/entry", data={"name": "Virtual", "last4": "9999", "virtual": "on"})
+        assert unlinked.status_code == 400 and "virtual number of" in unlinked.text.lower()
+        assert len(config_value("cards")) == 1
+        linked = client.post("/settings/section/cards/entry", data={"name": "Virtual", "last4": "9999", "virtual": "on",
+                                                                     "virtual_of": "0315"}, follow_redirects=False)
+        assert linked.status_code == 303
+        assert config_value("cards")[1] == {"last4": "9999", "name": "Virtual", "virtual": True, "virtual_of": "0315"}
+        body = client.get("/settings").text
+        assert "virtual of …0315" in body
 
     def test_an_invalid_entry_is_400_and_writes_nothing(self, client):
         bad = client.post("/settings/section/cards/entry", data={"name": "Bare", "last4": "1111",

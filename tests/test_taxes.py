@@ -381,10 +381,13 @@ class TestVirtualCardOnTheSettingsPage:
     def test_the_flag_round_trips_through_the_entry_card(self, config_file):
         from web import settings_form
 
-        config_file(cards=[{"last4": "0315", "name": "USB Prime Business", "cashback_rate": 0.05}])
+        config_file(cards=[{"last4": "0315", "name": "USB Prime Business", "cashback_rate": 0.05},
+                           {"last4": "1111", "name": "The real card", "cashback_rate": 0.05}])
+        # a virtual card names the card it belongs to
         settings_form.apply_entry("cards", 0, {"last4": "0315", "name": "USB Prime Business",
-                                               "cashback_rate": "5%", "virtual": "on"})
+                                               "cashback_rate": "5%", "virtual": "on", "virtual_of": "1111"})
         assert settings_form.display_entries("cards")[0]["virtual"] is True
+        assert settings_form.display_entries("cards")[0]["virtual_of"] == "1111"
         settings_form.apply_entry("cards", 0, {"last4": "0315", "name": "USB Prime Business",
                                                "cashback_rate": "5%"})
         assert settings_form.display_entries("cards")[0]["virtual"] is False

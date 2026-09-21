@@ -561,15 +561,42 @@ def display_entries(path: str) -> list[dict]:
                          for j in (entry.get("jigs") or []) if isinstance(j, dict)],
             })
         elif path == "cards":
+            caps = [c for c in (entry.get("caps") or []) if isinstance(c, dict)]
             out.append({
                 "index": index, "last4": entry.get("last4", ""), "name": entry.get("name", ""),
                 "cashback_rate": entry.get("cashback_rate", ""),
                 "profile": entry.get("profile", ""),
-                "virtual": bool(entry.get("virtual")),
+                "virtual": bool(entry.get("virtual")) or bool(entry.get("virtual_of")),
+                "virtual_of": str(entry.get("virtual_of") or ""),
                 "retailer_rates": list((entry.get("retailer_rates") or {}).items()),
-                "caps": [_cap_display(c) for c in (entry.get("caps") or []) if isinstance(c, dict)],
+                "caps": [_cap_display(c) for c in caps],
+                "rate_rows": _rate_rows(entry.get("retailer_rates") or {}, caps),
+                "cap_all": next((_cap_display(c) for c in caps if not c.get("retailers")), _cap_display({})),
             })
     return out
+
+
+def _rate_rows(retailer_rates: dict, caps: list) -> list[dict]:
+    """The card's rates by retailer as ONE table: a row per retailer cap (its retailers share the row, the
+    rate and the allowance), then a row per retailer rate without a cap."""
+    from models.card import normalize_retailer
+
+    by_key = {normalize_retailer(str(r)): (r, rate) for r, rate in retailer_rates.items()}
+    rows, covered = [], set()
+    for cap in caps:
+        retailers = cap.get("retailers") or []
+        if isinstance(retailers, str):
+            retailers = [retailers]
+        if not retailers:
+            continue  # the catch-all rides on the "everywhere else" row
+        keys = [normalize_retailer(str(r)) for r in retailers]
+        rate = next((by_key[k][1] for k in keys if k in by_key), "")
+        rows.append({**_cap_display(cap), "retailers": ", ".join(str(r) for r in retailers), "rate": rate})
+        covered.update(keys)
+    for key, (retailer, rate) in by_key.items():
+        if key not in covered:
+            rows.append({**_cap_display({}), "retailers": str(retailer), "rate": rate})
+    return rows
 
 
 def _cap_display(cap: dict) -> dict:
@@ -707,48 +734,67 @@ def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
         entry["profile"] = profile
     else:
         entry.pop("profile", None)
-    if str(form.get("virtual", "")).strip().lower() in ("on", "true", "1", "yes"):
+    virtual = str(form.get("virtual", "")).strip().lower() in ("on", "true", "1", "yes")
+    virtual_of = _text(form, "virtual_of")
+    if virtual or virtual_of:
+        if not virtual_of:  # a virtual card must say which card it is a number of
+            raise SettingsError(["A virtual card must name the card it is a number of (its spend counts "
+                                 "against that card's caps): pick it under \"virtual number of\"."])
         entry["virtual"] = True
+        entry["virtual_of"] = virtual_of
     else:
         entry.pop("virtual", None)
-    rates = {}
-    for i in _indexed(form, "rate"):
-        retailer = _text(form, f"rate.{i}.retailer")
-        value = _rate_value(_text(form, f"rate.{i}.rate"))
-        if retailer and value is not None:
-            rates[retailer] = value
+        entry.pop("virtual_of", None)
+    # one table of rates and caps: a row's retailers share its rate, and its
+    # allowance when it has a spend limit; the "everywhere else" row carries the catch-all cap
+    rates: dict = {}
+    caps: list = []
+    for i in _indexed(form, "rr"):
+        retailers = [r.strip() for r in _text(form, f"rr.{i}.retailers").split(",") if r.strip()]
+        if not retailers:
+            continue  # the blank "new" row, or a row being dropped
+        value = _rate_value(_text(form, f"rr.{i}.rate"))
+        if value is not None:
+            for r in retailers:
+                rates[r] = value
+        cap = _cap_from_form(form, f"rr.{i}", retailers)
+        if cap:
+            caps.append(cap)
+    catch_all = _cap_from_form(form, "cap_all", [])
+    if catch_all:
+        caps.append(catch_all)
     if rates:
         entry["retailer_rates"] = rates
     else:
         entry.pop("retailer_rates", None)
-    caps = []
-    for i in _indexed(form, "cap"):
-        limit = _text(form, f"cap.{i}.spend_limit")
-        if not limit:
-            continue  # the blank "new cap" row, or a cap being dropped
-        resets = _text(form, f"cap.{i}.resets") or "calendar-year"
-        if resets == "anniversary":
-            resets = _text(form, f"cap.{i}.anniversary")
-        cap = {"retailers": [r.strip() for r in _text(form, f"cap.{i}.retailers").split(",") if r.strip()],
-               "spend_limit": _money_value(limit),
-               "fallback_rate": _rate_value(_text(form, f"cap.{i}.fallback_rate")),
-               "resets": resets}
-        offsets = {}
-        for part in re.split(r"[;,](?=\s*[^,;:]+:)", _text(form, f"cap.{i}.outside_spend")):
-            if ":" in part:
-                period, amount = part.split(":", 1)
-                if period.strip() and amount.strip():
-                    offsets[period.strip()] = _money_value(amount)
-        if offsets:
-            cap["outside_spend"] = offsets
-        if cap["fallback_rate"] is None:
-            cap.pop("fallback_rate")  # the model says what is missing
-        caps.append(cap)
     if caps:
         entry["caps"] = caps
     else:
         entry.pop("caps", None)
     return entry
+
+
+def _cap_from_form(form: Mapping[str, str], prefix: str, retailers: list) -> dict | None:
+    """A CashbackCap from a table row's fields, or None when the row has no spend limit."""
+    limit = _text(form, f"{prefix}.spend_limit")
+    if not limit:
+        return None
+    resets = _text(form, f"{prefix}.resets") or "calendar-year"
+    if resets == "anniversary":
+        resets = _text(form, f"{prefix}.anniversary")
+    cap = {"retailers": list(retailers), "spend_limit": _money_value(limit),
+           "fallback_rate": _rate_value(_text(form, f"{prefix}.fallback_rate")), "resets": resets}
+    offsets = {}
+    for part in re.split(r"[;,](?=\s*[^,;:]+:)", _text(form, f"{prefix}.outside_spend")):
+        if ":" in part:
+            period, amount = part.split(":", 1)
+            if period.strip() and amount.strip():
+                offsets[period.strip()] = _money_value(amount)
+    if offsets:
+        cap["outside_spend"] = offsets
+    if cap["fallback_rate"] is None:
+        cap.pop("fallback_rate")  # the model says what is missing
+    return cap
 
 
 def _money_value(text: str):

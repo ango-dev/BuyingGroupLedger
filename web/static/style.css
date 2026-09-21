@@ -591,7 +591,12 @@ table.entry-table td.rm { width: 1%; white-space: nowrap; color: var(--muted); f
 table.entry-table td.rm label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
 table.entry-table td input[type=text], table.entry-table td input[type=password] { width: 100%; box-sizing: border-box; padding: 4px 7px; }
 table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-top: 6px; }
-table.entry-table.rates { max-width: 420px; }
+/* the card's rates table: the retailers and the
+   outside-spend columns take the room, the numbers stay narrow */
+table.entry-table.rates { max-width: none; }
+table.entry-table.rates td.narrow { width: 84px; }
+table.entry-table.rates th:first-child, table.entry-table.rates td:first-child { width: 26%; min-width: 200px; white-space: nowrap; padding-right: 10px; }
+table.entry-table.rates details.multi .summary-text { min-width: 150px; }
 .entry-card details.multi.cell { font-size: 1em; color: var(--muted); }
 .entry-card details.multi.cell .summary-text { width: 100%; box-sizing: border-box; padding: 4px 7px; font-size: 1em; }
 .entry-card footer { display: flex; gap: 8px; align-items: center; padding-top: 4px; }

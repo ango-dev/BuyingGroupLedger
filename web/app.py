@@ -1650,7 +1650,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             hidden_envs=settings_form.hidden_envs(), section_title=settings_form.section_title,
             field_label=settings_form.field_label, retailer_keys=settings_form.RETAILER_KEYS,
             auth_retailers=settings_form.AUTH_RETAILERS, profile_labels=settings_form.profile_labels(),
-            section_forms=[], in_container=in_container, auth_on=auth_on,
+            card_choices=card_choices(), section_forms=[], in_container=in_container, auth_on=auth_on,
             restart=setup_wizard.pending_restart(), configured=setup_wizard.is_configured(), **extra)
         response.status_code = status
         return response
@@ -1882,30 +1882,51 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     # --- settings (edits config.json in place; never the ledger) ---------------------------------
     from web import settings_form
 
-    def settings_page(request: Request, *, message: str = "", errors: list[str] | None = None,
-                      open_section: str = "", section_texts: dict | None = None, status: int = 200,
-                      restart: str = ""):
+    def card_choices() -> list[tuple[str, str]]:
+        """(last4, "name …last4") for every card: what a virtual number picks its card from."""
+        return [(str(e["last4"]), f"{e['name']} …{e['last4']}") for e in settings_form.display_entries("cards")]
+
+    def settings_context(*, open_section: str = "", section_texts: dict | None = None) -> dict:
+        """What settings.html and the in-place section partial both render from."""
         rows_schema = settings_form.schema()
         texts = section_texts or {}
         forms = [(path, shape, help_text, texts.get(path, settings_form.section_text(path)))
                  for path, shape, _model, help_text in settings_form.SECTIONS]
-        response = page_no_snapshot(
-            request, "settings.html", message=message, errors=errors or [],
+        return dict(
             rows=settings_form.view(rows_schema, os.environ),
             sections=settings_form.sections_in_order(rows_schema), section_forms=forms,
-            hidden_envs=settings_form.hidden_envs(),
-            in_container=in_container,
+            hidden_envs=settings_form.hidden_envs(), in_container=in_container,
             open_section=open_section, config_path=str(settings_form.loader.CONFIG_FILE),
-            restart=restart if restart in ("container", "dashboard") else "",
             section_title=settings_form.section_title, field_label=settings_form.field_label,
-            entries={path: settings_form.display_entries(path)
-                     for path in settings_form.CARD_SECTIONS},
-            retailer_keys=settings_form.RETAILER_KEYS,
-            auth_retailers=settings_form.AUTH_RETAILERS,
-            profile_labels=settings_form.profile_labels(),
-            **backup_context())
+            entries={path: settings_form.display_entries(path) for path in settings_form.CARD_SECTIONS},
+            retailer_keys=settings_form.RETAILER_KEYS, auth_retailers=settings_form.AUTH_RETAILERS,
+            profile_labels=settings_form.profile_labels(), card_choices=card_choices(),
+        )
+
+    def settings_page(request: Request, *, message: str = "", errors: list[str] | None = None,
+                      open_section: str = "", section_texts: dict | None = None, status: int = 200,
+                      restart: str = ""):
+        response = page_no_snapshot(
+            request, "settings.html", message=message, errors=errors or [],
+            restart=restart if restart in ("container", "dashboard") else "",
+            **settings_context(open_section=open_section, section_texts=section_texts), **backup_context())
         response.status_code = status
         return response
+
+    def settings_section(request: Request, path: str, *, message: str = "", errors: list[str] | None = None,
+                         open_index=None, open_new: bool = False, status: int = 200):
+        """One entry section, re-rendered for an htmx save / add / remove to swap in place."""
+        context = settings_context(open_section=path if open_new else "")
+        context["entries"] = {}  # the partial renders one section from `items`
+        response = page_no_snapshot(
+            request, "_settings_section.html", path=path, singular=path[:-1],
+            items=settings_form.display_entries(path), message=message, section_errors=errors or [],
+            open_index=open_index, errors=[], **context)
+        response.status_code = status
+        return response
+
+    def wants_fragment(request: Request) -> bool:
+        return request.headers.get("HX-Request", "").lower() == "true"
 
     @app.get("/settings", response_class=HTMLResponse)
     def settings_get(request: Request):
@@ -1947,12 +1968,16 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     async def _save_entry(request: Request, path: str, index: int | None):
         form = await request.form()
         try:
-            _landed, label = settings_form.apply_entry(path, index, form)
+            landed, label = settings_form.apply_entry(path, index, form)
         except settings_form.SettingsError as exc:
+            if wants_fragment(request):
+                return settings_section(request, path, errors=exc.errors, open_index=index, open_new=index is None, status=400)
             return settings_page(request, errors=exc.errors, open_section=path, status=400)
         verb = "Added" if index is None else "Saved"
         message = f"{verb} {path[:-1]} {label}."
         act("settings", f"Settings: {verb.lower()} {path[:-1]} {label}", {"path": path, "entry": label})
+        if wants_fragment(request):  # the section swaps in place; the saved entry stays open
+            return settings_section(request, path, message=message, open_index=landed)
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
                                 status_code=303)
 
@@ -1969,9 +1994,13 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         try:
             label = settings_form.delete_entry(path, index)
         except settings_form.SettingsError as exc:
+            if wants_fragment(request):
+                return settings_section(request, path, errors=exc.errors, status=400)
             return settings_page(request, errors=exc.errors, open_section=path, status=400)
         message = f"Removed {path[:-1]} {label}."
         act("settings", f"Settings: removed {path[:-1]} {label}", {"path": path, "entry": label})
+        if wants_fragment(request):
+            return settings_section(request, path, message=message)
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
                                 status_code=303)
 

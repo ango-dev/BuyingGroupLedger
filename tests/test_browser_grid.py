@@ -244,6 +244,33 @@ def test_the_expenses_and_activity_tables_stack_on_a_phone(served, phone, client
     assert page.errors == []
 
 
+def test_a_card_saves_in_place_and_the_anniversary_field_follows_the_reset(served, page):
+    """ "hide on (MM-DD)
+    unless the reset is on a date each year"."""
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/settings")
+    page.wait_for_selector("#s-cards details.entry-card")
+    page.evaluate("window.__loaded = true")  # a reload would lose it
+    card = page.locator("#s-cards details.entry-card").first
+    card.evaluate("d => d.open = true")
+    day = card.locator("input[name='cap_all.anniversary']")
+    assert not day.is_visible()  # calendar year: no date
+    card.locator("details[data-param='cap_all.resets'] summary").click()
+    card.locator("details[data-param='cap_all.resets'] label", has_text="on a date each year").click()
+    assert day.is_visible()
+    card.locator("details[data-param='cap_all.resets'] summary").click()
+    card.locator("details[data-param='cap_all.resets'] label", has_text="each calendar year").click()
+    assert not day.is_visible()
+    card.locator("input[name='cashback_rate']").fill("3%")
+    card.locator("button", has_text="Save card").click()
+    page.wait_for_selector("#s-cards .banner.ok")
+    assert "Saved card" in page.locator("#s-cards .banner.ok").inner_text()
+    assert page.evaluate("window.__loaded === true") and page.url.endswith("/settings")
+    saved = page.locator("#s-cards details.entry-card").first
+    assert saved.evaluate("d => d.open") and saved.locator("input[name='cashback_rate']").input_value() == "3%"
+    assert page.errors == []
+
+
 def test_a_desktop_window_keeps_the_tabs(served, page):
     page.set_viewport_size({"width": 1400, "height": 800})
     page.goto(f"{served}/orders")

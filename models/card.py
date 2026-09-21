@@ -164,6 +164,10 @@ class Card(BaseModel):
     # A virtual card number (another card's, or a card with no account of its own): it earns
     # cashback like any card, but the Taxes page does not ask for a sign-up bonus for it.
     virtual: bool = False
+    #: The last 4 of the card this virtual number belongs to: its spend counts against that card's caps, and that card's caps apply to
+    #: it. The Settings page insists on it for a virtual card; an older config without it loads
+    #: with a warning (config.cards.load_cards) and pools nothing.
+    virtual_of: str = ""
 
     @field_validator("last4", mode="before")
     @classmethod
@@ -174,6 +178,11 @@ class Card(BaseModel):
     @classmethod
     def _percent_to_fraction(cls, v):
         return parse_rate(v)
+
+    @field_validator("virtual_of", mode="before")
+    @classmethod
+    def _clean_virtual_of(cls, v):
+        return normalize_last4(str(v)) if v else ""
 
     @field_validator("retailer_rates", mode="before")
     @classmethod
@@ -203,6 +212,10 @@ class Card(BaseModel):
                 seen[r] = i
         if catch_alls > 1:
             raise ValueError(f"Card {self.name} has {catch_alls} catch-all cashback caps; one at most.")
+        if self.virtual_of:
+            self.virtual = True
+            if self.virtual_of == self.last4:
+                raise ValueError(f"Card {self.name} cannot be a virtual number of itself.")
         return self
 
     def cap_for(self, retailer: str):

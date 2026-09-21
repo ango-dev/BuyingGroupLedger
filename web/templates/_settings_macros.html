@@ -120,49 +120,62 @@
       </div>
     {% endmacro %}
 
+    {% macro cap_cells(prefix, cap) %}
+      <td class="narrow"><input type="text" name="{{ prefix }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="no limit"></td>
+      <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="1%"></td>
+      <td>{{ choose(prefix ~ '.resets', [('calendar-year', 'each calendar year'), ('anniversary', 'on a date each year'), ('never', 'never')], cap.resets, '', 'cell') }}</td>
+      <td class="narrow"><input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="03-15" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></td>
+      <td><input type="text" name="{{ prefix }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000 (spend the ledger never sees)"></td>
+    {% endmacro %}
+
     {% macro card_fields(c) %}
+      {#- One table of rates and caps: the "everywhere else" row is the card's
+          rate and the catch-all cap; a row's retailers share its rate and, with a spend limit,
+          one allowance. A virtual number must name its card: the caps pool by it. -#}
+      {% set blank_cap = {'spend_limit': '', 'fallback_rate': '', 'resets': 'calendar-year', 'anniversary': '', 'outside_spend': ''} %}
       <div class="fgrid four">
         <label>Name <input type="text" name="name" value="{{ c.name if c else '' }}" required placeholder="Chase Freedom Unlimited"></label>
         <label>Last 4 <input type="text" name="last4" value="{{ c.last4 if c else '' }}" required maxlength="4" pattern="[0-9]{4}" class="mono"></label>
-        <label>Cashback rate <input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="0.02 or 2%"></label>
         <span class="lbl">Only for profile {{ choose('profile', [('', 'any account')] + (profile_labels | list), c.profile if c else '', '', 'field') }}</span>
+        {% set others = [] %}{% for last4, text in card_choices if not c or last4 != c.last4 %}{% set _ = others.append((last4, text)) %}{% endfor %}
+        <span class="lbl">Virtual number of {{ choose('virtual_of', [('', '— no: a real card —')] + others, c.virtual_of if c else '', '', 'field') }}</span>
       </div>
-      <label class="check"><input type="checkbox" name="virtual" value="on" {{ 'checked' if c and c.virtual }}> Virtual card <span class="muted small">— a virtual number of another card: the Taxes page does not ask for a sign-up bonus for it</span></label>
+      <label class="check"><input type="checkbox" name="virtual" value="on" {{ 'checked' if c and c.virtual }}> Virtual card <span class="muted small">— a virtual number of another card: it shares that card's spend caps, and the Taxes page does not ask for a sign-up bonus for it</span></label>
+      {% if c and c.virtual and not c.virtual_of %}<p class="warn small">This virtual card names no card it belongs to, so its spend counts against no cap: pick one under “Virtual number of”.</p>{% endif %}
       <div class="fblock">
-        <div class="ftitle">Per-retailer rates <span class="muted">— override the card's rate at one retailer; blank the retailer to drop a row</span></div>
+        <div class="ftitle">Rates <span class="muted">— by retailer (several share a row); a spend limit caps the rate: past it the fallback applies, the row that crosses it gets the blend. Blank the retailers to drop a row</span></div>
         <table class="entry-table rates">
-          <thead><tr><th>retailer</th><th>rate</th></tr></thead>
+          <thead><tr><th>retailer(s)</th><th>rate</th><th>spend limit</th><th>fallback</th><th>resets</th><th>on (MM-DD)</th><th>outside spend</th></tr></thead>
           <tbody>
-            {% set pairs = (c.retailer_rates if c else []) + [('', '')] %}
-            {% for retailer, rate in pairs %}
-            {% set keys = (retailer_keys | list) + ([retailer] if retailer and retailer not in retailer_keys else []) %}
+            <tr class="everywhere">
+              <td class="muted">everywhere else</td>
+              <td class="narrow"><input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="default rate"></td>
+              {{ cap_cells('cap_all', c.cap_all if c else blank_cap) }}
+            </tr>
+            {% set rows = (c.rate_rows if c else []) + [dict(blank_cap, retailers='', rate='')] %}
+            {% for r in rows %}
             <tr class="{{ 'new-row' if loop.last }}">
-              <td>{{ choose('rate.' ~ loop.index0 ~ '.retailer', [('', '— add —' if loop.last else '— remove —')] + keys, retailer, '', 'cell') }}</td>
-              <td class="narrow"><input type="text" name="rate.{{ loop.index0 }}.rate" value="{{ rate }}" placeholder="5%"></td>
+              <td><input type="text" name="rr.{{ loop.index0 }}.retailers" value="{{ r.retailers }}" placeholder="amazon, amazon-business" list="retailer-keys"></td>
+              <td class="narrow"><input type="text" name="rr.{{ loop.index0 }}.rate" value="{{ r.rate }}" placeholder="5%"></td>
+              {{ cap_cells('rr.' ~ loop.index0, r) }}
             </tr>
             {% endfor %}
           </tbody>
         </table>
+        <datalist id="retailer-keys">{% for k in retailer_keys %}<option value="{{ k }}">{% endfor %}</datalist>
       </div>
-      <div class="fblock">
-        <div class="ftitle">Spend caps <span class="muted">— past the limit the fallback rate applies; the row that crosses it gets the blend. Blank retailers = the catch-all. Blank the limit to drop a row</span></div>
-        <table class="entry-table caps">
-          <thead><tr><th>retailers</th><th>spend limit</th><th>fallback rate</th><th>resets</th><th>on (MM-DD)</th><th>outside spend</th></tr></thead>
-          <tbody>
-            {% set caps = (c.caps if c else []) + [{'retailers': '', 'spend_limit': '', 'fallback_rate': '', 'resets': 'calendar-year', 'anniversary': '', 'outside_spend': ''}] %}
-            {% for cap in caps %}
-            <tr class="{{ 'new-row' if loop.last }}">
-              <td><input type="text" name="cap.{{ loop.index0 }}.retailers" value="{{ cap.retailers }}" placeholder="amazon, amazon-business (blank: every retailer)"></td>
-              <td class="narrow"><input type="text" name="cap.{{ loop.index0 }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="150000"></td>
-              <td class="narrow"><input type="text" name="cap.{{ loop.index0 }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="1%"></td>
-              <td>{{ choose('cap.' ~ loop.index0 ~ '.resets', [('calendar-year', 'each calendar year'), ('anniversary', 'on a date each year'), ('never', 'never')], cap.resets, '', 'cell') }}</td>
-              <td class="narrow"><input type="text" name="cap.{{ loop.index0 }}.anniversary" value="{{ cap.anniversary }}" placeholder="03-15" class="mono"></td>
-              <td><input type="text" name="cap.{{ loop.index0 }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000 (spend the ledger never sees)"></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+      <script>
+        // the anniversary field only when the reset is "on a date each year"
+        if (!window.__resetsToggle) {
+          window.__resetsToggle = true;
+          document.addEventListener("change", function (e) {
+            var input = e.target;
+            if (!input.name || !/\.resets$/.test(input.name)) return;
+            var row = input.closest("tr"), day = row && row.querySelector("input.anniversary");
+            if (day) day.hidden = input.value !== "anniversary";
+          });
+        }
+      </script>
     {% endmacro %}
 
     {% macro entry_summary(path, e) %}
@@ -183,41 +196,49 @@
         {% for r, rate in e.retailer_rates %}<span class="chip muted">{{ r }} {{ rate }}</span>{% endfor %}
         {% for cap in e.caps %}<span class="chip warn" title="spend cap: past the limit the fallback rate applies">{{ cap.retailers or 'all' }} to {{ cap.spend_limit }} then {{ cap.fallback_rate }}</span>{% endfor %}
         {% if e.profile %}<span class="chip">{{ e.profile }}</span>{% endif %}
-        {% if e.virtual %}<span class="chip virtual" title="a virtual number of another card: the Taxes page does not ask for a sign-up bonus for it">virtual</span>{% endif %}
+        {% if e.virtual %}<span class="chip virtual" title="a virtual number of another card: it shares that card's spend caps; the Taxes page does not ask for a sign-up bonus for it">virtual{% if e.virtual_of %} of …{{ e.virtual_of }}{% endif %}</span>{% endif %}
       {% endif %}
     {% endmacro %}
 
-    {% macro entry_section(path, singular, items, fields, action_base='', show_json=true) %}
+    {#- On the Settings page (no action_base) the forms post through htmx and the section is swapped
+        in place, so a save never reloads the page; the wizard's copies post
+        plainly. `open_index` (context) keeps the entry just saved open; `message` / `section_errors`
+        show the outcome inside the section. -#}
+    {% macro entry_section(path, singular, items, fields, action_base='', show_json=true, message='', section_errors=[]) %}
     {% set title, blurb = section_title(path) %}
     {% set base = action_base or ('/settings/section/' ~ path) %}
+    {% set inplace = not action_base %}
     <section class="panel" id="s-{{ path }}">
       <header>
         <h2>{{ title }} <span class="muted small">{{ items | length }}</span>
           <span class="panel-tools"><a href="#" class="small" data-expand="{{ path }}">expand all</a> · <a href="#" class="small" data-collapse="{{ path }}">collapse all</a></span>
         </h2>
         <p class="muted">{{ blurb }}</p>
+        {% if message %}<div class="banner ok small">{{ message }}</div>{% endif %}
+        {% if section_errors %}<div class="banner warn small"><strong>Nothing was saved.</strong><ul>{% for err in section_errors %}<li>{{ err }}</li>{% endfor %}</ul></div>{% endif %}
       </header>
       <div class="entry-list" data-section="{{ path }}">
         {% for e in items %}
         {% set key = path ~ ':' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else e.last4)) %}
-        <details class="entry-card" data-key="{{ key }}">
+        <details class="entry-card" data-key="{{ key }}"{% if open_index is defined and open_index == e.index %} open{% endif %}>
           <summary>{{ entry_summary(path, e) }}</summary>
-          <form method="post" action="{{ base }}/entry/{{ e.index }}" class="entry-form" autocomplete="off">
+          <form method="post" action="{{ base }}/entry/{{ e.index }}" class="entry-form" autocomplete="off"{% if inplace %} hx-post="{{ base }}/entry/{{ e.index }}" hx-target="#s-{{ path }}" hx-swap="outerHTML"{% endif %}>
             {{ fields(e) }}
             <footer>
               <button type="submit" class="small primary">Save {{ singular }}</button>
               <button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="remove this {{ singular }} from config.json">✕ Remove</button>
             </footer>
           </form>
+          {% set ask = 'Remove ' ~ singular ~ ' ' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else (e.name ~ ' …' ~ e.last4))) ~ ' from config.json?' %}
           <form method="post" id="del-{{ path }}-{{ e.index }}" action="{{ base }}/entry/{{ e.index }}/delete" class="entry-delete" hidden
-                data-confirm="Remove {{ singular }} {% if path == 'profiles' %}{{ e.label }}{% elif path == 'warehouses' %}{{ e.buying_group }}{% else %}{{ e.name }} …{{ e.last4 }}{% endif %} from config.json?"></form>
+                {% if inplace %}hx-post="{{ base }}/entry/{{ e.index }}/delete" hx-target="#s-{{ path }}" hx-swap="outerHTML" hx-confirm="{{ ask }}"{% else %}data-confirm="{{ ask }}"{% endif %}></form>
         </details>
         {% else %}
         <p class="settings-empty">No {{ path }} yet.</p>
         {% endfor %}
-        <details class="entry-card new" {{ 'open' if open_section == path }}>
+        <details class="entry-card new" {{ 'open' if open_section == path or (open_index is defined and open_index is none) }}>
           <summary>+ Add {{ singular }}</summary>
-          <form method="post" action="{{ base }}/entry" class="entry-form" autocomplete="off">
+          <form method="post" action="{{ base }}/entry" class="entry-form" autocomplete="off"{% if inplace %} hx-post="{{ base }}/entry" hx-target="#s-{{ path }}" hx-swap="outerHTML"{% endif %}>
             {{ fields(none) }}
             <footer><button type="submit" class="small primary">Add {{ singular }}</button></footer>
           </form>

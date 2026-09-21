@@ -93,13 +93,14 @@
 // dropped if a browser still carries it.
 (function () {
   try { document.cookie = "settings-open=; path=/settings; max-age=0; samesite=lax"; } catch (e) {}
-  document.querySelectorAll("[data-expand], [data-collapse]").forEach(function (a) {
-    a.addEventListener("click", function (e) {
-      e.preventDefault();
-      var section = a.dataset.expand || a.dataset.collapse;
-      var list = document.querySelector('.entry-list[data-section="' + section + '"]');
-      if (!list) return;
-      list.querySelectorAll("details.entry-card[data-key]").forEach(function (d) { d.open = !!a.dataset.expand; });
-    });
+  // delegated: a section swapped in place by a save (htmx) keeps its links working
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest ? e.target.closest("[data-expand], [data-collapse]") : null;
+    if (!a) return;
+    e.preventDefault();
+    var section = a.dataset.expand || a.dataset.collapse;
+    var list = document.querySelector('.entry-list[data-section="' + section + '"]');
+    if (!list) return;
+    list.querySelectorAll("details.entry-card[data-key]").forEach(function (d) { d.open = !!a.dataset.expand; });
   });
 })();

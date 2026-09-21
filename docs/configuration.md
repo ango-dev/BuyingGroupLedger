@@ -185,7 +185,10 @@ Details:
   key. A key that names **no** retailer this ledger scrapes logs a warning at load — a typo'd override
   would otherwise never apply and nothing would say so.
 - **`virtual: true`** marks a virtual card number (one issued off another card): it earns cashback
-  like any entry, and the dashboard's Taxes page does not ask for a sign-up bonus for it.
+  like any entry, and the dashboard's Taxes page does not ask for a sign-up bonus for it. It also
+  names the card it belongs to in **`virtual_of`** (that card's last 4): its spend counts against
+  that card's spend caps and those caps apply to it. The Settings page insists on the link; an
+  older entry without it loads with a warning and pools nothing.
 - `last4` is matched **normalized**, so it doesn't matter that Amazon says "ending in 4321", Best Buy
   sends `************4321`, and Costco sends `xxxx4321`.
 - Two *different* cards can genuinely share a last 4 across accounts. Add an optional **`profile`** (a
@@ -232,4 +235,6 @@ return moved the line — the one exception to the rule that a rate cell is neve
 a capped card's rates current. Ordered and shipped rows keep their scrape-time rate until they
 get there; a hand-typed rate cell is never touched. An Amazon promo (the "extra 1% back" the
 order page advertises) rides on top of the capped rate. The Settings page edits all of it on the
-card's entry.
+card's entry as ONE table of rates: the "everywhere else" row is the card's rate and the catch-all
+cap, every other row names one or more retailers that share a rate and, with a spend limit, one
+allowance; a virtual number's spend pools with the card it names.

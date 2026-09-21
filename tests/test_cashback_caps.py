@@ -136,7 +136,22 @@ class TestCappedRate:
             row(order_id="A3", order_date="2026-02-03", total_cost="70"),                          # after
         ])
         upto = next(e for e in events if e.key[0] == "A3")
-        assert caps.spend_before(events, c, the_cap, upto) == 250 + 100 + 200
+        assert caps.spend_before(events, [c], c, the_cap, upto) == 250 + 100 + 200
+
+    def test_a_virtual_number_pools_with_its_card(self):
+        real = card(caps=[{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": "1%"}])
+        virtual = Card(last4="9999", name="ABP virtual", virtual_of="5555", retailer_rates={"Amazon": "5%"})
+        cards = [real, virtual]
+        events = caps.events_from_rows([
+            row(order_id="V1", order_date="2026-01-05", total_cost="700", card_last4="9999"),
+            row(order_id="A1", order_date="2026-02-01", total_cost="100"),
+        ])
+        upto = next(e for e in events if e.key[0] == "A1")
+        assert caps.spend_before(events, cards, real, real.caps[0], upto) == 700.0
+        # and a purchase on the virtual number is capped by the real card's allowance
+        items = [item(order_id="V2", order_date="2026-03-01", total_cost=500, card_last4="9999")]
+        caps.apply_to_items(items, cards, [row(order_id="A0", order_date="2026-01-01", total_cost="900")])
+        assert items[0].cashback_rate == round((100 * 0.05 + 400 * 0.01) / 500, 4)
 
     def test_a_return_gives_its_spend_back_in_its_own_period(self):
         c = card()
@@ -147,7 +162,7 @@ class TestCappedRate:
             row(order_id="A1", order_date="2026-02-01", total_cost="100"),
         ])
         upto = next(e for e in events if e.key[0] == "A1")
-        assert caps.spend_before(events, c, the_cap, upto) == -900.0
+        assert caps.spend_before(events, [c], c, the_cap, upto) == -900.0
 
 
 def item(**kw) -> OrderItem:

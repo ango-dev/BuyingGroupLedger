@@ -32,7 +32,20 @@ def load_cards() -> list[Card]:
     """
     cards = [Card.model_validate(entry) for entry in config_section("cards")]
     _warn_about_unknown_retailer_rates(cards)
+    _warn_about_unlinked_virtual_cards(cards)
     return cards
+
+
+def _warn_about_unlinked_virtual_cards(cards: list[Card]) -> None:
+    """A virtual number that names no card pools no spend with it; one naming a last4 no entry has pools nothing either."""
+    known = {c.last4 for c in cards}
+    for card in cards:
+        if card.virtual and not card.virtual_of:
+            log.warning("Card %r is virtual but names no card it belongs to (`virtual_of`): its spend "
+                        "does not count against any cap. Set it on the Settings page.", card.name)
+        elif card.virtual_of and card.virtual_of not in known:
+            log.warning("Card %r is a virtual number of ...%s, which no `cards` entry has.",
+                        card.name, card.virtual_of)
 
 
 def _warn_about_unknown_retailer_rates(cards: list[Card]) -> None:

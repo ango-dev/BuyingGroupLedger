@@ -161,13 +161,23 @@ def _card_of(cards: list[Card], last4: str, profile: str) -> Card | None:
     return matches[0]
 
 
-def spend_before(events, card: Card, cap: CashbackCap, upto: SpendEvent) -> float:
-    """The period's spend on this card, within this cap's scope, before `upto` in date order --
-    plus the period's outside-ledger offset."""
+def _root_of(cards: list[Card], last4: str, profile: str) -> Card | None:
+    """The card whose caps a purchase counts against: a virtual number's parent, else the card itself."""
+    card = _card_of(cards, last4, profile)
+    if card is not None and card.virtual_of:
+        parent = _card_of(cards, card.virtual_of, profile)
+        if parent is not None:
+            return parent
+    return card
+
+
+def spend_before(events, cards: list[Card], card: Card, cap: CashbackCap, upto: SpendEvent) -> float:
+    """The period's spend on this card -- its virtual numbers included -- within this cap's scope,
+    before `upto` in date order, plus the period's outside-ledger offset."""
     period = period_key(cap, upto.when)
     total = float(cap.outside_spend.get(period, 0.0))
     for e in events:
-        if not card.matches(e.card_last4, e.profile) or card.cap_for(e.retailer) is not cap:
+        if _root_of(cards, e.card_last4, e.profile) is not card or card.cap_for(e.retailer) is not cap:
             continue
         if period_key(cap, e.when) != period or e.order >= upto.order:
             continue
@@ -217,11 +227,11 @@ def apply_to_items(items: list, cards: list[Card], ledger_rows: list[dict]) -> l
     for e, it in batch:
         if e.rank[0] != 0 or it.cashback_rate is None:
             continue  # a return, or a row with no resolvable rate
-        card = _card_of(cards, e.card_last4, e.profile)
+        card = _root_of(cards, e.card_last4, e.profile)
         cap = card.cap_for(e.retailer) if card else None
         if cap is None:
             continue
-        used = spend_before(all_events, card, cap, e)
+        used = spend_before(all_events, cards, card, cap, e)
         new = capped_rate(float(it.cashback_rate), cap, used, e.amount)
         if abs(new - float(it.cashback_rate)) > 5e-5:
             changes.append((it, it.cashback_rate, new))
@@ -261,16 +271,17 @@ def recompute(values: list[list], cards: list[Card], protected: dict | None = No
             continue
         if "cashback_rate" in protected.get(purchase.key, ()):
             continue
-        card = _card_of(cards, purchase.card_last4, purchase.profile)
+        own = _card_of(cards, purchase.card_last4, purchase.profile)
+        card = _root_of(cards, purchase.card_last4, purchase.profile)
         cap = card.cap_for(purchase.retailer) if card else None
-        if cap is None:
+        if cap is None or own is None:
             continue
-        rate = card.rate_for(purchase.retailer)
+        rate = own.rate_for(purchase.retailer)  # the row's own card says what it earns
         if rate is None:
             rate = default_rate
         if rate is None:
             continue
-        used = spend_before(events, card, cap, purchase)
+        used = spend_before(events, cards, card, cap, purchase)
         new = capped_rate(float(rate), cap, used, purchase.amount)
         old = parse_rate(cells.get("cashback_rate")) if str(cells.get("cashback_rate") or "").strip() else None
         try:
