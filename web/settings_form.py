@@ -647,11 +647,23 @@ def _secret(form: Mapping[str, str], name: str, stored) -> str:
 
 
 def _rate_value(text: str):
-    """A rate as typed: "2%" stays text (the models accept it), a number becomes a float."""
+    """A rate as typed, written as a PERCENT: "2%" stays "2%", a fraction up to 1 becomes its percent ("0.015" -> "1.5%"),
+    and anything else is handed on as typed for the model to refuse (a bare "2" is ambiguous)."""
     text = text.strip()
     if not text:
         return None
-    return text if text.endswith("%") else float(text)
+    if text.endswith("%"):
+        try:
+            return f"{float(text[:-1].strip()):g}%"
+        except ValueError:
+            return text
+    try:
+        value = float(text)
+    except ValueError:
+        return text
+    if 0 <= value <= 1:
+        return f"{value * 100:g}%"
+    return value  # the model says why a bare number above 1 is refused
 
 
 def _indexed(form: Mapping[str, str], prefix: str) -> list[int]:

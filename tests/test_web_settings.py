@@ -485,8 +485,9 @@ class TestEntryCards:
             "name": "Citi Double Cash", "last4": "8765", "cashback_rate": "0.02", "profile": "p1",
             "rr.0.retailers": "", "rr.0.rate": "5%"}, follow_redirects=False)
         assert response.status_code == 303 and "Saved+card" in response.headers["location"]
+        # a fraction typed is written as its percent
         assert config_value("cards")[1] == {"last4": "8765", "name": "Citi Double Cash",
-                                            "cashback_rate": 0.02, "profile": "p1"}
+                                            "cashback_rate": "2%", "profile": "p1"}
         response = client.post("/settings/section/cards/entry/0/delete", follow_redirects=False)
         assert response.status_code == 303 and "Removed+card+USB" in response.headers["location"]
         assert [c["last4"] for c in config_value("cards")] == ["8765"]
@@ -661,6 +662,13 @@ class TestEntryCards:
         assert as_kind.status_code == 303 and config_value("cards")[1]["own_bonus"] is True
         regular = client.post("/settings/section/cards/entry/1", data={"name": "Virtual", "last4": "9999", "kind": ""}, follow_redirects=False)
         assert regular.status_code == 303 and "virtual" not in config_value("cards")[1]
+
+    def test_rates_are_written_as_percents_however_typed(self):
+        from web.settings_form import _rate_value
+
+        assert _rate_value("0.01") == "1%" and _rate_value("0.015") == "1.5%" and _rate_value("1") == "100%"
+        assert _rate_value("1%") == "1%" and _rate_value(" 2.50 % ") == "2.5%" and _rate_value("0") == "0%"
+        assert _rate_value("2") == 2.0 and _rate_value("") is None and _rate_value("abc") == "abc"
 
     def test_an_invalid_entry_is_400_and_writes_nothing(self, client):
         bad = client.post("/settings/section/cards/entry", data={"name": "Bare", "last4": "1111",
