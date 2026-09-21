@@ -408,7 +408,7 @@ class TestEntryCards:
         assert '<details class="entry-card" data-key="cards:0315">' in body
         assert '<details class="entry-card" data-key="profiles:p1">' in body
         assert 'data-expand="cards"' in body and 'data-collapse="cards"' in body
-        assert '<span class="chip">costco</span>' in body  # the profile's retailers, at a glance
+        assert '<span class="chip">Costco</span>' in body  # the profile's retailers, at a glance
         assert "settings-open" in client.get("/static/settings.js").text
         assert "USB Prime Business" in body and 'value="0315"' in body
         assert "No warehouses yet." in body
@@ -480,7 +480,7 @@ class TestEntryCards:
             follow_redirects=False)
         assert response.status_code == 303 and "Added+card" in response.headers["location"]
         assert config_value("cards")[1] == {"last4": "8765", "name": "Citi Double Cash",
-                                            "cashback_rate": "2%", "retailer_rates": {"amazon": "5%"}}
+                                            "cashback_rate": "2%", "retailer_rates": {"Amazon": "5%"}}
         response = client.post("/settings/section/cards/entry/1", data={
             "name": "Citi Double Cash", "last4": "8765", "cashback_rate": "0.02", "profile": "p1",
             "rr.0.retailers": "", "rr.0.rate": "5%"}, follow_redirects=False)
@@ -503,9 +503,9 @@ class TestEntryCards:
             "rr.2.retailers": "", "rr.2.spend_limit": ""}, follow_redirects=False)
         assert response.status_code == 303 and "Added+card" in response.headers["location"]
         saved = config_value("cards")[1]
-        assert saved["retailer_rates"] == {"amazon": "5%", "amazon-business": "5%", "bestbuy": "3%"}
+        assert saved["retailer_rates"] == {"Amazon": "5%", "Amazon Business": "5%", "Best Buy": "3%"}
         assert saved["caps"] == [
-            {"retailers": ["amazon", "amazon-business"], "spend_limit": 150000.0, "fallback_rate": "1%", "resets": "03-15",
+            {"retailers": ["Amazon", "Amazon Business"], "spend_limit": 150000.0, "fallback_rate": "1%", "resets": "03-15",
              "outside_spend": {"2026": 4000.0, "2027": 0.0}},
             {"retailers": [], "spend_limit": 25000.0, "fallback_rate": "1%", "resets": "calendar-year"}]
         body = client.get("/settings").text
@@ -534,13 +534,13 @@ class TestEntryCards:
         client.post("/settings/section/cards/entry/1", data={"name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%",
                                                              "rr.0.retailers": "amazon", "rr.0.rate": "5%", "rr.0.spend_limit": "",
                                                              "cap_all.spend_limit": ""}, follow_redirects=False)
-        assert "caps" not in config_value("cards")[1] and config_value("cards")[1]["retailer_rates"] == {"amazon": "5%"}
+        assert "caps" not in config_value("cards")[1] and config_value("cards")[1]["retailer_rates"] == {"Amazon": "5%"}
         # the dropdown posts one value per tick
         ticked = client.post("/settings/section/cards/entry/1", data={
             "name": "Amazon Business Prime", "last4": "5555", "cashback_rate": "1%",
             "rr.0.retailers": ["amazon", "costco"], "rr.0.rate": "4%"}, follow_redirects=False)
         assert ticked.status_code == 303, ticked.text[ticked.text.find("Nothing was saved"):][:400]
-        assert config_value("cards")[1]["retailer_rates"] == {"amazon": "4%", "costco": "4%"}
+        assert config_value("cards")[1]["retailer_rates"] == {"Amazon": "4%", "Costco": "4%"}
 
     def test_a_save_from_the_page_swaps_the_section_in_place(self, client):
         hx = {"HX-Request": "true"}
@@ -560,7 +560,7 @@ class TestEntryCards:
         limited = client.post("/settings/section/cards/entry/0", headers=hx, data={
             "name": "USB Prime Business", "last4": "0315", "cashback_rate": "5%", "rr.0.retailers": "amazon", "rr.0.rate": "5%",
             "rr.0.spend_limit": "1000"})
-        assert limited.status_code == 200 and config_value("cards")[0]["caps"] == [{"retailers": ["amazon"], "spend_limit": 1000.0, "resets": "calendar-year"}]
+        assert limited.status_code == 200 and config_value("cards")[0]["caps"] == [{"retailers": ["Amazon"], "spend_limit": 1000.0, "resets": "calendar-year"}]
         assert "Amazon 5% up to 1,000 then Everywhere Else" in limited.text
         refused = client.post("/settings/section/cards/entry/0", headers=hx, data={"name": "USB", "last4": "0315", "cashback_rate": "2"})
         assert refused.status_code == 400 and refused.text.lstrip().startswith('<section') and "outside 0-1" in refused.text
@@ -648,18 +648,18 @@ class TestEntryCards:
         assert response.status_code == 303
         saved = config_value("profiles")[0]
         assert saved["// note"] == "kept" and saved["profile_id"] == "BU-1"
-        assert saved["retailers"] == ["bestbuy", "costco"]
+        assert saved["retailers"] == ["Best Buy", "Costco"]  # written by name (models/retailers.py)
         assert saved["proxy"]["password"] == "pw"
-        assert saved["auth"]["bestbuy"] == {"method": "password", "username": "me",
-                                            "password": "secret", "totp_secret": "SEED"}
-        assert saved["auth"]["amazon-business"]["password"] == "x"
+        assert saved["auth"]["Best Buy"] == {"method": "password", "username": "me",  # keys by name too
+                                             "password": "secret", "totp_secret": "SEED"}
+        assert saved["auth"]["Amazon Business"]["password"] == "x"
         # clear the proxy password, remove the bestbuy sign-in, drop the proxy entirely next
         client.post("/settings/section/profiles/entry/0", data={
             "label": "p1", "retailers": "costco", "proxy_host": "h", "proxy_port": "1",
             "proxy_password__clear": "1", "auth.bestbuy.__remove": "1",
             "auth.amazon-business.username": "ab", "auth.amazon-business.password": ""})
         saved = config_value("profiles")[0]
-        assert saved["proxy"]["password"] == "" and list(saved["auth"]) == ["amazon-business"]
+        assert saved["proxy"]["password"] == "" and list(saved["auth"]) == ["Amazon Business"]
         client.post("/settings/section/profiles/entry/0", data={"label": "p1", "proxy_host": ""})
         assert "proxy" not in config_value("profiles")[0]
 

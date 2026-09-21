@@ -1,13 +1,18 @@
 from typing import Literal
 from urllib.parse import quote
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from models.retailers import key_of
 
 
 class ProxyConfig(BaseModel):
     host: str
     port: int
     username: str = ""
+    #: Switched off: the
+    #: details stay in config.json, but ProfileConfig hands the scrapers no proxy at all.
+    enabled: bool = True
     # repr=False so a proxy password cannot ride out in a traceback, a log line or an alert email.
     # A ProfileConfig is handed to almost everything here, so its repr surfaces in a lot of places —
     # and an alert leaves the host entirely. The value is still read normally by as_url().
@@ -84,3 +89,31 @@ class ProfileConfig(BaseModel):
     # Optional per-retailer auto-auth config, keyed by retailer_key (e.g. {"bestbuy": {...}}).
     # Absent = a lapsed session alerts and skips instead of signing itself back in.
     auth: dict[str, RetailerAuth] = Field(default_factory=dict)
+
+    # config.json spells retailers by NAME ("Best Buy", "Amazon Business"; models/retailers.py);
+    # the code compares retailer_keys, so both `retailers` and the `auth` keys are canonicalised
+    # here and any older spelling ("bestbuy", "best-buy") still loads.
+    @field_validator("retailers", mode="before")
+    @classmethod
+    def _retailer_keys(cls, v):
+        if isinstance(v, str):
+            v = [v]
+        out: list[str] = []
+        for item in v or []:
+            key = key_of(str(item))
+            if key and key not in out:
+                out.append(key)
+        return out
+
+    @field_validator("auth", mode="before")
+    @classmethod
+    def _auth_keys(cls, v):
+        if not isinstance(v, dict):
+            return v
+        return {key_of(str(k)): a for k, a in v.items()}
+
+    @model_validator(mode="after")
+    def _drop_disabled_proxy(self):
+        if self.proxy is not None and not self.proxy.enabled:
+            self.proxy = None  # switched off on the Settings page: the run goes direct
+        return self

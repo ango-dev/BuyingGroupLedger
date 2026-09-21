@@ -151,6 +151,10 @@ TOOLS: tuple[Tool, ...] = (
          "Ledger Fixes", (APPLY, Field("--retailer", "Retailer", "select", choices=("", "amazon", "amazon-business")),
                           Field("--orders", "Orders", "list", "limit to these order numbers")),
          writes=True, spends="a cloud browser session"),
+    Tool("standardize_retailers", "scripts.standardize_retailers", "Standardize retailer names",
+         "Spell every retailer in config.json one way -- Amazon, Amazon Business, Best Buy, Costco -- in the "
+         "profiles' retailers and sign-ins and the cards' rates and caps. Every spelling already loads.",
+         "Config", (APPLY,), writes=True),
     Tool("backfill_promo_rate", "scripts.backfill_promo_rate", "Fill Promo Rate from the ledger",
          "Move the promo folded into an Amazon row's Cashback Rate (what sits above the card's configured rate) "
          "into the Promo Rate column. Offline: no browser, no profile. Odd differences are listed, not guessed.",
@@ -180,7 +184,7 @@ TOOLS: tuple[Tool, ...] = (
          writes=True),
 )
 
-GROUPS = ("Run", "Accounts", "Checks", "Ledger Fixes")
+GROUPS = ("Run", "Accounts", "Checks", "Ledger Fixes", "Config")
 
 
 def tool(key: str) -> Tool:

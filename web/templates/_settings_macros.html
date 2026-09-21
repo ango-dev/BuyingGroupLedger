@@ -59,7 +59,8 @@
         </div>
       </div>
       <div class="fblock">
-        <div class="ftitle">Proxy <span class="muted">— blank host = none</span></div>
+        <div class="ftitle">Proxy <span class="muted">— blank host = none</span>
+          {% if p and p.proxy %}<label class="check small inline"><input type="hidden" name="proxy_form" value="1"><input type="checkbox" name="proxy_enabled" value="on" {{ 'checked' if p.proxy.enabled }}> in use</label>{% endif %}</div>
         <div class="fgrid four">
           <label>Host <input type="text" name="proxy_host" value="{{ p.proxy.host if p and p.proxy else '' }}"></label>
           <label>Port <input type="number" name="proxy_port" value="{{ p.proxy.port if p and p.proxy else '' }}"></label>
@@ -68,13 +69,13 @@
         </div>
       </div>
       <div class="fblock">
-        <div class="ftitle">Unattended sign-in <span class="muted">— password + authenticator seed (bestbuy, amazon-business); enrol the app, not SMS</span></div>
+        <div class="ftitle">Unattended sign-in <span class="muted">— password + authenticator seed (Best Buy, Amazon Business); enrol the app, not SMS</span></div>
         <table class="entry-table">
           <thead><tr><th>Retailer</th><th>Username</th><th>Password</th><th>TOTP Seed</th><th></th></tr></thead>
           <tbody>
             {% if p %}{% for a in p.auth %}
             <tr>
-              <td class="mono">{{ a.retailer }}</td>
+              <td>{{ retailer_title(a.retailer) | trim }}</td>
               <td><input type="text" name="auth.{{ a.retailer }}.username" value="{{ a.username }}"></td>
               <td><span class="secret">{{ secret_cell('auth.' ~ a.retailer ~ '.password', a.password_set) }}</span></td>
               <td><span class="secret">{{ secret_cell('auth.' ~ a.retailer ~ '.totp_secret', a.totp_set) }}</span></td>
@@ -83,7 +84,8 @@
             {% endfor %}{% endif %}
             {% set have = (p.auth | map(attribute='retailer') | list) if p else [] %}
             <tr class="new-row">
-              <td>{{ choose('auth_new_retailer', [('', '— add —')] + (auth_retailers | reject('in', have) | list), '', '', 'cell') }}</td>
+              {% set addable = [] %}{% for r in auth_retailers if r not in have %}{% set _ = addable.append((r, retailer_title(r) | trim)) %}{% endfor %}
+              <td>{{ choose('auth_new_retailer', [('', '— Add —')] + addable, '', '', 'cell') }}</td>
               <td><input type="text" name="auth_new_username" placeholder="username"></td>
               <td><input type="password" name="auth_new_password" autocomplete="new-password" placeholder="password"></td>
               <td><input type="password" name="auth_new_totp_secret" autocomplete="new-password" placeholder="TOTP seed"></td>
@@ -122,9 +124,8 @@
 
     {#- The reset's date sits inline in the resets cell and only when the reset is "on a date each
         year". -#}
-    {#- Title Case everywhere the page shows a name; the keys stay as saved -#}
-    {% set RETAILER_TITLES = {'amazon': 'Amazon', 'amazon-business': 'Amazon Business', 'bestbuy': 'Best Buy', 'costco': 'Costco'} %}
-    {% macro retailer_title(key) %}{{ RETAILER_TITLES.get(key, key | replace('-', ' ') | title) }}{% endmacro %}
+    {#- The one spelling of a retailer (models/retailers.py, `retailer_names` in the context) -#}
+    {% macro retailer_title(key) %}{{ retailer_names.get(key, key | replace('-', ' ') | title) }}{% endmacro %}
     {% macro limit_text(cap) %}{% if cap.spend_limit != '' %} up to {{ '{:,.0f}'.format(cap.spend_limit | float) }} then {{ cap.fallback_rate if cap.fallback_rate != '' else 'Everywhere Else' }}{% endif %}{% endmacro %}
 
     {% macro cap_cells(prefix, cap) %}
@@ -205,10 +206,12 @@
     {% macro entry_summary(path, e) %}
       {% if path == 'profiles' %}
         <strong>{{ e.label or '(unlabelled)' }}</strong>
-        {% for r in e.retailers %}<span class="chip">{{ r }}</span>{% endfor %}
-        {% if not e.retailers %}<span class="chip muted">no retailers</span>{% endif %}
-        {% if e.proxy %}<span class="chip">proxy</span>{% endif %}
-        {% for a in e.auth %}<span class="chip ok">sign-in: {{ a.retailer }}</span>{% endfor %}
+        {% for r in e.retailers %}<span class="chip">{{ retailer_title(r) | trim }}</span>{% endfor %}
+        {% if not e.retailers %}<span class="chip muted">No Retailers</span>{% endif %}
+        {#- the proxy switch:
+            posts in place from the summary line, without opening the card -#}
+        {% if e.proxy %}<button type="button" class="chip switch {{ 'on' if e.proxy.enabled else 'off' }}" hx-post="/settings/section/profiles/entry/{{ e.index }}/proxy" hx-target="#s-profiles" hx-swap="outerHTML" onclick="event.preventDefault()" title="{{ 'the proxy is in use: click to switch it off' if e.proxy.enabled else 'the proxy is switched off: click to use it' }}">Proxy {{ 'On' if e.proxy.enabled else 'Off' }}</button>{% endif %}
+        {% for a in e.auth %}<span class="chip ok">Sign-in: {{ retailer_title(a.retailer) | trim }}</span>{% endfor %}
       {% elif path == 'warehouses' %}
         <strong>{{ e.buying_group or '(unnamed)' }}</strong>
         <span class="chip">{{ e.jigs | length }} jig(s)</span>

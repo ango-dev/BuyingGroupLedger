@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 # would quietly fall back to the card's overall rate and understate profit with no error anywhere.
 # So load_cards warns about it. Kept here rather than imported from main.SCRAPERS (config importing
 # main would invert the dependency); tests/test_cards.py asserts the two stay in sync.
-KNOWN_RETAILERS = ("Amazon", "Amazon Business", "Best Buy", "Costco", "amazon-business", "bestbuy")
+KNOWN_RETAILERS = ("Amazon", "Amazon Business", "Best Buy", "Costco", "amazon-business", "bestbuy")  # models/retailers.py has the one spelling
 
 
 def load_cards() -> list[Card]:

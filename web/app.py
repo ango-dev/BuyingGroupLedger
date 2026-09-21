@@ -41,6 +41,7 @@ from web.audit_view import AuditCache, audit_grids, audit_key, key_of, run_audit
 from web.queries import (CHOICE_FIELDS, Filters, _values as query_values, cell_choices, column_headings, facets, filter_rows,
                          order_view, sort_rows)
 from web.queries import DEFAULT_SORT, sort_by_finding  # the Finding column's sort
+from models import retailers as retailers_module
 from web.recon_view import findings_for as recon_findings, reconcile
 from web import tax_inputs
 from web.summary import overview
@@ -1650,6 +1651,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             hidden_envs=settings_form.hidden_envs(), section_title=settings_form.section_title,
             field_label=settings_form.field_label, retailer_keys=settings_form.RETAILER_KEYS,
             auth_retailers=settings_form.AUTH_RETAILERS, profile_labels=settings_form.profile_labels(),
+            retailer_names=retailers_module.NAMES,
             card_choices=card_choices(), section_forms=[], in_container=in_container, auth_on=auth_on,
             restart=setup_wizard.pending_restart(), configured=setup_wizard.is_configured(), **extra)
         response.status_code = status
@@ -1902,6 +1904,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             section_title=settings_form.section_title, field_label=settings_form.field_label,
             entries={path: settings_form.display_entries(path) for path in settings_form.CARD_SECTIONS},
             retailer_keys=settings_form.RETAILER_KEYS, auth_retailers=settings_form.AUTH_RETAILERS,
+            retailer_names=retailers_module.NAMES,
             profile_labels=settings_form.profile_labels(), card_choices=card_choices(),
         )
 
@@ -1990,6 +1993,22 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.post("/settings/section/{path}/entry/{index}", response_class=HTMLResponse)
     async def settings_save_entry(request: Request, path: str, index: int):
         return await _save_entry(request, path, index)
+
+    @app.post("/settings/section/profiles/entry/{index}/proxy", response_class=HTMLResponse)
+    async def settings_toggle_proxy(request: Request, index: int):
+        """The proxy switch on a profile's summary line: flips `proxy.enabled`
+        and swaps the section in place."""
+        try:
+            label, on = settings_form.toggle_proxy(index)
+        except settings_form.SettingsError as exc:
+            if wants_fragment(request):
+                return settings_section(request, "profiles", errors=exc.errors, status=400)
+            return settings_page(request, errors=exc.errors, open_section="profiles", status=400)
+        message = f"Proxy {'on' if on else 'off'} for profile {label}."
+        act("settings", f"Settings: proxy {'on' if on else 'off'} for profile {label}", {"path": "profiles", "entry": label})
+        if wants_fragment(request):
+            return settings_section(request, "profiles", message=message)
+        return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-profiles", status_code=303)
 
     @app.post("/settings/section/{path}/entry/{index}/delete", response_class=HTMLResponse)
     async def settings_delete_entry(request: Request, path: str, index: int):

@@ -34,6 +34,7 @@ from typing import Any, Mapping
 from config import loader
 from config.loader import config_value, load_config, save_config, strip_comments
 from config.settings import BOOLEAN_SETTINGS, ENV_TO_CONFIG, Settings
+from models import retailers as retailers_module
 from models.card import Card
 from models.profile import ProfileConfig
 from models.warehouse import Warehouse
@@ -543,11 +544,12 @@ def display_entries(path: str) -> list[dict]:
             out.append({
                 "index": index, "label": entry.get("label", ""),
                 "profile_id": entry.get("profile_id", ""),
-                "retailers": list(entry.get("retailers") or []),
+                "retailers": [retailers_module.key_of(str(r)) for r in (entry.get("retailers") or [])],  # keys: the boxes compare them
                 "proxy": {"host": proxy.get("host", ""), "port": proxy.get("port", ""),
                           "username": proxy.get("username", ""),
-                          "password_set": _is_set(proxy.get("password"))} if proxy else None,
-                "auth": [{"retailer": key, "username": (a or {}).get("username", ""),
+                          "password_set": _is_set(proxy.get("password")),
+                          "enabled": proxy.get("enabled", True) is not False} if proxy else None,
+                "auth": [{"retailer": retailers_module.key_of(str(key)), "username": (a or {}).get("username", ""),
                           "password_set": _is_set((a or {}).get("password")),
                           "totp_set": _is_set((a or {}).get("totp_secret"))}
                          for key, a in auth.items()],
@@ -592,11 +594,12 @@ def _rate_rows(retailer_rates: dict, caps: list) -> list[dict]:
             continue  # the catch-all rides on the "everywhere else" row
         keys = [normalize_retailer(str(r)) for r in retailers]
         rate = next((by_key[k][1] for k in keys if k in by_key), "")
-        rows.append({**_cap_display(cap), "retailers": ", ".join(str(r) for r in retailers), "rate": rate})
+        # the form's tick values are retailer_keys (models/retailers.py); the chips show the names
+        rows.append({**_cap_display(cap), "retailers": ", ".join(retailers_module.key_of(str(r)) for r in retailers), "rate": rate})
         covered.update(keys)
     for key, (retailer, rate) in by_key.items():
         if key not in covered:
-            rows.append({**_cap_display({}), "retailers": str(retailer), "rate": rate})
+            rows.append({**_cap_display({}), "retailers": retailers_module.key_of(str(retailer)), "rate": rate})
     return rows
 
 
@@ -664,7 +667,8 @@ def _profile_from_form(form: Mapping[str, str], base: dict) -> dict:
     chosen = form.getlist("retailers") if hasattr(form, "getlist") else form.get("retailers", [])
     if isinstance(chosen, str):
         chosen = [chosen]
-    entry["retailers"] = [r for r in RETAILER_KEYS if r in chosen]
+    chosen = {retailers_module.key_of(str(c)) for c in chosen}
+    entry["retailers"] = [retailers_module.name_of(r) for r in RETAILER_KEYS if r in chosen]  # written by name (models/retailers.py)
     old_proxy = base.get("proxy") or {}
     host = _text(form, "proxy_host")
     if host:
@@ -674,23 +678,30 @@ def _profile_from_form(form: Mapping[str, str], base: dict) -> dict:
         proxy["port"] = int(port) if port.isdigit() else port
         proxy["username"] = _text(form, "proxy_username")
         proxy["password"] = _secret(form, "proxy_password", old_proxy.get("password"))
+        if "proxy_form" in form:  # the page's form carries the "in use" box (unticked = absent); a hand-made post keeps the stored state
+            if str(form.get("proxy_enabled", "")).strip().lower() in ("on", "true", "1", "yes"):
+                proxy.pop("enabled", None)
+            else:
+                proxy["enabled"] = False
         entry["proxy"] = proxy
     else:
         entry.pop("proxy", None)
-    auth = dict(base.get("auth") or {})
+    # the auth keys are written by name too; the same retailer under two spellings is one entry
+    auth = {retailers_module.name_of(k): a for k, a in (base.get("auth") or {}).items()}
     for retailer in list(auth):
-        if _text(form, f"auth.{retailer}.__remove") in ("1", "on", "true"):
+        if _text(form, f"auth.{retailers_module.key_of(retailer)}.__remove") in ("1", "on", "true"):
             auth.pop(retailer)
             continue
-        if f"auth.{retailer}.username" not in form:
+        key = retailers_module.key_of(retailer)
+        if f"auth.{key}.username" not in form:
             continue  # not on the form (a key the page does not know): kept as stored
         old = dict(auth.get(retailer) or {})
         old["method"] = old.get("method") or "password"
-        old["username"] = _text(form, f"auth.{retailer}.username")
-        old["password"] = _secret(form, f"auth.{retailer}.password", old.get("password"))
-        old["totp_secret"] = _secret(form, f"auth.{retailer}.totp_secret", old.get("totp_secret"))
+        old["username"] = _text(form, f"auth.{key}.username")
+        old["password"] = _secret(form, f"auth.{key}.password", old.get("password"))
+        old["totp_secret"] = _secret(form, f"auth.{key}.totp_secret", old.get("totp_secret"))
         auth[retailer] = old
-    new_retailer = _text(form, "auth_new_retailer")
+    new_retailer = retailers_module.name_of(_text(form, "auth_new_retailer")) if _text(form, "auth_new_retailer") else ""
     if new_retailer and new_retailer not in auth:
         auth[new_retailer] = {"method": "password", "username": _text(form, "auth_new_username"),
                               "password": _text(form, "auth_new_password"),
@@ -769,14 +780,14 @@ def _card_from_form(form: Mapping[str, str], base: dict) -> dict:
     rates: dict = {}
     caps: list = []
     for i in _indexed(form, "rr"):
-        retailers = _many(form, f"rr.{i}.retailers")
-        if not retailers:
+        names = [retailers_module.name_of(r) for r in _many(form, f"rr.{i}.retailers")]  # written by name
+        if not names:
             continue  # the blank "new" row, or a row being dropped
         value = _rate_value(_text(form, f"rr.{i}.rate"))
         if value is not None:
-            for r in retailers:
+            for r in names:
                 rates[r] = value
-        cap = _cap_from_form(form, f"rr.{i}", retailers)
+        cap = _cap_from_form(form, f"rr.{i}", names)
         if cap:
             caps.append(cap)
     catch_all = _cap_from_form(form, "cap_all", [])
@@ -881,6 +892,27 @@ def apply_entry(path: str, index: int | None, form: Mapping[str, str]) -> tuple[
     _set_path(data, path, entries)
     save_config(data)
     return index, entry_label(path, entry)
+
+
+def toggle_proxy(index: int) -> tuple[str, bool]:
+    """Flip a profile's proxy between in use and switched off (the details stay). Returns
+    (label, now on). Raises SettingsError when the profile or its proxy does not exist."""
+    entries = _entries("profiles")
+    if not 0 <= index < len(entries) or not isinstance(entries[index], dict):
+        raise SettingsError([f"profiles[{index}] does not exist (the page may be stale; reload it)"])
+    entry = entries[index]
+    proxy = entry.get("proxy")
+    if not isinstance(proxy, dict) or not proxy.get("host"):
+        raise SettingsError([f"profile {entry.get('label', index)} has no proxy to switch"])
+    on = proxy.get("enabled", True) is False  # the new state
+    if on:
+        proxy.pop("enabled", None)
+    else:
+        proxy["enabled"] = False
+    data = load_config()
+    _set_path(data, "profiles", entries)
+    save_config(data)
+    return str(entry.get("label", "")), on
 
 
 def delete_entry(path: str, index: int) -> str:

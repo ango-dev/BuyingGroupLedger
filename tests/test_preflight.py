@@ -526,11 +526,11 @@ class TestProfiles:
         assert "records nothing" in result.detail
 
     def test_an_unknown_retailer_key_FAILS(self, monkeypatch):
-        results = self._run(monkeypatch, self._profile(retailers=["amazon_business"]))
+        results = self._run(monkeypatch, self._profile(retailers=["amazn-business"]))  # a real typo: any spelling of a known retailer loads (models/retailers.py)
 
         result = self._named(results, "profile-new")
         assert result.level == FAIL
-        assert "amazon_business" in result.detail, "the offending key must be named"
+        assert "amazn-business" in result.detail, "the offending key must be named"
         assert "amazon-business" in result.detail, "and the valid ones offered"
 
     def test_a_typo_is_caught_even_when_ANOTHER_profile_covers_that_retailer(self, monkeypatch):
@@ -538,7 +538,7 @@ class TestProfiles:
         main.py only warns when NO profile matches a retailer — so a working profile masks the typo
         completely and there is no signal anywhere. This is the fully silent case."""
         good = self._profile(label="profile-old", retailers=["amazon"])
-        typo = self._profile(label="profile-new", retailers=["Amazon"])
+        typo = self._profile(label="profile-new", retailers=["Amazn"])
 
         results = self._run(monkeypatch, good, typo)
 

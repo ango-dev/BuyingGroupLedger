@@ -591,6 +591,12 @@ table.entry-table td.rm { width: 1%; white-space: nowrap; color: var(--muted); f
 table.entry-table td.rm label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
 table.entry-table td input[type=text], table.entry-table td input[type=password] { width: 100%; box-sizing: border-box; padding: 4px 7px; }
 table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-top: 6px; }
+/* the proxy switch on a profile's summary line */
+.entry-card summary .chip.switch { cursor: pointer; font: inherit; font-size: 0.8em; border: 1px solid var(--line); }
+.entry-card summary .chip.switch.on { background: color-mix(in srgb, var(--ok) 18%, var(--card)); border-color: var(--ok); color: var(--ok); }
+.entry-card summary .chip.switch.off { background: var(--bg); color: var(--muted); text-decoration: line-through; }
+.entry-card summary .chip.switch:hover { border-color: var(--accent); }
+.entry-card .ftitle label.check.inline { display: inline-flex; margin-left: 12px; font-weight: 400; text-transform: none; letter-spacing: 0; }
 /* A notification from the top after an in-place save on Settings: swapped in
    out of band, slides in, and settings.js lets it go after a few seconds. */
 #toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1200; pointer-events: none; }

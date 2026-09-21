@@ -181,9 +181,14 @@ Details:
 - Rates are **decimal fractions** (`0.015` = 1.5%); `"1.5%"` is accepted and converted, in both
   `cashback_rate` and `retailer_rates`. A bare `2` is **rejected** rather than guessed at — it reads
   equally as 2% or 200%, and picking wrong would misstate every profit number by 100×.
-- `retailer_rates` keys are matched loosely: `"Best Buy"`, `"bestbuy"` and `"best-buy"` are the same
-  key. A key that names **no** retailer this ledger scrapes logs a warning at load — a typo'd override
-  would otherwise never apply and nothing would say so.
+- Retailers are spelled ONE way in config.json, by name — `Amazon`, `Amazon Business`, `Best Buy`,
+  `Costco` — in a profile's `retailers` and `auth` keys and a card's `retailer_rates` and `caps`
+  (`models/retailers.py`; the Settings page writes them so, and `python -m scripts.standardize_retailers
+  --apply`, also under Tools, rewrites an older file). Any spelling still loads: `"bestbuy"` and
+  `"best-buy"` are the same key. A key that names **no** retailer this ledger scrapes logs a warning
+  at load — a typo'd override would otherwise never apply and nothing would say so.
+- A profile's proxy can be **switched off without losing it** (`"enabled": false`; the switch on the
+  profile's line on the Settings page): the run then goes direct for that profile.
 - **`virtual: true`** marks a virtual card number (one issued off another card): it earns cashback
   and names the card it belongs to in **`virtual_of`** (that card's last 4). It earns that card's
   rates, its spend counts against that card's spend caps and those caps apply to it, so a virtual
