@@ -185,14 +185,13 @@ input.month { font: inherit; color: var(--fg); background: var(--card); border: 
 .charts .chart-body { display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1; }
 .charts svg { flex: 1 1 auto; min-width: 0; max-width: 100%; height: auto; }
 .charts .donut svg { flex: 0 0 auto; }
-.charts .legend { flex: 0 1 auto; min-width: 0; }
 .charts .track { stroke: var(--line); }
 .charts a.slice circle, .charts a.slice rect { transition: opacity .12s; }
 .charts a.slice:hover circle, .charts a.slice:hover rect, .charts a.slice:focus circle, .charts a.slice:focus rect { opacity: 0.8; }
 .charts a.slice:focus { outline: none; }
 
 
-.charts .legend { list-style: none; margin: 0; padding: 0; font-size: 0.9em; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.charts .legend { flex: 0 1 auto; list-style: none; margin: 0; padding: 0; font-size: 0.9em; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .charts .legend li { display: flex; align-items: center; gap: 6px; white-space: nowrap; min-width: 0; }
 .charts .legend li a, .charts .legend li > span:not(.swatch):not(.num):not(.small) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .charts .legend .num { min-width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; }
@@ -280,14 +279,13 @@ table.sheetlike tr.status-paid td       { background: var(--status-paid); color:
 table.sheetlike tr.status-return td     { background: var(--status-return); color: var(--status-ink); }
 table.sheetlike tr.status-cancelled td  { background: var(--status-cancelled); color: var(--status-ink); text-decoration: line-through; }
 table.sheetlike tr.status-superseded td { background: var(--status-superseded); color: var(--status-ink-inverse); text-decoration: line-through; }
-table.sheetlike tr[class*="status-"] td a { color: #1d4ed8; }
 table.sheetlike tr.status-superseded td a { color: var(--status-link-inverse); }
 table.sheetlike tr[class*="status-"] td.rownum { background: var(--bg); color: var(--muted); text-decoration: none; }
 /* ---- the tables' hint pill (a light bulb + "hint"), its tooltip a table ---- */
 .hint-mark { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 0.8em; font-weight: 500; cursor: help; user-select: none; }
-.hint-mark svg { color: #d9a400; }
+.hint-mark svg { color: var(--gold); }
 .hint-mark:hover, .hint-mark:focus { color: var(--accent); border-color: var(--accent); outline: none; }
-.count { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.count { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
 .count .hint-mark { margin-left: auto; }
 h2.with-hint { display: flex; align-items: center; gap: 10px; }
 h2.with-hint .hint-mark { font-size: 0.68em; }
@@ -330,7 +328,6 @@ table.sheetlike td[data-editing] { padding: 0; }
 table.sheetlike td.saving { opacity: 0.6; }
 table.sheetlike td.error { outline: 2px solid var(--bad); outline-offset: -2px; }
 .cell-error { color: var(--bad); font-weight: 600; white-space: normal; }
-.count { margin: 6px 0; }
 .ext { color: var(--muted); }
 
 /* one row, and NO overflow clipping: a scrolling bar would cut the dropdown menus off; the search box gives
@@ -351,7 +348,7 @@ table.sheetlike td.error { outline: 2px solid var(--bad); outline-offset: -2px; 
 
 /* --- The cards view: one card per order, paginated; the wrapper is the scroll region ----------- */
 body.wide .cards-wrap { padding: 10px 12px 24px; }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
 .card { background: var(--card); border: 1px solid var(--line); border-left-width: 6px; border-radius: var(--r-2);
   padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .card.status-ordered { border-left-color: var(--cat-ordered); }
@@ -371,10 +368,9 @@ body.wide .cards-wrap { padding: 10px 12px 24px; }
 .card .facts-grid dd.num { text-align: left; font-variant-numeric: tabular-nums; }
 .card .facts-grid dd.neg { color: var(--bad); font-weight: 600; }
 .card .facts-grid dd.pos { color: var(--ok); font-weight: 600; }
-.card footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
+.card footer { display: flex; flex-wrap: nowrap; justify-content: space-between; align-items: center; gap: 6px; margin-top: auto; }
 /* all four footer buttons on ONE line: nothing wraps, the buttons are a
    touch smaller and the cards a touch wider so the row fits at the minimum card width */
-.card footer { flex-wrap: nowrap; gap: 6px; }
 .card footer .links { display: flex; gap: 5px; flex-wrap: nowrap; min-width: 0; }
 .card footer .button.small, .card footer button.small { padding: 2px 7px; font-size: 0.8em; white-space: nowrap; }
 /* the card's footer links are buttons of the same cut as its Delete order button, in the accent
@@ -458,7 +454,7 @@ details.dossier summary { cursor: pointer; padding: 10px 14px; display: flex; ga
 details.multi { position: relative; font-size: 0.85em; color: var(--muted); }
 details.multi summary { list-style: none; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
 details.multi summary::-webkit-details-marker { display: none; }
-details.multi .summary-text { display: inline-block; font-size: 1.18em; color: var(--fg); background: var(--bg);
+details.multi .summary-text { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 1.18em; color: var(--fg); background: var(--bg);
   border: 1px solid var(--line); border-radius: var(--r-1); padding: 5px 8px; min-width: 120px; max-width: 220px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 details.multi[open] .summary-text { border-color: var(--accent); }
@@ -493,9 +489,7 @@ details.multi .menu label.add-one input { width: 100%; box-sizing: border-box; f
 .card tr.status-return td[data-field="status"]     { background: var(--status-return); color: var(--status-ink); }
 .card tr.status-cancelled td[data-field="status"]  { background: var(--status-cancelled); color: var(--status-ink); text-decoration: line-through; }
 .card tr.status-superseded td[data-field="status"] { background: var(--status-superseded); color: var(--status-ink-inverse); text-decoration: line-through; }
-.cards { grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); }
 /* the caret sits inside the dropdown box */
-details.multi .summary-text { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; }
 details.multi .summary-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 details.multi .caret { color: var(--muted); flex: 0 0 auto; }
 /* status as a coloured box in a card's facts, the row colours of the table */
@@ -507,13 +501,11 @@ details.multi .caret { color: var(--muted); flex: 0 0 auto; }
 .card .tag.status-return, .facts .tag.status-return, .shipment .tag.status-return             { background: var(--status-return); color: var(--status-ink); border-color: transparent; }
 .card .tag.status-cancelled, .facts .tag.status-cancelled, .shipment .tag.status-cancelled    { background: var(--status-cancelled); color: var(--status-ink); border-color: transparent; text-decoration: line-through; }
 .card .tag.status-superseded, .facts .tag.status-superseded, .shipment .tag.status-superseded { background: var(--status-superseded); color: var(--status-ink-inverse); border-color: transparent; text-decoration: line-through; }
-.card-rows-wrap { overflow: auto; max-width: 100%; }
 .shipment table.sheetlike { font-size: 12.5px; }
 .card details.card-edit summary { cursor: pointer; }
 .card details.card-edit[open] summary { margin-bottom: 6px; }
 .card .row-count { margin: -4px 0 0; }
 .card details.card-edit summary .row-count { margin: 0; }
-.cards { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
 /* the order page's shipment tables: the same editable cells, the same affordances */
 .card-rows-wrap { overflow-x: auto; max-width: 100%; }
 table.order-rows { width: max-content; min-width: 100%; }
@@ -1004,7 +996,8 @@ dialog.confirm[open]::backdrop { animation: fade-in var(--enter) var(--ease) bac
 /* hover and focus: colours cross-fade, buttons press, tiles and cards lift a pixel */
 button, a.button, .theme-toggle, header .meta .gear, .pager a, header nav a, header nav details.nav-menu .nav-link,
 header nav details.nav-menu .menu a, details.multi .summary-text, details.multi .menu label, .entry-card > summary,
-.entry-card .chips label, td .cell-edit, td .cell-empty, .settings-nav a, .tile, .card, .charts figure {
+.entry-card .chips label, td .cell-edit, td .cell-empty, .settings-nav a, .tile, .card, .charts figure,
+table.sheetlike th a.sort, .hint-mark {
   transition-property: color, background-color, border-color, box-shadow, transform, opacity, filter;
   transition-duration: var(--quick); transition-timing-function: var(--ease); }
 button:active:not(:disabled), a.button:active { transform: translateY(1px); }

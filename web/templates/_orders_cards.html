@@ -27,11 +27,12 @@
       </ol>
       <dl class="facts-grid">
         <dt>Status</dt><dd>{% for s in c.statuses %}<span class="tag status-{{ s }}">{{ s }}</span> {% endfor %}</dd>
-        <dt>Group</dt><dd>{{ c.buying_group }}</dd>
+        {% if c.buying_group %}<dt>Group</dt><dd>{{ c.buying_group }}</dd>{% endif %}
         <dt>Qty</dt><dd>{{ c.quantity }}</dd>
         <dt>Cost</dt><dd class="num">{{ c.total_cost | money }}</dd>
         <dt>Payout</dt><dd class="num">{% if c.payout_state == 'committed' %}{{ (c.expected or c.payout) | money }} <span class="tag committed" title="what the buying group committed to pay; not paid yet">proj.</span>{% else %}{{ c.payout | money }}{% if c.payout_state == 'partly settled' %} <span class="tag committed">part</span>{% endif %}{% endif %}</dd>
-        <dt>Profit</dt><dd class="num {{ 'neg' if c.profit is not none and c.profit < 0 else ('pos' if c.profit is not none and c.profit > 0) }}">{{ c.profit | money }}</dd>
+        {# a fact with nothing to say is left out, never a label over a blank (2026-09-21) #}
+        {% if c.profit is not none %}<dt>Profit</dt><dd class="num {{ 'neg' if c.profit < 0 else ('pos' if c.profit > 0) }}">{{ c.profit | money }}</dd>{% endif %}
         {% if c.tracking %}<dt>Tracking</dt><dd class="mono small">{{ c.tracking | join(', ') }}</dd>{% endif %}
         {% if c.card %}<dt>Card</dt><dd>{{ c.card }}</dd>{% endif %}
       </dl>

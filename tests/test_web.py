@@ -806,6 +806,16 @@ class TestOverviewPage:
         body = client.get("/orders", params={"view": "cards"}).text
         assert ">Order ↗<" in body and ">Receipt ↗<" in body and ">Details<" in body
 
+    def test_a_card_leaves_out_a_fact_with_nothing_to_say(self, client):
+        """2026-09-21: a cancelled order rendered a Profit label over a blank; the row is left
+        out instead (a card with a profit keeps it)."""
+        body = client.get("/orders", params={"view": "cards", "q": "1399000019"}).text
+        card = body[body.index('<article class="card'):body.index("</article>")]
+        assert "<dt>Profit</dt>" not in card and "<dt>Status</dt>" in card
+        body = client.get("/orders", params={"view": "cards", "q": "1399000018"}).text
+        card = body[body.index('<article class="card'):body.index("</article>")]
+        assert "<dt>Profit</dt>" in card
+
     def test_a_card_lists_its_items_as_numbered_lines_with_quantity(self, client):
         body = client.get("/orders", params={"view": "cards", "q": "111-0000002-0000002"}).text
         card = body[body.index('<article class="card'):body.index("</article>")]

@@ -844,3 +844,20 @@ def test_the_chart_legends_stay_inside_their_cards_on_a_phone(served, phone):
     assert overflow == [], overflow
     assert phone.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
     assert phone.errors == []
+
+
+def test_a_360px_phone_fits_every_page_and_the_schedule_table_scrolls_inside_its_panel(served, page):
+    """2026-09-21: at 360px (the session's phone floor; the Pixel 5 test above is 393) the Taxes
+    page scrolled sideways -- the Schedule C table ran 21px past the viewport with no scroll
+    container of its own. It scrolls inside the panel now, and no page pans sideways."""
+    page.set_viewport_size({"width": 360, "height": 780})
+    for path in ("/", "/orders?view=cards", "/taxes?year=2026", "/settings", "/activity", "/audit", "/tools/import"):
+        page.goto(f"{served}{path}")
+        page.wait_for_timeout(150)
+        over = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        assert over == 0, f"{path} sticks out {over}px past a 360px viewport"
+    page.goto(f"{served}/taxes?year=2026")
+    wrap = page.locator("#s-schedule-c .scroll")
+    assert wrap.count() == 1
+    assert page.evaluate("el => el.scrollWidth > el.clientWidth", wrap.element_handle())  # the table pans here
+    assert page.errors == []
