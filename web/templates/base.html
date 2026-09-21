@@ -105,12 +105,15 @@
       <span class="only-light">☾ dark</span><span class="only-dark">☀ light</span>
     </button>
     {% if heartbeat %}
+      {#- The pill states the fact; the mechanism (the full message, the stamp file, the timer)
+          lives in its tooltip (2026-09-21: the absent-stamp face named an internal file). -#}
       <span class="pill {{ 'stale' if heartbeat.stale else 'ok' }}" data-tip-from="tip-heartbeat">
-        heartbeat: {{ heartbeat.message }}
+        {% if not heartbeat.present %}no run yet{% elif heartbeat.stale %}run overdue · last {{ heartbeat.age_text }} ago{% else %}last run {{ heartbeat.age_text }} ago{% endif %}
       </span>
       <div id="tip-heartbeat" hidden>
         <p class="tip-title">heartbeat</p>
         <table class="tip-table">
+          <tr><td>status</td><td>{{ heartbeat.message }}</td></tr>
           <tr><td>file</td><td>{{ heartbeat.path }}</td></tr>
           <tr><td>stale after</td><td>{{ heartbeat.stale_hours | int if heartbeat.stale_hours == heartbeat.stale_hours | int else heartbeat.stale_hours }}h without a completed run</td></tr>
           <tr><td>setting</td><td>Settings → Dashboard → heartbeat stale hours (0 = twice the run interval of {{ heartbeat.interval_hours }}h)</td></tr>

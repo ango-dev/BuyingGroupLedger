@@ -835,11 +835,15 @@ class TestOverviewPage:
                          failures_dir=failures_dir, clock=lambda: NOW, settings=_settings())
         body = TestClient(app).get("/").text
         assert "pill stale" in body and "expected one every 6h" in body
+        assert "run overdue · last" in body  # the pill's short face; the mechanism sits in its tooltip
 
     def test_heartbeat_warns_when_absent(self, snapshot_path, logs_dir, failures_dir):
         app = create_app(SnapshotReader(snapshot_path), logs_dir=logs_dir,
                          failures_dir=failures_dir, clock=lambda: NOW, settings=_settings())
-        assert "no run has completed yet" in TestClient(app).get("/").text
+        body = TestClient(app).get("/").text
+        # the face says the fact in user language; the internal file name stays in the tooltip
+        assert "no run yet" in body and "no run has completed yet" in body
+        assert "heartbeat: no run" not in body
 
 
 class TestOrdersPage:
