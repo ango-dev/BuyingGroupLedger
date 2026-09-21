@@ -88,6 +88,18 @@
   }
 })();
 
+// A refused save answers 400 with the section re-rendered (the errors inside it, a warning from
+// the top). htmx leaves a 4xx response unswapped unless told otherwise, which looked like the
+// Save button doing nothing.
+document.addEventListener("htmx:beforeSwap", function (e) {
+  var d = e.detail || {};
+  var elt = d.requestConfig && d.requestConfig.elt;
+  if (d.xhr && d.xhr.status === 400 && elt && elt.closest && elt.closest(".entry-form, .entry-delete")) {
+    d.shouldSwap = true;
+    d.isError = false;
+  }
+});
+
 // The notification from the top after an in-place save (#toast, swapped in out of band by the
 // section partial): fades after a few seconds, then goes.
 (function () {

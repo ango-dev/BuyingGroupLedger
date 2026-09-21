@@ -224,8 +224,11 @@ never by the rate:
   the card was charged for a row, the COGS basis: Total Cost + Shipping + Sales Tax − Gift Card −
   Rewards Used. A **return** gives Return Qty × Cost Per Item back to the allowance in the period of
   its Return Date.
-- `fallback_rate` is the rate past the limit. The purchase that crosses the line gets the exact
-  blend: the remaining allowance at the boosted rate, the rest at the fallback.
+- `fallback_rate` is the rate past the limit; left out, the card's own `cashback_rate` (its
+  "everywhere else" rate) applies, else the global default. The purchase that crosses the line
+  gets the exact blend: the remaining allowance at the boosted rate, the rest at the fallback.
+- A limit named for Amazon covers Amazon Business too, and the other way round (one issuer
+  program), unless each site has a cap of its own.
 - `resets`: `calendar-year` (default), `never`, or an `MM-DD` the period starts on each year.
 - `outside_spend`: per period (`"2026"`, or `"all"` for a cap that never resets), spend on the card
   the ledger never sees — personal purchases that also use up the allowance. Update it by hand.

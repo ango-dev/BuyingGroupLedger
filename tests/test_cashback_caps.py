@@ -61,6 +61,23 @@ class TestTheModel:
         with pytest.raises(ValueError, match="resets"):
             cap(resets="13-01")
 
+    def test_a_blank_fallback_is_the_cards_everywhere_else_rate(self):
+        c = card(cashback_rate="2%", caps=[{"retailers": ["Amazon"], "spend_limit": 100}])
+        assert c.caps[0].fallback_rate is None and c.fallback_for(c.caps[0]) == 0.02
+        bare = Card(last4="1111", name="Bare", retailer_rates={"Amazon": "5%"}, caps=[{"retailers": ["Amazon"], "spend_limit": 100}])
+        assert bare.fallback_for(bare.caps[0], default_rate=0.015) == 0.015
+        assert caps.capped_rate(0.05, c.caps[0], used=100, amount=50, fallback=c.fallback_for(c.caps[0])) == 0.02
+
+    def test_an_amazon_limit_covers_amazon_business_and_back(self):
+        c = card(caps=[{"retailers": ["Amazon"], "spend_limit": 100, "fallback_rate": "1%"}])
+        assert c.cap_for("Amazon Business") is c.caps[0] and c.cap_for("amazon-business") is c.caps[0]
+        c = card(caps=[{"retailers": ["Amazon Business"], "spend_limit": 100, "fallback_rate": "1%"}])
+        assert c.cap_for("amazon") is c.caps[0] and c.cap_for("Best Buy") is None
+        # each site with a cap of its own: kept apart
+        c = card(caps=[{"retailers": ["Amazon"], "spend_limit": 100, "fallback_rate": "1%"},
+                       {"retailers": ["Amazon Business"], "spend_limit": 200, "fallback_rate": "1%"}])
+        assert c.cap_for("amazon-business") is c.caps[1]
+
     def test_a_cap_refuses_a_zero_limit_a_bad_fallback_and_negative_offsets(self):
         with pytest.raises(ValueError, match="spend limit"):
             cap(spend_limit=0)

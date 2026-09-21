@@ -185,14 +185,17 @@ def spend_before(events, cards: list[Card], card: Card, cap: CashbackCap, upto: 
     return round(total, 2)
 
 
-def capped_rate(rate: float, cap: CashbackCap, used: float, amount: float) -> float:
-    """The rate a purchase of `amount` earns with `used` of the allowance already spent."""
+def capped_rate(rate: float, cap: CashbackCap, used: float, amount: float, fallback: float | None = None) -> float:
+    """The rate a purchase of `amount` earns with `used` of the allowance already spent. `fallback`
+    is the rate past the limit (Card.fallback_for); a cap's own when not given."""
+    if fallback is None:
+        fallback = cap.fallback_rate if cap.fallback_rate is not None else rate
     room = cap.spend_limit - used
     if amount <= 0 or room >= amount:
         return rate
     if room <= 0:
-        return cap.fallback_rate
-    return round((room * rate + (amount - room) * cap.fallback_rate) / amount, 4)
+        return fallback
+    return round((room * rate + (amount - room) * fallback) / amount, 4)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -200,7 +203,7 @@ def capped_rate(rate: float, cap: CashbackCap, used: float, amount: float) -> fl
 # --------------------------------------------------------------------------------------------------
 
 
-def apply_to_items(items: list, cards: list[Card], ledger_rows: list[dict]) -> list[tuple]:
+def apply_to_items(items: list, cards: list[Card], ledger_rows: list[dict], *, default_rate: float | None = None) -> list[tuple]:
     """Rate the batch's items against their cards' caps, in place. `items` carry the ORDER-LEVEL
     shipping / tax / gift card / rewards repeated on every row (models.order), so each row takes
     its cost-weighted share here, as ledger.sync will. Ledger rows with a batch item's key are the
@@ -232,7 +235,7 @@ def apply_to_items(items: list, cards: list[Card], ledger_rows: list[dict]) -> l
         if cap is None:
             continue
         used = spend_before(all_events, cards, card, cap, e)
-        new = capped_rate(float(it.cashback_rate), cap, used, e.amount)
+        new = capped_rate(float(it.cashback_rate), cap, used, e.amount, card.fallback_for(cap, default_rate))
         if abs(new - float(it.cashback_rate)) > 5e-5:
             changes.append((it, it.cashback_rate, new))
             it.cashback_rate = new
@@ -283,7 +286,7 @@ def recompute(values: list[list], cards: list[Card], protected: dict | None = No
             continue
         used = spend_before(events, cards, card, cap, purchase)
         promo = _num(cells.get("promo_rate"))  # Amazon's extra rides on top, outside the cap
-        new = round(capped_rate(float(rate), cap, used, purchase.amount) + promo, 4)
+        new = round(capped_rate(float(rate), cap, used, purchase.amount, card.fallback_for(cap, default_rate)) + promo, 4)
         old = parse_rate(cells.get("cashback_rate")) if str(cells.get("cashback_rate") or "").strip() else None
         try:
             old = float(old) if old is not None else None

@@ -826,7 +826,7 @@ def _cap_from_form(form: Mapping[str, str], prefix: str, retailers: list) -> dic
     if offsets:
         cap["outside_spend"] = offsets
     if cap["fallback_rate"] is None:
-        cap.pop("fallback_rate")  # the model says what is missing
+        cap.pop("fallback_rate")  # blank: the card's everywhere-else rate applies past the limit
     return cap
 
 

@@ -270,6 +270,12 @@ def test_a_card_saves_in_place_and_the_anniversary_field_follows_the_reset(serve
     assert page.evaluate("window.__loaded === true") and page.url.endswith("/settings")
     saved = page.locator("#s-cards details.entry-card").first
     assert saved.evaluate("d => d.open") and saved.locator("input[name='cashback_rate']").input_value() == "3%"
+    # a refused save shows in place too (a 400 htmx would otherwise drop; user: "it did nothing")
+    saved.locator("input[name='cashback_rate']").fill("2")
+    saved.locator("button", has_text="Save card").click()
+    page.wait_for_selector("#toast .toast.warn")
+    assert "outside 0-1" in page.locator("#s-cards .banner.warn").inner_text()
+    assert page.evaluate("window.__loaded === true")
     assert page.errors == []
 
 

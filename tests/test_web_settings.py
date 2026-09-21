@@ -556,6 +556,12 @@ class TestEntryCards:
         assert '<div id="toast" hx-swap-oob="true"><div class="toast ok" role="status">Saved card USB Prime Business' in saved.text
         assert 'class="banner ok' not in saved.text.split('id="toast"')[0]
         assert config_value("cards")[0]["cashback_rate"] == "5%"
+        # a spend limit with no fallback is fine: the everywhere-else rate applies past it
+        limited = client.post("/settings/section/cards/entry/0", headers=hx, data={
+            "name": "USB Prime Business", "last4": "0315", "cashback_rate": "5%", "rr.0.retailers": "amazon", "rr.0.rate": "5%",
+            "rr.0.spend_limit": "1000"})
+        assert limited.status_code == 200 and config_value("cards")[0]["caps"] == [{"retailers": ["amazon"], "spend_limit": 1000.0, "resets": "calendar-year"}]
+        assert "Amazon 5% up to 1,000 then Everywhere Else" in limited.text
         refused = client.post("/settings/section/cards/entry/0", headers=hx, data={"name": "USB", "last4": "0315", "cashback_rate": "2"})
         assert refused.status_code == 400 and refused.text.lstrip().startswith('<section') and "outside 0-1" in refused.text
         assert '<div class="toast warn" role="alert">Nothing was saved:' in refused.text

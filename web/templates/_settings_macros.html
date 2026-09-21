@@ -70,7 +70,7 @@
       <div class="fblock">
         <div class="ftitle">Unattended sign-in <span class="muted">— password + authenticator seed (bestbuy, amazon-business); enrol the app, not SMS</span></div>
         <table class="entry-table">
-          <thead><tr><th>retailer</th><th>username</th><th>password</th><th>TOTP seed</th><th></th></tr></thead>
+          <thead><tr><th>Retailer</th><th>Username</th><th>Password</th><th>TOTP Seed</th><th></th></tr></thead>
           <tbody>
             {% if p %}{% for a in p.auth %}
             <tr>
@@ -101,7 +101,7 @@
       <div class="fblock">
         <div class="ftitle">Address jigs <span class="muted">— a jig matches when every filled field appears in the address</span></div>
         <table class="entry-table">
-          <thead><tr><th>label</th><th>street</th><th>zip</th><th>name contains</th><th>also contains</th><th></th></tr></thead>
+          <thead><tr><th>Label</th><th>Street</th><th>ZIP</th><th>Name Contains</th><th>Also Contains</th><th></th></tr></thead>
           <tbody>
             {% set jigs = (w.jigs if w else []) + [{'label': '', 'street': '', 'zip': '', 'name_contains': '', 'contains': ''}] %}
             {% for j in jigs %}
@@ -125,11 +125,11 @@
     {#- Title Case everywhere the page shows a name; the keys stay as saved -#}
     {% set RETAILER_TITLES = {'amazon': 'Amazon', 'amazon-business': 'Amazon Business', 'bestbuy': 'Best Buy', 'costco': 'Costco'} %}
     {% macro retailer_title(key) %}{{ RETAILER_TITLES.get(key, key | replace('-', ' ') | title) }}{% endmacro %}
-    {% macro limit_text(cap) %}{% if cap.spend_limit != '' %} up to {{ '{:,.0f}'.format(cap.spend_limit | float) }} then {{ cap.fallback_rate }}{% endif %}{% endmacro %}
+    {% macro limit_text(cap) %}{% if cap.spend_limit != '' %} up to {{ '{:,.0f}'.format(cap.spend_limit | float) }} then {{ cap.fallback_rate if cap.fallback_rate != '' else 'Everywhere Else' }}{% endif %}{% endmacro %}
 
     {% macro cap_cells(prefix, cap) %}
       <td class="narrow"><input type="text" name="{{ prefix }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="no limit"></td>
-      <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="1%"></td>
+      <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="everywhere else" title="the rate past the limit; blank: the Everywhere Else rate"></td>
       <td class="resets"><span class="inline">{{ choose(prefix ~ '.resets', [('calendar-year', 'Each Calendar Year'), ('anniversary', 'On a Date Each Year'), ('never', 'Never')], cap.resets, '', 'cell') }}<input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></span></td>
       <td class="outside"><input type="text" name="{{ prefix }}.outside_spend" value="{{ cap.outside_spend }}" placeholder="2026: 4000 (spend the ledger never sees)"></td>
     {% endmacro %}
@@ -158,9 +158,9 @@
       {% if kind and not (c and c.virtual_of) %}<p class="warn small">Pick the card this number belongs to. Until then it earns its own rates and no limit applies.</p>{% endif %}
       {#- the rates are the original card's: hidden for a virtual number -#}
       <div class="fblock rates-block" {{ 'hidden' if kind }}>
-        <div class="ftitle">Rates <span class="muted">— by retailer (several share a row); a spend limit caps the rate: past it the fallback applies, the row that crosses it gets the blend. Blank the retailers to drop a row</span></div>
+        <div class="ftitle">Rates <span class="muted">— by retailer (several share a row); a spend limit caps the rate: past it the fallback applies (blank: the Everywhere Else rate), the row that crosses it gets the blend. A limit on Amazon covers Amazon Business too, and the other way round. Blank the retailers to drop a row</span></div>
         <table class="entry-table rates">
-          <thead><tr><th>retailer(s)</th><th>rate</th><th>spend limit</th><th>fallback</th><th>resets</th><th>outside spend</th></tr></thead>
+          <thead><tr><th>Retailer(s)</th><th>Rate</th><th>Spend Limit</th><th>Fallback</th><th>Resets</th><th>Outside Spend</th></tr></thead>
           <tbody>
             <tr class="everywhere">
               <td class="muted">Everywhere Else</td>

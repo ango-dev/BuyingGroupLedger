@@ -48,6 +48,11 @@ def normalize_last4(text: str) -> str:
     return digits[-4:] if len(digits) >= 4 else ""
 
 
+#: Amazon and Amazon Business are one issuer program: a limit named for one covers the other.
+AMAZON_TWINS = {normalize_retailer("Amazon"): normalize_retailer("Amazon Business"),
+                normalize_retailer("Amazon Business"): normalize_retailer("Amazon")}
+
+
 def _money(value) -> float:
     if isinstance(value, str):
         cleaned = value.strip().replace("$", "").replace(",", "")
@@ -64,7 +69,9 @@ class CashbackCap(BaseModel):
       $120k covers Amazon and Amazon Business together); EMPTY means the catch-all, every retailer
       without a cap of its own (Aven's 5% to $25k). Keys match through `normalize_retailer`.
     - `spend_limit`: dollars of spend at the boosted rate per period.
-    - `fallback_rate`: the rate past the limit, a fraction or "1%" like every other rate.
+    - `fallback_rate`: the rate past the limit, a fraction or "1%" like every other rate; left out,
+      the card's own `cashback_rate` (its "everywhere else" rate), else the global default -- "they
+      start receiving the default amount".
     - `resets`: "calendar-year" (the default), "never", or an "MM-DD" the period starts on each
       year (a cardmember anniversary).
     - `outside_spend`: spend the ledger never sees -- personal purchases on the card -- per period
@@ -73,7 +80,7 @@ class CashbackCap(BaseModel):
 
     retailers: list[str] = Field(default_factory=list)
     spend_limit: float
-    fallback_rate: float
+    fallback_rate: float | None = None
     resets: str = "calendar-year"
     outside_spend: dict[str, float] = Field(default_factory=dict)
 
@@ -112,8 +119,6 @@ class CashbackCap(BaseModel):
         if self.spend_limit <= 0:
             raise ValueError(f"A cashback cap needs a spend limit above 0, not {self.spend_limit}.")
         _check_rate(self.fallback_rate, "A cashback cap's fallback")
-        if self.fallback_rate is None:
-            raise ValueError("A cashback cap needs a fallback rate (the rate past the limit).")
         resets = self.resets.strip().lower()
         if resets not in ("calendar-year", "never") and not re.fullmatch(r"(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])", resets):
             raise ValueError(
@@ -224,16 +229,30 @@ class Card(BaseModel):
         return self
 
     def cap_for(self, retailer: str):
-        """The cap a purchase at `retailer` counts against: the one naming it, else the catch-all,
-        else None (no cap: the rate applies without limit)."""
+        """The cap a purchase at `retailer` counts against: the one naming it; for Amazon or Amazon
+        Business, the one naming the other (the two sites share a card's limit
+        unless each has a cap of its own); else the catch-all; else None (no cap: the rate applies
+        without limit)."""
         key = normalize_retailer(retailer)
         for cap in self.caps:
             if key in cap.retailers:
                 return cap
+        twin = AMAZON_TWINS.get(key)
+        if twin:
+            for cap in self.caps:
+                if twin in cap.retailers:
+                    return cap
         for cap in self.caps:
             if not cap.retailers:
                 return cap
         return None
+
+    def fallback_for(self, cap, default_rate: float | None = None):
+        """The rate past a cap's limit: the cap's own, else this card's everywhere-else rate, else
+        the global default."""
+        if cap.fallback_rate is not None:
+            return cap.fallback_rate
+        return self.cashback_rate if self.cashback_rate is not None else default_rate
 
     def rate_for(self, retailer: str) -> float | None:
         """This card's rate at `retailer`: the per-retailer override if one is set, else the card's

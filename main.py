@@ -111,7 +111,7 @@ def _apply_cashback_caps(items: list, cards: list, label: str) -> None:
 
     try:
         rows = rows_by_field(_get_worksheet().get_all_values())
-        changes = apply_to_items(items, cards, rows)
+        changes = apply_to_items(items, cards, rows, default_rate=settings.default_cashback_rate)
     except Exception:
         log.exception("%s: the cashback caps could not be applied (the ledger could not be read); "
                       "the rows keep their uncapped rates until the post-sync recompute.", label)
