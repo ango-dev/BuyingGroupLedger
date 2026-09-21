@@ -1625,7 +1625,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "border-spacing: 0; border-collapse: separate; }", "body.wide table.grid th { top: 0; }",
                        "body.wide h1, body.wide .lead, body.wide .pinned, body.wide .add-row, body.wide .count,",
                        "@media (max-width: 1024px) and (min-width: 761px)",
-                       "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: #d64545; }", ".tiles.audit-stats .tile.skipped",
+                       "td.finding { white-space: nowrap;", ".tiles.audit-stats .tile.fail { border-color: var(--badge); }", ".tiles.audit-stats .tile.skipped",
                        "table.card-rows", 'td[data-field="status"]', "dialog.confirm", ".pager",
                        ".add-form", ".add-form .actions", ".add-form .span-6", "repeat(6, minmax(0, 1fr))", "tr.selected td", ".cards {", ".card ol.items",
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
