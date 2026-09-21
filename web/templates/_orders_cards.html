@@ -1,7 +1,7 @@
 {# The cards view: one card per ORDER (web/queries.order_cards), paginated. Swapped into
    #orders-table exactly like the table partial; the same filters, sort and search apply. A card's
    Delete posts EVERY row key of the order to /orders/delete (the same route the table's bulk
-   delete uses), through the in-page confirmation dialog. #}
+   delete uses), through the in-page confirmation dialog. #}{% from "_cell_macro.html" import cell %}
 {% if notice %}<div class="banner ok" role="status">{{ notice }}</div>{% endif %}
 {% if error %}<div class="banner warn" role="alert">{{ error }}</div>{% endif %}
 <p class="muted count">{{ pager.start }}–{{ pager.end }} of {{ pager.total }} order(s) ({{ rows | length }} row(s))
@@ -49,7 +49,7 @@
             {% for row in c.row_objs %}
             {% set key = {'order_id': row.order_id, 'order_date': row.order_date, 'item_name': row.item_name, 'shipment': row.shipment} %}
             <tr class="status-{{ row.status }}">
-              {% for name in CARD_COLUMNS %}{% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}{% endfor %}
+              {% for name in CARD_COLUMNS %}{{- cell(name, row, key, editable) -}}{% endfor %}
             </tr>
             {% endfor %}
           </tbody>

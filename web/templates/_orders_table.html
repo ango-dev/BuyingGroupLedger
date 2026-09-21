@@ -2,7 +2,7 @@
    Every ledger column in the ledger's order; rows coloured by status; each
    editable cell is a <td class="edit"> the inline editor (static/edit.js) posts to /orders/cell.
    SELECTION is Sheets-style: the row-number cell is the row's handle (click, shift-click a range,
-   click the # header for all); the hidden checkbox inside it is what the #bulk form posts. #}
+   click the # header for all); the hidden checkbox inside it is what the #bulk form posts. #}{% from "_cell_macro.html" import cell %}
 {% if notice %}<div class="banner ok" role="status">{{ notice }}</div>{% endif %}
 {% if error %}<div class="banner warn" role="alert">{{ error }}</div>{% endif %}
 {#- The how-it-works prose sits behind the hint pill's tooltip, on the right; the counter and the keep-my-edits switch stay in view. -#}
@@ -60,7 +60,7 @@
       <td class="rownum muted" title="row {{ row.row_number }}{{ ' — click to select' if editable }}">{% if editable %}<input type="checkbox" name="sel" value="{{ key | tojson | forceescape }}" hidden aria-label="select row {{ row.row_number }}">{% endif %}{{ row.row_number }}</td>
       {% if findings is not none %}<td class="finding">{% for label, line in findings.get(row_key(row), []) %}<div><b>{{ label }}</b> {{ line }}</div>{% endfor %}</td>{% endif %}
       {% for name, heading in columns %}
-        {% with col=name, row=row, key=key, error='' %}{% include "_cell.html" %}{% endwith %}
+        {{- cell(name, row, key, editable) -}}
       {% endfor %}
     </tr>
     {% else %}

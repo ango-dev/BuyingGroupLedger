@@ -1,34 +1,5 @@
-{#- ONE <td> of the ledger table, rendered from a LedgerRow. Used by _orders_table.html for every
-    cell and returned alone by POST /orders/cell after an edit (htmx swaps the td in place).
-    `row` may be None after a conflict (the row left the ledger): the cell then only shows the error. -#}
-{%- set editable_cell = editable and col in EDITABLE_FIELDS -%}
-{%- set text = (row | cell(col)) if row else '' -%}
-{%- set raw = row.text(col) if row else '' -%}
-{%- set hand = row and col in row.hand_edited -%}
-<td class="{{ 'num' if col in MONEY_FIELDS or col in ('quantity', 'shipment', 'cashback_rate', 'promo_rate', 'return_quantity') }}{{ ' mono' if col in ('order_id', 'tracking_number', 'package_id', 'card_last4') }}{{ ' item' if col == 'item_name' }}{{ ' edit' if editable_cell }}{{ ' error' if error }}{{ ' hand' if hand }}"
-    data-field="{{ col }}"
-    {%- if editable_cell %} data-raw="{{ raw }}" data-order-id="{{ key.order_id }}" data-order-date="{{ key.order_date }}" data-item-name="{{ key.item_name }}" data-shipment="{{ key.shipment }}" tabindex="0" data-kind="{{ 'check' if col == 'tracking_submitted' else 'date' if col in DATE_FIELDS else 'choice' if col in CHOICE_FIELDS else 'text' }}" {% if hand %} data-tip-from="tip-hand"{% endif %}{% elif hand %} data-tip-from="tip-hand"{% endif %}
-    {%- if error %} data-error="{{ error }}"{% endif %}>
-  {%- if error %}<span class="cell-error" title="{{ error }}">⚠ {{ error }}</span> {% endif -%}
-  {%- if row -%}
-    {%- if col == 'order_id' -%}
-      <a href="/orders/{{ row.order_id }}">{{ row.order_id }}</a>
-    {%- elif col == 'item_name' -%}
-      <span title="{{ row.item_name }}">{{ row.item_name }}</span>
-    {%- elif col == 'tracking_number' -%}
-      {%- if row.tracking_number and row.text('tracking_url') -%}<a href="{{ row.text('tracking_url') }}" rel="noopener">{{ row.tracking_number }}</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the tracking number" aria-label="edit tracking number">✎</button>{% endif %}{%- else -%}{{ row.tracking_number }}{%- endif -%}
-    {%- elif col in LINK_FIELDS -%}
-      {%- if raw -%}<a href="{{ raw }}" rel="noopener" title="{{ raw }}">{{ 'receipt' if col == 'receipt_url' else 'tracking' if col == 'tracking_url' else 'order' }} ↗</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the link" aria-label="edit {{ col }}">✎</button>{% endif %}{%- elif editable_cell -%}<span class="muted cell-empty">add ↗</span>{%- endif -%}{%- if col == 'receipt_url' and editable_cell -%}<button type="button" class="cell-upload" data-order-id="{{ key.order_id }}" title="upload a receipt file for this order (the link goes on every row of it)" aria-label="upload a receipt for {{ key.order_id }}">⤒</button>{%- endif -%}
-    {%- elif col == 'tracking_submitted' -%}
-      <input type="checkbox" class="cell-check" {{ 'checked' if row.tracking_submitted }} {{ '' if editable_cell else 'disabled' }} aria-label="tracking submitted" title="{{ 'submitted to the buying group' if row.tracking_submitted else 'not submitted' }}">
-    {%- elif col == 'delivery_date' -%}
-      {{ text }}{% if raw and row.status in ('ordered', 'shipped') %} <span class="tag committed" title="the retailer's estimated delivery date, until the run sees the package land">est.</span>{% endif %}
-    {%- elif col == 'payout_amount' -%}
-      {{ text }}{% if row.is_committed and raw %} <span class="tag committed" title="committed by the buying group, not yet paid">proj.</span>{% endif %}
-    {%- elif col == 'expected_payout' -%}
-      {{ text }}{% if row.is_committed and raw %} <span class="tag committed" title="what the buying group committed to pay; not paid yet">proj.</span>{% endif %}
-    {%- else -%}
-      {{ text }}
-    {%- endif -%}
-  {%- endif -%}
-</td>
+{#- ONE <td> of the ledger table -- the body lives in _cell_macro.html (imported by the hot
+    tables); this shim keeps the include contract for POST /orders/cell's single-cell answer
+    (_cell_response.html) and anything else that renders one cell with context vars. -#}
+{%- from "_cell_macro.html" import cell -%}
+{{- cell(col, row, key, editable, error) -}}
