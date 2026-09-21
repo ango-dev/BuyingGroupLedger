@@ -28,6 +28,15 @@
 .theme-toggle, button { font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line);
   border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 .theme-toggle:hover, button:hover { border-color: var(--accent); }
+/* every text-like box wears the page's design wherever it sits, never the browser's default; the contexts below only adjust widths and padding. The grid's
+   cell editor keeps its own look. */
+input[type=text]:not(.cell-input), input[type=password]:not(.cell-input), input[type=number]:not(.cell-input),
+input[type=email]:not(.cell-input), input[type=url]:not(.cell-input), input[type=search]:not(.cell-input),
+input:not([type]):not(.cell-input), textarea:not(.cell-input) {
+  font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+input[type=text]:focus-visible, input[type=password]:focus-visible, input[type=number]:focus-visible, input[type=email]:focus-visible,
+input[type=url]:focus-visible, input[type=search]:focus-visible, input:not([type]):focus-visible, textarea:focus-visible {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }
 /* an outlined button fills with its outline colour on hover, as the Backups' Delete does with red
   */
 button:hover:not(:disabled):not(.primary):not(.danger):not(.chip):not(.ghost) { background: var(--accent); color: #fff; }
@@ -235,7 +244,8 @@ table.sheetlike th, table.sheetlike td { border: 0; border-right: 1px solid rgba
 table.sheetlike th { position: sticky; top: 0; z-index: 2; background: var(--bg); box-shadow: 0 1px 0 var(--line); }
 table.sheetlike td.rownum input, table.sheetlike th.rownum input { display: none; }
 table.sheetlike td.item > span { max-width: 420px; }
-table.sheetlike td.rownum, table.sheetlike th.rownum { position: sticky; left: 0; z-index: 1; background: var(--bg); color: var(--muted); text-align: right; font-size: 0.8em; min-width: 34px; }
+/* one width for the row-number column on every table */
+table.sheetlike td.rownum, table.sheetlike th.rownum { position: sticky; left: 0; z-index: 1; background: var(--bg); color: var(--muted); text-align: right; font-size: 0.8em; width: 46px; min-width: 46px; max-width: 46px; box-sizing: border-box; }
 table.sheetlike th.rownum { z-index: 3; }
 table.sheetlike tr.status-ordered td    { background: #EA9999; color: #1a1a1a; }
 table.sheetlike tr.status-shipped td    { background: #F9CB9C; color: #1a1a1a; }
@@ -760,12 +770,11 @@ details.multi.inline summary { flex-direction: row; align-items: center; gap: 6p
 .entry-card .fgrid .lbl details.multi.field summary { gap: 0; }
 .entry-card details.multi.field .summary-text { font-size: 1em; width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: 6px; }
 table.activity { width: 100%; min-width: 880px; table-layout: fixed; }
-table.activity col.c-num { width: 40px; } table.activity col.c-when { width: 150px; } table.activity col.c-type { width: 130px; } table.activity col.c-run { width: 170px; }
-table.activity col.c-act { width: 250px; }
+table.activity col.c-num { width: 46px; } table.activity col.c-when { width: 150px; } table.activity col.c-type { width: 130px; } table.activity col.c-run { width: 170px; }
 table.activity td, table.activity th { overflow-wrap: anywhere; }
 table.activity th.col-act { cursor: default; padding-right: 6px; }  /* the buttons' column: nothing to sort */
 table.activity th .name { white-space: nowrap; }
-table.activity td.num { white-space: nowrap; }
+table.activity td.what .acts { float: right; margin-left: 12px; white-space: nowrap; }
 
 /* ---- file drop zones (_dropzone.html): the page's own picker, click or drop ---- */
 .dropzone { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1.5px dashed var(--line); border-radius: 8px;
@@ -885,8 +894,12 @@ table.sheetlike td.hand, table.card-rows td.hand, table.order-rows td.hand { bor
 
 /* ---- the Taxes page ---- */
 .tax-years .button.primary { color: #fff; }
+.tax-years .year-nav { vertical-align: middle; margin-right: 6px; }
+.tax-years .year-nav .year-label { min-width: 3.4em; }
 .tax-years form.open-year { display: inline-flex; gap: 6px; margin: 0 0 0 8px; vertical-align: middle; }
 .tax-years form.open-year input { width: 64px; padding: 2px 6px; font-size: 0.95em; }
+.tax-years form.close-year { display: inline-flex; margin: 0 0 0 6px; vertical-align: middle; }
+.tax-years form.close-year button:disabled { opacity: 0.45; cursor: not-allowed; }
 table.schedule { width: 100%; }
 table.schedule td.num, table.schedule th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.schedule tr.total td { font-weight: 600; border-top: 1px solid var(--line); }
@@ -1234,7 +1247,7 @@ main .setup-steps + h1 { margin-top: 6px; }
   table.activity.stacked tbody tr:not(.details-row) td:nth-child(3)::before { content: "Type"; }
   table.activity.stacked tbody tr:not(.details-row) td:nth-child(4)::before { content: "Run"; }
   table.activity.stacked tbody tr:not(.details-row) td:nth-child(5)::before { content: "What happened"; }
-  table.activity.stacked tbody tr:not(.details-row) td:nth-child(6)::before { content: none; }
+  table.activity.stacked td.what .acts { float: none; display: block; margin: 4px 0 0; }
   table.activity.stacked tbody td.when { font-size: 0.85em; }
   table.activity.stacked tbody tr.details-row { display: block; }
   table.activity.stacked tbody tr.details-row[hidden] { display: none; }

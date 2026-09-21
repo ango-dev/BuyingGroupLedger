@@ -351,13 +351,25 @@
     </details>
   {% endmacro %}
 
+{#- The "+ Add" card at the end of a section's list; `oob` set: swapped out of band (reset) after an
+    in-place add answered with the new card alone -#}
+{% macro add_card(path, singular, fields, base, inplace, open=false, oob=false) %}
+        <details class="entry-card new" id="add-{{ path }}"{% if oob %} hx-swap-oob="true"{% endif %}{% if open %} open{% endif %}>
+          <summary>+ Add {{ singular }}</summary>
+          <form method="post" action="{{ base }}/entry" class="entry-form" autocomplete="off"{% if inplace %} hx-post="{{ base }}/entry" hx-target="#s-{{ path }}" hx-swap="outerHTML"{% endif %}>
+            {{ fields(none) }}
+            <footer><button type="submit" class="small primary">Add {{ singular }}</button></footer>
+          </form>
+        </details>
+{% endmacro %}
+
     {% macro entry_section(path, singular, items, fields, action_base='', show_json=true, message='', section_errors=[]) %}
     {% set title, blurb = section_title(path) %}
     {% set base = action_base or ('/settings/section/' ~ path) %}
     {% set inplace = not action_base %}
     <section class="panel" id="s-{{ path }}">
       <header>
-        <h2>{{ title }} <span class="muted small">{{ items | length }}</span>
+        <h2>{{ title }} <span class="muted small" id="count-{{ path }}">{{ items | length }}</span>
           <span class="panel-tools"><a href="#" class="small" data-expand="{{ path }}">expand all</a> · <a href="#" class="small" data-collapse="{{ path }}">collapse all</a></span>
         </h2>
         <p class="muted">{{ blurb }}</p>
@@ -376,13 +388,7 @@
         {% else %}
         <p class="settings-empty">No {{ path }} yet.</p>
         {% endfor %}
-        <details class="entry-card new" {{ 'open' if open_section == path or (open_index is defined and open_index is none) }}>
-          <summary>+ Add {{ singular }}</summary>
-          <form method="post" action="{{ base }}/entry" class="entry-form" autocomplete="off"{% if inplace %} hx-post="{{ base }}/entry" hx-target="#s-{{ path }}" hx-swap="outerHTML"{% endif %}>
-            {{ fields(none) }}
-            <footer><button type="submit" class="small primary">Add {{ singular }}</button></footer>
-          </form>
-        </details>
+        {{ add_card(path, singular, fields, base, inplace, open_section == path or (open_index is defined and open_index is none)) }}
       </div>
       {% if show_json %}
       <details class="advanced" {{ 'open' if open_section == path and errors }}>

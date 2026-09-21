@@ -2,7 +2,11 @@
     swapped in place of that card alone (HX-Retarget), so the other cards keep their unsaved edits.
    The outcome rides as the toast. -#}
 {% from "_select.html" import choose, pick_many %}
-{% from "_settings_macros.html" import profile_fields, warehouse_fields, card_fields, entry_summary, entry_card with context %}
+{% from "_settings_macros.html" import profile_fields, warehouse_fields, card_fields, entry_summary, entry_card, add_card with context %}
 {% set fields = {'profiles': profile_fields, 'warehouses': warehouse_fields, 'cards': card_fields}[path] %}
-{{ entry_card(path, singular, item, children, fields, '/settings/section/' ~ path, true, card_errors) }}
+{% if item %}{{ entry_card(path, singular, item, children, fields, '/settings/section/' ~ path, true, card_errors) }}{% endif %}
+{#- an add: the new card lands before the "+ Add" card, which is reset out of band; a removal: only
+    the count changes (the card itself is deleted by the swap) -#}
+{% if count is defined %}<span class="muted small" id="count-{{ path }}" hx-swap-oob="true">{{ count }}</span>{% endif %}
+{% if reset_add %}{{ add_card(path, singular, fields, '/settings/section/' ~ path, true, false, true) }}{% endif %}
 <div id="toast" hx-swap-oob="true">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif card_errors %}<div class="toast warn" role="alert">Nothing was saved: {{ card_errors[0] }}</div>{% endif %}</div>

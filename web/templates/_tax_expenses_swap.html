@@ -1,0 +1,6 @@
+{#- What an in-place expense add answers with: the expenses panel again (a refusal: the form open with
+    what was typed and the reason), the summary out of band, the notification from the top. -#}
+{% include "_tax_expenses.html" %}
+{% set oob = true %}
+{% include "_tax_summary.html" %}
+<div id="toast" hx-swap-oob="true">{% if message %}<div class="toast ok" role="status">{{ message }}</div>{% elif error %}<div class="toast warn" role="alert">Nothing was added: {{ error }}</div>{% endif %}</div>

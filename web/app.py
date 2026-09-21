@@ -598,16 +598,34 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     tax_inputs_path = (Path(repo_root_dir) if repo_root_dir else tax_inputs.Path(__file__).resolve().parents[1]) \
         / "data" / tax_inputs.FILE_NAME
 
-    def tax_years(snapshot) -> list[int]:
-        """Every year the ledger touches (by Order Date or Payout Date), every year with saved
-        inputs, and this one, newest first -- a new year appears on its own on January 1."""
-        years = {clock().year} | set(tax_inputs.load_all(tax_inputs_path))
+    def ledger_years(snapshot) -> dict[int, int]:
+        """{year: rows} for every year the ledger touches, by Order Date or Payout Date."""
+        out: dict[int, int] = {}
         for row in snapshot.rows:
+            seen = set()
             for name in ("order_date", "payout_date"):
                 text = row.text(name)[:4]
                 if len(text) == 4 and text.isdigit():
-                    years.add(int(text))
+                    seen.add(int(text))
+            for y in seen:
+                out[y] = out.get(y, 0) + 1
+        return out
+
+    def tax_years(snapshot) -> list[int]:
+        """Every year the ledger touches (by Order Date or Payout Date), every year with saved
+        inputs, and this one, newest first -- a new year appears on its own on January 1."""
+        years = {clock().year} | set(tax_inputs.load_all(tax_inputs_path)) | set(ledger_years(snapshot))
         return sorted(years, reverse=True)
+
+    def close_year_refusal(snapshot, year: int) -> str:
+        """Why a year cannot close: the current year, or a year with ledger rows.
+        Empty when it may."""
+        if int(year) == clock().year:
+            return f"{year} is the current year"
+        rows = ledger_years(snapshot).get(int(year), 0)
+        if rows:
+            return f"{rows} ledger row(s) were placed or paid in {year}"
+        return ""
 
     def tax_report_for(snapshot, year: int) -> dict:
         from scripts.audit_ledger import Sheet
@@ -756,6 +774,13 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         response.status_code = status
         return response
 
+    def taxes_expenses_swap(request: Request, year: int, *, message: str = "", error: str = "", draft=None, status: int = 200):
+        """An in-place expense add's answer: the panel, the summary (out of band) and the toast."""
+        response = page_no_snapshot(request, "_tax_expenses_swap.html", message=message,
+                                    **taxes_context(request, year, error=error, draft=draft))
+        response.status_code = status
+        return response
+
     def taxes_context(request: Request, year: int, **extra) -> dict:
         from web.settings_form import profile_labels
 
@@ -765,6 +790,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         programs, cards = tax_prompts(snapshot, year)
         summary = tax_inputs.schedule_c(tax_report_for(snapshot, year), inputs)
         program_logs, site_logs, bonus_logs = tax_inputs.log_entries(inputs, year)  # the dated logs' rows
+        close_why = close_year_refusal(snapshot, year)
+        # the year steps like the overview's month: through the listed years, the
+        # right arrow greyed on the latest listed one (a future year can be opened), not on the current
+        older = [y for y in years if y < year]
+        newer = [y for y in years if y > year]
+        year_prev, year_next = (max(older) if older else None), (min(newer) if newer else None)
         try:
             labels = profile_labels()
         except Exception:  # noqa: BLE001
@@ -776,7 +807,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
                     program_logs=program_logs, site_logs=site_logs, bonus_logs=bonus_logs,
-                    other_logs=tax_inputs.other_logs(inputs, year),
+                    other_logs=tax_inputs.other_logs(inputs, year), closable=not close_why, close_why=close_why,
+                    year_prev=year_prev, year_next=year_next, this_year=clock().year,
                     today=tax_inputs.log_default_date(year, clock().date().isoformat()),  # the logs' new row: in the year
                     draft=draft or {}, expense_choices=tax_inputs.expense_choices(inputs),
                     expenses=tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True),
@@ -829,19 +861,37 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         fields = {k: str(v) for k, v in form.items() if isinstance(v, str)}
         return year, fields, receipt_file
 
+    @app.post("/taxes/close")
+    async def taxes_close(request: Request):
+        """Close a year: its saved inputs and receipts go, and it leaves the year list. Refused for the current year and for a year with ledger rows."""
+        form = await request.form()
+        year = requested_year(request, clock().year, form)
+        snapshot = load(request)
+        why = close_year_refusal(snapshot, year)
+        if why:
+            return taxes_page(request, year, error=f"{year} cannot be closed: {why}.")
+        gone = tax_inputs.remove_year(tax_inputs_path, year, data_dir=data_dir)
+        act("settings", f"Tax year {year} closed", {"year": year, "expenses": len(gone.expenses) if gone else 0})
+        return RedirectResponse(url=f"/taxes?year={clock().year}&notice=Closed+{year}", status_code=303)
+
     @app.post("/taxes/expense")
     async def taxes_expense_add(request: Request):
         """One expense with its receipt: every field required (web/tax_inputs.add_expense)."""
         year, fields, receipt_file = await expense_form(request)
         inputs = load_tax_inputs(year)
+        in_place = request.headers.get("HX-Request", "").lower() == "true"
         try:
             entry = tax_inputs.add_expense(inputs, fields, year=year, data_dir=data_dir,
                                            receipt_file=receipt_file)
         except ValueError as exc:
+            if in_place:
+                return taxes_expenses_swap(request, year, error=str(exc), draft=fields, status=400)
             return taxes_page(request, year, error=str(exc), draft=fields)
         tax_inputs.save_year(tax_inputs_path, year, inputs)
         act("settings", f"Expense added to {year}: {entry['description']} ({entry['amount']:.2f})",
             {"year": year, "id": entry["id"], "amount": entry["amount"], "profile": entry["profile"]})
+        if in_place:  # the panel swaps itself, the summary follows
+            return taxes_expenses_swap(request, year, message=f"Added {entry['description']}")
         return RedirectResponse(url=f"/taxes?year={year}&notice={quote('Added ' + entry['description'])}#s-expenses",
                                 status_code=303)
 
@@ -2038,6 +2088,31 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         response.headers["HX-Reswap"] = "outerHTML"
         return response
 
+    def settings_added_card(request: Request, path: str, index: int, *, message: str):
+        """An in-place add's answer: the new card, inserted before the "+ Add" card (HX-Retarget /
+        beforebegin), the count and a reset add form out of band."""
+        context = settings_context()
+        items = context["entries"][path]
+        context["entries"] = {}
+        item = next((e for e in items if e["index"] == index), None)
+        response = page_no_snapshot(
+            request, "_settings_card.html", path=path, singular=path[:-1], item=item, children=[],
+            message=message, card_errors=[], open_index=index, errors=[], count=len(items), reset_add=True, **context)
+        response.headers["HX-Retarget"] = f"#add-{path}"
+        response.headers["HX-Reswap"] = "beforebegin"
+        return response
+
+    def settings_removed_card(request: Request, path: str, key: str, *, message: str, count: int):
+        """An in-place removal's answer when the card can simply go (HX-Reswap delete): the count and the toast."""
+        context = settings_context()
+        context["entries"] = {}
+        response = page_no_snapshot(
+            request, "_settings_card.html", path=path, singular=path[:-1], item=None, children=[],
+            message=message, card_errors=[], errors=[], count=count, **context)
+        response.headers["HX-Retarget"] = f'#s-{path} details.entry-card[data-key="{key}"]'
+        response.headers["HX-Reswap"] = "delete"
+        return response
+
     def entry_key_at(path: str, index: int | None) -> str:
         entries = settings_form.display_entries(path)
         return settings_form.entry_key(path, entries[index]) if index is not None and 0 <= index < len(entries) else ""
@@ -2107,7 +2182,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     # One entry of a card section: add, replace, delete. Errors re-render the page with the section open and nothing written.
     async def _save_entry(request: Request, path: str, index: int | None):
         form = await request.form()
-        before = settings_form.display_entries(path)[index] if index is not None else None
+        entries_before = settings_form.display_entries(path)
+        before = entries_before[index] if index is not None else None
         old_key = settings_form.entry_key(path, before) if before else ""
         try:
             landed, label = settings_form.apply_entry(path, index, form, today=clock().date().isoformat())
@@ -2124,7 +2200,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             after = next((e for e in settings_form.display_entries(path) if e["index"] == landed), None)
             if before is not None and after is not None and not moved_in_tree(path, before, after):
                 return settings_card(request, path, landed, old_key, message=message)  # that card alone
-            return settings_section(request, path, message=message, open_index=landed)  # added, or moved: the section
+            nested = path == "cards" and after is not None and after.get("virtual_of") in {e.get("last4") for e in entries_before}
+            if before is None and entries_before and after is not None and not nested:
+                return settings_added_card(request, path, landed, message=message)  # the new card, in place
+            return settings_section(request, path, message=message, open_index=landed)  # the first, nested, or moved: the section
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
                                 status_code=303)
 
@@ -2154,6 +2233,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     @app.post("/settings/section/{path}/entry/{index}/delete", response_class=HTMLResponse)
     async def settings_delete_entry(request: Request, path: str, index: int):
+        entries_before = settings_form.display_entries(path)
+        gone = entries_before[index] if 0 <= index < len(entries_before) else None
         try:
             label = settings_form.delete_entry(path, index)
         except settings_form.SettingsError as exc:
@@ -2163,6 +2244,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         message = f"Removed {path[:-1]} {label}."
         act("settings", f"Settings: removed {path[:-1]} {label}", {"path": path, "entry": label})
         if wants_fragment(request):
+            # the card alone can go when nothing else shifts: it was the last entry (the others' form
+            # indexes stay), it leaves some behind, and (a card) nothing was nested under it
+            had_children = path == "cards" and gone is not None and any(e.get("virtual_of") == gone.get("last4") for e in entries_before)
+            if gone is not None and index == len(entries_before) - 1 and len(entries_before) > 1 and not had_children:
+                return settings_removed_card(request, path, settings_form.entry_key(path, gone), message=message, count=len(entries_before) - 1)
             return settings_section(request, path, message=message)
         return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-{path}",
                                 status_code=303)

@@ -579,7 +579,8 @@ class TestEntryCards:
         for path, data, label in (("profiles", {"label": "alpha", "profile_id": "", "retailers": "costco"}, "profile alpha"),
                                   ("warehouses", {"buying_group": "BFMR", "jig.0.label": "BFMR", "jig.0.zip": "12345"}, "warehouse BFMR")):
             resp = client.post(f"/settings/section/{path}/entry", headers=hx, data=data)
-            assert resp.status_code == 200 and resp.text.lstrip().startswith(f'<section class="panel" id="s-{path}">'), resp.text[:300]
+            # the first entry of a section answers with the section, a later one with the new card alone (2026-09-21)
+            assert resp.status_code == 200 and resp.text.lstrip().startswith((f'<section class="panel" id="s-{path}">', '<details class="entry-card"')), resp.text[:300]
             assert f'<div class="toast ok" role="status">Added {label}.</div>' in resp.text
         added = client.post("/settings/section/cards/entry", headers=hx, data={"name": "Second", "last4": "2222"})
         assert added.status_code == 200 and 'data-key="cards:2222" open>' in added.text
@@ -655,6 +656,31 @@ class TestEntryCards:
         flipped = client.post("/settings/section/profiles/entry/0/proxy", headers={"HX-Request": "true"})
         assert flipped.status_code == 200 and flipped.headers["HX-Retarget"] == '#s-profiles details.entry-card[data-key="profiles:p1"]'
         assert "Proxy Off" in flipped.text and "<section" not in flipped.text
+
+    def test_an_add_inserts_the_new_card_and_a_removal_of_the_last_deletes_it(self, client, config):
+        """adds and removes get the one-card treatment where the tree allows it."""
+        config(cards=[{"last4": "0315", "name": "USB Prime Business", "cashback_rate": "5%"}])
+        added = client.post("/settings/section/cards/entry", data={"name": "Citi", "last4": "8765", "cashback_rate": "2%"},
+                            headers={"HX-Request": "true"})
+        assert added.status_code == 200 and added.headers["HX-Retarget"] == "#add-cards" and added.headers["HX-Reswap"] == "beforebegin"
+        assert added.text.count('data-key="cards:') == 1 and 'data-key="cards:8765" open>' in added.text and "<section" not in added.text
+        assert '<span class="muted small" id="count-cards" hx-swap-oob="true">2</span>' in added.text
+        assert '<details class="entry-card new" id="add-cards" hx-swap-oob="true">' in added.text and "Added card Citi" in added.text
+        # a number of an existing card nests under it: the section
+        nested = client.post("/settings/section/cards/entry", data={"name": "USB virtual", "last4": "9999", "kind": "virtual", "virtual_of": "0315"},
+                             headers={"HX-Request": "true"})
+        assert nested.status_code == 200 and "HX-Retarget" not in nested.headers and '<section class="panel" id="s-cards">' in nested.text
+        # removing the last entry deletes its card; removing one before it shifts the others' indexes: the section
+        gone = client.post("/settings/section/cards/entry/2/delete", headers={"HX-Request": "true"})
+        assert gone.status_code == 200 and gone.headers["HX-Reswap"] == "delete" and gone.headers["HX-Retarget"].endswith('[data-key="cards:9999"]')
+        assert 'id="count-cards" hx-swap-oob="true">2</span>' in gone.text and "<details" not in gone.text and "Removed card" in gone.text
+        shifted = client.post("/settings/section/cards/entry/0/delete", headers={"HX-Request": "true"})
+        assert shifted.status_code == 200 and "HX-Retarget" not in shifted.headers and '<section class="panel" id="s-cards">' in shifted.text
+        assert [c["last4"] for c in config_value("cards")] == ["8765"]
+        last = client.post("/settings/section/cards/entry/0/delete", headers={"HX-Request": "true"})  # the only one left: the empty section
+        assert "HX-Retarget" not in last.headers and "No cards yet" in last.text
+        first = client.post("/settings/section/cards/entry", data={"name": "Again", "last4": "1111"}, headers={"HX-Request": "true"})
+        assert "HX-Retarget" not in first.headers and '<section class="panel" id="s-cards">' in first.text  # the first entry: the section
 
     def test_the_scalar_settings_save_in_place(self, client):
         """the scalar form too:

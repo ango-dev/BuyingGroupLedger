@@ -244,6 +244,22 @@ def load_year(path: Path, year: int) -> YearInputs:
     return load_all(path).get(int(year), YearInputs())
 
 
+def remove_year(path: Path, year: int, *, data_dir: Path) -> YearInputs | None:
+    """Close a year: its saved inputs leave the file and its uploaded receipts
+    are deleted. Whether the year MAY close (not the current one, no ledger rows in it) is the
+    caller's check. Returns what was removed, None when nothing was saved for it."""
+    path = Path(path)
+    everything = load_all(path)
+    gone = everything.pop(int(year), None)
+    if gone is None:
+        return None
+    for e in gone.expenses:
+        _unlink_receipt(e.get("receipt") or {}, data_dir=data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({str(y): v.to_json() for y, v in everything.items()}, indent=2, sort_keys=True), encoding="utf-8")
+    return gone
+
+
 def save_year(path: Path, year: int, inputs: YearInputs) -> None:
     path = Path(path)
     everything = {str(y): v.to_json() for y, v in load_all(path).items()}

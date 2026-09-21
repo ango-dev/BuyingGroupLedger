@@ -7,7 +7,7 @@
   document.addEventListener("htmx:beforeSwap", function (e) {
     var d = e.detail || {};
     var elt = d.requestConfig && d.requestConfig.elt;
-    if (d.xhr && d.xhr.status === 400 && elt && elt.closest && elt.closest(".entry-form, .entry-delete, .tax-form, #scalar-form")) {
+    if (d.xhr && d.xhr.status === 400 && elt && elt.closest && elt.closest(".entry-form, .entry-delete, .tax-form, .expense-form, #scalar-form")) {
       d.shouldSwap = true;
       d.isError = false;
     }

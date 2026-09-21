@@ -259,6 +259,45 @@ class TestTaxesPage:
         page = client.get("/taxes", params={"year": "2026"}).text  # the page itself: one summary, one form, a toast slot
         assert page.count('id="s-schedule-c"') == 1 and page.count('id="tax-form"') == 1 and '<div id="toast"></div>' in page and 'hx-swap-oob' not in page
 
+    def test_an_expense_adds_in_place(self, client, tmp_path):
+        """the expense add posts in place -- the panel, the summary and a toast; a refusal keeps what was typed."""
+        response = client.post("/taxes/expense", data={"year": "2026", "date": "2026-03-03", "description": "boxes", "amount": "12",
+                                                       "profile": "alpha", "email": "", "receipt_url": "https://x/r.pdf", "category": ""},
+                               headers={"HX-Request": "true"})
+        assert response.status_code == 200, response.text[:300]
+        body = response.text
+        assert body.lstrip().startswith('<details class="panel" id="s-expenses" open>') and "<html" not in body
+        assert '<details class="panel" id="s-schedule-c" open hx-swap-oob="true">' in body
+        assert '<div class="toast ok" role="status">Added boxes</div>' in body and "boxes" in body
+        refused = client.post("/taxes/expense", data={"year": "2026", "date": "2026-03-03", "description": "tape", "amount": "lots"},
+                              headers={"HX-Request": "true"})
+        assert refused.status_code == 400 and "Nothing was added:" in refused.text and 'value="tape"' in refused.text
+        assert 'class="expense-form" hx-post="/taxes/expense?year=2026" hx-encoding="multipart/form-data"' in refused.text
+
+    def test_a_year_closes_unless_it_is_current_or_has_rows(self, client, tmp_path):
+        page = client.get("/taxes", params={"year": "2026"}).text
+        assert '<form method="post" action="/taxes/close" class="inline-form close-year"' in page
+        assert 'disabled title="2026 is the current year">Close year</button>' in page
+        refused = client.post("/taxes/close", data={"year": "2026"})
+        assert refused.status_code == 200 and "2026 cannot be closed: 2026 is the current year." in refused.text
+        import re
+
+        listed = {int(y) for y in page.split('data-years="')[1].split('"')[0].split(",")}
+        for y in listed - {2026}:  # every other listed year comes from the ledger's rows: refused too
+            body = client.post("/taxes/close", data={"year": str(y)}).text
+            assert f"{y} cannot be closed:" in body and "ledger row(s)" in body
+        client.post("/taxes/save", data={"year": "2019", "site.0.name": "Rakuten", "site.0.amount": "5"}, follow_redirects=False)
+        client.post("/taxes/expense", data={"year": "2019", "date": "2019-03-03", "description": "boxes", "amount": "12",
+                                            "profile": "alpha", "email": "", "receipt_url": "https://x/r.pdf", "category": ""}, follow_redirects=False)
+        page = client.get("/taxes", params={"year": "2019"}).text
+        assert "2019" in page.split('data-years="')[1].split('"')[0] and 'title="delete this year' in page
+        assert "disabled" not in page.split('class="inline-form close-year"')[1].split("</form>")[0]
+        closed = client.post("/taxes/close", data={"year": "2019"}, follow_redirects=False)
+        assert closed.status_code == 303 and "notice=Closed+2019" in closed.headers["location"]
+        assert "2019" not in json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))
+        assert "2019" not in client.get("/taxes").text.split('data-years="')[1].split('"')[0]
+        assert client.post("/taxes/close", data={"year": "2019"}, follow_redirects=False).status_code == 303  # nothing saved: still fine
+
     def test_a_years_logs_stay_inside_the_year(self, client, tmp_path):
         """a past year's page offered a 2026 date; "it should not be possible to
         set dates for different years"."""
@@ -279,10 +318,21 @@ class TestTaxesPage:
     def test_a_year_with_saved_inputs_stays_on_the_list(self, client):
         """this
         year is always offered; a year with saved inputs but no rows stays too."""
-        assert 'href="/taxes?year=2026"' in client.get("/taxes").text
-        assert 'href="/taxes?year=2023"' not in client.get("/taxes").text
+        years = lambda: client.get("/taxes").text.split('data-years="')[1].split('"')[0].split(",")  # noqa: E731
+        assert "2026" in years() and "2023" not in years()
         client.post("/taxes/save", data={"year": "2023", "site.0.name": "Rakuten", "site.0.amount": "5"}, follow_redirects=False)
-        assert 'href="/taxes?year=2023"' in client.get("/taxes").text
+        assert "2023" in years()
+        # the year steps like the overview's month: arrows through the listed years, the right one
+        # greyed on the latest listed year, "this year" back from another
+        body = client.get("/taxes", params={"year": "2023"}).text
+        assert '<span class="month-label year-label">2023</span>' in body and 'href="/taxes?year=2026">this year</a>' in body
+        assert '<span class="button small disabled">‹</span>' in body or 'title="' in body.split('year-label">2023')[0][-200:]
+        latest = client.get("/taxes", params={"year": "2026"}).text
+        assert '<span class="button small disabled">›</span>' in latest and "this year</a>" not in latest
+        client.post("/taxes/save", data={"year": "2027", "site.0.name": "Rakuten", "site.0.amount": "1"}, follow_redirects=False)  # a future year opened
+        body = client.get("/taxes", params={"year": "2026"}).text
+        assert 'href="/taxes?year=2027" title="2027">›</a>' in body  # the arrow reaches it; 2027 is the latest and greys its own
+        assert '<span class="button small disabled">›</span>' in client.get("/taxes", params={"year": "2027"}).text
 
     def test_the_amounts_keep_a_dated_log(self, client, tmp_path):
         """program cashback and cashback sites change often -- a log of what was

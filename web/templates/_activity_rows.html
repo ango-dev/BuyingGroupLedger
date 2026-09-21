@@ -15,9 +15,9 @@
 <table class="grid compact activity sheetlike stacked">
   {#- Fixed columns: the widths are the stylesheet's, not the rows', so a search or a filter never
       reflows them. -#}
-  <colgroup><col class="c-num"><col class="c-when"><col class="c-type"><col class="c-run"><col class="c-what"><col class="c-act"></colgroup>
+  <colgroup><col class="c-num"><col class="c-when"><col class="c-type"><col class="c-run"><col class="c-what"></colgroup>
   <thead>
-    <tr><th class="rownum" title="select every cell">#</th>{{ sort_th(filters, 'at', 'When') }}{{ sort_th(filters, 'kind', 'Type') }}{{ sort_th(filters, 'run', 'Run') }}{{ sort_th(filters, 'summary', 'What happened') }}<th class="col-act"></th></tr>
+    <tr><th class="rownum" title="select every cell">#</th>{{ sort_th(filters, 'at', 'When') }}{{ sort_th(filters, 'kind', 'Type') }}{{ sort_th(filters, 'run', 'Run') }}{{ sort_th(filters, 'summary', 'What happened') }}</tr>
   </thead>
   <tbody>
     {% for e in events %}
@@ -31,12 +31,13 @@
       <td class="what">{{ e.summary }}
         {% if e.dossier %}<span class="mono small muted">{{ e.dossier.name }}</span>{% if not e.dossier.has_report %} <span class="tag stale">no report.md</span>{% endif %}{% endif %}
         {% if e.details.order_id %} <a href="/orders/{{ e.details.order_id }}" class="small mono">{{ e.details.order_id }}</a>{% endif %}
+        {#- the row's buttons sit at the right of this column -#}
+        <span class="acts">{% if (e.kind, e.at, e.summary) in unacked %}<form method="post" action="/activity/acknowledge" class="ack-one" hx-post="/activity/acknowledge" hx-target="#activity-table" hx-swap="innerHTML"><input type="hidden" name="kind" value="{{ e.kind }}"><input type="hidden" name="at" value="{{ e.at }}"><input type="hidden" name="summary" value="{{ e.summary }}"><input type="hidden" name="next" value="/activity?{{ filters.as_query() | query }}"><button type="submit" class="small" title="acknowledge this one: it leaves the overview card and the Activity badge">acknowledge</button></form> {% endif %}{% if e.dossier %}<a class="button small" href="/activity/dossier/{{ e.dossier.name | urlencode }}/download" title="the whole dossier as one zip, to hand to whoever fixes it">download</a> {% endif %}{% if e.details or e.dossier %}<button type="button" class="small ghost" onclick="var d=document.getElementById('ev-{{ n }}');d.hidden=!d.hidden;this.textContent=d.hidden?'{{ 'report' if e.dossier else 'details' }}':'hide'">{{ 'report' if e.dossier else 'details' }}</button>{% endif %}</span>
       </td>
-      <td class="num">{% if (e.kind, e.at, e.summary) in unacked %}<form method="post" action="/activity/acknowledge" class="ack-one" hx-post="/activity/acknowledge" hx-target="#activity-table" hx-swap="innerHTML"><input type="hidden" name="kind" value="{{ e.kind }}"><input type="hidden" name="at" value="{{ e.at }}"><input type="hidden" name="summary" value="{{ e.summary }}"><input type="hidden" name="next" value="/activity?{{ filters.as_query() | query }}"><button type="submit" class="small" title="acknowledge this one: it leaves the overview card and the Activity badge">acknowledge</button></form> {% endif %}{% if e.dossier %}<a class="button small" href="/activity/dossier/{{ e.dossier.name | urlencode }}/download" title="the whole dossier as one zip, to hand to whoever fixes it">download</a> {% endif %}{% if e.details or e.dossier %}<button type="button" class="small ghost" onclick="var d=document.getElementById('ev-{{ n }}');d.hidden=!d.hidden;this.textContent=d.hidden?'{{ 'report' if e.dossier else 'details' }}':'hide'">{{ 'report' if e.dossier else 'details' }}</button>{% endif %}</td>
     </tr>
     {% if e.details or e.dossier %}
     <tr class="details-row" id="ev-{{ n }}" hidden>
-      <td colspan="6">
+      <td colspan="5">
         {% if e.dossier %}
         {# the dossier itself, as the Failures page showed it: path, files, hosted copies, the report #}
         <div class="dossier-inline">
