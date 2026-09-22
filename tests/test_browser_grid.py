@@ -734,6 +734,31 @@ def test_import_anyway_swaps_the_row_in_place_and_the_grid_still_edits(served, p
     assert page.errors == []
 
 
+def test_the_staging_sheet_pages_and_its_size_picker_submits_at_once(served, page, client):
+    """The staging sheet is one page at a time: the pager walks pages with the
+    row numbers following, and picking a size in the page's own dropdown reloads at once, remembered."""
+    csv_text = "Order Number,Date,Item,Qty,Status\n" + "".join(f"X{i},3/1{i % 9 + 1}/2026,Thing {i},1,paid\n" for i in range(1, 121))
+    client.post("/tools/import/upload", files={"source": ("old.csv", csv_text.encode(), "text/csv")}, follow_redirects=False)
+    client.post("/tools/import/map", data={"map.0": "order_id", "map.1": "order_date", "map.2": "item_name", "map.3": "quantity",
+                                          "map.4": "status", "date_order": "", "profile": ""}, follow_redirects=False)
+    assert client.post("/tools/import/run", follow_redirects=False).status_code == 303
+    page.set_viewport_size({"width": 1400, "height": 800})
+    page.goto(f"{served}/tools/import")
+    assert page.locator("table.sheetlike tbody tr").count() == 100
+    assert "1–100 of 120" in page.locator(".count").inner_text()
+    page.locator(".import-pager a", has_text="next").click()
+    page.wait_for_url("**ipage=2**")
+    assert page.locator("table.sheetlike tbody tr").count() == 20
+    assert page.locator("table.sheetlike tbody tr").first.locator("td.rownum").inner_text().strip() == "101"
+    page.locator("#iper-form details.multi summary").click()
+    page.locator("#iper-form .menu label", has_text="all").click()
+    page.wait_for_url("**iper=0**")
+    assert page.locator("table.sheetlike tbody tr").count() == 120
+    page.goto(f"{served}/tools/import")
+    assert page.locator("table.sheetlike tbody tr").count() == 120  # remembered
+    assert page.errors == []
+
+
 def test_the_dated_log_totals_live_grows_a_row_and_saves(served, page):
     """the outside-spend log -- open the total, type an amount, the total follows,
     a fresh row appears, a removed row leaves the total, an outside click closes it, the save keeps it."""

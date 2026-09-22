@@ -1691,17 +1691,42 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except Exception:  # noqa: BLE001
             return {"values": {}, "card_pairs": []}
 
+    IMPORT_PER_CHOICES = (50, 100, 250, 500, 0)  # 0 = every row
+    IMPORT_PER_DEFAULT = 100
+    IMPORT_PER_COOKIE = "import-per"
+
+    def _import_per(request: Request) -> int:
+        """The staging sheet's page size: the query's preset, else this browser's remembered one,
+        else 100 (like Activity's: a 5,000-row sheet was 11 MB and 87k cells at once)."""
+        for raw in (request.query_params.get("iper"), request.cookies.get(IMPORT_PER_COOKIE)):
+            try:
+                per = int(str(raw))
+            except (TypeError, ValueError):
+                continue
+            if per in IMPORT_PER_CHOICES:
+                return per  # a value that is not a preset falls through to the remembered one
+        return IMPORT_PER_DEFAULT
+
     def import_page(request: Request, *, error: str = "", notice: str = "", status: int = 200):
         batch = importer.live_batch(data_dir)
         staging = batch.load_staging() if batch else None
-        rows = staging.staged if staging else []
+        every = staging.staged if staging else []
+        per = _import_per(request)
+        try:
+            page_no = int(request.query_params.get("ipage", "1") or 1)
+        except ValueError:
+            page_no = 1
+        ipager = paginate(every, per or max(len(every), 1), page_no)
+        rows = ipager["items"]
         response = page_no_snapshot(
-            request, "tools_import.html", wide=bool(rows), batch=batch, staging=staging, rows=rows,
+            request, "tools_import.html", wide=bool(every), batch=batch, staging=staging, rows=rows, ipager=ipager, iper=per,
             gaps={r.id: importer.gap_fields(r) for r in rows}, gap_names={r.id: importer.gaps_for(r) for r in rows},
             editable=True, can_import=writer is not None, choices=importer.choices_for(staging, ledger_choices_now()),
             unfinished=bool(batch and staging is None), error=error, notice=notice,
-            step="staging" if rows else ("map" if batch else "upload"))
+            step="staging" if every else ("map" if batch else "upload"))
         response.status_code = status
+        if request.query_params.get("iper") not in (None, "") and str(per) == request.query_params.get("iper"):
+            response.set_cookie(IMPORT_PER_COOKIE, str(per), max_age=365 * 24 * 3600, samesite="lax")
         return response
 
     def staged_from_batch(batch: importer.Batch) -> tuple[importer.Staging, list[str]]:

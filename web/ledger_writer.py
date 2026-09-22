@@ -204,6 +204,14 @@ class _Grid:
         return matches[0]
 
 
+class AddSession:
+    """What `LedgerCellWriter.open_adds` hands out: the worksheet and its grid, shared by many adds."""
+
+    def __init__(self, worksheet, grid: _Grid):
+        self.worksheet = worksheet
+        self.grid = grid
+
+
 def _protect(worksheet, key: dict, field: str, value, previous=None) -> None:
     """Record a hand edit (ledger_db/hand_edits) with what the cell held before it (`previous`,
     kept from the FIRST hand edit); a test fake has no database and needs no record. Never fails
@@ -370,11 +378,21 @@ class LedgerCellWriter:
         return {"written": len(seen), "errors": errors, "field": field, "value": coerced}
 
     # --- a new row ------------------------------------------------------------------------------
-    def add_row(self, fields: dict) -> dict:
+    def open_adds(self) -> "AddSession":
+        """One worksheet and ONE read of the grid for many `add_row` calls (the importer's commit):
+        each add used to re-read the whole ledger to check its key, so 2,500 adds read 2,500 grids.
+       The session's grid grows with every row written, so a
+        key added a moment ago is still refused as a duplicate."""
+        self._guard()
+        worksheet = self._opener()
+        return AddSession(worksheet, _Grid(worksheet))
+
+    def add_row(self, fields: dict, *, session: "AddSession | None" = None) -> dict:
         """Add one row from {field: text}. Needs Order ID, Order Date (YYYY-MM-DD) and Item Name;
         Shipment defaults to 1, Status to ordered; Total Cost is computed from Quantity x Cost Per
         Item when both are given. Every other value is validated as an edit would be. The key
-        must not already exist. Returns {"row_number", "key"}."""
+        must not already exist. Returns {"row_number", "key"}. `session` (open_adds) shares one
+        worksheet and grid across many adds."""
         key = normalize_key(fields)
         if not key["order_id"]:
             raise EditError("Order ID is required")
@@ -395,8 +413,11 @@ class LedgerCellWriter:
         if values.get("quantity") != "" and values.get("cost_per_item") != "":
             values["total_cost"] = round(values["quantity"] * values["cost_per_item"], 2)
         self._guard()
-        worksheet = self._opener()
-        grid = _Grid(worksheet)
+        if session is None:
+            worksheet = self._opener()
+            grid = _Grid(worksheet)
+        else:
+            worksheet, grid = session.worksheet, session.grid
         try:
             grid.locate(key)
         except ConflictError:
@@ -412,6 +433,11 @@ class LedgerCellWriter:
             row[FIELDNAMES.index(f)] = ""
         worksheet.update(f"A{row_number}", [_blank_to_none(row)], value_input_option="RAW")
         _write_profit_formulas(worksheet, [row_number])
+        if session is not None:
+            # the session's grid follows the write: the next add sees this key and this row
+            while len(grid.rows) < row_number:
+                grid.rows.append([])
+            grid.rows[row_number - 1] = [_text(v) for v in row]
         # Every field the user typed on the new row is theirs: a scrape that later finds the
         # order may fill the blanks, never rewrite these.
         for field in EDITABLE_FIELDS:

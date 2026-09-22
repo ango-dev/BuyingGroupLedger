@@ -519,3 +519,85 @@ class TestImportPages:
         run = upload_and_run(client)
         assert "editing+is+off" in run.headers["location"] and "3+row%28s%29+staged" in run.headers["location"]
         assert client.post("/tools/import/commit", follow_redirects=False).status_code == 409
+
+
+# --------------------------------------------------------------------------------------------------
+# At scale: the commit saves in batches over one grid, the sheet
+# shows one page at a time, and the nav badge does not parse the sheet on every render
+# --------------------------------------------------------------------------------------------------
+
+
+class TestAtScale:
+    def test_the_commit_saves_every_batch_and_reads_the_grid_once(self, sheet, logs_dir):
+        writer = LedgerCellWriter(opener=lambda: sheet, logs_dir=logs_dir)
+        rows = [staged(id=f"r{i:04d}-1", order_id=f"111-{i:07d}-0000001", item_name=f"W{i}") for i in range(1, 121)]
+        rows.append(staged(id="dup", order_id="1399000017", order_date="2026-08-20", item_name="iPad", shipment="1"))
+        st = importer.Staging(id="b", created_at="", source_name="x", date_order="mdy", rows=rows)
+        saves, reads = [], []
+        original = sheet.get_values
+
+        def counted(*args, **kwargs):
+            reads.append(1)
+            return original(*args, **kwargs)
+
+        sheet.get_values = counted
+        result = importer.import_complete(st, writer, importer.ledger_index(GridReader(sheet).load().rows),
+                                          save=lambda s: saves.append(len(s.staged)), clock=lambda: NOW)
+        assert len(result.imported) == 120 and len(result.duplicates) == 1 and result.remaining == 0
+        assert len(sheet.grid) == 122 and sheet.grid[-1][HEADER.index("Item Name")] == "W120"
+        assert len(saves) <= 1 + 120 // importer.SAVE_EVERY + 1 and saves[-1] == 0  # batches, and once at the end
+        assert len(reads) <= 2  # the grid is read once for the whole commit, not once per row
+        # a second commit finds nothing left and writes nothing
+        assert importer.import_complete(st, writer, importer.ledger_index([]), save=lambda s: None, clock=lambda: NOW).imported == []
+
+    def test_a_refusal_mid_way_is_saved_where_it_happened(self, sheet, logs_dir):
+        writer = LedgerCellWriter(opener=lambda: sheet, logs_dir=logs_dir)
+        rows = [staged(id="a", order_id="A"), staged(id="b", order_id="B", shipment="x"), staged(id="c", order_id="C")]  # b: refused by the ledger
+        st = importer.Staging(id="b", created_at="", source_name="x", date_order="mdy", rows=rows)
+        saves = []
+        result = importer.import_complete(st, writer, importer.ledger_index([]), save=lambda s: saves.append([r.status for r in s.rows]), clock=lambda: NOW)
+        assert [r.id for r in result.imported] == ["a", "c"] and [r.id for r, _ in result.refused] == ["b"]
+        assert saves[-1] == ["imported", "staged", "imported"] and "refused by the ledger" in st.row("b").note
+
+    def test_the_staging_sheet_is_one_page_at_a_time(self, client):
+        many = CSV.splitlines()[0] + "\n" + "".join(
+            f"111-{i:07d}-0000001,3/11/2026,Widget {i},2,100,paid,Amazon,1Z{i},120,,alpha,https://a/{i},1 Main St,Prime Visa 0315,BFMR,/receipts/a/{i}.pdf,2,yes\n"
+            for i in range(1, 231))
+        run = upload_and_run(client, many)
+        assert "230+staged" in run.headers["location"]
+        page = client.get("/tools/import").text
+        rownums = '<td class="rownum muted"'
+        assert page.count(rownums) == 100 and "1–100 of 230 staged row(s)" in page  # the default page size
+        assert 'id="iper-form"' in page and 'href="/tools/import?ipage=2"' in page and "page 1 of 3" in page
+        assert 'aria-label="select row 1"' in page and 'aria-label="select row 101"' not in page
+        second = client.get("/tools/import", params={"ipage": "2"}).text
+        assert "101–200 of 230" in second and 'aria-label="select row 101"' in second and 'data-entry-id="r0101-1"' in second
+        assert 'name="sel" value="r0101-1"' in second
+        big = client.get("/tools/import", params={"iper": "500"})
+        assert big.text.count(rownums) == 230 and big.cookies.get("import-per") == "500"
+        assert client.get("/tools/import").text.count(rownums) == 230  # remembered
+        assert client.get("/tools/import", params={"iper": "7"}).text.count(rownums) == 230  # not a preset: the remembered one
+        every = client.get("/tools/import", params={"iper": "0"}).text
+        assert every.count(rownums) == 230 and "230 staged row(s)" in every and "of 230" not in every
+        # the commit takes every complete row, whatever page is showing
+        for i in range(1, 231):
+            client.post("/tools/import/cell", data={"entry_id": f"r{i:04d}-1", "field": "payout_date", "value": "2026-04-02"}) if i <= 3 else None
+        commit = client.post("/tools/import/commit", follow_redirects=False)
+        assert "3+row%28s%29+imported" in commit.headers["location"] and "227+staged" in commit.headers["location"]
+        assert client.get("/tools/import/staging.csv").text.count("\n") == 228  # every staged row, not a page
+
+    def test_the_nav_badge_does_not_parse_the_sheet_when_it_has_not_changed(self, client, monkeypatch):
+        upload_and_run(client)
+        loads = []
+        original = importer.Batch.load_staging
+
+        def counted(self):
+            loads.append(1)
+            return original(self)
+
+        monkeypatch.setattr(importer.Batch, "load_staging", counted)
+        assert importer.staged_count(client.data_dir) == 2
+        first = len(loads)
+        assert importer.staged_count(client.data_dir) == 2 and len(loads) == first  # cached on the sheet's stamp
+        client.get("/")
+        assert len(loads) == first

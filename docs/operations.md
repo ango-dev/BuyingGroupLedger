@@ -569,7 +569,10 @@ Orders grid -- click, type, Enter; ranges; paste; undo; the row numbers select a
 and *Import the complete rows* moves whatever is complete now onto the ledger. A key cell (Order
 ID, Order Date, Item Name, Shipment) cannot be edited onto a key the ledger or another row of the
 sheet already holds -- the row would otherwise be dropped as a duplicate at the next import -- and
-every date must be a real calendar day. The sheet lives in
+every date must be a real calendar day. The sheet shows 100 rows a page (50 / 100 / 250 / 500 /
+all, remembered per browser); the import, the CSV and *Drop selected* work on the whole sheet, the
+page only decides what is in view. An import writes over one read of the ledger and saves the sheet
+every 50 rows (and whenever it stops), so a 5,000-row file lands in seconds. The sheet lives in
 `data/imports/<stamp>/` (`source.csv`, `mapping.json`, `staging.json`), so every backup carries it
 and the page finds it again after a restart; the nav's Tools menu counts the rows still waiting.
 One import at a time: finish or discard it before uploading another. *Download the staging CSV*

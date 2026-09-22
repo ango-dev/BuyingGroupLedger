@@ -215,25 +215,34 @@ def live_batch(data_dir: Path) -> Batch | None:
     return None
 
 
-_count_cache: dict[str, tuple[float, int]] = {}
+_count_cache: dict[str, tuple[tuple[int, int], int]] = {}
 
 
 def staged_count(data_dir: Path) -> int:
-    """The nav badge: staged rows of the live batch. Cached on the sheet's mtime."""
-    batch = live_batch(data_dir)
-    if batch is None or not batch.staging_path.is_file():
-        return 0
-    try:
-        stamp = batch.staging_path.stat().st_mtime
-    except OSError:
-        return 0
-    cached = _count_cache.get(str(batch.staging_path))
-    if cached and cached[0] == stamp:
-        return cached[1]
-    staging = batch.load_staging()
-    count = len(staging.staged) if staging else 0
-    _count_cache[str(batch.staging_path)] = (stamp, count)
-    return count
+    """The nav badge: staged rows of the live batch, by `live_batch`'s own rule (the newest batch
+    with rows left, else an upload that never got past mapping = 0), but WITHOUT parsing a sheet
+    whose (mtime, size) stamp is cached -- every page render asks, and a 6 MB sheet took ~45 ms
+    to read each time."""
+    for batch in batches(data_dir):
+        if batch.staging_path.is_file():
+            try:
+                st = batch.staging_path.stat()
+            except OSError:
+                continue
+            stamp = (st.st_mtime_ns, st.st_size)
+            cached = _count_cache.get(str(batch.staging_path))
+            if cached and cached[0] == stamp:
+                count = cached[1]
+            else:
+                staging = batch.load_staging()
+                count = len(staging.staged) if staging else 0
+                _count_cache[str(batch.staging_path)] = (stamp, count)
+            if count:
+                return count
+            continue
+        if batch.source_path.is_file():
+            return 0
+    return 0
 
 
 def new_batch(data_dir: Path, filename: str, payload: bytes, *, clock: Callable[[], datetime]) -> Batch:
@@ -741,39 +750,61 @@ class ImportResult:
         return "; ".join(parts)
 
 
+#: The sheet is saved every this many landed rows (and at the end, and on any stop): saving after
+#: EVERY row rewrote a 6 MB staging.json 2,500 times. A crash
+#: between saves leaves up to this many rows on the ledger but still "staged" -- the next commit
+#: reports them as already on the ledger and drops them, which is exact, not silent.
+SAVE_EVERY = 50
+
+
 def import_complete(staging: Staging, writer, index: Mapping, *, save: Callable[[Staging], None],
                     clock: Callable[[], datetime]) -> ImportResult:
     """Write every complete staged row through `writer.add_row` (the Orders page's own write
-    path: run-lock refusal, duplicate refusal, hand-edit protection). The sheet is saved after
-    every row, so a crash or a refusal mid-way leaves it exact. A run holding the lock stops the
-    import where it is and is re-raised for the page to say so."""
+    path: run-lock refusal, duplicate refusal, hand-edit protection), over ONE read of the ledger
+    (`writer.open_adds`). The sheet is saved every SAVE_EVERY rows and whenever the import stops,
+    so a refusal or a crash mid-way leaves it exact to within a batch. A run holding the lock
+    stops the import where it is and is re-raised for the page to say so."""
     result = ImportResult()
     buckets = classify(staging.rows, index)
     for row in buckets["duplicate"]:
         row.status = "duplicate"
         result.duplicates.append(row)
     save(staging)
-    for row in buckets["complete"]:
-        try:
-            written = writer.add_row(dict(row.cells))
-        except RunInProgress:
-            save(staging)
-            result.remaining = len(staging.staged)
-            raise
-        except EditError as exc:
-            if "already on the ledger" in str(exc):
-                row.status = "duplicate"
-                row.note = NOTES["duplicate"]
-                result.duplicates.append(row)
+    if not buckets["complete"]:
+        result.remaining = len(staging.staged)
+        return result
+    try:
+        session = writer.open_adds()
+    except RunInProgress:
+        result.remaining = len(staging.staged)
+        raise
+    since_save = 0
+    try:
+        for row in buckets["complete"]:
+            try:
+                written = writer.add_row(dict(row.cells), session=session)
+            except RunInProgress:
+                result.remaining = len(staging.staged)
+                raise
+            except EditError as exc:
+                if "already on the ledger" in str(exc):
+                    row.status = "duplicate"
+                    row.note = NOTES["duplicate"]
+                    result.duplicates.append(row)
+                else:
+                    row.note = f"refused by the ledger: {exc}"
+                    result.refused.append((row, str(exc)))
             else:
-                row.note = f"refused by the ledger: {exc}"
-                result.refused.append((row, str(exc)))
-        else:
-            row.status = "imported"
-            row.ledger_row = written.get("row_number")
-            row.imported_at = clock().isoformat(timespec="seconds")
-            row.note = ""
-            result.imported.append(row)
+                row.status = "imported"
+                row.ledger_row = written.get("row_number")
+                row.imported_at = clock().isoformat(timespec="seconds")
+                row.note = ""
+                result.imported.append(row)
+            since_save += 1
+            if since_save >= SAVE_EVERY:
+                save(staging)
+                since_save = 0
+    finally:
         save(staging)
     result.remaining = len(staging.staged)
     return result

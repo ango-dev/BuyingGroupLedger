@@ -1314,8 +1314,8 @@
   "use strict";
   document.addEventListener("change", function (e) {
     var t = e.target;
-    if (!t || !t.form || (t.form.id !== "filters" && t.form.id !== "eper-form")) return;
-    if (t.name !== "view" && t.name !== "per" && t.name !== "eper") return;
+    if (!t || !t.form || (t.form.id !== "filters" && t.form.id !== "eper-form" && t.form.id !== "iper-form")) return;
+    if (t.name !== "view" && t.name !== "per" && t.name !== "eper" && t.name !== "iper") return;
     e.stopPropagation();
     var page = t.form.querySelector('input[name="page"]');
     if (page) page.value = "";

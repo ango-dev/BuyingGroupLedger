@@ -2,16 +2,31 @@
     the Orders table (static/edit.js) -- click, type, Enter; ranges; Ctrl+C / Ctrl+V; undo; row
     numbers select rows and Delete drops them after one confirmation. A cell posts to
     data-cell-url and gets the <td> back. The first column says what each row still needs. -#}
+{% from "_select.html" import choose %}
 <form id="bulk" method="post" action="/tools/import/rows/delete" data-confirm="Drop every selected row from the staging sheet? They are not imported, and the sheet does not keep them.">
-  <div class="muted count">{{ rows | length }} staged row(s) · <span id="sel-count">0</span> selected {% with id='import-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}</div>
+  <div class="muted count">{% if ipager.pages > 1 %}{{ ipager.start }}–{{ ipager.end }} of {% endif %}{{ ipager.total }} staged row(s) · <span id="sel-count">0</span> selected {% with id='import-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}</div>
   <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Drop the selected row from the staging sheet?" data-confirm-many="Drop the {n} selected rows from the staging sheet?">Drop selected</button>
   <div class="sheet">
   <table class="grid compact sheetlike imports" data-cell-url="/tools/import/cell">
     <thead><tr><th class="rownum" title="select / unselect every row"><input type="checkbox" id="sel-all" hidden aria-label="select all">#</th><th class="missing">Still needed</th>{% for f in STAGING_FIELDS %}<th class="col-{{ f }}">{{ header_of(f) }}</th>{% endfor %}</tr></thead>
     <tbody>
-    {% for r in rows %}{% with n=loop.index, row_gap_names=gap_names[r.id], row_gaps=gaps[r.id] %}{% include "_import_row.html" %}{% endwith %}{% endfor %}
+    {% for r in rows %}{% with n=ipager.start + loop.index0, row_gap_names=gap_names[r.id], row_gaps=gaps[r.id] %}{% include "_import_row.html" %}{% endwith %}{% endfor %}
     </tbody>
   </table>
   </div>
 </form>
+{#- one page at a time: the pager and the
+    size picker, plain links and a plain form (edit.js submits the picker at once); the commit, the
+    CSV and Drop selected work on the whole sheet, the page only decides what is in view -#}
+<div class="pager import-pager">
+  {% if ipager.pages > 1 %}
+  <a class="{{ '' if ipager.has_prev else 'disabled' }}" href="/tools/import?ipage={{ (ipager.page - 1) if ipager.has_prev else 1 }}">‹ prev</a>
+  {% for p in ipager.window %}<a class="{{ 'current' if p == ipager.page }}" href="/tools/import?ipage={{ p }}">{{ p }}</a>{% endfor %}
+  <a class="{{ '' if ipager.has_next else 'disabled' }}" href="/tools/import?ipage={{ (ipager.page + 1) if ipager.has_next else ipager.pages }}">next ›</a>
+  <span class="muted small">page {{ ipager.page }} of {{ ipager.pages }}</span>
+  {% endif %}
+  <form method="get" action="/tools/import" id="iper-form" class="inline-form eper-form">
+    {{ choose('iper', [(50, '50'), (100, '100'), (250, '250'), (500, '500'), (0, 'all')], iper, 'Per page', 'inline') }}
+  </form>
+</div>
 <script type="application/json" id="cell-choices">{{ choices | tojson }}</script>
