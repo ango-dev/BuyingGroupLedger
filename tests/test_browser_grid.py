@@ -999,3 +999,43 @@ def test_a_selection_shows_sheets_style_stats_bottom_right(served, page):
     page.locator("table.sheetlike tbody tr").first.locator("td[data-field=quantity]").click()
     assert not page.locator(".sel-stats.on").count()
     assert page.errors == []
+
+
+def test_form_suggestions_appear_on_typing_and_enter_takes_the_first(served, page, client):
+    """no dropdown until the user types; it narrows as they type; Enter takes the
+    first result, the arrows move through them."""
+    for desc, cat in (("Shipping boxes", "supplies"), ("Shipping tape", "supplies"), ("Costco membership", "membership")):
+        client.post("/taxes/expense", data={"year": "2025", "date": "2025-03-03", "description": desc, "amount": "12",
+                                            "profile": "alpha", "email": "", "receipt_url": "https://x/r.pdf", "category": cat}, follow_redirects=False)
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{served}/taxes?year=2026")
+    page.wait_for_selector("#expense-form")
+    page.locator("#expense-form").evaluate("d => d.open = true")
+    box = page.locator("#expense-form input[name='description']")
+    box.click()
+    page.wait_for_timeout(100)
+    assert page.locator(".pop.on").count() == 0  # focus alone shows nothing
+    page.keyboard.type("Sh")
+    page.wait_for_selector(".pop.on .choice")
+    # what starts with the typed text first; "membership" merely contains "sh"
+    assert [t.strip() for t in page.locator(".pop.on .choice").all_inner_texts()] == ["Shipping boxes", "Shipping tape", "Costco membership"]
+    page.keyboard.type("ipping t")  # narrows as it goes
+    page.wait_for_timeout(50)
+    assert [t.strip() for t in page.locator(".pop.on .choice").all_inner_texts()] == ["Shipping tape"]
+    page.keyboard.press("Enter")  # the first result, and no form submit
+    page.wait_for_timeout(100)
+    assert box.input_value() == "Shipping tape" and page.locator(".pop.on").count() == 0 and "/taxes" in page.url
+    box.fill("")
+    page.keyboard.type("s")
+    page.wait_for_selector(".pop.on .choice")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("ArrowDown")
+    assert page.locator(".pop.on .choice.hi").inner_text().strip() == "Shipping tape"
+    page.keyboard.press("Enter")
+    assert box.input_value() == "Shipping tape"
+    page.locator("#expense-form input[name='category']").click()
+    page.keyboard.type("mem")
+    page.wait_for_selector(".pop.on .choice")
+    assert page.locator(".pop.on .choice").all_inner_texts() == ["membership"]
+    page.keyboard.press("Escape")
+    assert page.errors == []

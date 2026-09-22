@@ -484,6 +484,72 @@ def _store_receipt(receipt_file: tuple[str, bytes], *, year: int, entry_id: str,
     return {"file": rel.as_posix(), "name": safe_filename(filename)}
 
 
+#: Twin receipt names are numbered -0001, -0002, ...; the width is this constant.
+RECEIPT_SUFFIX_WIDTH = 4
+_SUFFIXED = re.compile(r"^(?P<stem>.*)-(?P<n>\d{" + str(RECEIPT_SUFFIX_WIDTH) + r"})(?P<ext>\.[^.]*)?$")
+
+
+def _receipt_base(name: str) -> tuple[str, str]:
+    """"Order-0002.pdf" -> ("Order", ".pdf"); "Order.pdf" -> ("Order", ".pdf")."""
+    m = _SUFFIXED.match(name)
+    if m:
+        return m.group("stem"), m.group("ext") or ""
+    stem, dot, ext = name.rpartition(".")
+    return (stem, "." + ext) if dot and stem else (name, "")
+
+
+def _numbered(stem: str, ext: str, n: int) -> str:
+    return f"{stem}-{n:0{RECEIPT_SUFFIX_WIDTH}d}{ext}"
+
+
+def number_receipt_name(path: Path, filename: str, *, data_dir: Path) -> str:
+    """The name a new upload is stored under so that no two receipts share one:
+    a name no other receipt carries stays as it is; a twin of an existing receipt is numbered, and
+    an existing twin that still carries the bare name is renamed -0001 first (its file moved, its
+    year saved), so the pair reads Order-0001.pdf / Order-0002.pdf. Every year's expenses count."""
+    wanted = safe_filename(filename)
+    stem, ext = _receipt_base(wanted)
+    everything = load_all(path)
+    twins = []  # (year, entry) whose receipt shares the base name
+    for year, inputs in everything.items():
+        for e in inputs.expenses:
+            name = str((e.get("receipt") or {}).get("name") or "")
+            if name and _receipt_base(name) == (stem, ext):
+                twins.append((year, e))
+    if not twins:
+        return wanted
+    used = set()
+    changed = set()
+    for year, e in twins:
+        name = e["receipt"]["name"]
+        m = _SUFFIXED.match(name)
+        if m:
+            used.add(int(m.group("n")))
+            continue
+        n = 1
+        while n in used:
+            n += 1
+        used.add(n)
+        new_name = _numbered(stem, ext, n)
+        old_rel = e["receipt"].get("file") or ""
+        if old_rel:  # the file on disk follows its record
+            old_path = Path(data_dir) / old_rel
+            new_rel = Path(old_rel).parent / f"{e['id']}_{new_name}"
+            try:
+                old_path.rename(Path(data_dir) / new_rel)
+                e["receipt"]["file"] = new_rel.as_posix()
+            except OSError:
+                pass
+        e["receipt"]["name"] = new_name
+        changed.add(year)
+    for year in changed:
+        save_year(path, year, everything[year])
+    n = 1
+    while n in used:
+        n += 1
+    return _numbered(stem, ext, n)
+
+
 def _unlink_receipt(receipt: Mapping, *, data_dir: Path) -> None:
     rel = (receipt or {}).get("file")
     if rel:
@@ -617,10 +683,16 @@ def remove_expenses(inputs: YearInputs, entry_ids: Iterable[str], *, data_dir: P
 def expense_choices(inputs: YearInputs) -> dict:
     """The previous answers per choice column of the expenses table, for the inline editor's
     dropdown (the same #cell-choices shape the Orders grid reads)."""
+    return expense_choices_all({0: inputs})
+
+
+def expense_choices_all(all_inputs: Mapping[int, YearInputs]) -> dict:
+    """The same over EVERY year's expenses, the description included for the add form's suggestions."""
     values = {}
-    for field in ("category", "profile", "email"):
-        seen = sorted({str(e.get(field) or "").strip() for e in inputs.expenses} - {""}, key=str.lower)
-        values[field] = seen
+    expenses = [e for inputs in all_inputs.values() for e in inputs.expenses]
+    for field in ("description", "category", "profile", "email"):
+        values[field] = sorted({str(e.get(field) or "").strip() for e in expenses} - {""}, key=str.lower)
+    values["amount"] = sorted({f"{float(e.get('amount') or 0):.2f}" for e in expenses if e.get("amount")}, key=float)
     return {"values": values, "card_pairs": []}
 
 

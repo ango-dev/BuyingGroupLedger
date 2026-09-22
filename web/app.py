@@ -829,7 +829,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     other_logs=tax_inputs.other_logs(inputs, year), closable=not close_why, close_why=close_why,
                     year_prev=year_prev, year_next=year_next, this_year=clock().year,
                     today=tax_inputs.log_default_date(year, clock().date().isoformat()),  # the logs' new row: in the year
-                    draft=draft or {}, expense_choices=tax_inputs.expense_choices(inputs),
+                    draft=draft or {}, expense_choices=tax_inputs.expense_choices_all(tax_inputs.load_all(tax_inputs_path)),
                     expenses=tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True),
                     esort=esort, edir=edir, **extra)
 
@@ -897,7 +897,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     async def taxes_expense_add(request: Request):
         """One expense with its receipt: every field required (web/tax_inputs.add_expense)."""
         year, fields, receipt_file = await expense_form(request)
-        inputs = load_tax_inputs(year)
+        if receipt_file:  # twin names are numbered across every year
+            receipt_file = (tax_inputs.number_receipt_name(tax_inputs_path, receipt_file[0], data_dir=data_dir), receipt_file[1])
+        inputs = load_tax_inputs(year)  # after the numbering: it may have renamed a twin in this year
         in_place = request.headers.get("HX-Request", "").lower() == "true"
         try:
             entry = tax_inputs.add_expense(inputs, fields, year=year, data_dir=data_dir,
@@ -952,6 +954,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return RedirectResponse(url=f"{back}&error={quote('No file was chosen')}#s-expenses", status_code=303)
         inputs = load_tax_inputs(year)
         try:
+            receipt_file = (tax_inputs.number_receipt_name(tax_inputs_path, receipt_file[0], data_dir=data_dir), receipt_file[1])
+            inputs = load_tax_inputs(year)
             entry = tax_inputs.replace_receipt(inputs, entry_id, receipt_file, year=year, data_dir=data_dir)
         except KeyError:
             raise HTTPException(status_code=404, detail="no such expense")

@@ -153,6 +153,10 @@
     var typed = (state.filter || "").trim().toLowerCase();
     var current = (owner.value || "").trim();
     var values = state.values.filter(function (v) { return !typed || v.toLowerCase().indexOf(typed) >= 0; });
+    if (typed) {  // what starts with the typed text first, then what merely contains it (each in its order)
+      var starts = values.filter(function (v) { return v.toLowerCase().indexOf(typed) === 0; });
+      values = starts.concat(values.filter(function (v) { return starts.indexOf(v) < 0; }));
+    }
     state.shown = values;
     if (state.hi >= values.length) state.hi = values.length ? values.length - 1 : -1;
     var html = "";
@@ -164,6 +168,7 @@
       html = '<span class="muted small">' + (typed ? "a new answer: Enter keeps what you typed" : "no previous answers yet") + "</span>";
     }
     pop.innerHTML = html;
+    if (owner && owner.matches && owner.matches("input[data-choices]")) pop.classList.toggle("empty", !values.length);
   }
   function render() { if (kind === "choices") renderChoices(); else renderDate(); }
 
@@ -200,10 +205,13 @@
     if (kind !== "choices" || !state) return;
     if (e.key === "ArrowDown") { e.preventDefault(); state.hi = Math.min(state.hi + 1, state.shown.length - 1); render(); }
     else if (e.key === "ArrowUp") { e.preventDefault(); state.hi = Math.max(state.hi - 1, -1); render(); }
-    else if (e.key === "Enter" && state.hi >= 0 && state.shown[state.hi] !== undefined) {
+    else if (e.key === "Enter") {
+      // the highlighted suggestion; with none highlighted, the FIRST one shown; with nothing shown, Enter is the form's
+      var at = state.hi >= 0 ? state.hi : (state.shown.length ? 0 : -1);
+      if (at < 0 || state.shown[at] === undefined) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      pick(state.shown[state.hi]);
+      pick(state.shown[at]);
     }
   }, true);
   document.addEventListener("input", function (e) {
@@ -271,8 +279,9 @@
     });
     return matched.length ? matched : all;
   }
-  // Forms: <input data-choices="column"> opens the column's answers on focus; data-pair names the
-  // sibling field that narrows it.
+  // Forms: <input data-choices="column"> offers the column's previous answers as SUGGESTIONS: nothing
+  // shows on focus; the list appears once the user types and narrows with every key. Arrows move the highlight, Enter takes it (or the first match),
+  // Escape closes. data-pair names the sibling field that narrows it.
   function formChoices(el) {
     var field = el.getAttribute("data-choices");
     var form = el.form || el.closest("form");
@@ -287,17 +296,12 @@
     });
     return list;
   }
-  document.addEventListener("focusin", function (e) {
+  document.addEventListener("input", function (e) {
     var el = e.target;
-    if (el && el.matches && el.matches("input[data-choices]") && !suppress) {
-      state = { values: formChoices(el), hi: -1, shown: [], filter: "" };
-      open(el, "choices", null);
-    }
-  });
-  document.addEventListener("click", function (e) {
-    var el = e.target;
-    if (el && el.matches && el.matches("input[data-choices]") && owner !== el) {
-      state = { values: formChoices(el), hi: -1, shown: [], filter: "" };
+    if (!(el && el.matches && el.matches("input[data-choices]"))) return;
+    if (!el.value.trim()) { if (owner === el) close(); return; }  // cleared: the suggestions go
+    if (owner !== el) {
+      state = { values: formChoices(el), hi: -1, shown: [], filter: el.value };
       open(el, "choices", null);
     }
   });

@@ -260,6 +260,39 @@ class TestTaxesPage:
         page = client.get("/taxes", params={"year": "2026"}).text  # the page itself: one summary, one form, a toast slot
         assert page.count('id="s-schedule-c"') == 1 and page.count('id="tax-form"') == 1 and '<div id="toast" role="status" aria-live="polite"></div>' in page and 'hx-swap-oob' not in page
 
+    def test_twin_receipt_names_are_numbered_across_years(self, client, tmp_path):
+        def add(year, name):
+            r = client.post("/taxes/expense", data={"year": str(year), "date": f"{year}-03-03", "description": name, "amount": "1",
+                                                    "profile": "alpha", "email": "", "category": ""},
+                            files={"receipt_file": (name, b"%PDF-1.4 x", "application/pdf")}, follow_redirects=False)
+            assert r.status_code == 303, r.text[:200]
+
+        add(2025, "Order.pdf")
+        store = lambda: json.loads((tmp_path / "data" / "tax_inputs.json").read_text(encoding="utf-8"))  # noqa: E731
+        assert store()["2025"]["expenses"][0]["receipt"]["name"] == "Order.pdf"  # alone: untouched
+        add(2026, "Order.pdf")
+        first, second = store()["2025"]["expenses"][0]["receipt"], store()["2026"]["expenses"][0]["receipt"]
+        assert first["name"] == "Order-0001.pdf" and second["name"] == "Order-0002.pdf"
+        assert first["file"].endswith("_Order-0001.pdf") and (tmp_path / "data" / first["file"]).exists()  # the file followed
+        assert second["file"].endswith("_Order-0002.pdf") and (tmp_path / "data" / second["file"]).exists()
+        add(2026, "Order.pdf")
+        assert store()["2026"]["expenses"][1]["receipt"]["name"] == "Order-0003.pdf"
+        add(2026, "Invoice.pdf")
+        assert store()["2026"]["expenses"][2]["receipt"]["name"] == "Invoice.pdf"  # a different name stays bare
+        from web import tax_inputs as ti
+        assert ti._receipt_base("Order-0002.pdf") == ("Order", ".pdf") and ti._receipt_base("scan") == ("scan", "")
+
+    def test_the_add_form_suggests_from_every_years_expenses(self, client, tmp_path):
+        """suggestions on the expense form, drawn from ALL expenses."""
+        client.post("/taxes/expense", data={"year": "2025", "date": "2025-03-03", "description": "Shipping boxes", "amount": "12",
+                                            "profile": "alpha", "email": "", "receipt_url": "https://x/r.pdf", "category": "supplies"}, follow_redirects=False)
+        body = client.get("/taxes", params={"year": "2026"}).text
+        assert 'name="description" value="" placeholder="what it was" required data-choices="description" autocomplete="off"' in body
+        assert 'data-choices="category"' in body and 'data-choices="email"' in body
+        choices = json.loads(body.split('id="cell-choices">')[1].split("</script>")[0])
+        assert choices["values"]["description"] == ["Shipping boxes"] and choices["values"]["category"] == ["supplies"]  # 2025's, on 2026's page
+        assert choices["values"]["amount"] == ["12.00"] and 'data-choices="amount"' in body  # every box but links and receipts
+
     def test_an_expense_adds_in_place(self, client, tmp_path):
         """the expense add posts in place -- the panel, the summary and a toast; a refusal keeps what was typed."""
         response = client.post("/taxes/expense", data={"year": "2026", "date": "2026-03-03", "description": "boxes", "amount": "12",

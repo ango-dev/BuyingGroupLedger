@@ -1,7 +1,7 @@
 """The choice columns' previous answers (web/queries.choice_values, 2026-09-18)."""
 from models.order import FIELDNAMES
 from web.ledger_reader import LedgerRow
-from web.queries import CHOICE_FIELDS, choice_values
+from web.queries import CHOICE_FIELDS, SUGGEST_FIELDS, choice_values
 
 
 def row(**values):
@@ -14,7 +14,7 @@ def test_most_used_first_then_alphabetical_and_blanks_skipped():
     rows = [row(profile_label="b", retailer="Costco"), row(profile_label="a", retailer="Costco"),
             row(profile_label="a", retailer=""), row(profile_label="  ", retailer="Best Buy")]
     values = choice_values(rows)
-    assert set(values) == set(CHOICE_FIELDS)
+    assert set(values) == set(SUGGEST_FIELDS) and set(CHOICE_FIELDS) < set(SUGGEST_FIELDS)  # every box suggests (2026-09-21)
     assert values["profile_label"] == ["a", "b"]
     assert values["retailer"] == ["Costco", "Best Buy"]
     assert values["status"] == [] and "tracking_submitted" not in values

@@ -19,13 +19,15 @@ LINK_FIELDS = ("order_url", "tracking_url", "receipt_url")
 #: Columns whose cell editor offers the ledger's previous answers -- and takes a new one, which
 #: is a previous answer from then on.
 CHOICE_FIELDS = ("status", "retailer", "buying_group", "card_name", "card_last4", "profile_label")
+#: Every box on the Orders add row suggests from its column; CHOICE_FIELDS stay the grid's choice cells.
+SUGGEST_FIELDS = CHOICE_FIELDS + ("order_id", "shipment", "item_name", "quantity", "cost_per_item")
 
 
 def choice_values(rows) -> dict[str, list[str]]:
-    """Every distinct non-blank value per CHOICE_FIELDS column, most used first, then A-Z."""
-    counts: dict[str, Counter] = {f: Counter() for f in CHOICE_FIELDS}
+    """Every distinct non-blank value per SUGGEST_FIELDS column, most used first, then A-Z."""
+    counts: dict[str, Counter] = {f: Counter() for f in SUGGEST_FIELDS}
     for row in rows:
-        for field in CHOICE_FIELDS:
+        for field in SUGGEST_FIELDS:
             value = row.text(field).strip()
             if value:
                 counts[field][value] += 1

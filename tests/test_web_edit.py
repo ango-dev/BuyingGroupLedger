@@ -403,6 +403,10 @@ class TestOrdersRoutes:
         assert 'name="card_last4" value="" data-choices="card_last4" data-pair="card_name"' in body
         assert 'class="actions"' in body and 'class="span-6"' in body
         assert 'name="status" value="ordered" data-choices="status" data-options="ordered,shipped,delivered,cancelled,paid,return"' in body
+        # every other box suggests from its column too, the date box keeps its calendar (2026-09-21)
+        assert 'name="order_id" value="" required data-choices="order_id" autocomplete="off"' in body
+        assert 'name="quantity" value="" inputmode="numeric" data-choices="quantity" autocomplete="off"' in body
+        assert 'name="order_date" data-date' in body and 'name="order_date" data-date value="" placeholder="YYYY-MM-DD" required autocomplete="off"' in body
         # every date-like editable uses the page's own picker: no native date / month controls anywhere
         assert 'type="month"' not in body and 'type="date"' not in body
         assert 'name="month" data-month' in body and 'name="paid" data-month' in body
