@@ -63,6 +63,7 @@ Apply for real:
 `run()` is also called from main.py so a scheduled run does this inside the same run lock.
 """
 
+import dataclasses
 import argparse
 import logging
 from datetime import datetime, timezone
@@ -745,6 +746,29 @@ def allocate_expected_payouts(
     return writes, changes
 
 
+def _in_ledger_spelling(records: list[PayoutRecord],
+                        rows_by_tracking: dict[str, list[int]]) -> list[PayoutRecord]:
+    """Each record's tracking number in the ledger's own spelling, where they differ only in case.
+
+    MOD's received-items report UPPER-CASES the carrier's number, and the tracking number is the
+    only join between a group's report and the ledger -- so five delivered MacBooks MOD had
+    received and priced never became `paid`. Only an unambiguous match is rewritten: a report
+    number the ledger holds exactly is left alone, and one that matches two ledger spellings
+    case-insensitively stays unmatched rather than guessed."""
+    by_fold: dict[str, list[str]] = {}
+    for number in rows_by_tracking:
+        by_fold.setdefault(number.casefold(), []).append(number)
+    out = []
+    for record in records:
+        number = record.tracking_number or ""
+        if number and number not in rows_by_tracking:
+            spellings = by_fold.get(number.casefold(), [])
+            if len(spellings) == 1:
+                record = dataclasses.replace(record, tracking_number=spellings[0])
+        out.append(record)
+    return out
+
+
 def _ledger_tracking_of(spelling: str, rows_by_tracking: dict[str, list[int]]) -> str:
     """The ledger's tracking number behind a group's spelling of it, "" when the ledger has none.
 
@@ -868,14 +892,12 @@ def _alert_on_cancelled_orders(group_key, client, plan, apply) -> None:
         return
 
     # A PARTIALLY cancelled order -- some rows cancelled, units still coming on others -- is not a divergence
-    # in itself: the group SHOULD still hold a purchase for the part that ships. It is one only
-    # when the group still expects more units than are coming (BFMR showing 2 where 1 is left).
+    # in itself: the group SHOULD still hold a purchase for the part that ships. Whether the group
+    # still expects MORE units than are coming is _alert_on_over_reserved_orders' question, asked
+    # of every open order -- the cancelled line may have no row at all (ledger/sync.py never adds
+    # one to a live order since 2026-09-22).
     live = plan.get("live_quantity_by_order") or {}
     fully = [(row, order_id) for row, order_id in cancelled if not live.get(order_id)]
-    partial: dict[str, list[int]] = {}
-    for row, order_id in cancelled:
-        if live.get(order_id):
-            partial.setdefault(order_id, []).append(row)
 
     if fully:
         still_open = client.active_purchases_for(order_id for _row, order_id in fully)
@@ -895,24 +917,56 @@ def _alert_on_cancelled_orders(group_key, client, plan, apply) -> None:
                 f"quota.",
             )
 
-    if partial and hasattr(client, "active_purchase_quantities_for"):
-        held = client.active_purchase_quantities_for(partial)
-        over = [(order_id, held[order_id], live[order_id]) for order_id in partial
-                if held.get(order_id, 0) > live[order_id]]
-        if over:
-            detail = "\n".join(f"  order {order_id}: {coming} unit(s) still coming, {group_key} shows {shown}"
-                               f" (cancelled rows: {', '.join(str(r) for r in partial[order_id])})"
-                               for order_id, shown, coming in over)
-            log.warning("%s: %d partially cancelled order(s) still show the full quantity there",
-                        group_key, len(over))
-            _alert(
-                apply,
-                f"ACTION NEEDED — {group_key}: {len(over)} partially cancelled order(s) still show the full quantity there",
-                f"Part of these orders was cancelled at the retailer, but {group_key} still expects the "
-                f"original quantity:\n{detail}\n\n"
-                f"Reduce the purchase quantity by hand in My Tracker (BFMR only ever lets a quantity "
-                f"go DOWN, and this tool never cancels or reduces anything there itself).",
-            )
+
+#: Statuses of an order still in progress -- the ones a quantity mismatch can still be fixed on.
+_OPEN_ORDER_STATUSES = frozenset({"ordered", "shipped", "delivered"})
+
+
+def _alert_on_over_reserved_orders(group_key, client, plan, apply) -> None:
+    """An OPEN order whose buying group still holds more units than the ledger shows coming.
+
+    The case that matters is a partial cancellation the group was never told about -- one
+    PS5 of two cancelled at Best Buy while BFMR still expects two. Asked of EVERY open order, not
+    only the ones with a cancelled row on the ledger: a cancelled line of a live order is not
+    recorded (ledger/sync.py), and a mismatch typed at the group has no cancelled row either.
+    Skipped: orders with an unresolved split row (Quantity "*" -- the count is unknown, and
+    _alert_on_unresolved_splits already says so) and orders the ledger counts no live unit for (a
+    fully cancelled order is _alert_on_cancelled_orders' case). Repeats every run until fixed, as
+    every ACTION NEEDED here does; this tool never reduces a quantity at the group itself."""
+    if not hasattr(client, "active_purchase_quantities_for"):
+        return
+    live = plan.get("live_quantity_by_order") or {}
+    status_by_row = plan.get("status_by_row") or {}
+    unresolved = {order_id for _row, order_id, _t in plan.get("unresolved_split") or []}
+    cancelled_rows: dict[str, list[int]] = {}
+    for row, order_id in plan.get("cancelled_by_group", {}).get(group_key) or []:
+        cancelled_rows.setdefault(order_id, []).append(row)
+    candidates = sorted(
+        order_id for order_id, rows in (plan.get("rows_by_order", {}).get(group_key) or {}).items()
+        if live.get(order_id) and order_id not in unresolved
+        and any(status_by_row.get(n, "") in _OPEN_ORDER_STATUSES for n in rows)
+    )
+    if not candidates:
+        return
+    held = client.active_purchase_quantities_for(candidates)
+    over = [(order_id, held[order_id], live[order_id]) for order_id in candidates
+            if held.get(order_id, 0) > live[order_id]]
+    if not over:
+        return
+    lines = []
+    for order_id, shown, coming in over:
+        note = (f" (cancelled rows: {', '.join(str(r) for r in cancelled_rows[order_id])})"
+                if cancelled_rows.get(order_id) else "")
+        lines.append(f"  order {order_id}: {coming} unit(s) still coming, {group_key} shows {shown}{note}")
+    log.warning("%s: %d open order(s) show more units there than are coming", group_key, len(over))
+    _alert(
+        apply,
+        f"ACTION NEEDED — {group_key}: {len(over)} order(s) show more units there than are coming",
+        f"{group_key} still expects more units than the ledger shows coming for these orders -- "
+        f"usually part of the order was cancelled at the retailer:\n" + "\n".join(lines) + "\n\n"
+        f"Reduce the purchase quantity by hand in My Tracker (BFMR only ever lets a quantity "
+        f"go DOWN, and this tool never cancels or reduces anything there itself).",
+    )
 
 
 def _alert_on_cancelled_purchases(group_key, client, plan, apply) -> None:
@@ -1065,7 +1119,8 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
                 "\n".join(reason for _t, reason in insurance.failed),
             )
 
-    payouts = client.fetch_payouts([r.tracking_number for r in rows])
+    payouts = _in_ledger_spelling(client.fetch_payouts([r.tracking_number for r in rows]),
+                                  plan["rows_by_tracking"])
     payout_writes = allocate_payouts(
         payouts, plan["rows_by_tracking"], plan["costs_by_row"], plan["status_by_row"],
         plan["insurance_by_row"], plan.get("order_of_row"), plan.get("item_of_row"),
@@ -1122,6 +1177,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
             )
 
     _alert_on_cancelled_orders(group_key, client, plan, apply)
+    _alert_on_over_reserved_orders(group_key, client, plan, apply)
     _alert_on_cancelled_purchases(group_key, client, plan, apply)
 
     ticked = _rows_held_by_group(rows, known, push)

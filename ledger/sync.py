@@ -704,6 +704,21 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
     incoming_pname_count: dict[tuple, int] = {}  # (order, package id, item name) — a multi-SKU carton
     incoming_pids_by_order: dict[str, set] = {}  # which packages this batch says are ON THE PAGE
     incoming_keys = {_record_key(rec) for rec in collapsed}  # every exact key this page still shows
+    # Orders this batch still reports a LIVE line for -- where a cancelled line is only partial.
+    orders_with_live_lines = {
+        str(rec.get("order_id", "")).strip() for rec in collapsed
+        if str(rec.get("status", "")).strip().lower() != "cancelled"
+    }
+    # Keys whose record the package id will route to a DIFFERENT existing row: that record will not
+    # land on the row its key names, so an id-less placeholder there is free (DEFER (3)).
+    routed_away_keys: set[tuple] = set()
+    for rec in collapsed:
+        rpid = str(rec.get("package_id", "")).strip()
+        owners = package_to_existing.get((rec.get("order_id", ""), rpid), []) if rpid else []
+        if len(owners) == 1:
+            owner_key = tuple(owners[0][1][i] if i < len(owners[0][1]) else "" for i in key_idx)
+            if owner_key != _record_key(rec):
+                routed_away_keys.add(_record_key(rec))
     incoming_itemno_count: dict[tuple, int] = {}  # (order, date, shipment, item number)
     # Which SHIPMENTS each incoming tracking number claims, per order — the mis-read detector below.
     incoming_tracking_shipments: dict[tuple, set] = {}
@@ -831,6 +846,16 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
         #    appending the "new" package here would book the order's full cost a second time, which
         #    is history 1f all over again.
         hit = key_to_existing.get(key)
+        if hit is not None and hit[0] in claimed_rows:
+            hit = None  # an earlier record of this batch already took that row, by identity
+        if hit is not None and incoming_pid and not _package_id_of(hit[1], package_hdr_idx):
+            # IDENTITY BEATS ORDINAL ON AN ID-LESS ROW:
+            # when the incoming package id already names exactly one OTHER row, that row is this
+            # package, whatever card position the page gave it.
+            owners = [c for c in package_to_existing.get((record["order_id"], incoming_pid), [])
+                      if c[0] not in claimed_rows]
+            if len(owners) == 1 and owners[0][0] != hit[0]:
+                hit = None
         hit_pid = _package_id_of(hit[1], package_hdr_idx) if hit is not None else ""
         displaced = (
             hit is not None and not same_package(hit)
@@ -917,13 +942,21 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
             # incoming Shipment number. Only when the placeholder's own key is not in this batch (a
             # page still showing that card keeps it), and only for a lone candidate.
             if match is None and placeholder_to_existing:
+                # A placeholder whose own key the page still shows is not free -- unless the record
+                # at that key belongs, by package id, to ANOTHER row.
                 candidates = [
                     c for c in placeholder_to_existing.get(key[:3], [])
                     if c[0] not in claimed_rows
-                    and tuple(c[1][i] if i < len(c[1]) else "" for i in key_idx) not in incoming_keys
+                    and (tuple(c[1][i] if i < len(c[1]) else "" for i in key_idx) not in incoming_keys
+                         or tuple(c[1][i] if i < len(c[1]) else "" for i in key_idx) in routed_away_keys)
                 ]
                 if len(candidates) == 1:
                     match = candidates[0]
+                    taken = key_to_existing.get(key)
+                    if taken is not None and taken[0] != match[0] \
+                            and shipment_hdr_idx < len(match[1]) and str(match[1][shipment_hdr_idx]).strip():
+                        # The incoming Shipment number is another live row's: keep the placeholder's.
+                        sheet_row[shipment_field_idx] = match[1][shipment_hdr_idx]
                     log.info(
                         "Order %s / %r: pre-ship placeholder at shipment %s re-homed as shipment %s "
                         "(the cards merged or re-ordered before shipping).",
@@ -950,6 +983,20 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
                         if name_hdr_idx < len(match[1]) and str(match[1][name_hdr_idx]).strip():
                             sheet_row[name_field_idx] = match[1][name_hdr_idx]  # keep recorded name
             if match is None:
+                if (str(record.get("status", "")).strip().lower() == "cancelled"
+                        and record["order_id"] in orders_with_live_lines):
+                    # A CANCELLED LINE OF A LIVE ORDER IS NEVER ADDED.
+                    # Best Buy keeps listing a cancelled unit as its own group on every read of the
+                    # still-open order (BBY01-809900000011: one PS5 coming, one cancelled), so a row
+                    # the user deleted came back each run. The per-line twin of the mappings' rule
+                    # for a brand-new, fully cancelled order: a cancelled line that has a row keeps
+                    # updating it; one without is not recorded. A fully cancelled order is unchanged.
+                    # The buying-group side does not need the row: _alert_on_over_reserved_orders
+                    # compares every open order's live quantity with the group's.
+                    log.info("Order %s / %r shipment %s: cancelled line of a live order has no row -- "
+                             "not added.", record["order_id"], record.get("item_name", ""),
+                             record.get("shipment", ""))
+                    continue
                 if displaced:
                     label = shipment_label(_next_shipment_number(
                         record["order_id"], existing, oid_idx, shipment_hdr_idx,

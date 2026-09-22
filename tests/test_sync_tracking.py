@@ -454,6 +454,7 @@ class TestPartiallyCancelledOrders:
         monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
         client = self.FakeClient(open_orders={"HALF"}, held={"HALF": 1})
         sync_tracking._alert_on_cancelled_orders("BFMR", client, self._plan(), apply=True)
+        sync_tracking._alert_on_over_reserved_orders("BFMR", client, self._plan(), apply=True)
         assert sent == []  # an open purchase for the half still coming is right, not a divergence
         assert client.asked_open == ["GONE"]  # only the fully cancelled order is checked for openness
 
@@ -461,12 +462,35 @@ class TestPartiallyCancelledOrders:
         sent = []
         monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
         client = self.FakeClient(open_orders={"HALF"}, held={"HALF": 2})
-        sync_tracking._alert_on_cancelled_orders("BFMR", client, self._plan(), apply=True)
+        sync_tracking._alert_on_over_reserved_orders("BFMR", client, self._plan(), apply=True)
         assert len(sent) == 1
         subject, body = sent[0]
-        assert subject == "ACTION NEEDED — BFMR: 1 partially cancelled order(s) still show the full quantity there"
+        assert subject == "ACTION NEEDED — BFMR: 1 order(s) show more units there than are coming"
         assert "order HALF: 1 unit(s) still coming, BFMR shows 2 (cancelled rows: 3)" in body
         assert "Reduce the purchase quantity by hand" in body and "never cancels or reduces" in body
+
+    def test_the_mismatch_alerts_with_no_cancelled_row_on_the_ledger(self, monkeypatch):
+        # the cancelled line of a live order is no longer recorded -- the alert
+        # must still fire when BFMR keeps the original quantity.
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
+        plan = plan_tracking_submissions(HEADER_LIST, [shipped("HALF", "T1", **{"Shipment": 1, "Quantity": 1})])
+        client = self.FakeClient(open_orders={"HALF"}, held={"HALF": 2})
+        sync_tracking._alert_on_over_reserved_orders("BFMR", client, plan, apply=True)
+        assert len(sent) == 1 and "order HALF: 1 unit(s) still coming, BFMR shows 2" in sent[0][1]
+        assert "cancelled rows" not in sent[0][1]
+
+    def test_settled_and_unresolved_orders_are_not_asked(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
+        plan = plan_tracking_submissions(HEADER_LIST, [
+            shipped("PAID", "T1", **{"Quantity": 1, "Status": "paid"}),
+            shipped("SPLIT", "T2", **{"Quantity": 1}),
+            shipped("SPLIT", "T3", **{"Shipment": 2, "Quantity": "*"}),
+        ])
+        client = self.FakeClient(held={"PAID": 2, "SPLIT": 5})
+        sync_tracking._alert_on_over_reserved_orders("BFMR", client, plan, apply=True)
+        assert sent == [] and (client.asked_qty is None or not ({"PAID", "SPLIT"} & set(client.asked_qty)))
 
     def test_a_fully_cancelled_order_still_open_at_the_group_alerts_as_before(self, monkeypatch):
         sent = []
@@ -484,8 +508,10 @@ class TestPartiallyCancelledOrders:
             def active_purchases_for(self, order_ids):
                 return set(order_ids)
 
-        sync_tracking._alert_on_cancelled_orders("MOD", Mod(), {"cancelled_by_group": {"MOD": [(3, "HALF")]},
-                                                                "live_quantity_by_order": {"HALF": 1}}, apply=True)
+        plan = {"cancelled_by_group": {"MOD": [(3, "HALF")]}, "live_quantity_by_order": {"HALF": 1},
+                "rows_by_order": {"MOD": {"HALF": [2]}}, "status_by_row": {2: "shipped"}}
+        sync_tracking._alert_on_cancelled_orders("MOD", Mod(), plan, apply=True)
+        sync_tracking._alert_on_over_reserved_orders("MOD", Mod(), plan, apply=True)
         assert sent == []
 
 
@@ -1414,3 +1440,23 @@ class TestExpectedPayoutFollowsTheShipment:
         writes, _ = self._alloc(self._deals(), {"O1": [2, 3]}, {2: 2000.0, 3: 500.0}, None,
                                 items={2: self.IPAD, 3: self.IPAD})
         assert writes == {2: {self.COL: 1573.6}, 3: {self.COL: 393.4}}
+
+
+
+class TestAGroupsReportIsJoinedWhateverTheCase:
+    """MOD's received-items report upper-cased Best Buy's Roadie numbers
+    ("1re2a6cf3fca6133" -> "1RE2A6CF3FCA6133"), so five received MacBooks never became paid."""
+
+    def test_an_upper_cased_report_number_lands_on_the_ledgers_row(self):
+        from sync_tracking import _in_ledger_spelling
+        records = [PayoutRecord("1RE2A6CF3FCA6133", payout_amount=1202.0, payout_date="2026-09-22", status="paid")]
+        fixed = _in_ledger_spelling(records, {"1re2a6cf3fca6133": [2]})
+        writes = allocate_payouts(fixed, {"1re2a6cf3fca6133": [2]}, {2: 1199.0})
+        assert writes[2][PAYOUT_AMOUNT_COL] == 1202.0 and writes[2][PAYOUT_DATE_COL] == "2026-09-22"
+
+    def test_an_exact_or_ambiguous_spelling_is_left_alone(self):
+        from sync_tracking import _in_ledger_spelling
+        exact = [PayoutRecord("TBA1", payout_amount=1.0)]
+        assert _in_ledger_spelling(exact, {"TBA1": [2]})[0].tracking_number == "TBA1"
+        ambiguous = [PayoutRecord("ABC", payout_amount=1.0)]
+        assert _in_ledger_spelling(ambiguous, {"abc": [2], "Abc": [3]})[0].tracking_number == "ABC"

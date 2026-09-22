@@ -2819,3 +2819,101 @@ class TestAnAppendedRowInheritsTheOrdersHandEditedCardFields:
 
         rates = {str(r[_F["shipment"]]): r[_F["cashback_rate"]] for r in sheet.data_rows()}
         assert rates["2"] == 0.05
+
+
+
+class TestAReOrderedPageNeverOrphansAPlaceholder:
+    """Live (Amazon order 111-9990018-9990018, 2 iPads). After the split, card 0 kept
+    the old shipmentId and card 1 had none yet (an id-less placeholder row). Then the page re-ordered
+    its cards: the NEW package took position 1, the old one moved to position 2. The new package had
+    no home, the placeholder read as occupied, and a third full-cost row was appended."""
+
+    OID, DATE, NAME = "111-9990018-9990018", "2026-09-17", "iPad Air 11 Purple"
+
+    @pytest.fixture
+    def alerts(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("alerts.notifier.alert", lambda subject, body: calls.append((subject, body)))
+        return calls
+
+    def _existing(self, shipment, pid):
+        return row(retailer="Amazon", order_id=self.OID, order_date=self.DATE, item_name=self.NAME,
+                   shipment=shipment, status="ordered", quantity="1", cost_per_item="749",
+                   total_cost="749", tracking_number="", package_id=pid)
+
+    def _incoming(self, shipment, pid):
+        return dict(retailer="Amazon", order_id=self.OID, order_date=self.DATE, item_name=self.NAME,
+                    shipment=shipment, status="ordered", quantity=1, cost_per_item=749,
+                    total_cost=749, package_id=pid)
+
+    def _ids(self, sheet):
+        return {str(r[_F["shipment"]]): r[_F["package_id"]] for r in sheet.data_rows()}
+
+    @pytest.mark.parametrize("order", ["page", "reversed"])
+    def test_each_package_keeps_one_row_whatever_order_the_records_arrive_in(self, sheet, tmp_path,
+                                                                             alerts, order):
+        sheet.rows = [list(HEADER), self._existing("1", "NHfbZgYnL"), self._existing("2", "")]
+        records = [self._incoming("1", "N4Df1VH6L"), self._incoming("2", "NHfbZgYnL")]
+        if order == "reversed":
+            records.reverse()
+
+        sync_csv_to_ledger(write_csv_file(tmp_path, *records))
+
+        assert self._ids(sheet) == {"1": "NHfbZgYnL", "2": "N4Df1VH6L"}
+        assert alerts == []
+
+    def test_the_next_read_of_the_same_page_is_stable(self, sheet, tmp_path, alerts):
+        sheet.rows = [list(HEADER), self._existing("1", "NHfbZgYnL"), self._existing("2", "N4Df1VH6L")]
+
+        sync_csv_to_ledger(write_csv_file(tmp_path, self._incoming("1", "N4Df1VH6L"),
+                                          self._incoming("2", "NHfbZgYnL")))
+
+        assert self._ids(sheet) == {"1": "NHfbZgYnL", "2": "N4Df1VH6L"}
+
+
+
+class TestACancelledLineOfALiveOrderIsNeverAdded:
+    """the cancelled
+    group comes back on every read of the still-open order, so a deleted row reappeared each run."""
+
+    OID, DATE, NAME = "BBY01-809900000011", "2026-09-18", "PlayStation 5 Slim Console 1TB"
+
+    def _existing(self, shipment, status, **v):
+        base = dict(retailer="Best Buy", order_id=self.OID, order_date=self.DATE, item_name=self.NAME,
+                    shipment=shipment, status=status, quantity="1", cost_per_item="649.99",
+                    total_cost="649.99", package_id=shipment)
+        base.update(v)
+        return row(**base)
+
+    def _incoming(self, shipment, status):
+        base = dict(retailer="Best Buy", order_id=self.OID, order_date=self.DATE, item_name=self.NAME,
+                    shipment=shipment, status=status, package_id=shipment)
+        if status != "cancelled":
+            base.update(quantity=1, cost_per_item=649.99, total_cost=649.99)
+        return base
+
+    def test_a_deleted_cancelled_line_stays_deleted(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER), self._existing("1", "ordered")]
+        sync_csv_to_ledger(write_csv_file(tmp_path, self._incoming("1", "ordered"),
+                                          self._incoming("2", "cancelled")))
+        assert [str(r[_F["shipment"]]) for r in sheet.data_rows()] == ["1"]
+
+    def test_an_existing_cancelled_row_keeps_updating(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER), self._existing("1", "ordered"),
+                      self._existing("2", "cancelled", quantity="", cost_per_item="", total_cost="")]
+        sync_csv_to_ledger(write_csv_file(tmp_path, self._incoming("1", "ordered"),
+                                          self._incoming("2", "cancelled")))
+        assert sorted(str(r[_F["status"]]) for r in sheet.data_rows()) == ["cancelled", "ordered"]
+
+    def test_a_line_cancelled_after_it_was_recorded_still_flips(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER), self._existing("1", "ordered"), self._existing("2", "ordered")]
+        sync_csv_to_ledger(write_csv_file(tmp_path, self._incoming("1", "ordered"),
+                                          self._incoming("2", "cancelled")))
+        by = {str(r[_F["shipment"]]): r[_F["status"]] for r in sheet.data_rows()}
+        assert by == {"1": "ordered", "2": "cancelled"}
+
+    def test_a_fully_cancelled_order_is_unchanged(self, sheet, tmp_path):
+        sheet.rows = [list(HEADER)]
+        sync_csv_to_ledger(write_csv_file(tmp_path, self._incoming("1", "cancelled"),
+                                          self._incoming("2", "cancelled")))
+        assert len(sheet.data_rows()) == 2
