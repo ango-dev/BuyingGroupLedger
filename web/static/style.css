@@ -263,6 +263,7 @@ body.wide .add-row { z-index: 7; }
   */
 body.wide .pinned { z-index: 8; }
 body.wide #activity-table { padding: 0 8px 16px; }
+#activity-table .count a.export { margin-left: auto; }  /* at the line's right */
 body.wide table.sheetlike th.rownum { z-index: 4; }
 /* SEPARATE borders (spacing 0): with collapsed borders a sticky <th> leaves its borders behind as
    it scrolls, and the row underneath shows through the 1px gaps between the headers. */

@@ -854,11 +854,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     esort=esort, edir=edir, **extra)
 
     EXPENSES_PER_CHOICES = (25, 50, 100, 0)  # 0 = all of them
-    EXPENSES_PER_DEFAULT = 50
+    EXPENSES_PER_DEFAULT = 25  # 25 a page
     EXPENSES_PER_COOKIE = "expenses-per"
 
     def _expenses_per(request: Request) -> int:
-        """The expenses page size: the query's preset, else this browser's remembered one, else 50."""
+        """The expenses page size: the query's preset, else this browser's remembered one, else 25."""
         raw = request.query_params.get("eper")
         if raw is None or raw == "":
             raw = request.cookies.get(EXPENSES_PER_COOKIE, "")

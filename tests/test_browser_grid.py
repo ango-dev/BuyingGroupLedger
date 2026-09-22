@@ -972,6 +972,10 @@ def test_the_activity_pager_swaps_in_place(served, page, client, tmp_path):
     assert page.locator("table.activity tbody tr:not(.details-row)").count() == 10
     assert page.evaluate("window.__loaded === true")  # swapped, never reloaded
     assert "51–60 of 60 event(s)" in page.locator("#activity-table .count").inner_text()
+    # the Export CSV button sits at the count line's right
+    line = page.locator("#activity-table .count").bounding_box()
+    button = page.locator("#activity-table a.export").bounding_box()
+    assert button["x"] + button["width"] >= line["x"] + line["width"] - 10  # inside the line's 8px padding
     assert page.errors == []
 
 

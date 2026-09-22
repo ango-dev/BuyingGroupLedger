@@ -262,7 +262,7 @@ class TestTaxesPage:
         assert page.count('id="s-schedule-c"') == 1 and page.count('id="tax-form"') == 1 and '<div id="toast" role="status" aria-live="polite"></div>' in page and 'hx-swap-oob' not in page
 
     def test_the_expenses_grid_is_one_page_at_a_time_and_exports_every_page(self, client):
-        """and Export CSV on every table. 50 a page by default, newest date first (the
+        """and Export CSV on every table. 25 a page by default, newest date first (the
         grid's existing default), the size a preset remembered in a cookie, row numbers running on
         across pages, every sort link back on page 1; the CSV holds the whole year as sorted."""
         for i in range(60):
@@ -270,26 +270,26 @@ class TestTaxesPage:
                         data={"date": f"2026-01-{i % 28 + 1:02d}", "description": f"item {i:02d}", "amount": str(i + 1),
                               "profile": "alpha", "category": "supplies", "receipt_url": "https://x/r"})
         body = client.get("/taxes", params={"year": "2026"}).text
-        assert "1–50 of 60 expense(s)" in body and body.count('<tr class="has-num">') == 50
-        assert 'class="pager expenses-pager"' in body and "page 1 of 2" in body
+        assert "1–25 of 60 expense(s)" in body and body.count('<tr class="has-num">') == 25
+        assert 'class="pager expenses-pager"' in body and "page 1 of 3" in body
         assert 'href="/taxes?year=2026&epage=2#s-expenses"' in body
         first_date = body.split('data-field="date"')[1].split(">")[1].split("<")[0]
         assert first_date == "2026-01-28"  # newest first by default, no esort needed
-        page2 = client.get("/taxes", params={"year": "2026", "epage": "2"}).text
+        page2 = client.get("/taxes", params={"year": "2026", "epage": "3"}).text
         assert "51–60 of 60 expense(s)" in page2 and page2.count('<tr class="has-num">') == 10
         assert 'aria-label="select expense 51"' in page2  # the numbering runs on
         # a sort link carries no epage: sorting from page 2 lands on page 1
         sort_link = page2[page2.index('href="/taxes?year=2026&esort=amount'):][:80]
         assert "epage" not in sort_link
         # the size: a preset, remembered, 0 = all
-        small = client.get("/taxes", params={"year": "2026", "eper": "25"}).text
-        assert small.count('<tr class="has-num">') == 25 and client.cookies.get("expenses-per") == "25"
-        assert client.get("/taxes", params={"year": "2026"}).text.count('<tr class="has-num">') == 25  # remembered
-        assert client.get("/taxes", params={"year": "2026", "eper": "7"}).text.count('<tr class="has-num">') == 50  # not a preset
+        small = client.get("/taxes", params={"year": "2026", "eper": "50"}).text
+        assert small.count('<tr class="has-num">') == 50 and client.cookies.get("expenses-per") == "50"
+        assert client.get("/taxes", params={"year": "2026"}).text.count('<tr class="has-num">') == 50  # remembered
+        assert client.get("/taxes", params={"year": "2026", "eper": "7"}).text.count('<tr class="has-num">') == 25  # not a preset
         every = client.get("/taxes", params={"year": "2026", "eper": "0"}).text
         assert every.count('<tr class="has-num">') == 60 and "page 1 of" not in every
         # the CSV: the whole year in the grid's order, whatever the page
-        csv_text = client.get("/taxes/expenses.csv", params={"year": "2026", "eper": "25", "epage": "2"}).text
+        csv_text = client.get("/taxes/expenses.csv", params={"year": "2026", "eper": "50", "epage": "2"}).text
         lines = csv_text.splitlines()
         assert lines[0] == "Date,Description,Category,Profile,Email,Receipt,Amount" and len(lines) == 61
         assert lines[1].startswith("2026-01-28,") and lines[1].endswith(",https://x/r,")  is False
