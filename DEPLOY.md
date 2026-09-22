@@ -104,10 +104,20 @@ Then lock them down — `config.json` holds every password in plaintext:
 chmod 600 config.json .state.json
 ```
 
-**Or let the dashboard ask.** Start the container with no `config.json` at all and open the
+**Or let the dashboard ask.** Create the two files EMPTY, start the container, and open the
 dashboard: a fresh install lands on the setup wizard at `/setup`, which walks restore-a-backup,
 the password, the keys, profiles, groups, cards, alerts and the schedule, each step saving into
 `config.json` the way the Settings page does (docs/operations.md, "First-time setup").
+
+```bash
+touch config.json .state.json && chmod 600 config.json .state.json   # BEFORE the first `up`
+```
+
+The empty files are load-bearing: `docker-compose.yml` bind-mounts both as files, and when the
+host file is missing at the first `docker compose up` Docker creates an empty *directory* in its
+place — the container then cannot write either, and every wizard save fails. If that has already
+happened, the entrypoint's log and preflight both say so and give the fix: `docker compose down`,
+`rmdir` the directory, `touch` the file, `up` again.
 
 ### Upgrading a host that is already running the old six-file layout
 
@@ -183,8 +193,9 @@ thing**, and so never raise:
 
 - **a deterministic-path import that broke** — `scrape()` catches `ImportError`, so a missing
   dependency fails that retailer on every run with a failure dossier blaming a "selector";
-- **a bind mount whose host file is missing** — Docker creates an empty *directory* there, and the
-  config loaders correctly read that as "not configured";
+- **a bind mount whose host file is missing** — Docker creates an empty *directory* there, the
+  config loaders read that as "not configured", and nothing can be written to it (the setup
+  wizard's saves, Costco's token) until the host `rmdir`s it and `touch`es the file;
 - **a missing Costco refresh token** — self-heals from `auth.costco` creds; without those, alerts and
   skips every run.
 

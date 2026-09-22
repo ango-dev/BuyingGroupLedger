@@ -51,8 +51,10 @@ services:
       # for exactly one writer: the dashboard's Settings page
       # (web/settings_form.py, through config.loader.save_config). Nothing in a scheduled run
       # rewrites it, as before. A bind mount whose host file is missing makes Docker create an
-      # empty DIRECTORY here, which preflight reports as "config.json is missing" on start rather
-      # than letting the run scrape nothing and exit 0.
+      # empty DIRECTORY here -- unwritable, so a fresh install's setup wizard cannot save -- which
+      # the entrypoint and preflight both name on start with the fix. On a NEW host `touch` both
+      # files BEFORE the first `up` (DEPLOY.md, "let the dashboard ask"): an empty file reads as
+      # "not configured" and the wizard fills it.
       - ./config.json:/app/config.json
       # The app's own state — currently just Costco's refresh tokens.
       # MUST be writable — NOT :ro. Costco ROTATES the refresh token on every refresh and

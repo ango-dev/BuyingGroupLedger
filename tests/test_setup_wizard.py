@@ -94,6 +94,26 @@ class TestGate:
         response = client.get("/setup/restore", follow_redirects=False)
         assert response.status_code == 303 and response.headers["location"].startswith("/login?next=%2Fsetup")
 
+    def test_a_fresh_docker_host_starts_from_empty_stubs(self, config_file, tmp_path):
+        """The 2026-09-21 review's blocker: docker-compose bind-mounts config.json and .state.json
+        as files, so DEPLOY.md now has a new host `touch` both before its first start. Zero-byte
+        files must read as a fresh install and take every save -- the password, a profile, the
+        Done record -- where a missing-file start used to promise a wizard it could not finish."""
+        path = config_file()
+        path.write_text("", encoding="utf-8")
+        (tmp_path / ".state.json").write_text("", encoding="utf-8")
+        loader.reload_config()
+        client = _client(tmp_path)
+
+        assert client.get("/", follow_redirects=False).headers["location"] == "/setup"
+        saved = client.post("/setup/password", data={"password": "pw", "confirm": "pw"}, follow_redirects=False)
+        assert saved.status_code == 303 and config_value("web.password") == "pw"
+        assert state_record()["restart"] == "dashboard"  # the record landed in the stub
+        client.post("/setup/profiles/entry", data={"label": "alpha", "retailers": ["costco"]}, follow_redirects=False)
+        assert client.get("/setup/done").status_code == 200
+        assert json.loads(path.read_text(encoding="utf-8"))["profiles"][0]["label"] == "alpha"
+        assert state_record()["completed_at"] == NOW.isoformat(timespec="seconds")
+
     def test_needs_setup_is_the_one_decision(self, config_file):
         config_file()
         assert setup_wizard.needs_setup(lambda: NOW) is True and state_record() == {}

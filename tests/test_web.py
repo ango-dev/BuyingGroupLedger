@@ -1341,6 +1341,21 @@ class TestBackupScript:
         assert "config.json" in forced["restored"]
         assert (repo / "config.json").read_text(encoding="utf-8") == '{"secret": 1}'
 
+    def test_restore_fills_an_empty_stub_without_force(self, repo, tmp_path):
+        """A fresh Docker host `touch`es config.json / .state.json before its first start; the
+        wizard's Restore step must fill those zero-byte stubs without the overwrite tick, or a new
+        host restoring its backup stays on the step with "kept config.json"."""
+        from scripts.backup import create_backup, restore_backup
+
+        archive = create_backup(repo, tmp_path / "out")
+        (repo / "config.json").write_text("", encoding="utf-8")
+        (repo / ".state.json").write_text("", encoding="utf-8")
+
+        result = restore_backup(archive, repo)
+        assert "config.json" in result["restored"] and ".state.json" in result["restored"]
+        assert "data/ledger.sqlite3" in result["skipped_existing"]  # a real file is still kept
+        assert (repo / "config.json").read_text(encoding="utf-8") == '{"secret": 1}'
+
     def test_restore_ignores_members_outside_the_allowed_set(self, tmp_path):
         import zipfile
 

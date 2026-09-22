@@ -6,6 +6,20 @@ set -euo pipefail
 
 mkdir -p /app/logs /app/data
 
+# The bind-mount trap, named at the top of the log where it is read. docker-compose.yml mounts
+# ./config.json and ./.state.json as FILES; when the host file is missing at the first `up`, Docker
+# creates an empty DIRECTORY on the host and mounts that, and every write to it (the setup wizard's
+# saves, Costco's token refresh) raises inside the container. Nothing in here can replace the mount
+# with a file -- the fix is on the host -- so say exactly what to run. Preflight below fails on it
+# too; this line survives even when preflight cannot start.
+for stub in /app/config.json /app/.state.json; do
+    if [ -d "$stub" ]; then
+        echo "[entrypoint] $(basename "$stub") is a DIRECTORY on the host (the bind mount found no file)." >&2
+        echo "[entrypoint]   fix on the host: docker compose down && rmdir $(basename "$stub") && touch $(basename "$stub") && chmod 600 $(basename "$stub") && docker compose up -d" >&2
+        echo "[entrypoint]   an EMPTY file is what a fresh install starts from; the setup wizard fills it." >&2
+    fi
+done
+
 # Records when this container came up, so the healthcheck can tell "hasn't run YET" (normal for the
 # first few hours after a deploy, since RUN_ON_START is false by default) apart from "stopped
 # running" (a real fault). Without it the container reports unhealthy from 2 minutes after every

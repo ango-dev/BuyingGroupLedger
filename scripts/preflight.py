@@ -86,21 +86,34 @@ def _check_path(path: Path, *, required: bool, what: str, parses_json: bool = Fa
     """Stat a config path, distinguishing 'missing' from Docker's empty-directory bind-mount trap."""
     name = path.name
     if path.is_dir():
-        return Result(
-            FAIL, name,
-            f"is a DIRECTORY, not a file. This is Docker's bind-mount behaviour when the host file "
-            f"does not exist: create {path} on the host (even as an empty stub) or remove its "
-            f"volume line from docker-compose.yml. Until then: {what}",
-        )
+        return Result(FAIL, name, f"{_DIRECTORY_TRAP} Until then: {what}")
     if not path.exists():
         level = FAIL if required else WARN
         return Result(level, name, f"missing. {what}")
     if parses_json:
+        text = path.read_text(encoding="utf-8")
+        if not text.strip():
+            # The stub a fresh Docker host creates before its first start (DEPLOY.md); the loaders
+            # read it as absent, so this is "not configured yet", not a broken file.
+            return Result(FAIL, name, f"is EMPTY -- a fresh install. Open the dashboard: the setup "
+                                      f"wizard at /setup fills it (or copy config.example.json over "
+                                      f"it). Until then: {what}")
         try:
-            json.loads(path.read_text(encoding="utf-8"))
+            json.loads(text)
         except Exception as exc:  # noqa: BLE001
             return Result(FAIL, name, f"is not valid JSON ({exc}).")
     return Result(OK, name, "present")
+
+
+#: One recipe, quoted wherever the trap is diagnosed: the directory is on the HOST, so nothing
+#: inside the container can replace it with a file.
+_DIRECTORY_TRAP = (
+    "is a DIRECTORY, not a file. This is Docker's bind-mount behaviour when the host file does not "
+    "exist at the first `docker compose up`. Fix on the host: `docker compose down && rmdir "
+    "config.json .state.json; touch config.json .state.json && chmod 600 config.json .state.json && "
+    "docker compose up -d` (rmdir whichever of the two is a directory; an empty file is what the "
+    "setup wizard fills)."
+)
 
 
 #: The files config.json replaced. Their presence is how an un-migrated host is recognised.
@@ -117,6 +130,7 @@ def check_config_files(root: Path = ROOT) -> list[Result]:
     (docker/entrypoint.sh), so the run stops instead.
     """
     config = root / "config.json"
+    state = root / ".state.json"
     legacy = [name for name in LEGACY_CONFIG_FILES if (root / name).is_file()]
 
     if config.is_dir():
@@ -124,6 +138,13 @@ def check_config_files(root: Path = ROOT) -> list[Result]:
         # as "missing" sends someone hunting for the wrong problem.
         return [_check_path(config, required=True, parses_json=True,
                             what="nothing can be loaded: no profiles, no ledger, no credentials.")]
+    if state.is_dir():
+        # The same trap on the file the app WRITES: every save of a Costco token, and every step of
+        # the setup wizard (its record lives here), raises IsADirectoryError -- on a fresh install
+        # that is a 500 on the wizard's first save, with config.json looking perfectly fine.
+        return [_check_path(state, required=True,
+                            what="nothing can be saved: the setup wizard's every save and every "
+                                 "Costco token refresh fails.")]
 
     if not config.is_file():
         if legacy:

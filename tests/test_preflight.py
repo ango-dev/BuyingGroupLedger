@@ -93,7 +93,29 @@ class TestConfigFiles:
 
         assert result.level == FAIL
         assert "DIRECTORY" in result.detail
-        assert "docker-compose" in result.detail
+        assert "docker compose down && rmdir" in result.detail  # the recipe, not just the diagnosis
+
+    def test_a_state_directory_is_the_same_trap_on_the_file_the_app_writes(self, tmp_path):
+        """config.json present and fine, .state.json a directory: every setup-wizard save and every
+        Costco token refresh raises, with nothing else looking wrong."""
+        self._write(tmp_path, profiles=[{"label": "p", "retailers": ["amazon"]}])
+        (tmp_path / ".state.json").mkdir()
+
+        result = _by_name(preflight.check_config_files(root=tmp_path), ".state.json")
+
+        assert result.level == FAIL
+        assert "DIRECTORY" in result.detail and "setup wizard" in result.detail
+
+    def test_an_empty_config_is_a_fresh_install_that_names_the_wizard(self, tmp_path):
+        """The `touch`ed stub a new Docker host starts from (DEPLOY.md): not valid JSON, but not a
+        typo either -- the report sends the reader to /setup rather than to a JSON error."""
+        (tmp_path / "config.json").write_text("", encoding="utf-8")
+
+        result = _by_name(preflight.check_config_files(root=tmp_path), "config.json")
+
+        assert result.level == FAIL
+        assert "EMPTY" in result.detail and "/setup" in result.detail
+        assert "not valid JSON" not in result.detail
 
     def test_an_empty_profiles_section_fails_but_an_empty_cards_section_only_warns(
         self, tmp_path, config_file

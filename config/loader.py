@@ -51,11 +51,20 @@ def _read_json(path: Path) -> dict:
     A file that EXISTS but is malformed raises, deliberately. A typo in the one file that holds every
     credential must not silently degrade to "no config", which would look exactly like a fresh
     install and scrape nothing.
+
+    An EMPTY file (nothing but whitespace) is absent, not malformed. A fresh Docker host has to
+    `touch` config.json and .state.json BEFORE the first `docker compose up` -- a bind mount whose
+    host file is missing becomes a directory -- so the zero-byte stub is exactly what the setup
+    wizard finds and fills (DEPLOY.md, "let the dashboard ask"). Nothing a person typed is lost in
+    an empty file, so the typo argument does not apply.
     """
     if not path.is_file():
         return {}
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{path.name} is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):

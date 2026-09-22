@@ -570,8 +570,9 @@ rows and invents nothing either, but reconciles a profit column before writing).
 
 ### First-time setup (/setup)
 
-A fresh install -- no `config.json`, or one with no profile, and no finished setup on record --
-lands on the wizard from any page (the static assets, `/health`, sign-in, the restore and
+A fresh install -- no `config.json` (or an empty one: a Docker host `touch`es `config.json` and
+`.state.json` before its first start, since a bind mount with no host file becomes an unwritable
+directory), or one with no profile, and no finished setup on record -- lands on the wizard from any page (the static assets, `/health`, sign-in, the restore and
 `/settings` stay open: Settings is the expert's way in). Ten steps over the Settings page's own
 fields, each saving only its own settings: restore a backup (skip it on a new setup; a restored
 `config.json` ends the wizard), the dashboard password (the browser is signed in for it at once,

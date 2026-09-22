@@ -390,7 +390,12 @@ def _safe_target(root: Path, name: str) -> Path | None:
 
 def restore_backup(archive_path: Path, root: Path | None = None, *, force: bool = False) -> dict:
     """Write the archive's files under `root`. Existing files are left alone unless `force`.
-    Returns {"restored": [...], "skipped_existing": [...], "ignored": [...]}."""
+    Returns {"restored": [...], "skipped_existing": [...], "ignored": [...]}.
+
+    An EMPTY existing file does not count as existing: a fresh Docker host `touch`es config.json
+    and .state.json before its first start (the bind mounts need a file to exist), and the wizard's
+    Restore step must fill those stubs without the overwrite tick -- a zero-byte file holds nothing
+    to keep."""
     root = Path(root) if root else ROOT
     restored, skipped, ignored = [], [], []
     with zipfile.ZipFile(archive_path) as archive:
@@ -400,7 +405,7 @@ def restore_backup(archive_path: Path, root: Path | None = None, *, force: bool 
                 if member.filename != MANIFEST:
                     ignored.append(member.filename)
                 continue
-            if target.exists() and not force:
+            if target.exists() and not force and not (target.is_file() and target.stat().st_size == 0):
                 skipped.append(member.filename)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)

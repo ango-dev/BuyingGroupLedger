@@ -278,6 +278,20 @@ class TestMalformedConfig:
         loader.reload_config()
         assert loader.load_config() == {}
 
+    def test_an_empty_file_is_a_fresh_install_not_a_typo(self, config_file, tmp_path, monkeypatch):
+        """A fresh Docker host `touch`es config.json and .state.json before its first start (a
+        bind mount whose host file is missing becomes an unwritable DIRECTORY, and the wizard's
+        first save 500s -- the 2026-09-21 review's blocker). A zero-byte file holds nothing a person
+        typed, so reading it as absent loses nothing; the wizard writes over it."""
+        path = config_file()
+        path.write_text("", encoding="utf-8")
+        loader.reload_config()
+        assert loader.load_config() == {}
+        (tmp_path / ".state.json").write_text(" " + chr(10), encoding="utf-8")
+        assert loader.load_state() == {}
+        loader.save_state({"setup": {"rerun": None}})
+        assert loader.load_state() == {"setup": {"rerun": None}}
+
 
 class TestStateIsSeparate:
     """The rotating Costco token is state, not config — which is what lets config.json stay :ro."""
