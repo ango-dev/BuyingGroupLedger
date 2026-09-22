@@ -151,6 +151,11 @@ TOOLS: tuple[Tool, ...] = (
          "Ledger Fixes", (APPLY, Field("--retailer", "Retailer", "select", choices=("", "amazon", "amazon-business")),
                           Field("--orders", "Orders", "list", "limit to these order numbers")),
          writes=True, spends="a cloud browser session"),
+    Tool("receipt_files", "scripts.receipt_files", "Receipt files check",
+         "Every receipt file on disk against the ledger's links and the Taxes page's records: orphans no "
+         "entry names, records whose file is gone, expense receipts still sharing one bare name. Apply deletes "
+         "the orphans and numbers the twins.",
+         "Checks", (APPLY,), writes=True),
     Tool("standardize_retailers", "scripts.standardize_retailers", "Standardize retailer names",
          "Spell every retailer in config.json one way -- Amazon, Amazon Business, Best Buy, Costco -- in the "
          "profiles' retailers and sign-ins and the cards' rates and caps. Every spelling already loads.",

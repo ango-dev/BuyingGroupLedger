@@ -63,3 +63,11 @@ class TestTheDirectory:
         monkeypatch.setattr(store, "settings", dataclasses.replace(store.settings, receipts_dir="data/receipts"))
         assert store.receipts_dir() == store.ROOT / "data" / "receipts"
 
+
+def test_a_re_stored_receipt_under_another_extension_replaces_the_old_file(on):
+    """a replaced receipt must not linger as an orphan."""
+    store.put(KEY, b"%PDF-1.4 x", "pdf")
+    png = KEY[:-4] + ".png"
+    store.put(png, b"\x89PNG", "png")
+    assert store.exists(png) and not store.exists(KEY)
+    assert sorted(p.name for p in (on / "bestbuy" / "2026-09").iterdir()) == ["BBY01-1.png"]

@@ -591,6 +591,9 @@ details.panel.advanced-panel > summary h2 { color: var(--warn); }
 .savebar button.attention { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 45%, transparent); }
 .settings-layout { padding-bottom: 76px; }
 @media (max-width: 760px) { .savebar.fixed { padding: 8px 12px; } .settings-layout { padding-bottom: 120px; } }
+/* the Taxes inputs form's own bar: the page keeps room under its last panel */
+.tax-form { padding-bottom: 76px; }
+@media (max-width: 760px) { .tax-form { padding-bottom: 120px; } }
 button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 button.primary:hover { filter: brightness(1.08); }
 button.ghost { background: transparent; }

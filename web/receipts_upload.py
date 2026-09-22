@@ -69,6 +69,19 @@ def store_receipt(*, retailer: str, order_id: str, order_date: str, filename: st
     return link
 
 
+def delete_receipt(link: str) -> bool:
+    """Delete the stored file behind a RELATIVE Receipt Link (`/receipts/...`); False for any other
+    link or when no file was there. Used when the last row carrying the link is deleted."""
+    path = store.path_for_link(link)
+    if path is None or not path.is_file():
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True
+
+
 def receipt_file_path(path: str):
     """The stored file behind a `/receipts/<path>` request, or None (the store refuses a path
     that climbs out of its directory). The dashboard's one door onto the receipt files."""

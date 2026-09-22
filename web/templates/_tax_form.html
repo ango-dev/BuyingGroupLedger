@@ -55,8 +55,12 @@
     <label class="field-block">Notes for the preparer <textarea name="notes" rows="3" class="json">{{ inputs.notes }}</textarea></label>
   </details>
 
-  <div class="inline-form">
-    <button type="submit" class="primary">Save {{ year }}</button>
+  {#- the save bar follows the page like Settings': fixed to the window; the note says when something is unsaved -#}
+  <div class="savebar fixed tax-savebar">
+    <div class="left">
+      <button type="submit" class="primary">Save {{ year }}</button>
+      <span class="dirty" id="tax-dirty">No unsaved changes</span>
+    </div>
     <span class="muted small">Saved to <code>data/tax_inputs.json</code> (inside every backup). The summary above updates on save.</span>
   </div>
 </form>

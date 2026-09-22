@@ -1064,17 +1064,26 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         keys = selected_keys(form)
         if writer is None:
             return table_after(request, form, error="editing is off: this backend is a CSV snapshot")
+        # the receipts the rows going away link to: deleted below once no remaining row links to
+        # them (one order is one document, shared by its rows)
+        going = {(k.get("order_id", ""), k.get("order_date", ""), k.get("item_name", ""), str(k.get("shipment", ""))) for k in keys}
+        links = {r.text("receipt_link") for r in load(request).rows
+                 if (r.text("order_id"), r.text("order_date"), r.text("item_name"), r.text("shipment")) in going
+                 and r.text("receipt_link").startswith("/receipts/")}
         try:
             result = writer.remove_rows(keys)
         except EditError as exc:
             return table_after(request, form, error=str(exc))
         except Exception as exc:  # noqa: BLE001
             return table_after(request, form, error=f"{type(exc).__name__}: {exc}")
-        reader.load(force=True)
+        snapshot = reader.load(force=True)
+        remaining = {r.text("receipt_link") for r in snapshot.rows}
+        removed = sum(1 for link in links - remaining if receipts_upload.delete_receipt(link))
         act("edit", f"Deleted {result['deleted']} row(s) from the ledger",
             {"rows": result["deleted"], "order_ids": sorted({k.get("order_id", "") for k in keys}),
-             "keys": keys[:40]})
-        return table_after(request, form, notice=f"Deleted {result['deleted']} row(s)")
+             "keys": keys[:40], "receipts_removed": removed})
+        note = f"Deleted {result['deleted']} row(s)" + (f" and {removed} receipt file(s)" if removed else "")
+        return table_after(request, form, notice=note)
 
     from web import receipts_upload
 

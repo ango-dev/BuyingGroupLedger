@@ -124,6 +124,15 @@ def put(key: str, body: bytes, ext: str) -> str:
         tmp.replace(path)
     except OSError as exc:
         raise ReceiptStoreError(f"Could not write {key!r} under {receipts_dir()}: {exc}") from exc
+    # the order's earlier receipt under another extension (a PDF re-uploaded as a photo) goes, so
+    # a replaced receipt never lingers as an orphan
+    for other in path.parent.glob(path.stem + ".*"):
+        if other != path and other.suffix != ".part" and other.is_file():
+            try:
+                other.unlink()
+                log.info("Removed the replaced receipt %s", other.name)
+            except OSError:
+                pass
     log.info("Stored %s (%d bytes)", key, len(body))
     return link_for(key)
 

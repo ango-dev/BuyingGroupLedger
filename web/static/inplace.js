@@ -21,4 +21,10 @@
   }
   document.addEventListener("htmx:afterSettle", arm);
   document.addEventListener("htmx:oobAfterSwap", arm);
+  // The Taxes inputs form's bar says when something is unsaved; a save swaps the form, which resets it.
+  document.addEventListener("input", function (e) {
+    var form = e.target.closest ? e.target.closest("#tax-form") : null;
+    var note = form && form.querySelector("#tax-dirty");
+    if (note) { note.textContent = "Unsaved changes"; note.classList.add("on"); }
+  });
 })();

@@ -779,6 +779,15 @@ def test_the_taxes_inputs_save_in_place_on_enter(served, page):
     assert page.evaluate("window.__loaded === true") and "/taxes" in page.url
     assert page.locator("#s-programs details.log").first.locator(".summary-value").inner_text() == "$30.00"
     assert page.locator("#s-schedule-c").count() == 1 and "$30.00" in page.locator("#s-schedule-c").inner_text()
+    # the save bar follows the page: at the window's bottom wherever the page is scrolled
+    bar = page.locator(".tax-savebar")
+    assert bar.evaluate("b => Math.round(b.getBoundingClientRect().bottom) === window.innerHeight")
+    page.mouse.wheel(0, 600)
+    page.wait_for_timeout(100)
+    assert bar.evaluate("b => Math.round(b.getBoundingClientRect().bottom) === window.innerHeight")
+    page.locator("#s-programs details.log").first.locator("summary").click()
+    page.locator("#s-programs details.log").first.locator("input[name$='.new.amount']").fill("1")
+    assert page.locator("#tax-dirty").inner_text() == "Unsaved changes"
     assert page.errors == []
 
 
