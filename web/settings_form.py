@@ -564,6 +564,9 @@ def apply_scalars(form: Mapping[str, str], settings: list[Setting] | None = None
     return changes
 
 
+JSON_TEXT_MAX_BYTES = 512 * 1024
+
+
 def apply_section(path: str, text: str) -> int:
     """Replace one structured section from its JSON text, validated entry by entry with the
     section's own model. Returns the entry count. Raises SettingsError, nothing written."""
@@ -571,9 +574,11 @@ def apply_section(path: str, text: str) -> int:
     if spec is None:
         raise SettingsError([f"unknown section {path!r}"])
     _, shape, model, _ = spec
+    if len(text or "") > JSON_TEXT_MAX_BYTES:
+        raise SettingsError([f"{path}: the text is longer than {JSON_TEXT_MAX_BYTES // 1024} KB; edit the cards instead"])
     try:
         value = json.loads(text or ("{}" if shape == "object" else "[]"))
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
         raise SettingsError([f"{path}: not valid JSON -- {exc}"]) from exc
     if shape == "list":
         if not isinstance(value, list):
@@ -582,6 +587,10 @@ def apply_section(path: str, text: str) -> int:
         for index, entry in enumerate(value):
             try:
                 model.model_validate(strip_comments(entry))
+                if path in _IDENTITY and isinstance(entry, dict):
+                    _check_identity(path, index, strip_comments(entry), value)  # twins and blanks, as the cards refuse them
+            except SettingsError as exc:
+                errors.append(f"{path}[{index}]: {'; '.join(exc.errors)}")
             except Exception as exc:  # noqa: BLE001 -- pydantic's message is the useful part
                 errors.append(f"{path}[{index}]: {exc}")
         if errors:

@@ -287,6 +287,9 @@ class TestTheRoutes:
         assert client.get("/tools/jobs/nope").status_code == 404
         bad = client.post("/tools/run/backfill_receipts", data={"--limit": "soon"})
         assert bad.status_code == 400 and "whole number" in bad.text
+        for bad_limit in ("-1", "0", "10000000"):  # -1 was accepted
+            bad = client.post("/tools/run/backfill_receipts", data={"--limit": bad_limit})
+            assert bad.status_code == 400 and "from 1 to 1,000,000" in bad.text, bad_limit
 
     def test_a_writing_tool_is_refused_while_a_run_is_in_progress(self, client):
         (client.logs / ".run.lock").write_text("1", encoding="utf-8")

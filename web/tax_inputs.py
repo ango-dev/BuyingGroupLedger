@@ -515,6 +515,22 @@ def _expense_fields(fields: Mapping[str, str], *, year: int) -> tuple[dict, list
     return clean, errors
 
 
+def _receipt_problems(receipt_file: tuple[str, bytes]) -> list[str]:
+    """Why an uploaded expense receipt is refused: the same types and size as an order's receipt.
+   """
+    from web import receipts_upload
+
+    filename, payload = receipt_file
+    problems = []
+    try:
+        receipts_upload.extension_of(filename)
+    except receipts_upload.UploadError as exc:
+        problems.append(f"Receipt file: {exc}")
+    if len(payload) > receipts_upload.MAX_BYTES:
+        problems.append(f"Receipt file: larger than {receipts_upload.MAX_BYTES // (1024 * 1024)} MB")
+    return problems
+
+
 def _store_receipt(receipt_file: tuple[str, bytes], *, year: int, entry_id: str, data_dir: Path) -> dict:
     filename, payload = receipt_file
     rel = Path(EXPENSES_DIR) / str(year) / f"{entry_id}_{safe_filename(filename)}"
@@ -604,6 +620,8 @@ def add_expense(inputs: YearInputs, fields: Mapping[str, str], *, year: int, dat
     """Validate and append one expense. `receipt_file` = (filename, bytes) from the upload, or
     None when a link was given. Raises ValueError naming what is missing."""
     clean, errors = _expense_fields(fields, year=year)
+    if receipt_file:
+        errors += _receipt_problems(receipt_file)
     if not receipt_file and not clean["link"]:
         errors.append("A receipt is required: upload the file or give its link")
     if errors:
@@ -631,6 +649,8 @@ def update_expense(inputs: YearInputs, entry_id: str, fields: Mapping[str, str],
     if entry is None:
         raise KeyError(entry_id)
     clean, errors = _expense_fields(fields, year=year)
+    if receipt_file:
+        errors += _receipt_problems(receipt_file)
     current = dict(entry.get("receipt") or {})
     if not receipt_file and not clean["link"] and not (current.get("file") or current.get("url")):
         errors.append("A receipt is required: upload the file or give its link")

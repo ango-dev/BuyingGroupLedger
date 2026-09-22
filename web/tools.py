@@ -84,8 +84,8 @@ class Tool:
                     raise ValueError(f"{f.label} is required")
                 continue
             if f.kind == "int":
-                if not raw.lstrip("-").isdigit():
-                    raise ValueError(f"{f.label} must be a whole number")
+                if not raw.isdigit() or int(raw) < 1 or int(raw) > 1_000_000:
+                    raise ValueError(f"{f.label} must be a whole number from 1 to 1,000,000")
             if f.kind == "select" and f.choices and raw not in f.choices:
                 raise ValueError(f"{f.label}: not one of {', '.join(c for c in f.choices if c)}")
             if f.kind == "list":

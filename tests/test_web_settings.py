@@ -262,6 +262,16 @@ class TestSettingsPage:
         bad = client.post("/settings/section/cards", data={"text": "[{"})
         assert bad.status_code == 400 and "not valid JSON" in bad.text
         assert "[{" in bad.text  # the submitted text is kept for correction
+        # twins saved as JSON though the cards refuse them; a
+        # bottomless nest was a RecursionError 500; a huge text a bare JSON answer
+        twins = client.post("/settings/section/cards", data={"text": json.dumps(
+            [{"last4": "0315", "name": "A", "cashback_rate": 0.02}, {"last4": "0315", "name": "B", "cashback_rate": 0.02}])})
+        assert twins.status_code == 400 and "cards[1]" in twins.text and "0315" in twins.text
+        assert config_value("cards")[0]["last4"] == "9999"  # nothing written
+        deep = client.post("/settings/section/cards", data={"text": "[" * 5000 + "]" * 5000})
+        assert deep.status_code == 400 and "not valid JSON" in deep.text
+        huge = client.post("/settings/section/cards", data={"text": "[" + " " * (600 * 1024) + "]"})
+        assert huge.status_code == 400 and "longer than 512 KB" in huge.text
 
     def test_restart_calls_the_restarter(self, client):
         response = client.post("/settings/restart")

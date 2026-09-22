@@ -144,9 +144,16 @@ def read(path: Path | None = None) -> list[dict]:
             except ValueError:
                 continue
             if isinstance(event, dict) and "at" in event and "kind" in event:
-                event.setdefault("summary", "")
-                event.setdefault("run_id", None)
-                event.setdefault("details", {})
+                # a line of the wrong shape (a hand edit of the log, a partial write) reads as data
+                # rather than taking the page down
+                event["at"] = str(event.get("at") or "")
+                event["kind"] = str(event.get("kind") or "")
+                event["summary"] = "" if event.get("summary") is None else (
+                    event["summary"] if isinstance(event["summary"], str) else json.dumps(event["summary"], ensure_ascii=False))
+                run_id = event.get("run_id")
+                event["run_id"] = None if run_id in (None, "") else (run_id if isinstance(run_id, str) else json.dumps(run_id, ensure_ascii=False))
+                details = event.get("details")
+                event["details"] = details if isinstance(details, dict) else ({} if details in (None, "") else {"value": details})
                 events.append(event)
     events.reverse()
     _READ_CACHE[str(target)] = (stamp, events)

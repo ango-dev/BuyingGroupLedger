@@ -119,6 +119,7 @@ class TestSessions:
         assert sessions.verify(f"s.{expires}.{signature}") == ""  # another kind
         assert sessions.verify(token[:-1] + ("0" if token[-1] != "0" else "1")) == ""
         assert sessions.verify("") == "" and sessions.verify(None) == "" and sessions.verify("junk") == ""
+        assert sessions.verify(f"{kind}.{'9' * 5000}.{signature}") == ""  # past int()'s digit limit: not ours (2026-09-22)
         assert auth.Sessions(b"other", "pw", clock=lambda: 1_000_000.0).verify(token) == ""
 
     def test_changing_the_password_signs_every_token_out(self):

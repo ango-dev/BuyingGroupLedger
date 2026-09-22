@@ -226,8 +226,8 @@ class TestThePage:
         assert 'href="/activity.csv?' in body and "type=alert" in body[body.index('href="/activity.csv?'):][:200]
         response = client.get("/activity.csv", params={"days": "0", "type": "alert", "per": "50", "page": "2"})
         assert response.headers["content-disposition"] == 'attachment; filename="activity_2026-09-18.csv"'
-        lines = response.text.splitlines()
-        assert lines[0] == "When,Type,Run,What happened,Order ID,Details"
+        lines = response.text.lstrip("\ufeff").splitlines()
+        assert response.text.startswith("\ufeff") and lines[0] == "When,Type,Run,What happened,Order ID,Details"
         assert len(lines) == 1 + 60 and all(",Alert," in line for line in lines[1:])  # every alert, not page 2's 10
         assert '111-0,"{""order_id"": ""111-0""}"' in lines[-1]  # newest first: Change 0 is the oldest
         assert "Export CSV" not in client.get("/activity", params={"q": "nothing-matches-this"}).text
@@ -357,6 +357,39 @@ class TestThePage:
     def test_an_empty_log_renders(self, client):
         body = client.get("/activity").text
         assert "Nothing recorded yet" in body and "0 event(s)" in body
+
+    def test_a_line_of_the_wrong_shape_reads_as_data(self, client):
+        """details as a list, summary as a list, run_id as a dict
+        were 500s on Activity, its CSV and the Overview."""
+        import json
+
+        with client.activity_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"at": "2026-09-17T08:00:00+00:00", "kind": "alert", "summary": ["a", "b"], "details": [1, 2]}) + "\n")
+            handle.write(json.dumps({"at": "2026-09-17T08:00:01+00:00", "kind": "edit", "summary": "ok", "details": "plain", "run_id": {"x": 1}}) + "\n")
+            handle.write(json.dumps({"at": "2026-09-17T08:00:02+00:00", "kind": "edit", "summary": None, "details": None}) + "\n")
+        assert client.get("/activity", params={"days": "0"}).status_code == 200
+        assert client.get("/activity", params={"days": "0", "type": "alert"}).status_code == 200
+        csv_text = client.get("/activity.csv", params={"days": "0"}).text
+        assert csv_text.count("\n") == 4 and '""value"": [1, 2]' in csv_text or "value" in csv_text
+        assert client.get("/").status_code == 200
+        events = activity.read(client.activity_path)
+        assert events[-1]["details"] == {"value": [1, 2]} and events[-1]["summary"] == '["a", "b"]'
+        assert events[-2]["details"] == {"value": "plain"} and events[-2]["run_id"] == '{"x": 1}'
+        assert events[-3]["details"] == {} and events[-3]["summary"] == ""
+
+    def test_acknowledge_all_only_reaches_the_newest_alert_there_is(self, client):
+        """`through=zzz` (or a year-2999 stamp) acknowledged every
+        alert for ever, including the ones recorded after."""
+        path = client.activity_path
+        activity.record("alert", "First", {}, path=path, at=datetime(2026, 9, 17, 8, 0, 0, tzinfo=timezone.utc))
+        activity.record("alert", "Second", {}, path=path, at=datetime(2026, 9, 17, 8, 0, 1, tzinfo=timezone.utc))
+        for junk in ("zzz", "2999-01-01T00:00:00+00:00", "9" * 30):
+            r = client.post("/activity/acknowledge", data={"kind": "alert", "through": junk}, follow_redirects=False)
+            assert r.status_code == 303, junk
+        acks = [e for e in activity.read(path) if e["kind"] == "ack"]
+        assert acks and all(e["details"]["through"] == "2026-09-17T08:00:01+00:00" for e in acks)
+        activity.record("alert", "Third", {}, path=path, at=datetime(2026, 9, 17, 9, 0, 0, tzinfo=timezone.utc))
+        assert "Third" in client.get("/activity", params={"days": "0", "unacked": "1"}).text  # a newer alert still shows
 
 
     def test_the_page_is_a_slice_with_a_pager_and_the_size_is_remembered(self, client):

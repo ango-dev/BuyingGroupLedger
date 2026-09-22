@@ -22,16 +22,66 @@ from models.order import FIELDNAMES
 
 RECEIPT_PREFIX = "/receipts/"
 
+#: Every CSV starts with a byte-order mark so Excel on Windows reads "Zürich" as written, and a
+#: cell that a spreadsheet would run as a formula is quoted with a leading apostrophe (review
+#: 2026-09-22, Orders bug 9: `=1+1` and `+cmd|' /C calc'!A0` were exported verbatim).
+BOM = "\ufeff"
+_FORMULA_STARTS = ("=", "@", "\t", "\r")
+_DERIVED = ("cogs", "total_profit")
+
+
+def guard(value) -> str:
+    """The cell text a spreadsheet will show as TEXT, never run: a leading = @ tab or CR gets an
+    apostrophe, and so does a leading + or - unless the whole cell is a number ("-$20.00" stays)."""
+    text = "" if value is None else str(value)
+    if not text:
+        return text
+    if text[0] in _FORMULA_STARTS:
+        return "'" + text
+    if text[0] in "+-":
+        from models.numbers import NumberError, parse_number
+
+        try:
+            parse_number(text, percent=True)
+        except NumberError:
+            return "'" + text
+    return text
+
+
+class _Writer:
+    """csv.writer over a StringIO that starts with the BOM and guards every cell."""
+
+    def __init__(self):
+        self.out = io.StringIO()
+        self.out.write(BOM)
+        self._writer = csv.writer(self.out, lineterminator="\n")
+
+    def writerow(self, cells) -> None:
+        self._writer.writerow([guard(c) for c in cells])
+
+    def getvalue(self) -> str:
+        return self.out.getvalue()
+
+
+def _stored(row, name: str, cell: Callable) -> str:
+    """A cell as the ledger STORES it -- 1259.99, 0.04, TRUE -- so the file round-trips through
+    the importer;
+    the two derived columns as plain numbers; anything without stored text as the page shows it."""
+    if name in _DERIVED:
+        value = getattr(row, "cogs" if name == "cogs" else "profit", None)
+        return f"{value:.2f}" if isinstance(value, (int, float)) and not isinstance(value, bool) else ""
+    text = getattr(row, "text", None)
+    return text(name) if callable(text) else cell(row, name)
+
 
 def orders_csv(rows: Iterable, cell: Callable, extra: tuple[str, Callable] | None = None) -> str:
-    """The rows as CSV, one header row, the page's display text per cell. `extra` = (heading,
+    """The rows as CSV, one header row, each cell as stored (see `_stored`). `extra` = (heading,
     row -> text) appends one column: the Audit and Recon pages' Finding."""
-    out = io.StringIO()
-    writer = csv.writer(out, lineterminator="\n")
+    writer = _Writer()
     writer.writerow(HEADER + ([extra[0]] if extra else []))
     for row in rows:
-        writer.writerow([cell(row, name) for name in FIELDNAMES] + ([extra[1](row)] if extra else []))
-    return out.getvalue()
+        writer.writerow([_stored(row, name, cell) for name in FIELDNAMES] + ([extra[1](row)] if extra else []))
+    return writer.getvalue()
 
 
 def findings_text(findings: dict, key_of: Callable) -> Callable:
@@ -46,36 +96,35 @@ def activity_csv(events: Iterable[dict], kinds: dict[str, str]) -> str:
     happened, the order id if the event names one, and the details as JSON."""
     import json
 
-    out = io.StringIO()
-    writer = csv.writer(out, lineterminator="\n")
+    writer = _Writer()
     writer.writerow(["When", "Type", "Run", "What happened", "Order ID", "Details"])
     for e in events:
         details = e.get("details") or {}
+        if not isinstance(details, dict):
+            details = {"value": details}
         writer.writerow([str(e.get("at", "")), kinds.get(e.get("kind"), str(e.get("kind", ""))),
                          str(e.get("run_id") or ""), str(e.get("summary", "")), str(details.get("order_id") or ""),
                          json.dumps(details, ensure_ascii=False, sort_keys=True) if details else ""])
-    return out.getvalue()
+    return writer.getvalue()
 
 
 def expenses_csv(expenses: Iterable[dict]) -> str:
     """The year's expense list as the grid shows it, a receipt as its link or its stored file."""
-    out = io.StringIO()
-    writer = csv.writer(out, lineterminator="\n")
+    writer = _Writer()
     writer.writerow(["Date", "Description", "Category", "Profile", "Email", "Receipt", "Amount"])
     for e in expenses:
         receipt = e.get("receipt") or {}
         writer.writerow([e.get("date", ""), e.get("description", ""), e.get("category", ""), e.get("profile", ""),
                          e.get("email", ""), receipt.get("url") or receipt.get("file") or "", _amount(e.get("amount"))])
-    return out.getvalue()
+    return writer.getvalue()
 
 
 def _csv(header: list[str], lines: Iterable[list]) -> str:
-    out = io.StringIO()
-    writer = csv.writer(out, lineterminator="\n")
+    writer = _Writer()
     writer.writerow(header)
     for line in lines:
         writer.writerow(line)
-    return out.getvalue()
+    return writer.getvalue()
 
 
 def _amount(value) -> str:
@@ -176,8 +225,8 @@ def year_bundle(year: int, *, rows: list, cell: Callable, summary: dict, inputs,
             "What is in this folder:",
             f"  schedule_c.csv               the year's figures laid out on Schedule C (cash basis: income by",
             f"                               payout date, cost of goods and insurance by order date)",
-            f"  orders_placed_{year_text}.csv      every ledger row whose order was placed in {year_text} ({len(placed)} rows)",
-            f"  orders_paid_out_{year_text}.csv    every ledger row whose payout landed in {year_text} ({len(paid)} rows)",
+            f"  {f'orders_placed_{year_text}.csv':<29}every ledger row whose order was placed in {year_text} ({len(placed)} rows)",
+            f"  {f'orders_paid_out_{year_text}.csv':<29}every ledger row whose payout landed in {year_text} ({len(paid)} rows)",
             f"  expenses.csv                 the year's expense list ({len(inputs.expenses)} entries); its receipts are in expense_receipts/",
             f"  income.csv                   every program cashback, sign-up bonus, cashback-site and other income entry, dated",
             f"  notes.txt                    the notes for the preparer" + ("" if (inputs.notes or "").strip() else " (none this year, so no file)"),
@@ -191,7 +240,7 @@ def year_bundle(year: int, *, rows: list, cell: Callable, summary: dict, inputs,
             lines += ["", "Straddling the year boundary:"]
             for key, value in straddle.items():
                 if isinstance(value, dict) and value.get("rows"):
-                    parts = ", ".join(f"{k} {v}" for k, v in value.items() if k != "rows")
+                    parts = ", ".join(f"{k} {v:,.2f}" if isinstance(v, float) else f"{k} {v}" for k, v in value.items() if k != "rows")
                     lines.append(f"  {key.replace('_', ' ')}: {value['rows']} row(s){' -- ' + parts if parts else ''}")
         if linked:
             lines += ["", "Order receipts that are web links, not files on this machine (open the link):"] + [f"  {x}" for x in linked]

@@ -112,8 +112,8 @@ class Sessions:
         if not token:
             return ""
         parts = token.split(".")
-        if len(parts) != 3 or parts[0] not in _KINDS or not parts[1].isdigit():
-            return ""
+        if len(parts) != 3 or parts[0] not in _KINDS or not parts[1].isdigit() or len(parts[1]) > 20:
+            return ""  # a stamp is ten digits; a 5,000-digit one is not a cookie of ours
         kind, expires, signature = parts[0], int(parts[1]), parts[2]
         if not hmac.compare_digest(signature, self._sign(kind, expires)):
             return ""

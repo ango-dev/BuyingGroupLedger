@@ -16,6 +16,7 @@ import hmac
 import logging
 import math
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -36,7 +37,7 @@ from web import auth as auth_module
 from web import failures as failures_module
 from web import importer
 from web import setup_wizard
-from web.ledger_writer import RunInProgress, safe_href
+from web.ledger_writer import FIRST_YEAR, LAST_YEAR, RunInProgress, safe_href
 from web.settings_form import labelled_error as _labelled_error
 from ledger_db.store import LedgerMissing, LedgerUnreadable
 from web import heartbeat as heartbeat_module
@@ -225,6 +226,16 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             return reader.load(force=force)
         except (FileNotFoundError, LedgerUnreadable) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+
+    def attachment(name: str) -> str:
+        """A Content-Disposition that carries any name: an ASCII fallback plus the RFC 5987 form
+        (a non-latin-1 profile label in a dossier's name was a UnicodeEncodeError)."""
+        from urllib.parse import quote as _q
+
+        ascii_name = name.encode("ascii", "replace").decode("ascii").replace('"', "'")
+        return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{_q(name)}"
 
     def problem_page(request: Request, status: int, title: str, reason: str, advice: str = ""):
         """A refusal a person can read: the page's own frame,
@@ -943,8 +954,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         return tax_inputs.load_year(tax_inputs_path, year)
 
     def requested_year(request: Request, default: int, form=None) -> int:
+        """A four-digit year in the ledger's range, else this year (`0000` rendered "Tax year 0"
+        and exported tax_0.zip)."""
         text = str((form.get("year") if form is not None else None) or request.query_params.get("year") or "").strip()
-        return int(text) if len(text) == 4 and text.isdigit() else default
+        if len(text) == 4 and text.isdigit() and FIRST_YEAR <= int(text) <= LAST_YEAR:
+            return int(text)
+        return default
 
     # ---- downloads: the rows in view as CSV; a tax year as one zip ----------
     @app.get("/orders.csv")
@@ -1083,7 +1098,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         if why:
             return taxes_page(request, year, error=f"{year} cannot be closed: {why}.")
         gone = tax_inputs.remove_year(tax_inputs_path, year, data_dir=data_dir)
-        act("settings", f"Tax year {year} closed", {"year": year, "expenses": len(gone.expenses) if gone else 0})
+        if gone is None:  # nothing was ever saved for it: say that, not "Closed"
+            return RedirectResponse(url=f"/taxes?year={clock().year}&notice={quote(f'Nothing was saved for {year}; there is nothing to close')}", status_code=303)
+        act("settings", f"Tax year {year} closed", {"year": year, "expenses": len(gone.expenses)})
         return RedirectResponse(url=f"/taxes?year={clock().year}&notice=Closed+{year}", status_code=303)
 
     @app.post("/taxes/expense")
@@ -1670,7 +1687,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                 if path.is_file():
                     archive.write(path, arcname=f"{dossier.name}/{path.relative_to(dossier.path).as_posix()}")
         return Response(content=buffer.getvalue(), media_type="application/zip",
-                        headers={"Content-Disposition": f'attachment; filename="{dossier.name}.zip"'})
+                        headers={"Content-Disposition": attachment(f"{dossier.name}.zip")})
 
     @app.post("/activity/acknowledge")
     async def acknowledge(request: Request):
@@ -1692,6 +1709,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                 act("ack", f"Acknowledged {label}: {summary}", {"kind": kind, "at": at, "summary": summary})
         else:
             through = str(form.get("through", "")).strip() or loud["newest"]
+            # a stamp shaped like the events' own, no later than the newest there is: `zzz` or a
+            # year-2999 stamp used to acknowledge every alert for ever
+            if not _STAMP.match(through) or not loud["newest"] or through > loud["newest"]:
+                through = loud["newest"]  # nothing newer than the newest; nothing at all when none is loud
             if through:
                 count = sum(1 for f in loud["events"] if f["at"] <= through)
                 act("ack", f"Acknowledged {count} {label}(s) through {through}",

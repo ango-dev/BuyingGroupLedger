@@ -857,26 +857,43 @@ class TestOverviewPage:
         # Finding column, with the page's check picks and tile riding along in the link
         audit = client.get("/audit", params={"check": "cogs_inputs_complete"}).text
         assert 'href="/audit.csv?' in audit and "check=cogs_inputs_complete" in audit[audit.index('href="/audit.csv?'):][:200]
-        rows = client.get("/audit.csv").text.splitlines()
+        rows = client.get("/audit.csv").text.lstrip("\ufeff").splitlines()
         assert rows[0].endswith(",Finding") and len(rows) > 1 and "cogs_inputs_complete:" in "\n".join(rows[1:])
-        narrowed = client.get("/audit.csv", params={"check": "cogs_inputs_complete"}).text.splitlines()
+        narrowed = client.get("/audit.csv", params={"check": "cogs_inputs_complete"}).text.lstrip("\ufeff").splitlines()
         assert all("cogs_inputs_complete:" in line for line in narrowed[1:]) and len(narrowed) <= len(rows)
         recon = client.get("/recon", params={"kind": "short"}).text
         assert 'href="/recon.csv?' in recon and "kind=short" in recon[recon.index('href="/recon.csv?'):][:200]
-        recon_rows = client.get("/recon.csv", params={"kind": "short"}).text.splitlines()
+        recon_rows = client.get("/recon.csv", params={"kind": "short"}).text.lstrip("\ufeff").splitlines()
         assert recon_rows[0].endswith(",Finding") and len(recon_rows) == 2 and "short" in recon_rows[1]
         assert client.get("/recon.csv").headers["content-disposition"] == 'attachment; filename="recon_2026-09-17.csv"'
         response = client.get("/orders.csv")
         assert response.status_code == 200 and response.headers["content-type"].startswith("text/csv")
         assert response.headers["content-disposition"] == 'attachment; filename="orders_2026-09-17.csv"'
-        lines = response.text.splitlines()
+        assert response.text.startswith("\ufeff")  # Excel on Windows reads "Zürich" as written
+        # a cell a spreadsheet would run is quoted; a signed number is not
+        from web import export
+
+        class Row:
+            def __init__(self, cells):
+                self.cells = cells
+                self.cogs, self.profit = 12.5, -3.0
+
+            def text(self, name):
+                return self.cells.get(name, "")
+
+        rows = [Row({"order_id": "=1+1", "item_name": "+cmd|' /C calc'!A0", "shipping": "-5", "retailer": "@x", "delivery_address": "-$20.00 owed"})]
+        out = export.orders_csv(rows, lambda r, n: r.text(n))
+        assert out.startswith("\ufeff") and "'=1+1" in out and ",'+cmd|' /C calc'!A0," in out and ",-5," in out and "'@x" in out
+        assert "'-$20.00 owed" in out and ",12.50," in out and ",-3.00," in out
+        lines = response.text.lstrip("\ufeff").splitlines()
         assert lines[0] == ",".join(HEADER) and len(lines) == 1 + len(LEDGER_ROWS)
-        assert '"$1,259.99"' in lines[1]  # the page's display text, not the stored number
+        assert ",1259.99," in lines[1] and '"$1,259.99"' not in lines[1]  # stored values: the file round-trips through the importer
+        assert ",0.05," in lines[1]  # a rate as stored, not "5%"
         paid = client.get("/orders.csv", params={"status": "paid"}).text.splitlines()
         assert len(paid) == 3 and all(",paid," in line for line in paid[1:])
         by_cost = client.get("/orders.csv", params={"sort": "total_cost", "dir": "desc"}).text.splitlines()
         import csv as _csv
-        assert next(_csv.reader([by_cost[1]]))[HEADER.index("Total Cost")] == "$2,000.00"  # the page's sort, too
+        assert float(next(_csv.reader([by_cost[1].lstrip("﻿")]))[HEADER.index("Total Cost")]) == 2000  # the page's sort, too
 
     def test_heartbeat_shows_fresh(self, client):
         body = client.get("/").text
@@ -1034,6 +1051,15 @@ class TestFailuresPage:
             (directory / "report.md").write_text(report, encoding="utf-8")
         return directory
 
+    def test_a_dossier_with_a_non_latin_name_still_downloads(self, client, failures_dir):
+        """the raw name in Content-Disposition was a UnicodeEncodeError."""
+        name = "costco_profile-René_20260830T070304Z"
+        self._dossier(failures_dir, name, self.REPORT)
+        response = client.get(f"/activity/dossier/{name}/download")
+        assert response.status_code == 200 and response.headers["content-type"] == "application/zip"
+        assert 'filename="costco_profile-Ren?_20260830T070304Z.zip"' in response.headers["content-disposition"]
+        assert "filename*=UTF-8''costco_profile-Ren%C3%A9_20260830T070304Z.zip" in response.headers["content-disposition"]
+
     def test_a_dossier_downloads_as_one_zip_for_an_agent(self, client, failures_dir):
         """a download button before details; the zip holds the whole dossier."""
         import io
@@ -1046,7 +1072,7 @@ class TestFailuresPage:
         assert page.index(f'href="/activity/dossier/{name}/download"') < page.index(">Report</button>")
         response = client.get(f"/activity/dossier/{name}/download")
         assert response.status_code == 200 and response.headers["content-type"] == "application/zip"
-        assert response.headers["content-disposition"] == f'attachment; filename="{name}.zip"'
+        assert response.headers["content-disposition"] == f"attachment; filename=\"{name}.zip\"; filename*=UTF-8''{name}.zip"
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             assert sorted(archive.namelist()) == [f"{name}/report.md", f"{name}/response_1.txt"]
             report = archive.read(f"{name}/report.md").decode("utf-8").replace("\r\n", "\n")

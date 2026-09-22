@@ -165,6 +165,18 @@ class TestExpenses:
                         year=2026, data_dir=tmp_path)
         assert inputs.expenses == []
 
+    def test_a_receipt_file_is_checked_like_an_orders_receipt(self, tmp_path):
+        """evil.exe, x.html and a 30 MB file were stored."""
+        inputs = YearInputs()
+        for name in ("evil.exe", "x.html", "x.svg", "noext"):
+            with pytest.raises(ValueError, match="Receipt file: a receipt must be one of"):
+                add_expense(inputs, self.FIELDS, year=2026, data_dir=tmp_path, receipt_file=(name, b"x"))
+        with pytest.raises(ValueError, match="Receipt file: larger than 25 MB"):
+            add_expense(inputs, self.FIELDS, year=2026, data_dir=tmp_path, receipt_file=("big.pdf", b"x" * (25 * 1024 * 1024 + 1)))
+        assert inputs.expenses == [] and not (tmp_path / "expenses").exists()
+        ok = add_expense(inputs, self.FIELDS, year=2026, data_dir=tmp_path, receipt_file=("r.JPEG", b"jpg"))
+        assert ok["receipt"]["name"] == "r.JPEG"
+
     def test_an_amount_is_a_non_negative_number_and_a_link_is_a_web_address(self, tmp_path):
         """`nan` reached the summary as "$nan"; a
         `javascript:` link was stored and rendered."""
@@ -330,7 +342,7 @@ class TestTaxesPage:
         every = client.get("/taxes", params={"year": "2026", "eper": "0"}).text
         assert every.count('<tr class="has-num">') == 60 and "page 1 of" not in every
         # the CSV: the whole year in the grid's order, whatever the page
-        csv_text = client.get("/taxes/expenses.csv", params={"year": "2026", "eper": "50", "epage": "2"}).text
+        csv_text = client.get("/taxes/expenses.csv", params={"year": "2026", "eper": "50", "epage": "2"}).text.lstrip("\ufeff")
         lines = csv_text.splitlines()
         assert lines[0] == "Date,Description,Category,Profile,Email,Receipt,Amount" and len(lines) == 61
         assert lines[1].startswith("2026-01-28,") and lines[1].endswith(",https://x/r,")  is False
@@ -362,11 +374,11 @@ class TestTaxesPage:
             assert expected in names, names
         receipts = [n for n in names if n.startswith("tax_2026/expense_receipts/")]
         assert len(receipts) == 1 and receipts[0].endswith("boxes.pdf") and zf.read(receipts[0]) == b"%PDF-1.4 x"
-        placed = zf.read("tax_2026/orders_placed_2026.csv").decode("utf-8").splitlines()
+        placed = zf.read("tax_2026/orders_placed_2026.csv").decode("utf-8-sig").splitlines()
         assert len(placed) == 1 + 9 and placed[0].startswith("Order Date,")  # every fixture row was placed in 2026
-        paid = zf.read("tax_2026/orders_paid_out_2026.csv").decode("utf-8").splitlines()
+        paid = zf.read("tax_2026/orders_paid_out_2026.csv").decode("utf-8-sig").splitlines()
         assert len(paid) == 2 and "1399000017" in paid[1]  # the one payout dated in 2026
-        assert "Gross receipts or sales,500.00" in zf.read("tax_2026/schedule_c.csv").decode("utf-8")
+        assert "Gross receipts or sales,500.00" in zf.read("tax_2026/schedule_c.csv").decode("utf-8-sig")
         expenses = zf.read("tax_2026/expenses.csv").decode("utf-8")
         assert "2026-03-03,shipping boxes,supplies,alpha,12.50,expense_receipts/" in expenses
         income = zf.read("tax_2026/income.csv").decode("utf-8")
@@ -465,6 +477,11 @@ class TestTaxesPage:
         for y in listed - {2026}:  # every other listed year comes from the ledger's rows: refused too
             body = client.post("/taxes/close", data={"year": str(y)}).text
             assert f"{y} cannot be closed:" in body and "ledger row(s)" in body
+        # a year nothing was saved for: "Closed 2019" would be a lie
+        nothing = client.post("/taxes/close", data={"year": "2019"}, follow_redirects=False)
+        assert nothing.status_code == 303 and "Nothing%20was%20saved%20for%202019" in nothing.headers["location"]
+        assert "Tax year 0" not in client.get("/taxes", params={"year": "0000"}).text  # this year instead
+        assert client.get("/taxes/export", params={"year": "0000"}).headers["content-disposition"] == 'attachment; filename="tax_2026.zip"'
         client.post("/taxes/save", data={"year": "2019", "site.0.name": "Rakuten", "site.0.amount": "5"}, follow_redirects=False)
         client.post("/taxes/expense", data={"year": "2019", "date": "2019-03-03", "description": "boxes", "amount": "12",
                                             "profile": "alpha", "email": "", "receipt_url": "https://x/r.pdf", "category": ""}, follow_redirects=False)
