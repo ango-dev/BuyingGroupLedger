@@ -986,6 +986,13 @@ def test_a_selection_shows_sheets_style_stats_bottom_right(served, page):
     assert stats_for("cashback_rate") == "Avg 6% · Count 6"     # (5+4+4+9+9+5)/6, never a sum
     assert stats_for("tracking_submitted") == "Count 2"          # the ticks, not the FALSEs
     assert stats_for("item_name") == "Count 9"                   # text counts non-empty cells
+    # columns are never BLENDED into one sum: a drag across headers shows each numeric column's own figure by name
+    page.keyboard.press("Escape")
+    page.locator("table.sheetlike thead th.col-quantity .name").click()
+    page.locator("table.sheetlike thead th.col-total_cost").scroll_into_view_if_needed()
+    page.locator("table.sheetlike thead th.col-total_cost .name").click(modifiers=["Shift"])
+    page.wait_for_selector(".sel-stats.on")
+    assert box.inner_text() == "Quantity 11 · Cost Per Item 3,899.99 · Total Cost 5,099.99"
     page.keyboard.press("Escape")
     page.wait_for_selector(".sel-stats:not(.on)", state="attached")  # gone with the selection
     # a single cell says nothing (Sheets shows stats only for a real selection)

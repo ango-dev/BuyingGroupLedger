@@ -739,7 +739,8 @@
   }
   function updateSelStats() {
     var box = selStats(), t = table();
-    var cells = 0, filled = 0, sum = 0, nums = 0, rateSum = 0, rates = 0;
+    var head = t && t.tHead ? t.tHead.rows[0] : null;
+    var cells = 0, filled = 0, byField = {}, order = [];
     if (t && t.tBodies[0]) ranges.forEach(function (range) {
       for (var r = range.r1; r <= range.r2; r++) {
         var row = t.tBodies[0].rows[r];
@@ -748,26 +749,47 @@
           var td = cellAt(r, c);
           if (!td || td.classList.contains("rownum")) continue;
           cells++;
-          var field = td.dataset.field || "";
+          var field = td.dataset.field || String(c);
           var check = field === "tracking_submitted" ? td.querySelector("input.cell-check") : null;
           if (check) { if (check.checked) filled++; continue; }
           var raw = td.hasAttribute("data-raw") ? td.getAttribute("data-raw") : (td.textContent || "").trim();
           if (raw) filled++;
-          if (field.slice(-5) === "_rate") {
-            var rate = parseFloat(String(raw).replace("%", ""));
-            if (!isNaN(rate)) { if (String(raw).indexOf("%") < 0 && rate <= 1) rate *= 100; rateSum += rate; rates++; }
+          var isRate = field.slice(-5) === "_rate", value = NaN;
+          if (isRate) {
+            value = parseFloat(String(raw).replace("%", ""));
+            if (!isNaN(value) && String(raw).indexOf("%") < 0 && value <= 1) value *= 100;
           } else if (td.classList.contains("num") && field !== "shipment") {
             var m = String(raw).replace(/,/g, "").match(/-?\d+(\.\d+)?/);  // "500.00 proj." reads 500
-            if (m) { sum += parseFloat(m[0]); nums++; }
+            if (m) value = parseFloat(m[0]);
           }
+          if (isNaN(value)) continue;
+          if (!byField[field]) {
+            var th = head && head.cells[c], name = th && th.querySelector(".name");
+            byField[field] = { label: (name ? name.textContent : th ? th.textContent : field).trim(),
+                               sum: 0, n: 0, rate: isRate };
+            order.push(field);
+          }
+          byField[field].sum += value;
+          byField[field].n++;
         }
       }
     });
     if (cells < 2) { box.classList.remove("on"); return; }
-    var parts = [];
-    if (nums) parts = ["Sum " + fmtNum(sum), "Avg " + fmtNum(sum / nums), "Count " + nums];
-    else if (rates) parts = ["Avg " + fmtNum(rateSum / rates) + "%", "Count " + rates];
-    else parts = ["Count " + filled];
+    // Sum only where summing means ONE thing: one numeric column keeps Sum / Avg / Count, a
+    // few columns show each column's own figure by name, more than three fall back to the count.
+    var parts, group;
+    if (order.length === 1) {
+      group = byField[order[0]];
+      parts = group.rate ? ["Avg " + fmtNum(group.sum / group.n) + "%", "Count " + group.n]
+                         : ["Sum " + fmtNum(group.sum), "Avg " + fmtNum(group.sum / group.n), "Count " + group.n];
+    } else if (order.length && order.length <= 3) {
+      parts = order.map(function (field) {
+        var g = byField[field];
+        return g.label + " " + (g.rate ? fmtNum(g.sum / g.n) + "%" : fmtNum(g.sum));
+      });
+    } else {
+      parts = ["Count " + filled];
+    }
     box.textContent = parts.join(" · ");
     box.classList.add("on");
   }
