@@ -974,9 +974,8 @@
     else if (act === "row") { if (td) selectRowOf(td); }
     else if (act === "delete-rows") { var button = document.getElementById("delete-selected"); if (button) button.click(); }
   }
-  var ctxOpenedAt = 0, ctxByTouch = false;
-  function openMenuAt(target, x, y, byTouch) {  // the menu for the cell or header cell under (x, y); false when none applies
-    ctxByTouch = !!byTouch;
+  var ctxOpenedAt = 0, ctxByTouch = false;  // ctxByTouch: the long-press path sets it before opening, the contextmenu path clears it
+  function openMenuAt(target, x, y) {  // the menu for the cell or header cell under (x, y); false when none applies
     var td = target.closest ? target.closest(GRID_TD) : null;
     var th = td ? null : headerOf(target);
     if (!td && !th) { hideCtx(); return false; }
@@ -1018,6 +1017,7 @@
     if (!e.target.closest) return;
     if (e.target.closest("input, textarea")) return;                 // the editor: the browser's menu
     if (e.target.closest("a") && !headerOf(e.target)) return;         // a link too; the header's sort link is ours
+    ctxByTouch = false;
     if (openMenuAt(e.target, e.clientX, e.clientY)) e.preventDefault();
   });
   // A long press on a touch screen opens the same menu (iOS never fires contextmenu); the touch's
@@ -1029,7 +1029,8 @@
     if (!(target.closest && (target.closest(GRID_TD) || target.closest("th")))) return;
     press = { x: t.clientX, y: t.clientY, target: target, timer: setTimeout(function () {
       press = null;
-      openMenuAt(target, t.clientX, t.clientY, true);
+      ctxByTouch = true;
+      openMenuAt(target, t.clientX, t.clientY);
     }, 550) };
   }, { passive: true });
   document.addEventListener("touchmove", function (e) {
