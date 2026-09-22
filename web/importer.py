@@ -38,7 +38,7 @@ from typing import Callable, Iterable, Mapping
 from ledger.sync import HEADER, _parse_display_number
 from models.order import FIELDNAMES, normalize_shipment
 from scripts import import_history as ih
-from web.ledger_writer import EditError, RunInProgress, validate
+from web.ledger_writer import EditError, RunInProgress, valid_iso_date, validate
 
 __all__ = ["BATCHES_DIR", "Batch", "ImportResult", "StagedRow", "Staging", "StagingError"]
 
@@ -59,7 +59,9 @@ DATE_FIELDS = ("order_date", "delivery_date", "payout_date", "return_date")
 MONEY_FIELDS = ("cost_per_item", "shipping", "sales_tax", "gift_card", "rewards_used", "insurance",
                 "payout_amount", "expected_payout")
 INT_FIELDS = ("quantity", "return_quantity")
-_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+#: The cells a box row of a split cannot carry until each box's Quantity is known: the order's
+#: figures would otherwise land whole on EVERY box.
+PER_BOX = ("quantity", "total_cost", "insurance", "payout_amount", "expected_payout")
 _DISPLAY = dict(zip(FIELDNAMES, HEADER))
 _FIELD_OF = {h: f for f, h in zip(FIELDNAMES, HEADER)}
 _FIELD_OF_NORM = {ih.norm(h): f for f, h in zip(FIELDNAMES, HEADER) if f in STAGING_FIELDS}
@@ -245,9 +247,25 @@ def new_batch(data_dir: Path, filename: str, payload: bytes, *, clock: Callable[
         text = payload.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise StagingError("the file is not UTF-8 text: save it as CSV UTF-8 and upload again") from exc
-    headers = next(csv.reader(io.StringIO(text)), [])
+    try:
+        headers = next(csv.reader(io.StringIO(text)), [])
+        # Walk the whole file once here, so a cell the csv module refuses (over its 128 KB field
+        # limit) is a message at upload rather than a 500 on every later screen.
+        for _row in csv.reader(io.StringIO(text)):
+            pass
+    except csv.Error as exc:
+        raise StagingError(f"the file could not be read as CSV ({exc}): a cell is probably far too long") from exc
     if not any(str(h).strip() for h in headers):
         raise StagingError("the file has no header row")
+    # Two columns under one name: DictReader keeps the LAST, and the mapping is keyed by header
+    # text, so one of the two would silently read the other's column.
+    seen_headers: dict[str, int] = {}
+    for i, h in enumerate(headers, start=1):
+        name = str(h).strip()
+        if name and name in seen_headers:
+            raise StagingError(f"two columns are both named {name!r} (columns {seen_headers[name]} and {i}): "
+                               f"rename one and upload again")
+        seen_headers[name] = i
     stamp = clock().astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     batch = Batch(Path(data_dir) / BATCHES_DIR / stamp)
     batch.dir.mkdir(parents=True, exist_ok=True)
@@ -438,20 +456,30 @@ def stage_rows(raw_rows: list[dict], mapping: Mapping[str, str], *, date_order: 
                                 f"({expected:.2f}): check the money cells")
         trackings = ih.tracking_numbers(get("tracking_number"))
         pieces = trackings or [""]
+        # A split needs a Quantity of at least one per box to share the money out; with none, or
+        # fewer units than boxes, the per-box cells stay blank for the user rather than the
+        # order's figures landing whole on every box or a qty-0 / $0 box row passing as complete.
+        split_known = len(pieces) > 1 and quantity is not None and quantity >= len(pieces)
         if len(pieces) > 1:
-            warnings.append(f"{len(pieces)} tracking numbers in one cell -- split into one row per box")
-        shares = ih.distribute(quantity, len(pieces)) if (quantity and len(pieces) > 1) else [quantity] * len(pieces)
+            warnings.append(f"{len(pieces)} tracking numbers in one cell -- split into one row per box"
+                            + ("" if split_known else
+                               f": Quantity {'is blank' if quantity is None else 'is ' + str(quantity)} for {len(pieces)} boxes, "
+                               f"so each box's Quantity, Total Cost, Insurance and payout are left for you"))
+        shares = ih.distribute(quantity, len(pieces)) if split_known else [quantity] * len(pieces)
         for k, (tracking, qty) in enumerate(zip(pieces, shares), start=1):
             row_cells = dict(cells)
             row_cells["tracking_number"] = tracking
             row_cells["shipment"] = get("shipment") if (len(pieces) == 1 and get("shipment")) else shipment_for(cells["order_id"], tracking, k)
-            if len(pieces) > 1 and quantity:
+            if split_known:
                 share = qty / quantity
                 row_cells["quantity"] = str(qty)
                 row_cells["total_cost"] = _num_text(round(float(cells["cost_per_item"]) * qty, 2)) if cells["cost_per_item"] else ""
-                for f in ("insurance", "payout_amount"):
+                for f in ("insurance", "payout_amount", "expected_payout"):
                     if cells[f]:
                         row_cells[f] = _num_text(round(float(cells[f]) * share, 2))
+            elif len(pieces) > 1:
+                for f in PER_BOX:
+                    row_cells[f] = ""
             out.append(StagedRow(id=f"r{n:04d}-{k}", source_row=n, cells=row_cells, warnings=list(warnings)))
     return out
 
@@ -589,10 +617,16 @@ def classify(rows: list[StagedRow], index: Mapping) -> dict[str, list[StagedRow]
 # --------------------------------------------------------------------------------------------------
 
 
-def write_staged_cell(staging: Staging, row_id: str, field: str, value: str, *, expected: str | None = None) -> StagedRow:
+def write_staged_cell(staging: Staging, row_id: str, field: str, value: str, *, expected: str | None = None,
+                      index: Mapping | None = None) -> StagedRow:
     """Write one cell of a staged row. The key cells are editable here (the row is not on the
     ledger yet); every other cell is checked as the ledger's editor would check it; Total Cost is
-    derived and follows Quantity x Cost Per Item. `expected` is the text the editor showed."""
+    derived and follows Quantity x Cost Per Item. `expected` is the text the editor showed.
+
+    A key cell may not be edited ONTO a key the ledger (`index`) or another row of the sheet
+    already holds: the commit would mark such a row a duplicate and it would leave the sheet for
+    good, its cells with it. Refused here, the row keeps its
+    old key and stays in view."""
     row = staging.row(row_id)
     if field not in STAGING_FIELDS:
         raise StagingError(f"{field} is not a column of the sheet")
@@ -603,8 +637,8 @@ def write_staged_cell(staging: Staging, row_id: str, field: str, value: str, *, 
     if field in DERIVED:
         raise StagingError("Total Cost is computed from Quantity x Cost Per Item")
     if field == "order_date":
-        if text and not _ISO_DATE.match(text):
-            raise StagingError("Order Date must be written as YYYY-MM-DD")
+        if text and not valid_iso_date(text):
+            raise StagingError("Order Date must be a real calendar date written as YYYY-MM-DD")
         stored = text
     elif field == "shipment":
         if text and not text.isdigit():
@@ -625,6 +659,17 @@ def write_staged_cell(staging: Staging, row_id: str, field: str, value: str, *, 
             stored = _num_text(coerced)
         else:
             stored = str(coerced)
+    if field in KEY_EDITABLE and stored != current:
+        probe = StagedRow(id=row.id, source_row=row.source_row, cells={**row.cells, field: stored})
+        new_key = key_of(probe)
+        if all(new_key[:3]):
+            if index is not None and new_key in index["keys"]:
+                raise StagingError(f"the ledger already holds a row with this key ({new_key[0]} / {new_key[1]} / "
+                                   f"{new_key[2]} / shipment {new_key[3]}): the row would be dropped as a duplicate")
+            for other in staging.rows:
+                if other.id != row.id and other.status != "duplicate" and key_of(other) == new_key:
+                    raise StagingError(f"row {other.source_row} of the sheet already has this key: "
+                                       f"the row would be dropped as a duplicate")
     row.cells[field] = stored
     if field in ("quantity", "cost_per_item"):
         q, c = row.cells.get("quantity", ""), row.cells.get("cost_per_item", "")

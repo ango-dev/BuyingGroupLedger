@@ -167,6 +167,11 @@ class TestValidate:
             validate("payout_amount", "twelve")
         with pytest.raises(EditError, match="YYYY-MM-DD"):
             validate("payout_date", "Sept 1")
+        # the shape alone let 2026-02-31 through
+        for bad in ("2026-02-31", "2026-13-01", "2026-00-10"):
+            with pytest.raises(EditError, match="real calendar date"):
+                validate("payout_date", bad)
+        assert validate("delivery_date", "2028-02-29") == "2028-02-29"  # a leap day is real
         with pytest.raises(EditError, match="Status must be one of"):
             validate("status", "done")
         with pytest.raises(EditError, match="TRUE or FALSE"):
@@ -279,6 +284,8 @@ class TestAppendRow:
             writer.add_row({"order_date": "2026-09-17", "item_name": "T"})
         with pytest.raises(EditError, match="YYYY-MM-DD"):
             writer.add_row({"order_id": "X", "order_date": "17/09/2026", "item_name": "T"})
+        with pytest.raises(EditError, match="real calendar date"):
+            writer.add_row({"order_id": "X", "order_date": "2026-13-45", "item_name": "T"})
         with pytest.raises(EditError, match="Item Name is required"):
             writer.add_row({"order_id": "X", "order_date": "2026-09-17"})
         with pytest.raises(EditError, match="Shipment must be a number"):

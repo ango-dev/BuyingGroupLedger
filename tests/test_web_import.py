@@ -161,6 +161,26 @@ class TestStageRows:
         assert [r.cells["insurance"] for r in rows] == ["2", "1"] and [r.cells["payout_amount"] for r in rows] == ["22", "11"]
         assert any("split into one row per box" in w for w in rows[0].warnings)
 
+    def test_a_split_without_a_quantity_per_box_leaves_the_per_box_cells_blank(self):
+        """two tracking numbers with a blank Quantity put
+        the order's Insurance and payout whole on BOTH box rows (the money doubled); a Quantity
+        smaller than the box count made a qty-0, $0 box row that passed as complete. Neither box's
+        share is knowable, so those cells stay blank for the user, and the warning says why."""
+        blank_qty = importer.stage_rows([{"Order": "A1", "Tracking": "1Z5\n1Z6", "Ins": "2", "Paid": "20", "Total": "50", "Unit": "25"}],
+                                        {"Order": "order_id", "Tracking": "tracking_number", "Ins": "insurance", "Paid": "payout_amount",
+                                         "Total": "total_cost", "Unit": "cost_per_item"}, date_order="mdy")
+        assert [r.cells["tracking_number"] for r in blank_qty] == ["1Z5", "1Z6"]
+        for r in blank_qty:
+            assert (r.cells["quantity"], r.cells["total_cost"], r.cells["insurance"], r.cells["payout_amount"]) == ("", "", "", "")
+            assert r.cells["cost_per_item"] == "25"  # a per-unit figure is still true of every box
+            assert any("Quantity is blank for 2 boxes" in w for w in r.warnings)
+        short = importer.stage_rows([{"Order": "A1", "Tracking": "1Z5, 1Z6", "Qty": "1", "Unit": "10", "Paid": "12"}],
+                                    {"Order": "order_id", "Tracking": "tracking_number", "Qty": "quantity", "Unit": "cost_per_item", "Paid": "payout_amount"},
+                                    date_order="mdy")
+        assert [r.cells["quantity"] for r in short] == ["", ""] and [r.cells["payout_amount"] for r in short] == ["", ""]
+        assert any("Quantity is 1 for 2 boxes" in w for w in short[0].warnings)
+        assert importer.gaps_for(importer.StagedRow(id="x", source_row=1, cells=complete_cells(quantity="", total_cost="", status="paid")))[:1] == ["Quantity"]
+
     def test_a_profit_column_that_disagrees_is_a_warning(self):
         rows = importer.stage_rows([{"Paid": "120", "Total": "100", "Rate": "0.05", "Profit": "40"}],
                                    {"Paid": "payout_amount", "Total": "total_cost", "Rate": "cashback_rate", "Profit": "source_profit"}, date_order="mdy")
@@ -239,8 +259,29 @@ class TestUpdateCell:
         assert st.row("r0001-1").cells["order_id"] == "NEW-1"
         with pytest.raises(importer.StagingError, match="YYYY-MM-DD"):
             importer.write_staged_cell(st, "r0001-1", "order_date", "3/11/2026")
+        with pytest.raises(importer.StagingError, match="real calendar date"):
+            importer.write_staged_cell(st, "r0001-1", "order_date", "2026-13-45")
+        with pytest.raises(importer.StagingError, match="real calendar date"):
+            importer.write_staged_cell(st, "r0001-1", "payout_date", "2026-02-31")
         with pytest.raises(importer.StagingError, match="Shipment must be a number"):
             importer.write_staged_cell(st, "r0001-1", "shipment", "two")
+
+    def test_a_key_cell_may_not_be_edited_onto_a_key_the_ledger_or_the_sheet_holds(self, sheet):
+        """re-keyed onto an existing key, the row was marked a
+        duplicate at the commit and left the sheet for good. Refused at the cell instead."""
+        index = importer.ledger_index(GridReader(sheet).load().rows)
+        st = importer.Staging(id="b", created_at="", source_name="x", date_order="mdy",
+                              rows=[staged(id="a", order_id="1399000017", order_date="2026-08-20", item_name="iPad Case"),
+                                    staged(id="b", order_id="X", item_name="Thing", shipment="1"),
+                                    staged(id="c", order_id="X", item_name="Thing", shipment="2")])
+        with pytest.raises(importer.StagingError, match="ledger already holds a row with this key"):
+            importer.write_staged_cell(st, "a", "item_name", "iPad", index=index)
+        assert st.row("a").cells["item_name"] == "iPad Case"  # the old key stands
+        with pytest.raises(importer.StagingError, match="row 1 of the sheet already has this key"):
+            importer.write_staged_cell(st, "c", "shipment", "1", index=index)
+        importer.write_staged_cell(st, "c", "shipment", "3", index=index)  # a free key is fine
+        importer.write_staged_cell(st, "a", "item_name", "iPad", index=None)  # no index: the ledger is not consulted
+        assert st.row("a").cells["item_name"] == "iPad"
 
     def test_other_cells_go_through_the_ledgers_validation_and_total_cost_follows(self):
         st = importer.Staging(id="b", created_at="", source_name="x", date_order="mdy", rows=[staged()])
@@ -316,6 +357,13 @@ class TestStore:
             importer.new_batch(tmp_path, "x.csv", b"\xff\xfe\x00bad", clock=lambda: NOW)
         with pytest.raises(importer.StagingError, match="no header"):
             importer.new_batch(tmp_path, "x.csv", b"\n", clock=lambda: NOW)
+        # two columns under one name would read each other's cells
+        with pytest.raises(importer.StagingError, match="both named 'Date' \\(columns 1 and 3\\)"):
+            importer.new_batch(tmp_path, "x.csv", b"Date,Item,Date \n1,x,2\n", clock=lambda: NOW)
+        # a cell past the csv module's field limit was a 500 on the map page (bug 6)
+        with pytest.raises(importer.StagingError, match="far too long"):
+            importer.new_batch(tmp_path, "x.csv", b"Order,Note\n1,\"" + b"x" * 140_000 + b"\"\n", clock=lambda: NOW)
+        assert importer.live_batch(tmp_path) is None  # nothing was kept
 
     def test_a_column_named_as_the_ledger_names_it_wins_its_suggestion(self, tmp_path):
         batch = importer.new_batch(tmp_path, "x.csv", b"Paid,Payout Date,Item\n120,4/1/2026,Widget\n", clock=lambda: NOW)
@@ -370,6 +418,15 @@ class TestImportPages:
         assert 'data-error="the cell changed meanwhile' in stale.text and 'data-raw="2026-04-02"' in stale.text
         bad = client.post("/tools/import/cell", data={"entry_id": "r0002-1", "field": "status", "value": "bogus"})
         assert "Status must be one of" in bad.text
+        # a key cell edited onto the ledger's own key is refused with the key named (bug 7)
+        rekey = client.post("/tools/import/cell", data={"entry_id": "r0002-1", "field": "order_id", "value": "1399000017"})
+        assert 'data-raw="1399000017"' in rekey.text and "data-error" not in rekey.text  # a different date: no collision
+        client.post("/tools/import/cell", data={"entry_id": "r0002-1", "field": "order_date", "value": "2026-08-20"})
+        collide = client.post("/tools/import/cell", data={"entry_id": "r0002-1", "field": "item_name", "value": "iPad"})
+        assert "ledger already holds a row with this key (1399000017 / 2026-08-20 / iPad / shipment 1)" in collide.text
+        assert 'data-raw="Gadget"' in collide.text
+        client.post("/tools/import/cell", data={"entry_id": "r0002-1", "field": "order_date", "value": "2026-03-12"})
+        client.post("/tools/import/cell", data={"entry_id": "r0002-1", "field": "order_id", "value": "111-0000002-0000002"})
         commit = client.post("/tools/import/commit", follow_redirects=False)
         assert commit.status_code == 303 and "1+row%28s%29+imported" in commit.headers["location"]
         assert len(client.sheet.grid) == 4 and client.sheet.grid[3][HEADER.index("Payout Date")] == "2026-04-02"

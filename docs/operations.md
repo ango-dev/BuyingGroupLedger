@@ -544,7 +544,11 @@ Upload a CSV of past orders -- any columns. The next screen maps each of its col
 column (pre-filled from the header names; *ignore* leaves a column unread), asks which way round
 slash dates are when the file does not say, and takes a profile for rows that name none. Or
 download the template (the ledger's own header) and fill that in. The preview says what the run
-will do with every row, and nothing is written until you run it.
+will do with every row, and nothing is written until you run it. An upload is refused outright
+when two columns share a name (one would silently read the other's cells) or a cell is past the
+CSV reader's limit; a cell holding several tracking numbers becomes one row per box, and when the
+row's Quantity is blank or smaller than the box count, each box's Quantity, Total Cost, Insurance
+and payout are left blank for you rather than the order's figures landing whole on every box.
 
 **What lands.** A row goes onto the ledger only when it carries everything the Audit page's
 `mandatory_by_stage` check asks of a row with its status -- the same function decides both, so the
@@ -562,7 +566,10 @@ holds, not refusals: *Import anyway* on the row lifts them and the row lands wit
 once it is complete (*undo* holds it again), and a row of an order this same import landed is never
 held -- item 2 of a two-item order follows item 1 as soon as it is filled in. The sheet is the
 Orders grid -- click, type, Enter; ranges; paste; undo; the row numbers select and Delete drops --
-and *Import the complete rows* moves whatever is complete now onto the ledger. The sheet lives in
+and *Import the complete rows* moves whatever is complete now onto the ledger. A key cell (Order
+ID, Order Date, Item Name, Shipment) cannot be edited onto a key the ledger or another row of the
+sheet already holds -- the row would otherwise be dropped as a duplicate at the next import -- and
+every date must be a real calendar day. The sheet lives in
 `data/imports/<stamp>/` (`source.csv`, `mapping.json`, `staging.json`), so every backup carries it
 and the page finds it again after a restart; the nav's Tools menu counts the rows still waiting.
 One import at a time: finish or discard it before uploading another. *Download the staging CSV*

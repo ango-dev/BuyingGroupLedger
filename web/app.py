@@ -1824,7 +1824,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             error = "no staging sheet (reload the page)"
         else:
             try:
-                row = importer.write_staged_cell(staging, entry_id, field, value, expected=None if expected is None else str(expected))
+                row = importer.write_staged_cell(staging, entry_id, field, value, expected=None if expected is None else str(expected),
+                                                 index=ledger_index_now() if field in importer.KEY_EDITABLE else None)
             except KeyError:
                 error = "no such row (the sheet is stale: reload the page)"
             except importer.StagingError as exc:

@@ -36,6 +36,7 @@ from __future__ import annotations
 import re
 import time
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Callable
 
@@ -53,6 +54,19 @@ NEVER_EDITABLE = frozenset(KEY_FIELDS) | frozenset(FORMULA_FIELDS) | {"last_scra
 EDITABLE_FIELDS = tuple(f for f in FIELDNAMES if f not in NEVER_EDITABLE)
 DATE_FIELDS = ("delivery_date", "payout_date", "return_date")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def valid_iso_date(text: str) -> bool:
+    """YYYY-MM-DD and a real calendar day: the shape alone let `2026-13-45` and `2026-02-31` onto
+    the ledger from the add row and the importer, where every
+    date comparison downstream -- the audit's staleness, the tax year, the pager -- trips on it."""
+    if not _ISO_DATE.match(text or ""):
+        return False
+    try:
+        date.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
 _HEADER_TO_FIELD = dict(zip(HEADER, FIELDNAMES))
 
 #: main.py's run lock. The staleness window is main._LOCK_STALE_SECONDS (3h); restated here rather
@@ -125,8 +139,8 @@ def validate(field: str, value: str):
             raise EditError(f"Status must be one of {', '.join(STATUSES)}")
         return text.lower()
     if field in DATE_FIELDS:
-        if not _ISO_DATE.match(text):
-            raise EditError(f"{field} must be a date written as YYYY-MM-DD (text), or blank")
+        if not valid_iso_date(text):
+            raise EditError(f"{field} must be a real calendar date written as YYYY-MM-DD (text), or blank")
         return text
     if field in _BOOL_FIELDS:
         parsed = _parse_checkbox(text)
@@ -364,8 +378,8 @@ class LedgerCellWriter:
         key = normalize_key(fields)
         if not key["order_id"]:
             raise EditError("Order ID is required")
-        if not _ISO_DATE.match(key["order_date"]):
-            raise EditError("Order Date must be written as YYYY-MM-DD")
+        if not valid_iso_date(key["order_date"]):
+            raise EditError("Order Date must be a real calendar date written as YYYY-MM-DD")
         if not key["item_name"]:
             raise EditError("Item Name is required")
         key["shipment"] = key["shipment"] or "1"
