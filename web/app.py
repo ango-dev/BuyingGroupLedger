@@ -35,7 +35,7 @@ from web import auth as auth_module
 from web import failures as failures_module
 from web import importer
 from web import setup_wizard
-from web.ledger_writer import RunInProgress
+from web.ledger_writer import RunInProgress, safe_href
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
 from web.audit_view import AuditCache, audit_grids, audit_key, key_of, run_audit
@@ -198,6 +198,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     from web.queries import query_string
 
     templates.env.filters["query"] = query_string
+    templates.env.filters["href"] = safe_href  # a link cell renders as a link only when it IS one
     templates.env.globals["header_of"] = FIELD_TO_HEADER.get
     from web.settings_form import plain_help
     templates.env.globals["plain_help"] = plain_help  # the setup wizard's help text, without the operator asides

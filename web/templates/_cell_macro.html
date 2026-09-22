@@ -13,13 +13,13 @@
   {%- if error %}<span class="cell-error" title="{{ error }}">⚠ {{ error }}</span> {% endif -%}
   {%- if row -%}
     {%- if col == 'order_id' -%}
-      <a href="/orders/{{ row.order_id }}">{{ row.order_id }}</a>
+      <a href="/orders/{{ row.order_id | urlencode }}">{{ row.order_id }}</a>
     {%- elif col == 'item_name' -%}
       <span title="{{ row.item_name }}">{{ row.item_name }}</span>
     {%- elif col == 'tracking_number' -%}
-      {%- if row.tracking_number and row.text('tracking_url') -%}<a href="{{ row.text('tracking_url') }}" rel="noopener">{{ row.tracking_number }}</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the tracking number" aria-label="edit tracking number">✎</button>{% endif %}{%- else -%}{{ row.tracking_number }}{%- endif -%}
+      {%- if row.tracking_number and row.text('tracking_url') | href -%}<a href="{{ row.text('tracking_url') | href }}" rel="noopener">{{ row.tracking_number }}</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the tracking number" aria-label="edit tracking number">✎</button>{% endif %}{%- else -%}{{ row.tracking_number }}{%- endif -%}
     {%- elif col in LINK_FIELDS -%}
-      {%- if raw -%}<a href="{{ raw }}" rel="noopener" title="{{ raw }}">{{ 'receipt' if col == 'receipt_url' else 'tracking' if col == 'tracking_url' else 'order' }} ↗</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the link" aria-label="edit {{ col }}">✎</button>{% endif %}{%- elif editable_cell -%}<span class="muted cell-empty">add ↗</span>{%- endif -%}{%- if col == 'receipt_url' and editable_cell -%}<button type="button" class="cell-upload" data-order-id="{{ key.order_id }}" title="upload a receipt file for this order (the link goes on every row of it)" aria-label="upload a receipt for {{ key.order_id }}">⤒</button>{%- endif -%}
+      {%- if raw | href -%}<a href="{{ raw | href }}" rel="noopener" title="{{ raw }}">{{ 'receipt' if col == 'receipt_url' else 'tracking' if col == 'tracking_url' else 'order' }} ↗</a>{% if editable_cell %}<button type="button" class="cell-edit" title="edit the link" aria-label="edit {{ col }}">✎</button>{% endif %}{%- elif raw -%}{{ raw }}{%- elif editable_cell -%}<span class="muted cell-empty">add ↗</span>{%- endif -%}{%- if col == 'receipt_url' and editable_cell -%}<button type="button" class="cell-upload" data-order-id="{{ key.order_id }}" title="upload a receipt file for this order (the link goes on every row of it)" aria-label="upload a receipt for {{ key.order_id }}">⤒</button>{%- endif -%}
     {%- elif col == 'tracking_submitted' -%}
       <input type="checkbox" class="cell-check" {{ 'checked' if row.tracking_submitted }} {{ '' if editable_cell else 'disabled' }} aria-label="tracking submitted" title="{{ 'submitted to the buying group' if row.tracking_submitted else 'not submitted' }}">
     {%- elif col == 'delivery_date' -%}

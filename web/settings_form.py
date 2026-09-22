@@ -33,6 +33,7 @@ from typing import Any, Mapping
 
 from config import loader
 from config.loader import config_value, load_config, save_config, strip_comments
+from models.numbers import NumberError, parse_number, whole_number
 from config.settings import BOOLEAN_SETTINGS, ENV_TO_CONFIG, Settings
 from models import retailers as retailers_module
 from models.card import Card
@@ -328,17 +329,23 @@ def _validate_days(text: str) -> str:
     return parse_days_any(text)
 
 
-def _validate_number(text: str, *, integer: bool, least: float, what: str):
+def _validate_number(text: str, *, integer: bool, least: float, what: str, most: float | None = None):
     """A sign-in length or count: blank keeps the default, otherwise a number of at least
-    `least` (a zero-hour session or a zero-attempt lock would sign everyone out for good)."""
+    `least` (a zero-hour session or a zero-attempt lock would sign everyone out for good) and at
+    most `most`. Through models.numbers, so `nan` -- which once saved and then made every /login
+    a 500 -- is "not a number" here."""
+    from models.numbers import NumberError, parse_number
+
     if not text:
         return ""
     try:
-        value = int(text) if integer else float(text)
-    except ValueError as exc:
-        raise ValueError(f"not a number: {text!r}") from exc
+        value = parse_number(text, integer=integer)
+    except NumberError as exc:
+        raise ValueError(str(exc)) from None
     if value < least:
         raise ValueError(f"{what} must be at least {least:g}")
+    if most is not None and value > most:
+        raise ValueError(f"{what} must be at most {most:g}")
     return value
 
 
@@ -351,11 +358,11 @@ def _validate_remember_days(text):
 
 
 def _validate_attempts(text):
-    return _validate_number(text, integer=True, least=1, what="the attempts before a lock")
+    return _validate_number(text, integer=True, least=1, most=1000, what="the attempts before a lock")
 
 
 def _validate_lockout(text):
-    return _validate_number(text, integer=False, least=0, what="the lock")
+    return _validate_number(text, integer=False, least=0, most=24 * 60 * 366, what="the lock")
 
 
 #: Settings with a vocabulary or a floor of their own, checked before anything is written.
@@ -365,43 +372,47 @@ _VALIDATORS = {"BACKUP_FREQUENCY": _validate_frequency, "BACKUP_TIME": _validate
                "WEB_LOGIN_ATTEMPTS": _validate_attempts, "WEB_LOGIN_LOCKOUT_MINUTES": _validate_lockout}
 
 
-#: Whole-number settings with a range of their own: the entrypoint falls back to 6 on an interval
-#: outside 1..23 (stderr only), and a keep of 0 would prune every backup.
-_BOUNDS: dict[str, tuple[int, int | None]] = {"RUN_INTERVAL_HOURS": (1, 23), "BACKUP_KEEP": (1, None)}
+#: Numeric settings with a range of their own: the entrypoint falls back to 6 on an interval
+#: outside 1..23 (stderr only), a keep of 0 would prune every backup, a port
+#: outside 1..65535 or a negative lookback stops the container or the run without a word (review
+#: 2026-09-22, pages bug 3). Anything not named here is whole (int) or finite (float) only.
+_BOUNDS: dict[str, tuple[float, float | None]] = {
+    "RUN_INTERVAL_HOURS": (1, 23), "BACKUP_KEEP": (1, 10_000),
+    "WEB_PORT": (1, 65535), "LOOKBACK_DAYS": (1, 3650), "WEB_TOOL_SESSION_MINUTES": (1, None),
+    "WEB_LEDGER_CACHE_TTL_SECONDS": (0, None), "WEB_HEARTBEAT_STALE_HOURS": (0, None),
+    "CASHBACK_CAP_WARN_PERCENT": (0, 100), "CASHBACK_CAP_WARN_DOLLARS": (0, None),
+    "BFMR_MIN_INSURANCE_VALUE": (0, None),
+}
 
 
 def _parse(setting: Setting, raw: str) -> Any:
     """The typed text as the value to store. The messages are the page's: a person reads them
-    under the field, so "invalid literal for int() with base 10" is not one of them."""
+    under the field, so "invalid literal for int() with base 10" is not one of them. Every
+    number goes through models.numbers (no `nan`, no `1e3`, no `10^30`)."""
+    from models.numbers import NumberError, parse_number
+
     text = (raw or "").strip()
     if setting.env in _VALIDATORS:
         return _VALIDATORS[setting.env](text)
-    if setting.kind == "int":
+    if setting.kind in ("int", "float"):
         if not text:
             return ""
-        try:
-            value = int(text)
-        except ValueError:
-            raise ValueError(f"{text!r} is not a whole number") from None
         low, high = _BOUNDS.get(setting.env, (None, None))
-        if low is not None and value < low:
-            raise ValueError(f"must be at least {low}")
-        if high is not None and value > high:
-            raise ValueError(f"must be between {low} and {high}")
-        return value
-    if setting.kind == "float":
-        if not text:
-            return ""
         try:
-            return float(text)
-        except ValueError:
-            raise ValueError(f"{text!r} is not a number") from None
+            value = parse_number(text, integer=setting.kind == "int")
+        except NumberError as exc:
+            raise ValueError(str(exc)) from None
+        if low is not None and value < low:
+            raise ValueError(f"must be at least {low:g}")
+        if high is not None and value > high:
+            raise ValueError(f"must be between {low:g} and {high:g}")
+        return value
     if setting.kind == "rate":
         if not text:
             return ""
         try:
-            rate = float(text[:-1].strip()) / 100 if text.endswith("%") else float(text)
-        except ValueError:
+            rate = parse_number(text, percent=True)
+        except NumberError:
             raise ValueError(f"{text!r} is not a rate: write 2% or 0.02") from None
         if not 0 <= rate <= 1:
             raise ValueError("outside 0-1 (write 2% as 0.02 or \"2%\")")
@@ -801,7 +812,10 @@ def _profile_from_form(form: Mapping[str, str], base: dict) -> dict:
         proxy = dict(old_proxy)
         proxy["host"] = host
         port = _text(form, "proxy_port")
-        proxy["port"] = int(port) if port.isdigit() else port
+        try:
+            proxy["port"] = whole_number(port, least=1, most=65535) if port else port
+        except NumberError as exc:
+            raise SettingsError([f"Proxy port: {exc}"]) from None
         proxy["username"] = _text(form, "proxy_username")
         proxy["password"] = _secret(form, "proxy_password", old_proxy.get("password"))
         if "proxy_form" in form:  # the page's form carries the "in use" box (unticked = absent); a hand-made post keeps the stored state
@@ -994,11 +1008,10 @@ def _log_rows(form: Mapping[str, str], prefix: str, today: str | None = None) ->
 
 def _money_value(text: str):
     """An amount as typed: "150,000" or "$150000" -> 150000.0; anything else stays text for the
-    model to refuse with its own message."""
-    cleaned = text.strip().replace("$", "").replace(",", "")
+    model to refuse with its own message (the typed-number rule: `nan` and `1e5` are text here)."""
     try:
-        return float(cleaned)
-    except ValueError:
+        return parse_number(text, least=0)
+    except NumberError:
         return text.strip()
 
 
@@ -1017,7 +1030,7 @@ def _check_identity(path: str, index: int | None, entry: dict, entries: list) ->
     if not value:
         raise SettingsError([f"{label} is required."])
     if path == "cards":
-        if not (value.isdigit() and len(value) == 4):
+        if not re.fullmatch(r"[0-9]{4}", value):  # ASCII digits: fullwidth ones never match a row
             raise SettingsError([f"{label} must be the card's four digits, got {value!r}."])
         if not str(entry.get("name", "") or "").strip():
             raise SettingsError(["Name is required."])

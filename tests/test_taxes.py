@@ -137,6 +137,19 @@ class TestExpenses:
                         year=2026, data_dir=tmp_path)
         assert inputs.expenses == []
 
+    def test_an_amount_is_a_non_negative_number_and_a_link_is_a_web_address(self, tmp_path):
+        """`nan` reached the summary as "$nan"; a
+        `javascript:` link was stored and rendered."""
+        inputs = YearInputs()
+        for bad in ("nan", "inf", "1e308", "-5", "1_000", "12abc"):
+            with pytest.raises(ValueError, match="Amount is not a number"):
+                add_expense(inputs, {**self.FIELDS, "amount": bad, "receipt_url": "https://x"}, year=2026, data_dir=tmp_path)
+        with pytest.raises(ValueError, match="Receipt link must start with http"):
+            add_expense(inputs, {**self.FIELDS, "receipt_url": "javascript:alert(1)"}, year=2026, data_dir=tmp_path)
+        assert inputs.expenses == []
+        ok = add_expense(inputs, {**self.FIELDS, "amount": "$1,234.50", "receipt_url": "https://x"}, year=2026, data_dir=tmp_path)
+        assert ok["amount"] == 1234.5
+
     def test_an_upload_is_kept_beside_the_ledger_and_a_link_is_kept_as_is(self, tmp_path):
         inputs = YearInputs()
         entry = add_expense(inputs, self.FIELDS, year=2026, data_dir=tmp_path,
@@ -471,6 +484,24 @@ class TestTaxesPage:
         body = client.get("/taxes", params={"year": "2026"}).text
         assert 'href="/taxes?year=2027" title="2027">›</a>' in body  # the arrow reaches it; 2027 is the latest and greys its own
         assert '<span class="button small disabled">›</span>' in client.get("/taxes", params={"year": "2027"}).text
+
+    def test_a_non_number_or_a_non_date_in_a_log_is_refused_and_named(self, client, tmp_path):
+        """Pages bugs 1 and 19: `nan` saved through the log; `not-a-date` silently became today."""
+        for bad in ("nan", "1e3", "inf"):
+            r = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": bad}, headers={"HX-Request": "true"})
+            assert r.status_code == 400 and "Costco Executive Cashback — alpha: not a number" in r.text, bad
+        r = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco.new.date": "not-a-date",
+                                             "program:alpha:costco.new.amount": "5"}, headers={"HX-Request": "true"})
+        assert r.status_code == 400 and "&#39;not-a-date&#39; is not a date (YYYY-MM-DD)" in r.text
+        r = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco.new.date": "2026-13-45",
+                                             "program:alpha:costco.new.amount": "5"}, headers={"HX-Request": "true"})
+        assert r.status_code == 400 and "is not a date" in r.text
+        assert not (tmp_path / "data" / "tax_inputs.json").exists()
+        r = client.post("/taxes/expense", data={"year": "2026", "date": "2026-03-03", "description": "boxes", "amount": "nan",
+                                                "profile": "alpha", "email": "", "category": "", "receipt_url": "https://x"},
+                        headers={"HX-Request": "true"})
+        assert r.status_code == 400 and "Amount is not a number" in r.text
+        assert "$nan" not in client.get("/taxes", params={"year": "2026"}).text
 
     def test_the_amounts_keep_a_dated_log(self, client, tmp_path):
         """program cashback and cashback sites change often -- a log of what was

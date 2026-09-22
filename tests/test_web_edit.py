@@ -163,7 +163,7 @@ class TestValidate:
         assert validate("status", "Paid") == "paid"
         assert validate("tracking_submitted", "yes") is True
         assert validate("insurance", "") == ""
-        with pytest.raises(EditError, match="must be a number"):
+        with pytest.raises(EditError, match="Actual Payout: 'twelve' is not a number"):
             validate("payout_amount", "twelve")
         with pytest.raises(EditError, match="YYYY-MM-DD"):
             validate("payout_date", "Sept 1")
@@ -176,6 +176,54 @@ class TestValidate:
             validate("status", "done")
         with pytest.raises(EditError, match="TRUE or FALSE"):
             validate("tracking_submitted", "maybe")
+
+    def test_numbers_are_stored_as_typed_or_refused(self):
+        """`1e3` stored 13, `2.5` stored 2, `150%`
+        and `-3` went in, a 20-digit quantity leaked OverflowError. One rule (models.numbers)."""
+        for bad in ("1e3", "0x10", "1o0", "12abc", "3 units", "nan", "inf", "1_000"):
+            with pytest.raises(EditError, match="Actual Payout: .* is not a number"):
+                validate("payout_amount", bad)
+        with pytest.raises(EditError, match="Quantity: '2.5' is not a whole number"):
+            validate("quantity", "2.5")
+        with pytest.raises(EditError, match="Return Qty: '1.9' is not a whole number"):
+            validate("return_quantity", "1.9")
+        with pytest.raises(EditError, match="Quantity: .*must be at least 1"):
+            validate("quantity", "0")
+        with pytest.raises(EditError, match="Quantity: .*must be at least 1"):
+            validate("quantity", "-3")
+        assert validate("return_quantity", "0") == 0
+        with pytest.raises(EditError, match="Cashback Rate: .*must be at most 100%"):
+            validate("cashback_rate", "150%")
+        with pytest.raises(EditError, match="Promo Rate: .*must be at least 0%"):
+            validate("promo_rate", "-4%")
+        assert validate("cashback_rate", "100%") == 1 and validate("promo_rate", "0.01") == 0.01
+        with pytest.raises(EditError, match="Shipping: .*must be at least 0"):
+            validate("shipping", "(5)")
+        with pytest.raises(EditError, match="Actual Payout: .*must be at least 0"):
+            validate("payout_amount", "-5")
+        with pytest.raises(EditError, match="too large"):
+            validate("quantity", "99999999999999999999")
+        assert validate("total_cost", "$1,234.56") == 1234.56 and validate("quantity", "3.0") == 3
+
+    def test_last_four_links_and_far_dates(self):
+        """Orders bugs 5-7: `abcd` and `12345` as a card's last 4, `javascript:` as a link,
+        9999-12-31 as a payout date."""
+        assert validate("card_last4", "0315") == "0315"
+        for bad in ("12345", "abcd", "766", "０７６６"):
+            with pytest.raises(EditError, match="Card Last 4: .*last four digits"):
+                validate("card_last4", bad)
+        for field in ("order_url", "tracking_url", "receipt_url"):
+            assert validate(field, "https://x.example/a?b=1") == "https://x.example/a?b=1"
+            with pytest.raises(EditError, match="starts with http"):
+                validate(field, "javascript:alert(1)")
+            with pytest.raises(EditError, match="starts with http"):
+                validate(field, "//evil.example/x")
+        assert validate("receipt_url", "/receipts/bestbuy/2026-09/BBY01-1.pdf") == "/receipts/bestbuy/2026-09/BBY01-1.pdf"
+        with pytest.raises(EditError, match="real calendar date"):
+            validate("payout_date", "9999-12-31")
+        with pytest.raises(EditError, match="real calendar date"):
+            validate("delivery_date", "1999-12-31")
+        assert validate("payout_date", "2099-12-31") == "2099-12-31"
 
     def test_editable_fields_are_everything_else(self):
         assert set(ledger_writer.EDITABLE_FIELDS) == set(FIELDNAMES) - {
@@ -296,6 +344,14 @@ class TestAppendRow:
                                "status": "done"})
         with pytest.raises(EditError, match="already on the ledger"):
             writer.add_row(KEY)
+        # Orders bug 6: an id with / ? # % or a space has no working order page or receipt route
+        for bad in ("A/B", "A?B", "A#B", "A%20B", "A\\B", "A\x07B"):
+            with pytest.raises(EditError, match="Order ID cannot contain"):
+                writer.add_row({"order_id": bad, "order_date": "2026-09-17", "item_name": "T"})
+        with pytest.raises(EditError, match="too long"):
+            writer.add_row({"order_id": "X" * 81, "order_date": "2026-09-17", "item_name": "T"})
+        with pytest.raises(EditError, match="Quantity: '2.5' is not a whole number"):
+            writer.add_row({"order_id": "X", "order_date": "2026-09-17", "item_name": "T", "quantity": "2.5"})
         assert sheet.writes == []
 
 
@@ -448,6 +504,35 @@ class TestOrdersRoutes:
         assert "now reads" in conflict.text and sheet.writes == []
         formula = client.post("/orders/cell", data={**KEY, "field": "cogs", "value": "1"})
         assert "not editable" in formula.text
+
+    def test_a_typo_in_a_number_is_a_refusal_not_a_different_number(self, sheet, tmp_path, logs_dir):
+        """Orders bug 1: POST payout_amount=1e3 answered 200 with no error and stored 13."""
+        client = self._client(sheet, tmp_path, logs_dir)
+        response = client.post("/orders/cell", data={**KEY, "field": "payout_amount", "value": "1e3", "expected": "$1,230.00"})
+        assert response.status_code == 200 and "&#39;1e3&#39; is not a number" in response.text and "data-error=" in response.text
+        response = client.post("/orders/cell", data={**KEY, "field": "quantity", "value": "2.5", "expected": "1"})
+        assert "not a whole number" in response.text
+        response = client.post("/orders/cell", data={**KEY, "field": "order_url", "value": "javascript:alert(1)", "expected": ""})
+        assert "starts with http" in response.text
+        assert sheet.writes == []
+
+    def test_a_link_cell_and_an_order_id_render_safely(self, sheet, tmp_path, logs_dir):
+        """Orders bugs 5-6: a scraper-fed `javascript:` link rendered as an <a href>; an id
+        carrying a space linked to a page nothing served."""
+        sheet.grid[1][FIELDNAMES.index("order_url")] = "javascript:alert(1)"
+        sheet.grid[1][FIELDNAMES.index("receipt_url")] = "/receipts/bestbuy/2026-09/BBY01-1.pdf"
+        sheet.grid[2][FIELDNAMES.index("order_id")] = "A B&C"
+        client = self._client(sheet, tmp_path, logs_dir)
+        body = client.get("/orders").text
+        assert 'href="javascript:' not in body and "javascript:alert(1)" in body  # shown as text
+        assert 'href="/receipts/bestbuy/2026-09/BBY01-1.pdf"' in body
+        assert 'href="/orders/A%20B%26C"' in body and 'href="/orders/A B' not in body
+        cards = client.get("/orders", params={"view": "cards"}).text
+        assert 'href="javascript:' not in cards and 'href="/orders/A%20B%26C"' in cards
+        page = client.get("/orders/A B&C").text
+        assert "A B&amp;C" in page and 'action="/orders/A%20B%26C/receipt"' in page
+        one = client.get("/orders/BBY01-1").text
+        assert 'href="javascript:' not in one and "javascript:alert(1)" in one
 
     def test_the_keep_my_edits_switch_is_on_for_orders_and_off_for_audit_and_rides_the_write(self, sheet, tmp_path, logs_dir):
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)

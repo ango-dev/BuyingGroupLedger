@@ -27,13 +27,22 @@ def money(value) -> float:
     """"$4,000", "-50", 12.5 -> a float; anything else raises ValueError naming it."""
     if isinstance(value, bool):
         raise ValueError(f"{value!r} is not an amount")
-    if isinstance(value, (int, float)):
-        return float(value)
-    text = str(value or "").strip().replace("$", "").replace(",", "")
+    from models.numbers import NumberError, parse_number
+
     try:
-        return float(text)
-    except ValueError:
+        return float(parse_number(value))
+    except NumberError:
         raise ValueError(f"{str(value).strip()!r} is not an amount") from None
+
+
+def _real_day(text: str) -> bool:
+    if not _ISO.match(text):
+        return False
+    try:
+        date.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
 
 
 def clean(entry, default_date: str) -> dict | None:
@@ -125,6 +134,9 @@ def parse(form: Mapping, prefix: str, today: str | None = None) -> list[dict]:
         row = rows[index]
         if str(row.get("remove") or "").strip().lower() in ("on", "true", "1", "yes"):
             continue
+        typed = str(row.get("date") or "").strip()
+        if typed and not _real_day(typed[:10]):
+            raise ValueError(f"log row {index}: {typed!r} is not a date (YYYY-MM-DD)")
         try:
             entry = clean(row, today)
         except ValueError as exc:

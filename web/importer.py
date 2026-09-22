@@ -38,7 +38,7 @@ from typing import Callable, Iterable, Mapping
 from ledger.sync import HEADER, _parse_display_number
 from models.order import FIELDNAMES, normalize_shipment
 from scripts import import_history as ih
-from web.ledger_writer import EditError, RunInProgress, valid_iso_date, validate
+from web.ledger_writer import EditError, RunInProgress, order_id_problem, valid_iso_date, validate
 
 __all__ = ["BATCHES_DIR", "Batch", "ImportResult", "StagedRow", "Staging", "StagingError"]
 
@@ -666,6 +666,8 @@ def write_staged_cell(staging: Staging, row_id: str, field: str, value: str, *, 
         if text and not text.isdigit():
             raise StagingError("Shipment must be a number (1, 2, ...)")
         stored = text
+    elif field == "order_id" and text and order_id_problem(text):
+        raise StagingError(order_id_problem(text))
     elif field in KEY_EDITABLE:
         stored = text
     else:

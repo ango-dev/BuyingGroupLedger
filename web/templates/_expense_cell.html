@@ -10,7 +10,8 @@
     {%- if field == 'amount' %}{{ e.amount | money }}
     {%- elif field == 'receipt_url' -%}
       {%- if e.receipt.file %}<a href="/taxes/receipt/{{ e.id }}?year={{ year }}" rel="noopener" title="the uploaded file; a link typed here replaces it">{{ e.receipt.name }}</a>
-      {%- elif e.receipt.url %}<a href="{{ e.receipt.url }}" rel="noopener" title="{{ e.receipt.url }}">receipt ↗</a>
+      {%- elif e.receipt.url | href %}<a href="{{ e.receipt.url | href }}" rel="noopener" title="{{ e.receipt.url }}">receipt ↗</a>
+      {%- elif e.receipt.url %}{{ e.receipt.url }}
       {%- else %}<span class="muted cell-empty">add ↗</span>{% endif %}<button type="button" class="cell-edit" title="edit the link" aria-label="edit the receipt link">✎</button><button type="button" class="cell-upload" data-upload-url="/taxes/expense/{{ e.id }}/receipt?year={{ year }}" title="upload a receipt file for this expense (it replaces the current receipt)" aria-label="upload a receipt for this expense">⤒</button>
     {%- else %}{{ raw }}{% endif -%}
   {%- endif -%}

@@ -127,11 +127,17 @@ def clean(value) -> str:
 
 
 def money(value) -> float | None:
+    """A cell's number ("$1,314.98", "-$3.86", "12.5%" -> 0.125), None for anything that is not one.
+    The typed-number rule (models.numbers): "1e3" is None here, never 13."""
+    from models.numbers import NumberError, parse_number
+
     text = clean(value)
     if not text:
         return None
-    parsed = _parse_display_number(text)
-    return float(parsed) if parsed is not None else None
+    try:
+        return float(parse_number(text, percent=True))
+    except NumberError:
+        return None
 
 
 def truthy(value) -> bool:

@@ -57,10 +57,16 @@ AMAZON_TWINS = {normalize_retailer("Amazon"): normalize_retailer("Amazon Busines
 
 
 def _money(value) -> float:
-    if isinstance(value, str):
-        cleaned = value.strip().replace("$", "").replace(",", "")
-        return float(cleaned) if cleaned else 0.0
-    return float(value)
+    """A spend amount in any spelling ("$150,000", 150000); blank is 0. The typed-number rule
+    (models.numbers): `nan` and `1e5` are refused, a negative limit too."""
+    from models.numbers import NumberError, parse_number
+
+    if isinstance(value, str) and not value.strip():
+        return 0.0
+    try:
+        return float(parse_number(value, least=0))
+    except NumberError as exc:
+        raise ValueError(f"spend limit: {exc}") from None
 
 
 class CashbackCap(BaseModel):

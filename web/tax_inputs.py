@@ -269,10 +269,13 @@ def save_year(path: Path, year: int, inputs: YearInputs) -> None:
 
 
 def _amount(text) -> float | None:
-    text = str(text or "").strip().replace("$", "").replace(",", "")
-    if not text:
+    """A typed amount, or None for blank; ValueError for text that is not a non-negative number
+    (`nan` once reached the summary as "$nan")."""
+    from models.numbers import parse_number
+
+    if not str(text or "").strip():
         return None
-    return round(float(text), 2)
+    return round(parse_number(text, least=0), 2)
 
 
 def log_entries(inputs: YearInputs, year: int) -> tuple[dict[str, list[dict]], dict[str, list[dict]], dict[str, list[dict]]]:
@@ -303,6 +306,13 @@ def log_default_date(year: int, today: str) -> str:
     """The date a log's new row starts with on a year's page: today when today falls in the year,
     else the year's last day."""
     return today if str(today or "").startswith(str(int(year))) else f"{int(year)}-12-31"
+
+
+def _why(exc: Exception) -> str:
+    """A refused amount's message for the page: the log's own words when they name a date or a
+    year, else the one phrase every amount box shares."""
+    text = str(exc)
+    return text if ("not in" in text or "is not a date" in text) else "not a number"
 
 
 def _logged(form: Mapping[str, str], key: str, today: str | None, year: int | None = None) -> tuple[float | None, list[dict] | None]:
@@ -344,7 +354,7 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
             try:
                 value, entries = _logged(form, key, today, year)
             except ValueError as exc:
-                errors.append(f"{p.label} sign-up bonus: {exc if 'not in' in str(exc) else 'not a number'}")
+                errors.append(f"{p.label} sign-up bonus: {_why(exc)}")
                 continue
             if value is not None:
                 bonuses[key] = value
@@ -354,7 +364,7 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
         try:
             value, entries = _logged(form, p.key, today, year)
         except ValueError as exc:
-            errors.append(f"{p.label}: {exc if 'not in' in str(exc) else 'not a number'}")
+            errors.append(f"{p.label}: {_why(exc)}")
             continue
         if value is not None:
             programs[p.key] = value
@@ -367,7 +377,7 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
         try:
             value, entries = _logged(form, f"site.{i}.amount", today, year)
         except ValueError as exc:
-            errors.append(f"{name}: {exc if 'not in' in str(exc) else 'not a number'}")
+            errors.append(f"{name}: {_why(exc)}")
             continue
         if value is not None:
             sites[name] = value
@@ -380,7 +390,7 @@ def _parse(form: Mapping[str, str], prompts: Iterable[Prompt], today: str | None
         try:
             value, entries = _logged(form, f"other.{i}.amount", today, year)
         except ValueError as exc:
-            errors.append(f"{label}: {exc if 'not in' in str(exc) else 'not a number'}")
+            errors.append(f"{label}: {_why(exc)}")
             continue
         other.append({"label": label, "amount": value or 0.0, "kind": "income", "entries": entries or []})
     if errors:
@@ -469,9 +479,12 @@ def _expense_fields(fields: Mapping[str, str], *, year: int) -> tuple[dict, list
         errors.append("Who paid is required: the profile, or the email of the account")
     if email and not _EMAIL.match(email):
         errors.append("Email is not an address")
+    link = str(fields.get("receipt_url") or "").strip()
+    if link and not link.lower().startswith(("http://", "https://")):
+        errors.append("Receipt link must start with http:// or https://")
     clean = {"date": when, "description": description, "amount": amount,
              "category": str(fields.get("category") or "").strip(), "profile": profile, "email": email,
-             "link": str(fields.get("receipt_url") or "").strip()}
+             "link": link}
     return clean, errors
 
 

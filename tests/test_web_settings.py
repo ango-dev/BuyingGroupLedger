@@ -917,6 +917,23 @@ class TestSignInSettings:
             assert f'for="f-{env}"' in panel, env
         assert 'for="f-WEB_PASSWORD"' in panel
 
+    def test_entry_cards_take_the_typed_number_rule(self, config):
+        """proxy port 99999, fullwidth digits as a last 4 and a
+        `nan` spend limit all saved."""
+        with pytest.raises(settings_form.SettingsError, match="Proxy port: '99999' is above 65535"):
+            settings_form.apply_entry("profiles", None, {"label": "p9", "retailers": "costco", "proxy_host": "h",
+                                                          "proxy_port": "99999", "proxy_username": "", "proxy_password": ""})
+        with pytest.raises(settings_form.SettingsError, match="Proxy port: '-1' is below 1"):
+            settings_form.apply_entry("profiles", None, {"label": "p9", "retailers": "costco", "proxy_host": "h",
+                                                          "proxy_port": "-1", "proxy_username": "", "proxy_password": ""})
+        with pytest.raises(settings_form.SettingsError, match="four digits"):
+            settings_form.apply_entry("cards", None, {"last4": "\uff10\uff17\uff16\uff16", "name": "Wide", "cashback_rate": "2%"})
+        with pytest.raises(settings_form.SettingsError) as info:
+            settings_form.apply_entry("cards", None, {"last4": "4242", "name": "Capped", "cashback_rate": "5%",
+                                                       "cap_all.spend_limit": "nan", "cap_all.fallback_rate": "1%",
+                                                       "cap_all.resets": "calendar-year"})
+        assert "nan" in " ".join(info.value.errors) and "pydantic" not in " ".join(info.value.errors)
+
     def test_the_lengths_have_floors_and_the_password_saves_like_a_secret(self, config):
         form = {s.env: "" for s in settings_form.schema()}
         with pytest.raises(settings_form.SettingsError) as info:
@@ -925,6 +942,18 @@ class TestSignInSettings:
         assert any(e.startswith("WEB_SESSION_HOURS:") for e in info.value.errors)
         assert any(e.startswith("WEB_LOGIN_ATTEMPTS:") for e in info.value.errors)
         assert any(e.startswith("WEB_REMEMBER_DAYS:") and "not a number" in e for e in info.value.errors)
+
+        # `nan` saved and made every /login a 500 after the restart
+        with pytest.raises(settings_form.SettingsError) as info:
+            settings_form.apply_scalars({**form, "WEB_SESSION_HOURS": "nan", "WEB_LOGIN_LOCKOUT_MINUTES": "inf",
+                                         "WEB_LOGIN_ATTEMPTS": "10^30", "WEB_PORT": "70000", "LOOKBACK_DAYS": "-5",
+                                         "WEB_HEARTBEAT_STALE_HOURS": "1e3", "BACKUP_KEEP": "1_000"})
+        errors = "\n".join(info.value.errors)
+        for needle in ("WEB_SESSION_HOURS: 'nan' is not a number", "WEB_LOGIN_LOCKOUT_MINUTES: 'inf' is not a number",
+                       "WEB_LOGIN_ATTEMPTS: '10^30' is not a whole number", "WEB_PORT: must be between 1 and 65535",
+                       "LOOKBACK_DAYS: must be at least 1", "WEB_HEARTBEAT_STALE_HOURS: '1e3' is not a number",
+                       "BACKUP_KEEP: '1_000' is not a whole number"):
+            assert needle in errors, needle
 
         changes = settings_form.apply_scalars({**form, "WEB_PASSWORD": "open sesame", "WEB_SESSION_HOURS": "12",
                                                "WEB_REMEMBER_DAYS": "365", "WEB_LOGIN_LOCKOUT_MINUTES": "0"})

@@ -45,6 +45,9 @@ class TestCellParsing:
         assert ih.clean("Please fill") == "" and ih.clean("#VALUE!") == ""
         assert ih.money("$1,314.98") == 1314.98 and ih.money("-$3.86") == -3.86 and ih.money("12.5%") == 0.125
         assert ih.money("Please fill") is None
+        # the typed-number rule (models.numbers): a letter is not decoration (2026-09-22)
+        assert ih.money("1e3") is None and ih.money("0x10") is None and ih.money("nan") is None
+        assert ih.money("(5)") == -5.0 and ih.money("1,234") == 1234.0
 
     def test_card_split(self):
         assert ih.split_card("Triple Cash 4351") == ("Triple Cash", "4351")

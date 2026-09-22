@@ -13,7 +13,7 @@
     {% for c in pager["items"] %}
     <article class="card status-{{ c.statuses[0] if c.statuses else 'unknown' }} payout-{{ c.payout_state | replace(' ', '-') }}">
       <header>
-        <a class="mono order-id" href="/orders/{{ c.order_id }}">{{ c.order_id }}</a>
+        <a class="mono order-id" href="/orders/{{ c.order_id | urlencode }}">{{ c.order_id }}</a>
         <span class="muted">{{ c.order_date }}</span>
         <span class="retailer">{{ c.retailer }}</span>
       </header>
@@ -61,9 +61,9 @@
       {% if not editable %}<p class="muted small row-count">{{ c.rows }} row(s)</p>{% endif %}
       <footer>
         <span class="links">
-          <a class="button small" href="/orders/{{ c.order_id }}">Details</a>
-          {% if c.order_url %}<a class="button small" href="{{ c.order_url }}" rel="noopener">Order ↗</a>{% endif %}
-          {% for u in c.receipt_urls %}<a class="button small" href="{{ u }}" rel="noopener">Receipt ↗</a>{% endfor %}
+          <a class="button small" href="/orders/{{ c.order_id | urlencode }}">Details</a>
+          {% if c.order_url | href %}<a class="button small" href="{{ c.order_url | href }}" rel="noopener">Order ↗</a>{% endif %}
+          {% for u in c.receipt_urls %}{% if u | href %}<a class="button small" href="{{ u | href }}" rel="noopener">Receipt ↗</a>{% endif %}{% endfor %}
         </span>
         {% if editable %}
         <form class="card-delete" hx-post="/orders/delete" hx-target="#orders-table" hx-include="#filters"

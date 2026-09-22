@@ -265,6 +265,9 @@ class TestUpdateCell:
             importer.write_staged_cell(st, "r0001-1", "payout_date", "2026-02-31")
         with pytest.raises(importer.StagingError, match="Shipment must be a number"):
             importer.write_staged_cell(st, "r0001-1", "shipment", "two")
+        with pytest.raises(importer.StagingError, match="Order ID cannot contain"):
+            importer.write_staged_cell(st, "r0001-1", "order_id", "A/B")
+        assert st.row("r0001-1").cells["order_id"] == "NEW-1"
 
     def test_a_key_cell_may_not_be_edited_onto_a_key_the_ledger_or_the_sheet_holds(self, sheet):
         """re-keyed onto an existing key, the row was marked a

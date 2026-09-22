@@ -15,10 +15,10 @@
     <dt>Profile</dt><dd>{{ order.profile }}</dd>
     <dt>Card</dt><dd>{{ order.card }}{% if order.card_last4 %} <span class="mono">…{{ order.card_last4 }}</span>{% endif %}</dd>
     <dt>Delivery Address</dt><dd>{{ order.delivery_address }}</dd>
-    <dt>Order Link</dt><dd>{% for u in order.order_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">none</span>{% endfor %}</dd>
-    <dt>Receipt Link</dt><dd>{% for u in order.receipt_urls %}<a href="{{ u }}" rel="noopener">{{ u }}</a><br>{% else %}<span class="muted">no receipt captured</span>{% endfor %}
+    <dt>Order Link</dt><dd>{% for u in order.order_urls %}{% if u | href %}<a href="{{ u | href }}" rel="noopener">{{ u }}</a>{% else %}{{ u }}{% endif %}<br>{% else %}<span class="muted">none</span>{% endfor %}</dd>
+    <dt>Receipt Link</dt><dd>{% for u in order.receipt_urls %}{% if u | href %}<a href="{{ u | href }}" rel="noopener">{{ u }}</a>{% else %}{{ u }}{% endif %}<br>{% else %}<span class="muted">no receipt captured</span>{% endfor %}
       {% if editable %}
-      <form method="post" action="/orders/{{ order.order_id }}/receipt" enctype="multipart/form-data" class="receipt-upload">
+      <form method="post" action="/orders/{{ order.order_id | urlencode }}/receipt" enctype="multipart/form-data" class="receipt-upload">
         {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'a photo or PDF uploads as soon as you pick it; the link is written to every row of this order', autosubmit=True) }}
         <noscript><button type="submit">Upload receipt</button></noscript>
       </form>
@@ -55,7 +55,7 @@
   <h3>Shipment {{ s.shipment }} <span class="tag status-{{ s.status }}">{{ s.status }}</span></h3>
   <dl class="inline">
     <dt>Tracking Number</dt>
-    <dd class="mono">{% if s.tracking_number %}{% if s.tracking_url %}<a href="{{ s.tracking_url }}" rel="noopener">{{ s.tracking_number }}</a>{% else %}{{ s.tracking_number }}{% endif %}{% else %}<span class="muted">none yet</span>{% endif %}</dd>
+    <dd class="mono">{% if s.tracking_number %}{% if s.tracking_url | href %}<a href="{{ s.tracking_url | href }}" rel="noopener">{{ s.tracking_number }}</a>{% else %}{{ s.tracking_number }}{% endif %}{% else %}<span class="muted">none yet</span>{% endif %}</dd>
     <dt>Tracking Submitted</dt><dd>{{ '✓ submitted to the buying group' if s.tracking_submitted else 'not submitted' }}</dd>
     <dt>Delivery Date</dt><dd>{{ s.delivery_date or '—' }}{% if s.delivery_date and s.status in ('ordered', 'shipped') %} <span class="tag committed" title="the retailer's estimated delivery date, until the run sees the package land">est.</span>{% endif %}</dd>
     <dt>Package ID</dt><dd class="mono">{{ s.package_id or '—' }}</dd>

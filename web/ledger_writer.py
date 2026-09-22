@@ -42,7 +42,7 @@ from typing import Callable
 
 from models.order import FIELDNAMES, STATUSES, normalize_shipment
 from ledger.sync import (
-    HEADER, _BOOL_FIELDS, _COL, _NUMERIC_FIELDS, _blank_to_none, _coerce,
+    HEADER, _BOOL_FIELDS, _COL, _INT_FIELDS, _NUMERIC_FIELDS, _blank_to_none, _coerce,
     _ensure_grid_rows, _last_occupied_row, _parse_checkbox, _write_profit_formulas,
 )
 
@@ -54,6 +54,9 @@ NEVER_EDITABLE = frozenset(KEY_FIELDS) | frozenset(FORMULA_FIELDS) | {"last_scra
 EDITABLE_FIELDS = tuple(f for f in FIELDNAMES if f not in NEVER_EDITABLE)
 DATE_FIELDS = ("delivery_date", "payout_date", "return_date")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+#: The years a ledger date can fall in: 9999-12-31 typed as a payout date sorted every page for
+#: ever after.
+FIRST_YEAR, LAST_YEAR = 2000, 2099
 
 
 def valid_iso_date(text: str) -> bool:
@@ -63,11 +66,12 @@ def valid_iso_date(text: str) -> bool:
     if not _ISO_DATE.match(text or ""):
         return False
     try:
-        date.fromisoformat(text)
+        parsed = date.fromisoformat(text)
     except ValueError:
         return False
-    return True
+    return FIRST_YEAR <= parsed.year <= LAST_YEAR
 _HEADER_TO_FIELD = dict(zip(HEADER, FIELDNAMES))
+FIELD_TO_HEADER = dict(zip(FIELDNAMES, HEADER))
 
 #: main.py's run lock. The staleness window is main._LOCK_STALE_SECONDS (3h); restated here rather
 #: than imported because importing main configures logging and pulls every scraper in.
@@ -148,11 +152,70 @@ def validate(field: str, value: str):
             raise EditError(f"{field} must be TRUE or FALSE")
         return parsed
     if field in _NUMERIC_FIELDS:
-        coerced = _coerce(field, text)
-        if isinstance(coerced, str):
-            raise EditError(f"{field} must be a number")
-        return coerced
+        return _typed_number(field, text)
+    if field == "card_last4":
+        if not _LAST4.match(text):
+            raise EditError(f"{_header(field)}: {text!r} is not the card's last four digits")
+        return text
+    if field in LINK_FIELDS:
+        if not safe_href(text):
+            raise EditError(f"{_header(field)}: a link starts with http:// or https://")
+        return text
     return text
+
+
+#: The typed-number rule per numeric column: rates are
+#: 0-100%, counts whole and never negative, money never negative; every one refuses letters,
+#: exponents and non-finite text through models.numbers, so a typo is a refusal, not 13.
+_RATE_FIELDS = frozenset({"cashback_rate", "promo_rate"})
+_LEAST = {"quantity": 1, "shipment": 1}
+_LAST4 = re.compile(r"^[0-9]{4}$")
+LINK_FIELDS = ("order_url", "tracking_url", "receipt_url")
+
+
+def _header(field: str) -> str:
+    return FIELD_TO_HEADER.get(field, field)
+
+
+def _typed_number(field: str, text: str):
+    from models.numbers import NumberError, parse_number
+
+    try:
+        if field in _RATE_FIELDS:
+            return parse_number(text, percent=True, least=0, most=1)
+        return parse_number(text, integer=field in _INT_FIELDS, least=_LEAST.get(field, 0))
+    except NumberError as exc:
+        raise EditError(f"{_header(field)}: {exc}") from None
+
+
+def safe_href(url: str) -> str:
+    """`url` when it is a link the page may render as one -- http(s), or the dashboard's own
+    /receipts/ files -- else "". The templates render anything else as text."""
+    text = str(url or "").strip()
+    lowered = text.lower()
+    if lowered.startswith(("http://", "https://")) or (text.startswith("/receipts/") and not text.startswith("//")):
+        return text
+    return ""
+
+
+#: Characters an Order ID cannot carry: the id is a path segment of /orders/<id> and a file name
+#: under data/receipts/, so a slash, a query or fragment mark, a percent sign or a control
+#: character has no working order page.
+_ORDER_ID_REFUSED = re.compile(r"[/\\?#%\x00-\x1f\x7f]")
+
+
+def order_id_problem(order_id: str) -> str:
+    """Why this text cannot be an Order ID, or "" when it can."""
+    text = str(order_id or "")
+    if not text.strip():
+        return "Order ID is required"
+    if text != text.strip():
+        return "Order ID cannot start or end with a space"
+    if _ORDER_ID_REFUSED.search(text):
+        return "Order ID cannot contain / \\ ? # % or control characters"
+    if len(text) > 80:
+        return "Order ID is too long (80 characters at most)"
+    return ""
 
 
 def normalize_key(key: dict) -> dict:
@@ -394,8 +457,8 @@ class LedgerCellWriter:
         must not already exist. Returns {"row_number", "key"}. `session` (open_adds) shares one
         worksheet and grid across many adds."""
         key = normalize_key(fields)
-        if not key["order_id"]:
-            raise EditError("Order ID is required")
+        if order_id_problem(key["order_id"]):
+            raise EditError(order_id_problem(key["order_id"]))
         if not valid_iso_date(key["order_date"]):
             raise EditError("Order Date must be a real calendar date written as YYYY-MM-DD")
         if not key["item_name"]:
