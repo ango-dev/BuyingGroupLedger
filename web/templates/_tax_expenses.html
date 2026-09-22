@@ -32,7 +32,9 @@
       posts to data-cell-url and gets the <td> back; the receipt cell's ⤒ uploads a file. No
       per-row buttons. -#}
   <form id="bulk" method="post" action="/taxes/expenses/delete?year={{ year }}" data-confirm="Delete every selected expense? Their uploaded receipts are deleted too.">
-    <div class="muted count">{{ inputs.expenses | length }} expense(s) · <span id="sel-count">0</span> selected {% with id='expense-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}</div>
+    {%- set esuffix = (('&esort=' ~ esort ~ '&edir=' ~ edir) if esort else '') ~ (('&eper=' ~ eper) if eper != 50 else '') -%}
+    <div class="muted count">{% if epager.total %}{{ epager.start }}–{{ epager.end }} of {% endif %}{{ epager.total }} expense(s) · <span id="sel-count">0</span> selected {% with id='expense-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}
+      <a class="button small export" href="/taxes/expenses.csv?year={{ year }}{{ esuffix | safe }}" title="download the year's expenses as the grid sorts them, every page, as a CSV">Export CSV</a></div>
     <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Delete the selected expense? Its uploaded receipt is deleted too." data-confirm-many="Delete the {n} selected expenses? Their uploaded receipts are deleted too.">Delete selected</button>
     <div class="sheet">
     <table class="grid compact expenses sheetlike stacked" data-cell-url="/taxes/expense/cell?year={{ year }}">
@@ -45,15 +47,30 @@
       <tbody>
         {% for e in expenses %}
         <tr class="has-num">
-          <td class="rownum muted" title="expense {{ loop.index }} — click to select"><input type="checkbox" name="sel" value="{{ e.id }}" hidden aria-label="select expense {{ loop.index }}">{{ loop.index }}</td>
+          {%- set n = epager.start + loop.index0 -%}
+          <td class="rownum muted" title="expense {{ n }} — click to select"><input type="checkbox" name="sel" value="{{ e.id }}" hidden aria-label="select expense {{ n }}">{{ n }}</td>
           {% for field in ('date', 'description', 'category', 'profile', 'email', 'receipt_url', 'amount') %}{% with e=e, field=field, entry_id=e.id, error='' %}{% include "_expense_cell.html" %}{% endwith %}{% endfor %}
         </tr>
         {% endfor %}
       </tbody>
-      <tfoot><tr class="total"><td colspan="7">Total</td><td class="num">{{ inputs.expense_total | money }}</td></tr></tfoot>
+      <tfoot><tr class="total"><td colspan="7">Total for {{ year }}</td><td class="num">{{ inputs.expense_total | money }}</td></tr></tfoot>
     </table>
     </div>
   </form>
+  {#- one page at a time: the pager and the size picker, plain links and a plain
+      form -- the grid's sort is a plain link too; a sort lands on page 1 by carrying no epage -#}
+  <div class="pager expenses-pager">
+    {% if epager.pages > 1 %}
+    <a class="{{ '' if epager.has_prev else 'disabled' }}" href="/taxes?year={{ year }}{{ esuffix | safe }}&epage={{ (epager.page - 1) if epager.has_prev else 1 }}#s-expenses">‹ prev</a>
+    {% for p in epager.window %}<a class="{{ 'current' if p == epager.page }}" href="/taxes?year={{ year }}{{ esuffix | safe }}&epage={{ p }}#s-expenses">{{ p }}</a>{% endfor %}
+    <a class="{{ '' if epager.has_next else 'disabled' }}" href="/taxes?year={{ year }}{{ esuffix | safe }}&epage={{ (epager.page + 1) if epager.has_next else epager.pages }}#s-expenses">next ›</a>
+    <span class="muted small">page {{ epager.page }} of {{ epager.pages }}</span>
+    {% endif %}
+    <form method="get" action="/taxes" id="eper-form" class="inline-form eper-form">
+      <input type="hidden" name="year" value="{{ year }}">{% if esort %}<input type="hidden" name="esort" value="{{ esort }}"><input type="hidden" name="edir" value="{{ edir }}">{% endif %}
+      {{ choose('eper', [(25, '25'), (50, '50'), (100, '100'), (0, 'all')], eper, 'Per page', 'inline') }}
+    </form>
+  </div>
   {% else %}
   <p class="muted">No expenses entered for {{ year }} yet.</p>
   {% endif %}

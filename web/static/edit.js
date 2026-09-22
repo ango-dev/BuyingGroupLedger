@@ -1303,8 +1303,8 @@
   "use strict";
   document.addEventListener("change", function (e) {
     var t = e.target;
-    if (!t || !t.form || t.form.id !== "filters") return;
-    if (t.name !== "view" && t.name !== "per") return;
+    if (!t || !t.form || (t.form.id !== "filters" && t.form.id !== "eper-form")) return;
+    if (t.name !== "view" && t.name !== "per" && t.name !== "eper") return;
     e.stopPropagation();
     var page = t.form.querySelector('input[name="page"]');
     if (page) page.value = "";

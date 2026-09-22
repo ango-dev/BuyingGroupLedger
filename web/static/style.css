@@ -390,6 +390,9 @@ button.small { padding: 2px 8px; font-size: 0.85em; }
 .pager a { padding: 3px 9px; border: 1px solid var(--line); border-radius: var(--r-1); }
 .pager a.current { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .pager a.disabled { opacity: 0.4; pointer-events: none; }
+/* the expenses grid's pager (2026-09-21): the size picker at the row's right, a bare picker when one page */
+.pager.expenses-pager { justify-content: flex-start; }
+.pager.expenses-pager .eper-form { margin: 0 0 0 auto; }
 
 /* --- The in-page confirmation dialog ---------------------------------------------------------- */
 dialog.confirm { border: 1px solid var(--line); border-radius: var(--r-3); padding: 18px 20px; max-width: 460px;

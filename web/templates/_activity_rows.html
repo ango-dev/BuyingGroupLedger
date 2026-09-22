@@ -1,7 +1,8 @@
 {#- The Activity table (diagnostics/activity.py events), swapped into #activity-table by the filter
     form. A row's details expand in place; a run id filters to that run; a dossier row links to
     its report on the Failures page. -#}
-<p class="muted count">{% if pager.total %}{{ pager.start }}–{{ pager.end }} of {% endif %}{{ pager.total }} event(s){% if total != pager.total %} · {{ total }} in the log{% endif %}</p>
+<p class="muted count">{% if pager.total %}{{ pager.start }}–{{ pager.end }} of {% endif %}{{ pager.total }} event(s){% if total != pager.total %} · {{ total }} in the log{% endif %}
+  {% if pager.total %}<a class="button small export" href="/activity.csv?{{ filters.as_query() | query }}" title="download the events in view -- this type, window, search, run and sort, every page -- as a CSV">Export CSV</a>{% endif %}</p>
 {% if events %}
 {#- A grid like the others: sheetlike, so edit.js selects and copies its cells,
     and each column's arrow sorts (web/activity_view.SORTS), one click a step. -#}

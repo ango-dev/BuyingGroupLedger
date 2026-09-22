@@ -1078,4 +1078,37 @@ def test_the_export_links_download_in_the_browser(served, page):
     with page.expect_download() as got:
         page.locator("a.download-year").click()
     assert got.value.suggested_filename == "tax_2026.zip"
+    page.goto(f"{served}/audit")
+    page.wait_for_selector("a.export")
+    with page.expect_download() as got:
+        page.locator("a.export").click()
+    assert got.value.suggested_filename.startswith("audit_")
+    assert page.errors == []
+
+
+def test_the_expenses_pager_and_size_picker_navigate(served, page, client):
+    """2026-09-21: the expenses grid pages like the others; the size picker is the page's own
+    dropdown in a plain form that submits at once; the CSV button downloads the year."""
+    for i in range(30):
+        client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                    data={"date": f"2026-02-{i % 28 + 1:02d}", "description": f"thing {i:02d}", "amount": "1",
+                          "profile": "alpha", "category": "", "receipt_url": "https://x/r"})
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/taxes?year=2026&eper=25")
+    page.wait_for_selector("table.expenses tbody tr")
+    assert page.locator("table.expenses tbody tr").count() == 25
+    page.locator(".expenses-pager a", has_text="2").click()
+    page.wait_for_url("**epage=2**")
+    page.wait_for_selector("table.expenses tbody tr")
+    assert page.locator("table.expenses tbody tr").count() == 5
+    assert page.locator("table.expenses tbody td.rownum").first.inner_text() == "26"
+    # the size picker: choose "all" -- the plain form submits itself, every row on one page
+    page.locator("#eper-form details.multi summary").click()
+    page.locator("#eper-form .menu label", has_text="all").click()
+    page.wait_for_url("**eper=0**")
+    page.wait_for_selector("table.expenses tbody tr")
+    assert page.locator("table.expenses tbody tr").count() == 30
+    with page.expect_download() as got:
+        page.locator("#s-expenses a.export").click()
+    assert got.value.suggested_filename == "expenses_2026.csv"
     assert page.errors == []

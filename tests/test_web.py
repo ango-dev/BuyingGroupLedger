@@ -853,7 +853,19 @@ class TestOverviewPage:
         filtered = client.get("/orders", params={"status": "paid"}).text
         assert "status=paid" in filtered[filtered.index('href="/orders.csv?'):][:200]  # the link carries the view
         assert 'href="/orders.csv?' in client.get("/orders", params={"view": "cards"}).text  # both views
-        assert "Export CSV" not in client.get("/audit").text  # the Orders page's own, not Audit's
+        # every table exports: Audit and Recon carry their own routes and their
+        # Finding column, with the page's check picks and tile riding along in the link
+        audit = client.get("/audit", params={"check": "cogs_inputs_complete"}).text
+        assert 'href="/audit.csv?' in audit and "check=cogs_inputs_complete" in audit[audit.index('href="/audit.csv?'):][:200]
+        rows = client.get("/audit.csv").text.splitlines()
+        assert rows[0].endswith(",Finding") and len(rows) > 1 and "cogs_inputs_complete:" in "\n".join(rows[1:])
+        narrowed = client.get("/audit.csv", params={"check": "cogs_inputs_complete"}).text.splitlines()
+        assert all("cogs_inputs_complete:" in line for line in narrowed[1:]) and len(narrowed) <= len(rows)
+        recon = client.get("/recon", params={"kind": "short"}).text
+        assert 'href="/recon.csv?' in recon and "kind=short" in recon[recon.index('href="/recon.csv?'):][:200]
+        recon_rows = client.get("/recon.csv", params={"kind": "short"}).text.splitlines()
+        assert recon_rows[0].endswith(",Finding") and len(recon_rows) == 2 and "short" in recon_rows[1]
+        assert client.get("/recon.csv").headers["content-disposition"] == 'attachment; filename="recon_2026-09-17.csv"'
         response = client.get("/orders.csv")
         assert response.status_code == 200 and response.headers["content-type"].startswith("text/csv")
         assert response.headers["content-disposition"] == 'attachment; filename="orders_2026-09-17.csv"'

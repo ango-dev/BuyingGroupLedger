@@ -23,13 +23,49 @@ from models.order import FIELDNAMES
 RECEIPT_PREFIX = "/receipts/"
 
 
-def orders_csv(rows: Iterable, cell: Callable) -> str:
-    """The rows as CSV, one header row, the page's display text per cell."""
+def orders_csv(rows: Iterable, cell: Callable, extra: tuple[str, Callable] | None = None) -> str:
+    """The rows as CSV, one header row, the page's display text per cell. `extra` = (heading,
+    row -> text) appends one column: the Audit and Recon pages' Finding."""
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
-    writer.writerow(HEADER)
+    writer.writerow(HEADER + ([extra[0]] if extra else []))
     for row in rows:
-        writer.writerow([cell(row, name) for name in FIELDNAMES])
+        writer.writerow([cell(row, name) for name in FIELDNAMES] + ([extra[1](row)] if extra else []))
+    return out.getvalue()
+
+
+def findings_text(findings: dict, key_of: Callable) -> Callable:
+    """The Finding column's text for a row: every (check, line) the page shows, joined."""
+    def text(row) -> str:
+        return "; ".join(f"{check}: {line}" for check, line in (findings or {}).get(key_of(row), []))
+    return text
+
+
+def activity_csv(events: Iterable[dict], kinds: dict[str, str]) -> str:
+    """The Activity page's events in view: when, the type as the page names it, the run, what
+    happened, the order id if the event names one, and the details as JSON."""
+    import json
+
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(["When", "Type", "Run", "What happened", "Order ID", "Details"])
+    for e in events:
+        details = e.get("details") or {}
+        writer.writerow([str(e.get("at", "")), kinds.get(e.get("kind"), str(e.get("kind", ""))),
+                         str(e.get("run_id") or ""), str(e.get("summary", "")), str(details.get("order_id") or ""),
+                         json.dumps(details, ensure_ascii=False, sort_keys=True) if details else ""])
+    return out.getvalue()
+
+
+def expenses_csv(expenses: Iterable[dict]) -> str:
+    """The year's expense list as the grid shows it, a receipt as its link or its stored file."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(["Date", "Description", "Category", "Profile", "Email", "Receipt", "Amount"])
+    for e in expenses:
+        receipt = e.get("receipt") or {}
+        writer.writerow([e.get("date", ""), e.get("description", ""), e.get("category", ""), e.get("profile", ""),
+                         e.get("email", ""), receipt.get("url") or receipt.get("file") or "", _amount(e.get("amount"))])
     return out.getvalue()
 
 

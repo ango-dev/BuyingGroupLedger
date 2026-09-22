@@ -20,7 +20,7 @@
     </table>
   </div>
   {% with id='table-hints', rows=True, protect=True %}{% include "_table_hints.html" %}{% endwith %}{% else %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
-  {% if base == '/orders' %}<a class="button small export" href="/orders.csv?{{ filters.as_query() | query }}" title="download the rows in view -- these filters, this search, this sort -- as a CSV">Export CSV</a>{% endif %}
+  {% if export_href %}<a class="button small export" href="{{ export_href }}" title="download the rows in view -- these filters, this search, this sort, every page -- as a CSV">Export CSV</a>{% endif %}
 </div>
 {% include "_cell_tips.html" %}
 <div class="sheet" id="sheet">

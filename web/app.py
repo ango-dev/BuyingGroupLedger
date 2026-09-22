@@ -721,6 +721,16 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             "scope": scope, "base": SCOPES[scope], "findings": findings,
             "findings_by_order": by_order, **extra,
         }
+        # The Export CSV link: this page's own CSV route with the view's whole query (Audit's
+        # check picks and Recon's short / over tile ride along; the pager never does).
+        from web.queries import query_string
+
+        export_query = dict(filters.as_query())
+        if scope == "audit" and context.get("checks"):
+            export_query["check"] = list(context["checks"])
+        elif scope == "recon" and params.get("kind") in ("short", "over"):
+            export_query["kind"] = params.get("kind")
+        context["export_href"] = f"{SCOPES[scope]}.csv?{query_string(export_query)}"
         if filters.view == "cards":
             context["pager"] = paginate(order_cards(rows), filters.per, filters.page)
         return context
@@ -822,7 +832,17 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         draft = extra.pop("draft", None)  # a refused add re-renders the form with what was typed
         esort = str(request.query_params.get("esort") or "").strip()  # the expenses table's header sort
         edir = "asc" if str(request.query_params.get("edir") or "").lower() == "asc" else "desc"
-        return dict(snapshot=snapshot, year=year, years=years,
+        # The expenses grid is one page at a time, newest date first by
+        # default; the size is a preset, remembered in a cookie like the other grids', the page
+        # never (it is where you were). Every sort link lands on page 1 by carrying no epage.
+        eper = _expenses_per(request)
+        try:
+            epage = max(1, int(str(request.query_params.get("epage") or 1)))
+        except ValueError:
+            epage = 1
+        ordered = tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True)
+        epager = paginate(ordered, eper or max(1, len(ordered)), epage)
+        return dict(snapshot=snapshot, year=year, years=years, epager=epager, eper=eper,
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
                     program_logs=program_logs, site_logs=site_logs, bonus_logs=bonus_logs,
@@ -830,8 +850,23 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     year_prev=year_prev, year_next=year_next, this_year=clock().year,
                     today=tax_inputs.log_default_date(year, clock().date().isoformat()),  # the logs' new row: in the year
                     draft=draft or {}, expense_choices=tax_inputs.expense_choices_all(tax_inputs.load_all(tax_inputs_path)),
-                    expenses=tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True),
+                    expenses=epager["items"],
                     esort=esort, edir=edir, **extra)
+
+    EXPENSES_PER_CHOICES = (25, 50, 100, 0)  # 0 = all of them
+    EXPENSES_PER_DEFAULT = 50
+    EXPENSES_PER_COOKIE = "expenses-per"
+
+    def _expenses_per(request: Request) -> int:
+        """The expenses page size: the query's preset, else this browser's remembered one, else 50."""
+        raw = request.query_params.get("eper")
+        if raw is None or raw == "":
+            raw = request.cookies.get(EXPENSES_PER_COOKIE, "")
+        try:
+            per = int(str(raw))
+        except ValueError:
+            return EXPENSES_PER_DEFAULT
+        return per if per in EXPENSES_PER_CHOICES else EXPENSES_PER_DEFAULT
 
     def load_tax_inputs(year: int):
         return tax_inputs.load_year(tax_inputs_path, year)
@@ -854,6 +889,51 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         name = f"orders_{clock().date().isoformat()}.csv"
         return Response(export.orders_csv(rows, cell), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/audit.csv")
+    def audit_csv_download(request: Request):
+        """The Audit page's rows in view, plus its Finding column."""
+        from web import export
+
+        context = orders_context(request, scope="audit")
+        name = f"audit_{clock().date().isoformat()}.csv"
+        return Response(export.orders_csv(context["rows"], cell, ("Finding", export.findings_text(context["findings"], row_key))),
+                        media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/recon.csv")
+    def recon_csv_download(request: Request):
+        """The Reconciliation page's rows in view, plus its Finding column."""
+        from web import export
+
+        context = orders_context(request, scope="recon")
+        name = f"recon_{clock().date().isoformat()}.csv"
+        return Response(export.orders_csv(context["rows"], cell, ("Finding", export.findings_text(context["findings"], row_key))),
+                        media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/activity.csv")
+    def activity_csv_download(request: Request):
+        """The Activity page's events in view -- its filters, search, run and sort, every page."""
+        from starlette.datastructures import QueryParams
+
+        from web import export
+
+        params = QueryParams([(k, v) for k, v in request.query_params.multi_items() if k not in ("per", "page")] + [("per", "0")])
+        _filters, context = activity_context(request, params)
+        name = f"activity_{clock().date().isoformat()}.csv"
+        return Response(export.activity_csv(context["events"], activity_module.KINDS), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/taxes/expenses.csv")
+    def expenses_csv_download(request: Request):
+        """The year's expense list as the grid sorts it, every page."""
+        from web import export
+
+        year = requested_year(request, clock().year)
+        esort = str(request.query_params.get("esort") or "").strip()
+        edir = "asc" if str(request.query_params.get("edir") or "").lower() == "asc" else "desc"
+        expenses = tax_inputs.sort_expenses(load_tax_inputs(year).expenses, esort or "date", edir == "desc" if esort else True)
+        return Response(export.expenses_csv(expenses), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="expenses_{year}.csv"'})
 
     @app.get("/taxes/export")
     def taxes_export(request: Request):
@@ -881,9 +961,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     @app.get("/taxes", response_class=HTMLResponse)
     def taxes(request: Request):
-        return taxes_page(request, requested_year(request, clock().year),
-                          notice=request.query_params.get("notice", ""),
-                          error=request.query_params.get("error", ""))
+        response = taxes_page(request, requested_year(request, clock().year),
+                              notice=request.query_params.get("notice", ""),
+                              error=request.query_params.get("error", ""))
+        if request.query_params.get("eper"):  # an explicit page size updates the memory
+            response.set_cookie(EXPENSES_PER_COOKIE, str(_expenses_per(request)), max_age=365 * 24 * 3600, samesite="lax")
+        return response
 
     @app.post("/taxes/save")
     async def taxes_save(request: Request):

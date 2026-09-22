@@ -215,6 +215,23 @@ class TestThePage:
         test_client.activity_path = logs / "activity.jsonl"
         return test_client
 
+    def test_the_events_in_view_export_whatever_the_page_size(self, client):
+        """Export CSV on every table. The link carries the view's query; the CSV
+        holds every event the filters admit, not the page's slice, with the page's type names."""
+        path = client.activity_path
+        for i in range(120):
+            activity.record("edit" if i % 2 else "alert", f"Change {i}", {"order_id": f"111-{i}"}, path=path,
+                            at=datetime(2026, 9, 17, 8, 0, i % 60, tzinfo=timezone.utc))
+        body = client.get("/activity", params={"days": "0", "type": "alert"}).text
+        assert 'href="/activity.csv?' in body and "type=alert" in body[body.index('href="/activity.csv?'):][:200]
+        response = client.get("/activity.csv", params={"days": "0", "type": "alert", "per": "50", "page": "2"})
+        assert response.headers["content-disposition"] == 'attachment; filename="activity_2026-09-18.csv"'
+        lines = response.text.splitlines()
+        assert lines[0] == "When,Type,Run,What happened,Order ID,Details"
+        assert len(lines) == 1 + 60 and all(",Alert," in line for line in lines[1:])  # every alert, not page 2's 10
+        assert '111-0,"{""order_id"": ""111-0""}"' in lines[-1]  # newest first: Change 0 is the oldest
+        assert "Export CSV" not in client.get("/activity", params={"q": "nothing-matches-this"}).text
+
     def test_the_page_lists_filters_and_swaps(self, client):
         path = client.activity_path
         activity.record("alert", "Costco: scrape failed", {"message": "boom"}, path=path,
