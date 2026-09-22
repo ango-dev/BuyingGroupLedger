@@ -964,3 +964,31 @@ def test_the_activity_pager_swaps_in_place(served, page, client, tmp_path):
     assert page.evaluate("window.__loaded === true")  # swapped, never reloaded
     assert "51–60 of 60 event(s)" in page.locator("#activity-table .count").inner_text()
     assert page.errors == []
+
+
+def test_a_selection_shows_sheets_style_stats_bottom_right(served, page):
+    """, as Sheets does. Money columns sum (with average and numeric count), a rate
+    column averages as a percent, Tracking Submitted counts its ticks, text counts non-empty
+    cells; the pill leaves with the selection."""
+    page.set_viewport_size({"width": 1600, "height": 900})
+    page.goto(f"{served}/orders")
+    page.wait_for_selector("table.sheetlike tbody tr")
+    box = page.locator(".sel-stats")
+
+    def stats_for(column):
+        page.keyboard.press("Escape")
+        page.locator(f"table.sheetlike thead th.col-{column} .name").click()
+        page.wait_for_selector(".sel-stats.on")
+        return box.inner_text()
+
+    # the fixture ledger: Total Cost 1259.99 + 1000 + 2000 + 400 + 300 + 100 + 40 over 7 rows
+    assert stats_for("total_cost") == "Sum 5,099.99 · Avg 728.57 · Count 7"
+    assert stats_for("cashback_rate") == "Avg 6% · Count 6"     # (5+4+4+9+9+5)/6, never a sum
+    assert stats_for("tracking_submitted") == "Count 2"          # the ticks, not the FALSEs
+    assert stats_for("item_name") == "Count 9"                   # text counts non-empty cells
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".sel-stats:not(.on)", state="attached")  # gone with the selection
+    # a single cell says nothing (Sheets shows stats only for a real selection)
+    page.locator("table.sheetlike tbody tr").first.locator("td[data-field=quantity]").click()
+    assert not page.locator(".sel-stats.on").count()
+    assert page.errors == []

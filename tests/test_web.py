@@ -1665,7 +1665,7 @@ class TestStaticAssetsCarryTheirBlocks:
                        "td .cell-edit", ".settings-nav", ".entry-card", "details.multi.single",
                        "table.activity { width: 100%", ".dropzone.dragover",
                        ".filters { display: flex; flex-wrap: wrap", ".filters label.search {",
-                       "@keyframes rise-in", ".just-in {", "prefers-reduced-motion", "@media print"):
+                       "@keyframes rise-in", ".just-in {", "prefers-reduced-motion", "@media print", ".sel-stats"):
             assert needle in css, f"style.css lost its {needle!r} rules"
         # motion stays cheap: nothing transitions "all", and no layout property is ever animated
         motion = css[css.index("/* ---- Motion"):]
@@ -1705,7 +1705,8 @@ class TestStaticAssetsCarryTheirBlocks:
                        "selected rows from the ledger?", 'if (e.key === "Escape") { if (clearRows())',
                        '"rows:cleared"', "press.on = press.on.filter(", "function toggleOne(td)",
                        'addEventListener("rows:changed"', 'addEventListener("rows:clear"', "e.ctrlKey || e.metaKey",
-                       'GRID_TD = "table.sheetlike td, table.order-rows td"'):
+                       'GRID_TD = "table.sheetlike td, table.order-rows td"',
+                       "function updateSelStats()", 'className = "sel-stats"'):
             assert needle in js, f"edit.js lost its {needle!r} block"
 
 

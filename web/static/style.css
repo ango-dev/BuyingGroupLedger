@@ -1091,6 +1091,14 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
 .sel-handle::after { content: ""; position: absolute; left: 8px; top: 8px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
 .sel-handle.on { display: block; }
 .sel-handle.dragging { pointer-events: none; opacity: 0.6; }
+/* ---- the selection's stats: Sheets' bottom-right Sum / Count, as the page's
+   own pill. edit.js fills it from two selected cells on and hides it with the selection; money
+   and quantity columns sum, a rate column averages, everything else counts non-empty cells. ---- */
+.sel-stats { position: fixed; right: 14px; bottom: 12px; z-index: 900; display: none; padding: 6px 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--shadow-2);
+  font-size: 0.85em; font-variant-numeric: tabular-nums; color: var(--fg); pointer-events: none; white-space: nowrap; }
+.sel-stats.on { display: block; animation: fade-in var(--quick) var(--ease) backwards; }
+@media (max-width: 760px) { .sel-stats { right: 10px; bottom: 10px; font-size: 0.8em; } }
 /* The paste box on a phone (edit.js showPasteBox): the clipboard textarea, shown to paste into. */
 textarea.paste-box { position: fixed; left: 50%; top: 18%; transform: translateX(-50%); z-index: 1002; width: min(320px, 86vw); height: 72px;
   padding: 10px 12px; font: inherit; color: var(--fg); background: var(--card); border: 2px solid var(--accent); border-radius: var(--r-3);
@@ -1349,7 +1357,7 @@ details.log .menu p { margin: 6px 2px 0; }
     --accent: #4361b2; --committed: #7c5cbf; --ok: #2f7d4f; --warn: #a8622a; --bad: #b3423f;
     --ok-bg: #fff; --warn-bg: #fff; --grid-line-plain: #ccc;
   }
-  header.top, #toast, .savebar, .banner, dialog, .tip, .ctx, .pop, .sel-handle, .hint-mark,
+  header.top, #toast, .savebar, .banner, dialog, .tip, .ctx, .pop, .sel-handle, .sel-stats, .hint-mark,
   button, .theme-toggle, a.sort, a.button, .tax-years form, .pager, .filters, .add-row { display: none !important; }
   body { background: #fff; }
   main { max-width: none; padding: 0 4px; animation: none; }

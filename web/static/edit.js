@@ -111,6 +111,7 @@
         if (th && !th.classList.contains("rownum")) th.classList.add("sel-col");
       }
     });
+    updateSelStats();  // the bottom-right Sum / Count pill follows every selection change
     var td = active ? cellAt(active.r, active.c) : null;
     if (!td || dragging || document.activeElement === td || document.querySelector("input.cell-input")) return;
     var free = document.activeElement === document.body || inGrid(document.activeElement);
@@ -719,6 +720,56 @@
     });
     clip.addEventListener("keydown", function (e) { if (e.key === "Escape") { hidePasteBox(); paint(true); } });
     return clip;
+  }
+  // ---- the selection's stats. One fixed pill, bottom right,
+  // shown from two selected cells: money and quantity columns SUM (with the average and how many
+  // numbers), a *_rate column AVERAGES as a percent, Tracking Submitted counts its ticks, and
+  // everything else counts non-empty cells. Hidden rows (folded details) stay out, like a copy. --
+  var statsBox = null;
+  function selStats() {
+    if (statsBox) return statsBox;
+    statsBox = document.createElement("div");
+    statsBox.className = "sel-stats";
+    statsBox.setAttribute("role", "status");
+    document.body.appendChild(statsBox);
+    return statsBox;
+  }
+  function fmtNum(value) {
+    return value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+  function updateSelStats() {
+    var box = selStats(), t = table();
+    var cells = 0, filled = 0, sum = 0, nums = 0, rateSum = 0, rates = 0;
+    if (t && t.tBodies[0]) ranges.forEach(function (range) {
+      for (var r = range.r1; r <= range.r2; r++) {
+        var row = t.tBodies[0].rows[r];
+        if (!row || row.hidden) continue;
+        for (var c = range.c1; c <= range.c2; c++) {
+          var td = cellAt(r, c);
+          if (!td || td.classList.contains("rownum")) continue;
+          cells++;
+          var field = td.dataset.field || "";
+          var check = field === "tracking_submitted" ? td.querySelector("input.cell-check") : null;
+          if (check) { if (check.checked) filled++; continue; }
+          var raw = td.hasAttribute("data-raw") ? td.getAttribute("data-raw") : (td.textContent || "").trim();
+          if (raw) filled++;
+          if (field.slice(-5) === "_rate") {
+            var rate = parseFloat(String(raw).replace("%", ""));
+            if (!isNaN(rate)) { if (String(raw).indexOf("%") < 0 && rate <= 1) rate *= 100; rateSum += rate; rates++; }
+          } else if (td.classList.contains("num") && field !== "shipment") {
+            var m = String(raw).replace(/,/g, "").match(/-?\d+(\.\d+)?/);  // "500.00 proj." reads 500
+            if (m) { sum += parseFloat(m[0]); nums++; }
+          }
+        }
+      }
+    });
+    if (cells < 2) { box.classList.remove("on"); return; }
+    var parts = [];
+    if (nums) parts = ["Sum " + fmtNum(sum), "Avg " + fmtNum(sum / nums), "Count " + nums];
+    else if (rates) parts = ["Avg " + fmtNum(rateSum / rates) + "%", "Count " + rates];
+    else parts = ["Count " + filled];
+    box.textContent = parts.join(" · ");
+    box.classList.add("on");
   }
   function copySelection() {
     var c = clipboard();
