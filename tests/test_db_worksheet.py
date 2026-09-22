@@ -237,6 +237,68 @@ class TestTheFileIsNeverLostOrInvented:
             LedgerDb(junk, create=False).fetch_rows()
 
 
+class TestARunEndToEndOnTheFile:
+    """2026-09-22: most sync tests run on a fake worksheet, so the version check (LedgerStale) had
+    never met a real run. Here every opener hands out a FRESH worksheet on the file, as production
+    does: the upsert, the sort, a dashboard hand edit, a re-check, and the buying-group sync's
+    payout write, in a run's order -- nothing stale, nothing lost."""
+
+    def test_a_run_its_sort_a_hand_edit_and_the_payout_write_all_land(self, db, tmp_path, monkeypatch):
+        import sync_tracking
+        from web.ledger_writer import LedgerCellWriter
+
+        monkeypatch.setattr(ledger_sync, "_get_worksheet", lambda: DbWorksheet(db))
+        monkeypatch.setattr(sync_tracking, "_get_worksheet", lambda: DbWorksheet(db))
+        first = write_csv_file(tmp_path / "a.csv",
+                               {"order_id": "OLD", "order_date": "2026-08-01", "item_name": "a", "shipment": "1",
+                                "status": "shipped", "retailer": "Costco", "quantity": "1", "cost_per_item": "100",
+                                "total_cost": "100", "tracking_number": "1Z1"},
+                               {"order_id": "NEW", "order_date": "2026-09-01", "item_name": "b", "shipment": "1",
+                                "status": "ordered", "retailer": "Costco", "quantity": "2", "cost_per_item": "50",
+                                "total_cost": "100"})
+        assert ledger_sync.sync_csv_to_ledger(first)["appended"] == 2
+        ledger_sync.sort_ledger_by_date_desc()
+        assert [r["order_id"] for r in db.fetch_rows()] == ["NEW", "OLD"]
+        # the user types an insurance figure on the dashboard between two runs
+        writer = LedgerCellWriter(opener=lambda: DbWorksheet(db), logs_dir=tmp_path)
+        writer.write_cell({"order_id": "OLD", "order_date": "2026-08-01", "item_name": "a", "shipment": "1"}, "insurance", "7")
+        # the next run re-checks both orders; the hand edit survives the merge
+        again = write_csv_file(tmp_path / "b.csv",
+                               {"order_id": "OLD", "order_date": "2026-08-01", "item_name": "a", "shipment": "1",
+                                "status": "delivered", "retailer": "Costco", "insurance": "3"},
+                               {"order_id": "NEW", "order_date": "2026-09-01", "item_name": "b", "shipment": "1",
+                                "status": "shipped", "retailer": "Costco", "tracking_number": "1Z2"})
+        assert ledger_sync.sync_csv_to_ledger(again)["updated"] == 2
+        ledger_sync.sort_ledger_by_date_desc()
+        # the buying-group sync's payout write, through a worksheet opened after the upsert (as run() does)
+        ws = sync_tracking._get_worksheet()
+        sync_tracking._write_payout_cells(ws, {3: {"Actual Payout": 130.0, "Payout Date": "2026-09-10"}}, apply=True)
+        rows = {r["order_id"]: r for r in db.fetch_rows()}
+        assert rows["OLD"]["status"] == "delivered" and rows["OLD"]["insurance"] == 7.0  # the hand edit kept
+        assert rows["OLD"]["payout_amount"] == 130.0 and rows["OLD"]["payout_date"] == "2026-09-10"
+        assert rows["NEW"]["status"] == "shipped" and rows["NEW"]["tracking_number"] == "1Z2"
+
+    def test_a_hand_edit_during_a_standalone_sync_is_never_reverted(self, db, tmp_path, monkeypatch):
+        """`python -m sync_tracking --apply` takes no run lock and holds its worksheet across minutes
+        of API calls. A dashboard edit landing in that window used to be silently reverted by the
+        payout write; the write is refused now (LedgerStale, nothing written, the next pass retries)."""
+        import sync_tracking
+        from ledger_db.store import LedgerStale
+        from web.ledger_writer import LedgerCellWriter
+
+        monkeypatch.setattr(ledger_sync, "_get_worksheet", lambda: DbWorksheet(db))
+        ledger_sync.sync_csv_to_ledger(write_csv_file(tmp_path / "a.csv",
+                                       {"order_id": "X1", "order_date": "2026-09-01", "item_name": "a", "shipment": "1",
+                                        "status": "delivered", "retailer": "Costco", "total_cost": "100"}))
+        held = DbWorksheet(db)  # the sync reads the ledger, then calls the groups
+        LedgerCellWriter(opener=lambda: DbWorksheet(db), logs_dir=tmp_path).write_cell(
+            {"order_id": "X1", "order_date": "2026-09-01", "item_name": "a", "shipment": "1"}, "insurance", "7")
+        with pytest.raises(LedgerStale):
+            sync_tracking._write_payout_cells(held, {2: {"Actual Payout": 130.0}}, apply=True)
+        stored = db.fetch_rows()[0]
+        assert stored["insurance"] == 7.0 and stored["payout_amount"] is None
+
+
 class TestTheWritersRunOnIt:
     """The real money-path code, unchanged, against the adapter."""
 

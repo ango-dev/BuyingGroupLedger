@@ -471,6 +471,11 @@ class DbReader:
         self._snap: Snapshot | None = None
         self._snap_stamp: tuple | None = None
         self._monitor = None  # a connection kept only for PRAGMA data_version
+        #: Asked when the file is missing: True = a fresh install that has never run (the file does
+        #: not exist YET), so the pages read an empty ledger and say so; False / None = the file
+        #: should be there (a wrong path, a broken mount), so load() raises LedgerMissing and the
+        #: pages answer 503. The app wires it to "no run has ever completed on this host".
+        self.missing_ok: Callable[[], bool] | None = None
 
     def _stamp(self) -> tuple:
         """The ledger file family's identity. SQLite's `data_version` bumps when any OTHER
@@ -504,6 +509,11 @@ class DbReader:
         with self._lock:
             # The stamp is taken BEFORE the read: a write racing the build makes the stored stamp
             # stale, so the next request rebuilds -- one rebuild too many, never a stale page.
+            if not Path(self.db.path).is_file() and self.missing_ok is not None and self.missing_ok():
+                empty = Snapshot(rows=[], header=list(HEADER), backend=self.backend,
+                                 source=str(self.db.path), loaded_at=datetime.now(timezone.utc))
+                empty.meta = {"db_path": str(self.db.path), "missing": True}
+                return empty  # never cached: the first write creates the file and the next load reads it
             stamp = self._stamp()
             if not force and self._snap is not None and stamp == self._snap_stamp:
                 return self._snap

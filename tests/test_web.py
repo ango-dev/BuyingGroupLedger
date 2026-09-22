@@ -1161,6 +1161,7 @@ class TestHealth:
         from web.ledger_reader import DbReader
 
         missing = tmp_path / "nowhere" / "ledger.sqlite3"
+        (logs_dir / ".last_run").write_text("2026-09-17T09:00:00Z", encoding="utf-8")  # this host HAS run: the file should be there
         app = create_app(DbReader(missing), logs_dir=logs_dir, failures_dir=failures_dir, clock=lambda: NOW, settings=_settings())
         c = TestClient(app)
         health = c.get("/health")
@@ -1185,6 +1186,40 @@ class TestHealth:
             for url in ("/", "/orders", "/audit", "/recon", "/taxes"):
                 r = c.get(url)
                 assert r.status_code == 503 and "Ledger Unavailable" in r.text, (payload, url)
+
+
+    def test_a_fresh_install_reads_an_empty_ledger_and_its_first_write_creates_the_file(self, tmp_path, logs_dir, failures_dir):
+        """2026-09-22: `create=False` on the reader AND the writer made a fresh install -- no run
+        yet -- answer 503 on the Overview, Orders and Taxes, and the add row / the wizard's import
+        could not create the file. No heartbeat: the pages read an empty ledger with a banner; the
+        first write creates the file; once a run has stamped the heartbeat, a missing file is a 503."""
+        from ledger_db.store import LedgerDb
+        from ledger_db.worksheet import DbWorksheet
+        from web.ledger_reader import DbReader
+        from web.ledger_writer import LedgerCellWriter
+
+        path = tmp_path / "data" / "ledger.sqlite3"
+        writer = LedgerCellWriter(opener=lambda: DbWorksheet(LedgerDb(path)), logs_dir=logs_dir)
+        c = TestClient(create_app(DbReader(path), writer=writer, logs_dir=logs_dir, failures_dir=failures_dir,
+                                  repo_root_dir=tmp_path, clock=lambda: NOW, settings=_settings()))
+        for url in ("/", "/orders", "/audit", "/recon", "/taxes", "/activity", "/tools/import"):
+            r = c.get(url)
+            assert r.status_code == 200, url
+        body = c.get("/orders").text
+        assert "No ledger yet" in body and "Nothing to show." in body
+        health = c.get("/health").json()
+        assert health["ok"] is True and health["rows"] == 0 and "not created yet" in health["ledger"]
+        assert not path.exists()  # reading never creates it
+        added = c.post("/orders/add", data={"order_id": "N1", "order_date": "2026-09-01", "item_name": "Thing"},
+                       follow_redirects=False)
+        assert added.status_code == 303 and path.is_file()
+        after = c.get("/orders").text
+        assert "No ledger yet" not in after and "N1" in after
+        # the file lost once a run has happened: a 503 naming it, not an empty ledger
+        (logs_dir / ".last_run").write_text("2026-09-17T09:00:00Z", encoding="utf-8")
+        gone = tmp_path / "elsewhere" / "ledger.sqlite3"
+        c = TestClient(create_app(DbReader(gone), logs_dir=logs_dir, failures_dir=failures_dir, clock=lambda: NOW, settings=_settings()))
+        assert c.get("/orders").status_code == 503 and not gone.exists()
 
 
 # --------------------------------------------------------------------------------------------------

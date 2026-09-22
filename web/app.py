@@ -302,6 +302,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             "source": snapshot.source if snapshot else "",
             "loaded_at": snapshot.loaded_at if snapshot else None,
             "schema_matches": snapshot.schema_matches if snapshot else True,
+            "ledger_not_created": bool(snapshot and snapshot.meta.get("missing")),
             "heartbeat": context.pop("heartbeat", None) or heartbeat(),
         }
         return templates.TemplateResponse(request=request, name=name, context={**base, **context})
@@ -597,6 +598,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     # The ledger writer: cell edits on the Orders page. The snapshot backend is a CSV, so there is
     # nothing to write to and the page stays view-only there.
+    # A missing ledger file on a host where no run has ever completed is a fresh install: the
+    # pages read it as empty (with a banner) and a row added or imported creates it. Once a run
+    # has stamped the heartbeat, a missing file is a wrong path or a lost mount: 503.
+    if getattr(reader, "backend", "") == "db" and getattr(reader, "missing_ok", False) is None:
+        reader.missing_ok = lambda: not (Path(logs_dir) / heartbeat_module.STAMP_NAME).is_file()
+
     if writer is None and reader.backend != "snapshot":
         from web.ledger_writer import LedgerCellWriter
 
@@ -2672,6 +2679,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             snapshot = reader.load()
             rows, schema = len(snapshot.rows), snapshot.schema_matches
             info["source"] = snapshot.source
+            if snapshot.meta.get("missing"):
+                info["ledger"] = "not created yet: the first run, a row added or a history import creates it"
             if not schema:
                 info["missing_columns"] = list(snapshot.missing_columns)
                 info["extra_columns"] = list(snapshot.extra_columns)

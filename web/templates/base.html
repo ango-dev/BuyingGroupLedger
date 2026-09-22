@@ -136,6 +136,12 @@
   </div>
 </header>
 {% endblock %}
+{% if ledger_not_created %}
+<div class="banner ok" role="status">
+  No ledger yet: this install has not run. The first scheduled run creates it, or start it now with
+  <a href="/tools/import">Tools › Import</a> or a row added on the Orders page.
+</div>
+{% endif %}
 {% if schema_matches is defined and not schema_matches %}
 <div class="banner warn">
   This source's header is not the ledger's current column order. Values are read by column name, so

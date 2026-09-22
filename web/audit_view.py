@@ -188,7 +188,7 @@ def grids_from_snapshot(snapshot) -> Grids:
 def audit_grids(reader, snapshot) -> Grids:
     """The grids to audit for the dashboard's backend: the ledger file through the read-only
     worksheet adapter, or the CSV snapshot's rows."""
-    if getattr(reader, "backend", "") == "db":
+    if getattr(reader, "backend", "") == "db" and not snapshot.meta.get("missing"):  # a fresh install: nothing to open yet
         from ledger_db.worksheet import DbWorksheet
 
         worksheet = DbWorksheet(reader.db, read_only=True)

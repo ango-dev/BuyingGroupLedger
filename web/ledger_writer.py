@@ -119,12 +119,15 @@ def run_in_progress(logs_dir: Path | None = None, *, now: float | None = None) -
 
 def _open_for_writing():
     """The ledger file behind its worksheet face (the same object ledger_sync._get_worksheet hands
-    out; an edit never creates anything)."""
+    out). A write the user makes -- a row added, a history import -- may CREATE the file, as a run
+    does: on a fresh install the import is how the ledger starts (2026-09-22: with create=False
+    the wizard's import step could not land a row before the first run). The pages never create
+    it; reading a missing file is web.ledger_reader.DbReader's call."""
     from config.settings import settings
     from ledger_db.store import LedgerDb
     from ledger_db.worksheet import DbWorksheet
 
-    return DbWorksheet(LedgerDb(settings.ledger_db_path, create=False))
+    return DbWorksheet(LedgerDb(settings.ledger_db_path))
 
 
 def _display(value) -> str:
