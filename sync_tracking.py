@@ -599,6 +599,7 @@ def allocate_expected_payouts(
     expected_by_row: dict[int, float | None],
     date_by_row: dict[int, str] | None = None,
     settling_rows: set[int] | None = None,
+    rows_by_tracking: dict[str, list[int]] | None = None,
 ) -> tuple[dict[int, dict], list[str]]:
     """Fill Expected Payout with each order's COMMITTED payout, and spot a commitment that moved.
 
@@ -630,40 +631,82 @@ def allocate_expected_payouts(
     change — and a bucket whose total still agrees only rewrites cells when membership shifted
     (a new row appended, a blank to fill), silently, so an unchanged commitment queues no writes.
 
+    A PURCHASE WITH A SHIPMENT ATTACHED SCOPES TO THAT SHIPMENT'S ROWS (`rows_by_tracking`, the
+    same index the settlement uses; 2026-09-21). Two reservations of one product on one order
+    (BBY01-809900000012: qty 4 at $392 and qty 1 at $399, identical item names) cannot be told
+    apart by name, so after a 4 + 1 split the order-level fallback spread $1,967 by cost --
+    $1,573.60 / $393.40 -- while the settlement, keyed by tracking number, would land $1,568 /
+    $399. Once BFMR holds a tracking number for a purchase, its commitment goes to the rows under
+    that number (a suffixed spelling resolves to the ledger's number, exact match first, as
+    `_spelling_lookup` does); purchases still waiting share the order's rows no shipment has
+    claimed; and when nothing is left for them -- one row holding both deals -- the whole order
+    falls back to the merged behaviour so no commitment is dropped or doubled.
+
     Returns ({row_number: {EXPECTED_PAYOUT_COL: value}}, [change detail lines]).
     """
     date_by_row = date_by_row or {}
     settling_rows = settling_rows or set()
-    totals: dict[str, dict[str, dict]] = {}
+    rows_by_tracking = rows_by_tracking or {}
+    # {order: {ledger tracking or "" (no shipment yet): {deal key: sub}}}
+    totals: dict[str, dict[str, dict[str, dict]]] = {}
     for record in records:
         if record.expected_amount is None or not record.order_id:
             continue
-        deals = totals.setdefault(record.order_id, {})
+        tracking = _ledger_tracking_of(record.tracking_number, rows_by_tracking)
+        deals = totals.setdefault(record.order_id, {}).setdefault(tracking, {})
         key = " ".join(sorted(_hint_tokens(record.item_hint)))
         sub = deals.setdefault(key, {"expected": 0.0, "hint": record.item_hint})
         sub["expected"] += record.expected_amount
 
     writes: dict[int, dict] = {}
     changes: list[str] = []
-    for order_id, deals in totals.items():
+    for order_id, by_tracking in totals.items():
         scoped = [n for n in rows_by_order.get(order_id) or []
                   if status_by_row.get(n, "") not in ("paid", "return")
                   and not str(date_by_row.get(n, "")).strip()
                   and n not in settling_rows]
         if not scoped:
             continue
-        subs = list(deals.values())
-        if len(subs) == 1:
-            groups = [(scoped, subs[0])]
-        else:
-            partition = _split_rows_by_deal(scoped, subs, item_of_row)
-            if partition is not None:
-                groups = [(rows, sub) for sub, rows in zip(subs, partition)]
+        # Shipment-scoped buckets first; the purchases without one share the unclaimed rows.
+        buckets: list[tuple[list[int], dict[str, dict]]] = []
+        loose: dict[str, dict] = {}
+        claimed: set[int] = set()
+        for tracking, deals in by_tracking.items():
+            under = set(rows_by_tracking.get(tracking, [])) if tracking else set()
+            rows = [n for n in scoped if n in under]
+            if rows:
+                buckets.append((rows, deals))
+                claimed.update(rows)
             else:
-                # Can't tell which row is which deal — compare and write at order level rather
+                for key, sub in deals.items():
+                    merged_sub = loose.setdefault(key, {"expected": 0.0, "hint": sub["hint"]})
+                    merged_sub["expected"] += sub["expected"]
+        remaining = [n for n in scoped if n not in claimed]
+        if loose:
+            if remaining:
+                buckets.append((remaining, loose))
+            else:
+                everything: dict[str, dict] = {}
+                for _tracking, deals in by_tracking.items():
+                    for key, sub in deals.items():
+                        merged_sub = everything.setdefault(key, {"expected": 0.0, "hint": sub["hint"]})
+                        merged_sub["expected"] += sub["expected"]
+                buckets = [(scoped, everything)]
+
+        groups: list[tuple[list[int], dict]] = []
+        for rows, deals in buckets:
+            subs = list(deals.values())
+            if len(subs) == 1:
+                groups.append((rows, subs[0]))
+                continue
+            partition = _split_rows_by_deal(rows, subs, item_of_row)
+            if partition is not None:
+                groups.extend((part, sub) for sub, part in zip(subs, partition))
+            else:
+                # Can't tell which row is which deal — compare and write at this level rather
                 # than guess. The commitment still sums correctly; only its split is coarse.
                 merged = {"expected": sum(s["expected"] for s in subs), "hint": ""}
-                groups = [(scoped, merged)]
+                groups.append((rows, merged))
 
         for group_rows, sub in groups:
             costs = [costs_by_row.get(n, 0.0) for n in group_rows]
@@ -700,6 +743,23 @@ def allocate_expected_payouts(
                 for n, value in new_values.items():
                     writes[n] = {EXPECTED_PAYOUT_COL: value}
     return writes, changes
+
+
+def _ledger_tracking_of(spelling: str, rows_by_tracking: dict[str, list[int]]) -> str:
+    """The ledger's tracking number behind a group's spelling of it, "" when the ledger has none.
+
+    Exact match first; then the one-letter suffix BFMR appends to a number it already holds
+    (`bfmr_spellings`) -- resolved in that order for the same reason `_spelling_lookup` claims
+    exact matches first: a ledger holding both `T` and `T-plus-a-letter` as two rows must not have
+    the second's commitment land on the first."""
+    number = (spelling or "").strip()
+    if not number:
+        return ""
+    if number in rows_by_tracking:
+        return number
+    if len(number) > 1 and number[-1].isalpha() and number[:-1] in rows_by_tracking:
+        return number[:-1]
+    return ""
 
 
 def _expected_payment_mismatches(records: list[PayoutRecord], plan: dict) -> list[str]:
@@ -1044,7 +1104,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
         expected_writes, price_changes = allocate_expected_payouts(
             commitments, orders, plan["costs_by_row"], plan["item_of_row"],
             plan["status_by_row"], plan.get("expected_by_row") or {}, plan.get("date_by_row"),
-            settling_rows=settling,
+            settling_rows=settling, rows_by_tracking=plan["rows_by_tracking"],
         )
         _merge_writes(all_writes, expected_writes)
         if expected_writes:

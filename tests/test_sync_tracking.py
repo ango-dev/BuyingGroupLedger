@@ -1158,10 +1158,11 @@ class TestExpectedPayoutAllocation:
 
     @staticmethod
     def _alloc(records, rows_by_order, costs, items=None, status=None, expected=None,
-               dates=None, settling=None):
+               dates=None, settling=None, by_tracking=None):
         return allocate_expected_payouts(
             [PayoutRecord(**r) for r in records], rows_by_order, costs,
             items or {}, status or {}, expected or {}, dates or {}, settling or set(),
+            rows_by_tracking=by_tracking,
         )
 
     def test_a_first_sighting_prorates_by_cost_and_raises_no_alert(self):
@@ -1354,3 +1355,62 @@ class TestRowsHeldByGroupIsPerOrder:
         rows = [self._row(2, "A", "T1"), self._row(3, "B", "T2"), self._row(4, "C", "T3")]
         push = SubmissionResult(submitted=["T2"], submitted_for=[("B", "T2")])
         assert _rows_held_by_group(rows, known={("A", "T1")}, push=push) == {2, 3}
+
+
+
+class TestExpectedPayoutFollowsTheShipment:
+    """Two reservations of ONE product on one order (BBY01-809900000012, 2026-09-21: qty 4 at $392
+    and qty 1 at $399) cannot be split by item name. Once BFMR holds a tracking number for a
+    purchase, its commitment scopes to that shipment's rows -- the settlement's own key -- so a
+    4 + 1 split reads $1,568 / $399, not $1,967 prorated by cost."""
+
+    COL = EXPECTED_PAYOUT_COL
+    IPAD = "Apple - iPad 11-inch (A16) Wi-Fi 128GB - Silver"
+
+    @staticmethod
+    def _alloc(records, rows_by_order, costs, by_tracking, items=None, expected=None):
+        return allocate_expected_payouts(
+            [PayoutRecord(**r) for r in records], rows_by_order, costs, items or {}, {},
+            expected or {}, {}, set(), rows_by_tracking=by_tracking,
+        )
+
+    def _deals(self, t4="T4", t1="T1"):
+        return [
+            {"tracking_number": t4, "order_id": "O1", "expected_amount": 1568.0,
+             "item_hint": "Apple iPad 11 - 128gb - WiFi"},
+            {"tracking_number": t1, "order_id": "O1", "expected_amount": 399.0,
+             "item_hint": "Apple iPad 11 - 128gb - WiFi - Silver"},
+        ]
+
+    def test_a_split_lands_each_purchases_commitment_on_its_own_box(self):
+        writes, changes = self._alloc(self._deals(), {"O1": [2, 3]}, {2: 2000.0, 3: 500.0},
+                                      {"T4": [2], "T1": [3]}, items={2: self.IPAD, 3: self.IPAD})
+        assert writes == {2: {self.COL: 1568.0}, 3: {self.COL: 399.0}} and changes == []
+
+    def test_a_suffixed_spelling_resolves_to_the_ledgers_number(self):
+        writes, _ = self._alloc(self._deals(t4="T4B"), {"O1": [2, 3]}, {2: 2000.0, 3: 500.0},
+                                {"T4": [2], "T1": [3]}, items={2: self.IPAD, 3: self.IPAD})
+        assert writes == {2: {self.COL: 1568.0}, 3: {self.COL: 399.0}}
+
+    def test_one_box_holding_both_purchases_carries_their_sum(self):
+        writes, _ = self._alloc(self._deals(t4="T1", t1="T1"), {"O1": [2]}, {2: 2500.0},
+                                {"T1": [2]}, items={2: self.IPAD})
+        assert writes == {2: {self.COL: 1967.0}}
+
+    def test_a_purchase_still_waiting_takes_the_rows_no_shipment_has_claimed(self):
+        # The qty-4 box shipped and is attached; the qty-1 purchase has no tracking yet.
+        writes, _ = self._alloc(self._deals(t1=""), {"O1": [2, 3]}, {2: 2000.0, 3: 500.0},
+                                {"T4": [2]}, items={2: self.IPAD, 3: self.IPAD})
+        assert writes == {2: {self.COL: 1568.0}, 3: {self.COL: 399.0}}
+
+    def test_a_waiting_purchase_with_no_row_left_falls_back_to_the_whole_order(self):
+        # One row holds every unit; the attached purchase claims it, the waiting one would have
+        # nowhere to land -- so the order-level merge keeps the full $1,967 on that row.
+        writes, _ = self._alloc(self._deals(t1=""), {"O1": [2]}, {2: 2500.0},
+                                {"T4": [2]}, items={2: self.IPAD})
+        assert writes == {2: {self.COL: 1967.0}}
+
+    def test_without_the_tracking_index_the_order_level_split_stands(self):
+        writes, _ = self._alloc(self._deals(), {"O1": [2, 3]}, {2: 2000.0, 3: 500.0}, None,
+                                items={2: self.IPAD, 3: self.IPAD})
+        assert writes == {2: {self.COL: 1573.6}, 3: {self.COL: 393.4}}
