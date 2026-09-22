@@ -263,7 +263,10 @@ body.wide .add-row { z-index: 7; }
   */
 body.wide .pinned { z-index: 8; }
 body.wide #activity-table { padding: 0 8px 16px; }
-#activity-table .count a.export { margin-left: auto; }  /* at the line's right */
+/* Export CSV sits at the count line's right on every table; with the hint pill
+   there too, the pill keeps its place and the button follows it */
+.count a.export { margin-left: auto; }
+.count .hint-mark ~ a.export { margin-left: 0; }
 body.wide table.sheetlike th.rownum { z-index: 4; }
 /* SEPARATE borders (spacing 0): with collapsed borders a sticky <th> leaves its borders behind as
    it scrolls, and the row underneath shows through the 1px gaps between the headers. */
@@ -837,6 +840,12 @@ header nav details.nav-menu .menu { position: absolute; top: 100%; left: 0; z-in
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-2); padding: 6px; box-shadow: var(--shadow-2);
   display: flex; flex-direction: column; gap: 1px; }
 header nav details.nav-menu .menu .group { color: var(--muted); font-size: 0.75em; text-transform: uppercase; letter-spacing: .05em; padding: 8px 10px 3px; }
+/* the menu's groups fold: the group line is the summary, a small caret before it */
+header nav details.nav-menu .menu details.group-fold > summary { list-style: none; cursor: pointer; display: flex; flex-direction: row; align-items: center; gap: 5px; border-radius: var(--r-1); }  /* row: the generic details.multi summary rule is a column */
+header nav details.nav-menu .menu details.group-fold > summary::-webkit-details-marker { display: none; }
+header nav details.nav-menu .menu details.group-fold > summary::before { content: "▸"; font-size: 0.9em; width: 0.9em; flex: 0 0 auto; }
+header nav details.nav-menu .menu details.group-fold[open] > summary::before { content: "▾"; }
+header nav details.nav-menu .menu details.group-fold > summary:hover { color: var(--fg); }
 header nav details.nav-menu .menu a { display: block; padding: 5px 10px; border-radius: var(--r-1); color: var(--fg); font-weight: 400; border: 0; white-space: nowrap; }
 header nav details.nav-menu .menu a:hover { background: var(--bg); }
 header nav details.nav-menu .menu a.current { color: var(--accent); font-weight: 600; }

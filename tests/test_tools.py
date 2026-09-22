@@ -218,8 +218,14 @@ class TestTheRoutes:
         body = client.get("/tools").text
         assert "<h1>Tools</h1>" in body
         # the header's Tools menu lists every tool, grouped; the profile login is the default panel
-        menu = body[body.index('class="multi nav-menu'):body.index("</details>", body.index('class="multi nav-menu'))]
+        menu = body[body.index('class="multi nav-menu'):body.index('class="multi nav-menu nav-pick')]
         assert 'href="/tools?tool=profile"' in menu and ">Ledger Fixes<" in menu and ">Checks<" in menu
+        # the menu's groups fold: Import, Run and Accounts open, the rest folded
+        assert menu.count('<details class="group-fold" open>') == 3 and menu.count('<details class="group-fold">') == 3
+        assert menu.index('<details class="group-fold">') > menu.index(">Accounts<")
+        picked_menu = client.get("/tools", params={"tool": "backfill_tracking"}).text
+        picked_menu = picked_menu[picked_menu.index('class="multi nav-menu'):picked_menu.index('class="multi nav-menu nav-pick')]
+        assert picked_menu.count('<details class="group-fold" open>') == 4  # Ledger Fixes opens for its tool
         # the profile login sits inside Accounts, first; the run is its own group, first of all
         assert menu.index(">Run<") < menu.index("tool=run_once") < menu.index(">Accounts<") \
             < menu.index("tool=profile") < menu.index("tool=costco_token")
@@ -248,15 +254,15 @@ class TestTheRoutes:
         assert 'href="/tools/import"' in panel and 'href="/tools?tool=run_once"' in panel
         assert 'href="/tools?tool=profile" class="current"' in panel  # the default pick is marked
         assert "Pick a tool from the" not in body  # the old pointer sentence is gone
-        # the groups fold: the everyday three open by default, the rarer ones take a click
-
-        assert panel.count('<details class="tool-group" open>') == 3
-        assert panel.count('<details class="tool-group">') == 3  # Checks / Ledger Fixes / Config
+        # every group open, each foldable by hand
+        assert panel.count('<details class="tool-group" open>') == 6 and '<details class="tool-group">' not in panel
         picked = client.get("/tools", params={"tool": "backfill_tracking"}).text
         panel = picked[picked.index('id="t-all-tools"'):picked.index("</section>", picked.index('id="t-all-tools"'))]
         assert 'href="/tools?tool=backfill_tracking" class="current"' in panel
-        # a fold holding the shown tool opens itself: Ledger Fixes joins the three defaults
-        assert panel.count('<details class="tool-group" open>') == 4
+        # the Import landing carries the directory too, Run importer marked
+        landing = client.get("/tools/import").text
+        panel = landing[landing.index('id="t-all-tools"'):landing.index("</section>", landing.index('id="t-all-tools"'))]
+        assert ">All Tools<" in panel and 'href="/tools?tool=profile"' in panel and panel.count('<details class="tool-group" open>') == 6
 
     def test_running_a_tool_records_it_and_shows_its_output(self, client):
         response = client.post("/tools/run/preflight", data={"--strict": "on"}, follow_redirects=False)

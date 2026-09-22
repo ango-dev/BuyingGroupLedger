@@ -56,6 +56,9 @@
         alerts and failure dossiers from the last seven days, Audit's rows a failing check flags,
         Recon's orders paid short or over. Nothing waiting, no badge. -#}
     {% set badges = nav_badges() %}
+    {#- The Tools menus fold by group; a folded group holding the
+        tool on show opens. The tool pages' own All Tools directory stays unfolded. -#}
+    {% set current_tool = 'import' if path.startswith('/tools/import') else (request.query_params.get('tool', 'profile') if path.startswith('/tools') else '') %}
     {#- The tabs, and the same pages as one dropdown for a window too narrow for them (edit.js
         measures and sets header.compact: "on iphone the nav bar needs to scroll
         horizontally which is not intuitive"). -#}
@@ -70,8 +73,10 @@
       <summary><span class="nav-link">Tools{% if badges.import %} <span class="badge" title="staged rows still to import">{{ badges.import }}</span>{% endif %} <span class="caret">▾</span></span></summary>
       <div class="menu">
         {% for group, items in nav_tools() %}
-        <div class="group">{{ group }}</div>
+        <details class="group-fold"{% if group in ('Import', 'Run', 'Accounts') or (items | selectattr(0, 'equalto', current_tool) | list) %} open{% endif %}>
+        <summary class="group">{{ group }}</summary>
         {% for key, title in items %}{% if key == 'import' %}<a href="/tools/import" class="{{ 'current' if path.startswith('/tools/import') }}">{{ title }}{% if badges.import %} <span class="badge" title="staged rows still to import">{{ badges.import }}</span>{% endif %}</a>{% else %}<a href="/tools?tool={{ key }}" class="{{ 'current' if request.query_params.get('tool', 'profile') == key and path.startswith('/tools') and not path.startswith('/tools/import') }}">{{ title }}</a>{% endif %}{% endfor %}
+        </details>
         {% endfor %}
       </div>
     </details>
@@ -93,8 +98,10 @@
         <details class="sub"{% if path.startswith('/tools') %} open{% endif %}>
           <summary class="{{ 'current' if path.startswith('/tools') }}">Tools{% if badges.import %} <span class="badge">{{ badges.import }}</span>{% endif %} <span class="caret">▾</span></summary>
           {% for group, items in nav_tools() %}
-          <div class="group">{{ group }}</div>
+          <details class="group-fold"{% if group in ('Import', 'Run', 'Accounts') or (items | selectattr(0, 'equalto', current_tool) | list) %} open{% endif %}>
+          <summary class="group">{{ group }}</summary>
           {% for key, title in items %}{% if key == 'import' %}<a href="/tools/import" class="{{ 'current' if path.startswith('/tools/import') }}">{{ title }}{% if badges.import %} <span class="badge">{{ badges.import }}</span>{% endif %}</a>{% else %}<a href="/tools?tool={{ key }}" class="{{ 'current' if request.query_params.get('tool', 'profile') == key and path.startswith('/tools') and not path.startswith('/tools/import') }}">{{ title }}</a>{% endif %}{% endfor %}
+          </details>
           {% endfor %}
         </details>
       </div>

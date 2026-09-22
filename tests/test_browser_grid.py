@@ -178,8 +178,8 @@ def test_the_tabs_fold_into_a_dropdown_on_a_phone(served, phone):
     assert items[:6] == ["Overview", "Orders", "Activity", "Audit", "Reconciliation", "Taxes"] and "Settings" not in items  # the gear has it
     # Tools is a dropdown of its own inside the menu: closed here, its items hidden
     tools = pick.locator(".menu details.sub")
-    assert tools.locator("summary").inner_text().startswith("Tools") and not tools.locator("a", has_text="Run once").is_visible()
-    tools.locator("summary").click()
+    assert tools.locator("> summary").inner_text().startswith("Tools") and not tools.locator("a", has_text="Run once").is_visible()
+    tools.locator("> summary").click()  # the Tools fold's own summary, not its groups'
     assert tools.locator("a", has_text="Run once").is_visible()
     # the open menu hangs right below the header (its own 4px gap) and scrolls with it -- on a page the window scrolls (Overview; Orders scrolls inside its main area)
     header_bottom = phone.evaluate("document.querySelector('header.top').getBoundingClientRect().bottom")
@@ -328,11 +328,16 @@ def test_a_desktop_window_keeps_the_tabs(served, page):
     assert not page.evaluate("document.querySelector('header.top').classList.contains('compact')")
     assert page.locator("header nav .tabs").is_visible() and not page.locator("header nav details.nav-pick").is_visible()
     # the Tools menu opens in full below the tabs (nothing clips it)
-    page.locator("header nav .tabs details.nav-menu summary").click()
+    page.locator("header nav .tabs details.nav-menu > summary").click()  # the menu's own summary, not its groups'
     menu = page.locator("header nav .tabs details.nav-menu .menu")
-    assert menu.is_visible() and menu.locator("a").last.is_visible()
+    assert menu.is_visible() and menu.locator("details.group-fold[open] a").last.is_visible()
     box = menu.bounding_box()
     assert box["height"] > 150 and box["y"] > 30
+    # the groups fold: Config is folded until its line is clicked
+    config = menu.locator("details.group-fold", has_text="Config")
+    assert not config.locator("a").first.is_visible()
+    config.locator("> summary").click()
+    assert config.locator("a").first.is_visible()
     assert page.errors == []
 
 

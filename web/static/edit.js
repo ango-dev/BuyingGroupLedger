@@ -1039,7 +1039,11 @@
     hideCtx();
   }, true);
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") hideCtx(); }, true);
-  window.addEventListener("scroll", hideCtx, true);
+  // A scroll closes the menu -- unless it is the one the opening itself caused: the browser nudges
+  // a focused cell into view on the mousedown that opened the menu when the page can scroll
+  // (2026-09-21: the Import page grew a directory, its main became scrollable, and the row
+  // number's menu closed the instant it opened). The mousedown path keeps the same grace.
+  window.addEventListener("scroll", function () { if (Date.now() - ctxOpenedAt < 600) return; hideCtx(); }, true);
   window.addEventListener("resize", hideCtx);
 })();
 

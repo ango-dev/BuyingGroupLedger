@@ -1,0 +1,18 @@
+{#- The Tools pages' own directory: every tool the header menu carries, in its groups, all open;
+    `selected` marks the tool on show. Included by tools.html and the Import landing. -#}
+{# ---- All Tools: the page's own directory, the same tools and groups as the header menu ---- #}
+<section class="panel tool-card" id="t-all-tools">
+  <header><h2>All Tools</h2></header>
+  {#- Every group open, each foldable by hand. -#}
+  <div class="tool-dir">
+    {% for group, items in nav_tools() %}
+    <details class="tool-group" open>
+      <summary><h3>{{ group }}</h3></summary>
+      {% for key, title in items %}
+      {% if key == 'import' %}<a href="/tools/import">{{ title }}</a>
+      {% else %}<a href="/tools?tool={{ key }}" class="{{ 'current' if key == selected }}">{{ title }}</a>{% endif %}
+      {% endfor %}
+    </details>
+    {% endfor %}
+  </div>
+</section>
