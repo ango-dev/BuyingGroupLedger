@@ -72,6 +72,15 @@ _CARD_LAST4_SELECTOR = "[data-testid='payment-instrument-number']"
 _WIDGET_INSTRUMENT_SELECTOR = "[data-testid='payment-instrument']"
 _WIDGET_INSTRUMENT_NAME_SELECTOR = "[data-testid='payment-instrument-name']"
 _WIDGET_POINTS_NAME_RE = re.compile(r"\b(?:points?|rewards)\b", re.IGNORECASE)
+# Since ~2026-09-21 each widget row also carries a FEATURE DETAIL: on the paying card it is the
+# earn line the old pmts-* supplemental box used to hold ("Earn 5% back (cap applies) plus an
+# extra 1% back on select items" on the Prime Business Card, live on 111-9990023-9990023;
+# "$1,071.98 (Earns 5% back)" on the consumer Prime Visa, live on 111-9990016-9990016), and on a
+# spent cash-back balance it is the amount applied ("$126.02 applied"). The promo rate is read
+# from the card row's detail, and the applied amount stands in for the order-summary line only
+# when that line is absent.
+_WIDGET_FEATURE_SELECTOR = "[data-testid='payment-instrument-feature-detail']"
+_APPLIED_AMOUNT_RE = re.compile(r"(-?\$\s*[\d,]+\.\d{2})\s+applied", re.IGNORECASE)
 _SHIPMENT_ID_RE = re.compile(r"shipmentId=([A-Za-z0-9]+)")
 _ASIN_RE = re.compile(r"asin=([A-Z0-9]{10})|/dp/([A-Z0-9]{10})")
 _MONEY_RE = re.compile(r"-?\$\s*([\d,]+\.\d{2})")
@@ -125,6 +134,7 @@ SELECTORS: dict[str, str] = {
     "payment_card_last4": _CARD_LAST4_SELECTOR,
     "payment_instrument_widget": _WIDGET_INSTRUMENT_SELECTOR,
     "payment_instrument_widget_name": _WIDGET_INSTRUMENT_NAME_SELECTOR,
+    "payment_instrument_widget_feature": _WIDGET_FEATURE_SELECTOR,
     # Matches only on the related-transactions page (TRANSACTIONS_URL), so it audits at 0 on an
     # order-details snapshot — the same way the pt-page selectors do.
     "transactions_line_item": _TRANSACTION_LINE_SELECTOR,
@@ -508,8 +518,16 @@ def _promo_cashback_rate(region) -> float | None:
     Scoped to the payment element rather than the page text so unrelated marketing ("extra 5% off!")
     in a recommendations rail can never be mistaken for this order's promo.
     """
-    for el in region.select(_EARN_LINE_SELECTOR):
-        m = _EXTRA_PCT_RE.search(el.get_text(" ", strip=True))
+    texts = [el.get_text(" ", strip=True) for el in region.select(_EARN_LINE_SELECTOR)]
+    # The rebuilt widget: the same line sits in the paying card's feature detail (2026-09-21).
+    # Only the row that carries the card number -- a cash-back row's detail is an amount applied,
+    # and a points row has no earn line to offer.
+    for inst in region.select(_WIDGET_INSTRUMENT_SELECTOR):
+        if inst.select_one(_CARD_LAST4_SELECTOR) is None:
+            continue
+        texts.extend(fd.get_text(" ", strip=True) for fd in inst.select(_WIDGET_FEATURE_SELECTOR))
+    for text in texts:
+        m = _EXTRA_PCT_RE.search(text)
         if not m:
             continue
         try:
@@ -519,6 +537,29 @@ def _promo_cashback_rate(region) -> float | None:
         if 0 < rate <= 1:
             return rate
     return None
+
+
+def _cash_back_applied_in_widget(region) -> float | None:
+    """The cash-back balance the rebuilt widget says was applied ("$126.02 applied" on a row named
+    "... cash back"), as a POSITIVE number; None when no such row carries an amount.
+
+    A fallback for the order-summary line, never a second source: `rewards_used_amount` reads the
+    summary first (it survived the widget on every capture so far) and asks here only when the
+    summary shows no cash-back line at all."""
+    total, found = 0.0, False
+    for inst in region.select(_WIDGET_INSTRUMENT_SELECTOR):
+        if inst.select_one(_CARD_LAST4_SELECTOR) is not None:
+            continue
+        name_el = inst.select_one(_WIDGET_INSTRUMENT_NAME_SELECTOR)
+        name = name_el.get_text(" ", strip=True) if name_el else ""
+        if _CASH_BACK_TENDER_HINT not in name.lower():
+            continue
+        for fd in inst.select(_WIDGET_FEATURE_SELECTOR):
+            m = _APPLIED_AMOUNT_RE.search(fd.get_text(" ", strip=True))
+            if m:
+                total += abs(_num(m.group(1)) or 0.0)
+                found = True
+    return round(total, 2) if found else None
 
 
 def _summary_parsed(summary_el) -> bool:
@@ -585,7 +626,7 @@ def _cash_back_used(summary_el) -> float | None:
     return round(total, 2)
 
 
-def _cash_back_consumed(summary_el) -> float | None:
+def _cash_back_consumed(summary_el, applied: float | None = None) -> float | None:
     """`_cash_back_used`, capped at what the order can actually have consumed.
 
     Live (orders 111-9990007-9990007 and 111-9990025-9990025, one checkout split in
@@ -598,6 +639,8 @@ def _cash_back_consumed(summary_el) -> float | None:
     the pieces parse, and a healthy line equals the cap anyway — proven on the 09-05/09-07
     orders."""
     used = _cash_back_used(summary_el)
+    if not used and applied is not None:
+        used = applied  # the widget's "$X applied" when the summary has no cash-back line
     if not used:
         return used
     text = summary_el.get_text("\n", strip=True)
@@ -685,7 +728,7 @@ def missing_card_reason(order_details_html: str) -> str | None:
         )
     summary_el = region.select_one("[data-component='orderSummary']")
     gift = _gift_card_amount(summary_el) or 0.0
-    cash = _cash_back_used(summary_el) or 0.0
+    cash = _cash_back_used(summary_el) or _cash_back_applied_in_widget(region) or 0.0
     m = _GRAND_TOTAL_RE.search(summary_el.get_text("\n", strip=True)) if summary_el else None
     total = _num(m.group(1)) if m else None
     if total is not None and gift + cash >= total - 0.005:
@@ -791,7 +834,7 @@ def rewards_used_amount(summary_el, region, points_used: float | None, order_id:
     amazon_mapping.rewards_used_amount."""
     if summary_el is None:
         return None
-    total = _cash_back_consumed(summary_el) or 0.0
+    total = _cash_back_consumed(summary_el, _cash_back_applied_in_widget(region)) or 0.0
     if uses_points(region):
         if points_used is None:
             log.warning("Amazon Business order %s was paid partly with Amazon points but the amount is "

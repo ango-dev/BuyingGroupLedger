@@ -1519,3 +1519,65 @@ class TestWhatACaptureMustRead:
         assert set(FIELD_SOURCES) == set(CAPTURE_IDENTITY_FIELDS + CAPTURE_MANDATORY_FIELDS)
         for field in ("order_id", "order_date", "item_name", "cost_per_item", "delivery_address"):
             assert FIELD_SOURCES[field] in SELECTORS.values()
+
+
+
+# --- the widget's feature details: the earn line moved onto the card row, and
+# --- a spent cash-back balance shows its "$X applied" on its own row ------------------------------
+def _widget_card_with_feature(feature: str, name: str = "Prime Business Card", last4: str = "0315") -> str:
+    return (
+        '<div data-testid="payment-instrument">'
+        f'<span data-testid="payment-instrument-name">{name}</span>'
+        '<span data-testid="payment-instrument-prefix">\u2022\u2022\u2022\u2022</span>'
+        f'<span data-testid="payment-instrument-number">{last4}</span>'
+        f'<div data-testid="payment-instrument-feature-detail">{feature}</div></div>'
+    )
+
+
+_WIDGET_CASH_BACK_APPLIED_ROW = (
+    '<div data-testid="payment-instrument">'
+    '<span data-testid="payment-instrument-name">Prime Young Adults cash back</span>'
+    '<div data-testid="payment-instrument-feature-detail">$126.02 applied</div></div>'
+)
+
+
+def test_the_promo_rate_is_read_from_the_card_rows_feature_detail():
+    oid = "111-9990023-9990023"
+    html = _details(oid, "September 17, 2026",
+                    [_shipment(oid, 0, "Arriving tomorrow", [_item("PS5", "$599.00", qty=2)])]) \
+        .replace("<div>Payment method Visa ending in 1234</div>", _widget(_widget_card_with_feature(
+            "Earn 5% back (cap applies) plus an extra 1% back on select items")))
+    assert build_order_items(html, today="2026-09-21")[0].promo_rate == 0.01
+
+
+def test_a_consumer_cards_earn_detail_carries_no_promo():
+    oid = "111-9990016-9990016"
+    html = _details(oid, "September 17, 2026",
+                    [_shipment(oid, 0, "Arriving tomorrow", [_item("PS5", "$599.00", qty=2)])]) \
+        .replace("<div>Payment method Visa ending in 1234</div>", _widget(_widget_card_with_feature("$1,071.98 (Earns 5% back)", "Prime Visa", "4345")))
+    assert build_order_items(html, today="2026-09-21")[0].promo_rate is None
+
+
+def test_a_cash_back_rows_detail_never_reads_as_a_promo_or_an_unknown_tender():
+    from scrapers.amazon_mapping import unknown_tender_reason
+    oid = "111-9990016-9990016"
+    html = _details(oid, "September 17, 2026",
+                    [_shipment(oid, 0, "Arriving tomorrow", [_item("PS5", "$599.00", qty=2)])]) \
+        .replace("<div>Payment method Visa ending in 1234</div>", _widget(_WIDGET_CASH_BACK_APPLIED_ROW,
+                                       _widget_card_with_feature("$1,071.98 (Earns 5% back)", "Prime Visa", "4345")))
+    assert build_order_items(html, today="2026-09-21")[0].promo_rate is None
+    assert unknown_tender_reason(html) is None
+
+
+def test_the_widgets_applied_amount_stands_in_only_when_the_summary_line_is_missing():
+    oid = "111-9990016-9990016"
+    shipments = [_shipment(oid, 0, "Arriving tomorrow", [_item("PS5", "$599.00", qty=2)])]
+    widget = _widget(_WIDGET_CASH_BACK_APPLIED_ROW,
+                     _widget_card_with_feature("$1,071.98 (Earns 5% back)", "Prime Visa", "4345"))
+    base = _details(oid, "September 17, 2026", shipments, subtotal="$1,198.00").replace("<div>Payment method Visa ending in 1234</div>", widget)
+    # The summary carries the line: it wins, and the widget's figure is not added on top.
+    with_line = base.replace("Grand Total: $10", "Prime for Young Adults cash back: -$126.02\nGrand Total: $1,071")
+    assert build_order_items(with_line, today="2026-09-21")[0].rewards_used == 126.02
+    # No summary line at all: the widget's "$126.02 applied" fills Rewards Used instead.
+    without = base.replace("Grand Total: $10", "Grand Total: $1,071")
+    assert build_order_items(without, today="2026-09-21")[0].rewards_used == 126.02
