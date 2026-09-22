@@ -1133,10 +1133,16 @@ def build_order_items(
         summary_el = None  # a stub is a missing summary: amounts unknown, never a fake 0
         # ...and a dossier problem (2026-09-19): the amounts stay blank to fill on a re-read, but
         # a summary that stopped rendering or parsing is a shape change worth the page.
-        diagnostics.problem(
-            f"order {order_id}: the order summary could not be read ({SELECTORS['order_summary']} "
-            f"matched nothing, or showed no Grand Total / Item(s) Subtotal) -- Shipping, Sales Tax, "
-            f"Gift Card and Rewards Used recorded blank this run")
+        # EXCEPT when every shipment is cancelled: Amazon renders the
+        # chargeSummary EMPTY -- no Grand Total exists, and there is nothing to fill -- the same
+        # rule missing_card_reason keeps. One live card among cancelled ones still reports.
+        statuses = [_status_from_text(el.get_text(" ", strip=True))
+                    for el in region.select("[data-component='shipmentStatus']")]
+        if not (statuses and all(s == "cancelled" for s in statuses)):
+            diagnostics.problem(
+                f"order {order_id}: the order summary could not be read ({SELECTORS['order_summary']} "
+                f"matched nothing, or showed no Grand Total / Item(s) Subtotal) -- Shipping, Sales "
+                f"Tax, Gift Card and Rewards Used recorded blank this run")
     shipping = None
     if summary_el:
         st = summary_el.get_text("\n", strip=True)

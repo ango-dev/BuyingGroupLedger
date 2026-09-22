@@ -1337,6 +1337,63 @@ def test_the_payment_error_state_gets_its_own_precise_reason():
     assert "shape changed" not in reason
 
 
+# --- a fully CANCELLED order has no charge summary at all. The shipment card reads
+# "Cancelled / Your order was cancelled. You have not been charged for this order." and the order
+# summary holds only the payment widget over an EMPTY chargeSummary -- no Grand Total, no subtotal.
+# That is not a summary that failed to render; there is nothing to read and nothing to fill.
+_CANCELLED_SUMMARY = (
+    '<div data-component="orderSummary"><div data-component="viewPaymentPlanSummaryWidget">'
+    '<h5>Payment method</h5>'
+    '<div data-testid="payment-instrument"><span data-testid="payment-instrument-name">Prime Visa</span>'
+    ' <span data-testid="payment-instrument-number">4345</span></div>'
+    '<a href="/cpe/yourpayments/transactions">View related transactions</a></div>'
+    '<div data-component="chargeSummary"></div></div>'
+)
+_CANCELLED_CARD = ("Cancelled Your order was cancelled. You have not been charged for this order.")
+
+
+def _cancelled_order_page(oid: str, extra_shipments: list[str] | None = None) -> str:
+    import re as _re
+    # The cancelled card carries an EMPTY shipmentConnections (no Track package link), as captured.
+    card = _shipment(oid, 0, _CANCELLED_CARD, [_item("Apple iPad 11-inch", "$399.00")], track=False)
+    card = card[:-len("</div>")] + '<div data-component="shipmentConnections"></div></div>'
+    html = _details(oid, "September 21, 2026", [card] + (extra_shipments or []))
+    # The page names the card only in the summary's widget (no "ending in" line), as captured.
+    html = html.replace("<div>Payment method Visa ending in 1234</div>", "")
+    return _re.sub(r'<div data-component="orderSummary">.*?</div>', _CANCELLED_SUMMARY, html, flags=_re.S)
+
+
+def test_a_cancelled_orders_empty_charge_summary_is_not_a_dossier_problem(tmp_path):
+    import diagnostics
+    oid = "111-9990020-9990020"
+    with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
+        rows = build_order_items(_cancelled_order_page(oid), today="2026-09-21", known_open_ids={oid})
+    assert d.problems == []
+    (r,) = rows
+    assert r.status == "cancelled" and r.quantity is None and r.card_last4 == "4345"
+    assert (r.gift_card, r.rewards_used, r.sales_tax, r.shipping) == (None, None, None, None)
+
+
+def test_a_brand_new_cancelled_order_is_dropped_quietly(tmp_path):
+    import diagnostics
+    oid = "111-9990020-9990020"
+    with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
+        rows = build_order_items(_cancelled_order_page(oid), today="2026-09-21")
+    assert rows == [] and d.problems == []
+
+
+def test_the_same_empty_summary_still_reports_when_any_shipment_is_live(tmp_path):
+    # Only a page whose EVERY card is cancelled has nothing to charge; a live card beside a
+    # cancelled one has a Grand Total that failed to read, which is the shape change to report.
+    import diagnostics
+    oid = "111-9990020-9990020"
+    live = _shipment(oid, 1, "Arriving Wednesday", [_item("Apple Pencil", "$79.00")])
+    with diagnostics.collecting("amazon", "p", root=tmp_path) as d:
+        rows = build_order_items(_cancelled_order_page(oid, [live]), today="2026-09-21")
+    assert [r.status for r in rows] == ["cancelled", "ordered"]
+    assert d.problems and "order summary could not be read" in d.problems[0]
+
+
 def test_cash_back_applied_beyond_the_order_total_is_clamped_to_what_it_consumed():
     # the whole $89.10 balance applied to a $35.93 order, Grand Total $0.00 —
     # Rewards Used must be the $35.93 the order consumed, not the balance.
