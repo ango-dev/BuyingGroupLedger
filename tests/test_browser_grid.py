@@ -1177,3 +1177,47 @@ def test_the_expenses_pager_and_size_picker_navigate(served, page, client):
         page.locator("#s-expenses a.export").click()
     assert got.value.suggested_filename == "expenses_2026.csv"
     assert page.errors == []
+
+
+def test_a_phone_keeps_tiles_whole_menus_inside_and_stacks_the_settings_tables(served, phone):
+    """at 393px Recon's Net value broke into two lines and the
+    five Audit tiles read "WARNI…"; the Status menu opened 30px past the right edge; the Overview
+    statement panned inside its box and the 12-month chart was a scroll box scrolled to its end;
+    the Settings sign-in and jig tables gave a placeholder 13px; small buttons were 21px tall."""
+    phone.goto(f"{served}/recon")
+    phone.wait_for_selector(".tiles.stats .value")
+    lines = phone.evaluate("""Array.from(document.querySelectorAll('.tiles.stats .value')).map(v =>
+        [v.textContent.trim(), Math.round(v.getBoundingClientRect().height / (parseFloat(getComputedStyle(v).fontSize) * 1.35)), v.scrollWidth <= v.clientWidth + 1])""")
+    assert lines and all(n == 1 and fits for _text, n, fits in lines), lines
+    assert phone.evaluate("getComputedStyle(document.querySelector('.tiles.stats')).gridTemplateColumns.split(' ').length") == 2
+    phone.goto(f"{served}/audit")
+    phone.wait_for_selector(".tiles.audit-stats")
+    assert phone.evaluate("getComputedStyle(document.querySelector('.tiles.audit-stats')).gridTemplateColumns.split(' ').length") == 3
+    assert phone.evaluate("Array.from(document.querySelectorAll('.tiles.audit-stats .label')).every(l => l.scrollWidth <= l.clientWidth + 1)")
+    # the Status menu stays inside the window: hung from its right edge when the left would overflow
+    phone.goto(f"{served}/orders")
+    status = phone.locator("details.multi", has_text="Status").first
+    status.locator("> summary").click()
+    phone.wait_for_timeout(150)
+    box = phone.evaluate("(() => { const b = document.querySelector('details.multi[open] .menu').getBoundingClientRect(); return [b.left, b.right, window.innerWidth]; })()")
+    assert 0 <= box[0] and box[1] <= box[2], box
+    phone.keyboard.press("Escape")
+    # the search hint fits its box (it used to need 437px)
+    assert phone.evaluate("""(() => { const el = document.querySelector('#q'); const c = document.createElement('canvas').getContext('2d');
+        c.font = getComputedStyle(el).font; return c.measureText(el.placeholder).width < el.clientWidth - 16; })()""")
+    # the Overview: two statement columns that fit, a chart that scales to its card
+    phone.goto(f"{served}/")
+    phone.wait_for_selector("table.statement")
+    assert phone.evaluate("Array.from(document.querySelectorAll('table.statement thead th')).filter(th => th.offsetParent).length") == 3  # label + Lifetime + month
+    assert phone.evaluate("(() => { const w = document.querySelector('.statement-wrap'); return w.scrollWidth <= w.clientWidth + 1; })()")
+    assert phone.evaluate("(() => { const f = document.querySelector('figure.months'); const s = f.querySelector('svg').getBoundingClientRect(); const b = f.getBoundingClientRect(); return f.scrollWidth <= f.clientWidth + 1 && s.left >= b.left && s.right <= b.right + 1; })()")
+    # the Settings sub-tables stack, each cell led by its column's name; small buttons are tappable
+    phone.goto(f"{served}/settings")
+    phone.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
+    phone.wait_for_timeout(100)
+    assert phone.evaluate("(() => { const tr = document.querySelector('table.entry-table.stackable tbody tr'); return getComputedStyle(tr).display; })()") == "grid"
+    assert phone.evaluate("(() => { const td = document.querySelector('table.entry-table.stackable td[data-label]'); return getComputedStyle(td, '::before').content; })()").strip('"') != "none"
+    assert phone.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth") == 0
+    small = phone.evaluate("Array.from(document.querySelectorAll('button.small, a.button.small')).filter(b => b.offsetParent).map(b => Math.round(b.getBoundingClientRect().height))")
+    assert small and min(small) >= 31, small
+    assert phone.errors == []

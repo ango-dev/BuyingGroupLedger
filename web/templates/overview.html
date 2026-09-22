@@ -68,16 +68,16 @@
 <div class="overview-main">
 <div class="statement-wrap">
 <table class="statement">
-  <thead><tr><th scope="col"></th>{% for c in summary.statement.columns %}<th scope="col" class="num {{ 'current' if c.key == 'month' }}">{{ c.label }}</th>{% endfor %}</tr></thead>
+  <thead><tr><th scope="col"></th>{% for c in summary.statement.columns %}<th scope="col" class="num col-{{ c.key }} {{ 'current' if c.key == 'month' }}">{{ c.label }}</th>{% endfor %}</tr></thead>
   <tbody>
   {% for r in summary.statement.rows %}
   <tr class="{{ 'level-' ~ r.level if r.level }}">
     <th scope="row">{{ r.label | title }}</th>{# Title Case on the page; the tile labels stay as the tests know them #}
-    {% for t in r.cells %}
-    {% if t %}<td class="num {{ 'payout-' ~ t.tone if t.tone }}{{ ' neg' if t.kind == 'money' and t.value < 0 }}{{ ' rate' if t.kind == 'percent' }}"><a href="{{ t.href }}" title="{{ t.detail }}">
+    {% for t in r.cells %}{% set ckey = summary.statement.columns[loop.index0].key %}
+    {% if t %}<td class="num col-{{ ckey }} {{ 'payout-' ~ t.tone if t.tone }}{{ ' neg' if t.kind == 'money' and t.value < 0 }}{{ ' rate' if t.kind == 'percent' }}"><a href="{{ t.href }}" title="{{ t.detail }}">
       {%- if t.kind == 'money' %}{{ t.value | money }}{% elif t.kind == 'percent' %}{{ (t.value | percent) if t.value is not none else '—' }}{% elif t.kind == 'pair' %}{{ t.value[0] }} <span class="muted">/ {{ t.value[1] }}</span>{% else %}{{ t.value }}{% endif -%}
       </a><span class="cell-hint">{{ t.hint }}</span></td>
-    {% else %}<td class="num muted" title="entered per year on the Taxes page: see the year and Lifetime">—</td>{% endif %}
+    {% else %}<td class="num muted col-{{ ckey }}" title="entered per year on the Taxes page: see the year and Lifetime">—</td>{% endif %}
     {% endfor %}
   </tr>
   {% endfor %}

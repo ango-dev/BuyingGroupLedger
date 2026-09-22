@@ -1391,7 +1391,17 @@
     if (!details.matches || !details.matches("details.multi") || details.classList.contains("nav-menu")) return;
     details.dataset.narrow = "";
     applyNarrow(details);
+    keepInWindow(details);
   }, true);
+  // A menu hangs from its summary's left edge; near the right edge of a phone that put 30px of
+  // it off-screen. Measured on open: past the edge, it hangs from the right.
+  function keepInWindow(details) {
+    var menu = details.querySelector(".menu");
+    if (!menu || !details.open) return;
+    menu.classList.remove("flip");
+    var box = menu.getBoundingClientRect();
+    if (box.right > window.innerWidth - 8 && box.width < window.innerWidth - 16) menu.classList.add("flip");
+  }
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     var details = e.target.closest ? e.target.closest("details.multi[open]") : null;

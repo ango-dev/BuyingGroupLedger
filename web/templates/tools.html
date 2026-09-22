@@ -40,7 +40,8 @@
   {% if not session %}
   <form method="post" action="/tools/profile/start" class="tool-form" data-confirm="Open a live browser session for this profile? It costs a cloud browser session while open.">
     <span class="field-block">Profile {{ choose('label', profile_labels, profile_labels[0] if profile_labels else '', '', 'cell') }}</span>
-    <label class="field-block">Add retailers <input type="text" name="add_retailers" placeholder="optional, space-separated keys"></label>
+    <label class="field-block">Add retailers <input type="text" name="add_retailers" placeholder="space-separated" data-tip="Optional: retailer keys to sign in to beside the profile's own, separated by spaces (amazon bestbuy costco).">
+    </label>
     <button type="submit" class="primary small" {{ 'disabled' if not profile_labels }}>Open a live session</button>
   </form>
   {% if not profile_labels %}<p class="muted small">No profiles in config.json yet: add one under Settings → Profiles (label, proxy, retailers) first.</p>{% endif %}

@@ -36,7 +36,7 @@
     {#- The search is a plain text match over every event's summary AND details (an order id, a
         retailer, an item, an email subject, a tracking number -- whatever the event recorded);
         the placeholder says so instead of naming columns the table does not have. -#}
-    <input id="aq" type="search" name="q" value="{{ filters.q }}" placeholder="any text in an event: order id, retailer, item, subject, tracking number…" title="matches the event's summary and its details, whatever they hold">
+    <input id="aq" type="search" name="q" value="{{ filters.q }}" placeholder="search events" data-tip="Matches any text in an event's summary or details: an order id, a retailer, an item, an email subject, a tracking number.">
   </label>
   {% if filters.run_id %}
   <span class="tag">run {{ run_label(filters.run_id) }} <a href="/activity?{{ filters.as_query(run='') | query }}" title="show every run">✕</a></span>

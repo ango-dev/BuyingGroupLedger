@@ -73,25 +73,25 @@
       </div>
       <div class="fblock">
         <div class="ftitle">Unattended sign-in <span class="muted">— password + authenticator seed (Best Buy, Amazon Business); enrol the app, not SMS</span></div>
-        <table class="entry-table">
+        <table class="entry-table stackable">
           <thead><tr><th>Retailer</th><th>Username</th><th>Password</th><th>TOTP Seed</th><th></th></tr></thead>
           <tbody>
             {% if p %}{% for a in p.auth %}
             <tr>
-              <td>{{ retailer_title(a.retailer) | trim }}</td>
-              <td><input type="text" name="auth.{{ a.retailer }}.username" value="{{ a.username }}"></td>
-              <td><span class="secret">{{ secret_cell('auth.' ~ a.retailer ~ '.password', a.password_set) }}</span></td>
-              <td><span class="secret">{{ secret_cell('auth.' ~ a.retailer ~ '.totp_secret', a.totp_set) }}</span></td>
+              <td data-label="Retailer">{{ retailer_title(a.retailer) | trim }}</td>
+              <td data-label="Username"><input type="text" name="auth.{{ a.retailer }}.username" value="{{ a.username }}"></td>
+              <td data-label="Password"><span class="secret">{{ secret_cell('auth.' ~ a.retailer ~ '.password', a.password_set) }}</span></td>
+              <td data-label="TOTP seed"><span class="secret">{{ secret_cell('auth.' ~ a.retailer ~ '.totp_secret', a.totp_set) }}</span></td>
               <td class="rm"><label title="remove this sign-in on save"><input type="checkbox" name="auth.{{ a.retailer }}.__remove" value="1"> remove</label></td>
             </tr>
             {% endfor %}{% endif %}
             {% set have = (p.auth | map(attribute='retailer') | list) if p else [] %}
             <tr class="new-row">
               {% set addable = [] %}{% for r in auth_retailers if r not in have %}{% set _ = addable.append((r, retailer_title(r) | trim)) %}{% endfor %}
-              <td>{{ choose('auth_new_retailer', [('', '— Add —')] + addable, '', '', 'cell') }}</td>
-              <td><input type="text" name="auth_new_username" placeholder="username"></td>
-              <td><input type="password" name="auth_new_password" autocomplete="new-password" placeholder="password"></td>
-              <td><input type="password" name="auth_new_totp_secret" autocomplete="new-password" placeholder="TOTP seed"></td>
+              <td data-label="Retailer">{{ choose('auth_new_retailer', [('', '— Add —')] + addable, '', '', 'cell') }}</td>
+              <td data-label="Username"><input type="text" name="auth_new_username" placeholder="user"></td>
+              <td data-label="Password"><input type="password" name="auth_new_password" autocomplete="new-password" placeholder="pass"></td>
+              <td data-label="TOTP seed"><input type="password" name="auth_new_totp_secret" autocomplete="new-password" placeholder="seed"></td>
               <td></td>
             </tr>
           </tbody>
@@ -101,22 +101,22 @@
 
     {% macro warehouse_fields(w) %}
       <div class="fgrid two">
-        <label>Buying group <input type="text" name="buying_group" value="{{ w.buying_group if w else '' }}" required placeholder="BFMR — the value written to the ledger"></label>
+        <label>Buying group <input type="text" name="buying_group" value="{{ w.buying_group if w else '' }}" required placeholder="BFMR" data-tip="The name written to the ledger's Buying Group column for orders delivered to this warehouse."></label>
       </div>
       <div class="fblock">
         <div class="ftitle">Address jigs <span class="muted">— a jig matches when every filled field appears in the address</span></div>
-        <table class="entry-table">
+        <table class="entry-table stackable">
           <thead><tr><th>Label</th><th>Street</th><th>ZIP</th><th>Name Contains</th><th>Also Contains</th><th></th></tr></thead>
           <tbody>
             {% set jigs = (w.jigs if w else []) + [{'label': '', 'street': '', 'zip': '', 'name_contains': '', 'contains': ''}] %}
             {% for j in jigs %}
             {% set i = loop.index0 %}
             <tr class="{{ 'new-row' if loop.last }}">
-              <td><input type="text" name="jig.{{ i }}.label" value="{{ j.label }}" placeholder="{{ 'new jig' if loop.last else '' }}"></td>
-              <td><input type="text" name="jig.{{ i }}.street" value="{{ j.street }}"></td>
-              <td class="narrow"><input type="text" name="jig.{{ i }}.zip" value="{{ j.zip }}"></td>
-              <td><input type="text" name="jig.{{ i }}.name_contains" value="{{ j.name_contains }}"></td>
-              <td><input type="text" name="jig.{{ i }}.contains" value="{{ j.contains }}" placeholder="comma-separated"></td>
+              <td data-label="Label"><input type="text" name="jig.{{ i }}.label" value="{{ j.label }}" placeholder="{{ 'new' if loop.last else '' }}"></td>
+              <td data-label="Street"><input type="text" name="jig.{{ i }}.street" value="{{ j.street }}"></td>
+              <td class="narrow" data-label="ZIP"><input type="text" name="jig.{{ i }}.zip" value="{{ j.zip }}"></td>
+              <td data-label="Name contains"><input type="text" name="jig.{{ i }}.name_contains" value="{{ j.name_contains }}"></td>
+              <td data-label="Also contains"><input type="text" name="jig.{{ i }}.contains" value="{{ j.contains }}" placeholder="a, b" data-tip="Comma-separated words; the jig matches when every one appears in the address."></td>
               <td class="rm">{% if not loop.last %}<label title="remove this jig on save"><input type="checkbox" name="jig.{{ i }}.__remove" value="1"> remove</label>{% endif %}</td>
             </tr>
             {% endfor %}
@@ -158,7 +158,7 @@
           one allowance. A virtual number must name its card: the caps pool by it. -#}
       {% set blank_cap = {'spend_limit': '', 'fallback_rate': '', 'resets': 'calendar-year', 'anniversary': '', 'outside_entries': [], 'outside_total': 0, 'period_start': '', 'period_end': ''} %}
       <div class="fgrid four">
-        <label>Name <input type="text" name="name" value="{{ c.name if c else '' }}" required placeholder="Chase Freedom Unlimited"></label>
+        <label>Name <input type="text" name="name" value="{{ c.name if c else '' }}" required placeholder="Freedom Unlimited"></label>
         <label>Last 4 <input type="text" name="last4" value="{{ c.last4 if c else '' }}" required maxlength="4" pattern="[0-9]{4}" class="mono"></label>
         <span class="lbl">Only for profile {{ choose('profile', [('', 'Any Account')] + (profile_labels | list), c.profile if c else '', '', 'field') }}</span>
         {#- the card type: a regular card, a virtual number of another card, or an
@@ -182,7 +182,7 @@
           <tbody>
             <tr class="everywhere">
               <td class="muted">Everywhere Else</td>
-              <td class="narrow"><input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="Default Rate"></td>
+              <td class="narrow"><input type="text" name="cashback_rate" value="{{ c.cashback_rate if c else '' }}" placeholder="2%" data-tip="The card's default cashback rate, written 2% or 0.02; a row above overrides it for its retailers."></td>
               {{ cap_cells('cap_all', c.cap_all if c else blank_cap, default_rate_text) }}
             </tr>
             {% set all_reached = c and c.cap_all.usage is defined and c.cap_all.usage and c.cap_all.usage.fraction >= 1 and c.cap_all.fallback_rate != '' %}

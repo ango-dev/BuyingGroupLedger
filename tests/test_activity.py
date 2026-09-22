@@ -254,7 +254,7 @@ class TestThePage:
         assert '<time class="local run" datetime="2026-09-17T08:00:00+00:00">09-17 08:00</time>' in body
         assert '<time class="local" datetime="2026-09-18T09:00:00+00:00"' in body  # rendered in local time by edit.js
         assert body.count("<select") == 0 and 'data-param="days"' in body  # the page's own dropdowns
-        assert 'placeholder="any text in an event: order id, retailer, item, subject, tracking number' in body
+        assert 'placeholder="search events" data-tip="Matches any text in an event' in body
         assert 'href="/activity"' in body and 'class="gear' in body and 'href="/health"' not in body
         assert 'href="/failures"' not in body
         assert 'class="pill backend"' not in body and "<footer" not in body  # gone (2026-09-18)

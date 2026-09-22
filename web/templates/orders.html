@@ -38,7 +38,7 @@
     {#- The placeholder is derived from SEARCH_FIELDS, so it names every column the search looks in.
        -#}
     {% set searched = [] %}{% for f in SEARCH_FIELDS %}{% set _ = searched.append(header_of(f) | lower) %}{% endfor %}
-    <input id="q" type="search" name="q" value="{{ filters.q }}" placeholder="{{ searched | join(', ') }}" title="searches {{ searched | join(', ') }}">
+    <input id="q" type="search" name="q" value="{{ filters.q }}" placeholder="search {{ 'rows' if scope else 'orders' }}" data-tip="Searches {{ searched | join(', ') }}.">
   </label>
   {# The overview's tiles link here with these three; they are editable in place so a click-through
      can be widened or narrowed without going back. #}

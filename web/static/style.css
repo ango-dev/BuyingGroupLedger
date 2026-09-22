@@ -198,6 +198,10 @@ input.month { font: inherit; color: var(--fg); background: var(--card); border: 
 
 .charts .legend { flex: 0 1 auto; list-style: none; margin: 0; padding: 0; font-size: 0.9em; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .charts .legend li { display: flex; align-items: center; gap: 6px; white-space: nowrap; min-width: 0; }
+/* A narrow card (a phone, or the side column at 1400px with "Amazon Business"): the label may
+   take a second line rather than read "Amazon Bus…". */
+.charts .legend li a, .charts .legend li > span:not(.swatch):not(.num):not(.small) { white-space: normal; overflow-wrap: normal; }
+@media (max-width: 760px) { .charts figure.bars .legend { flex: 0 0 auto; min-width: 7.5em; } }  /* room for "superseded" beside the bars */
 .charts .legend li a, .charts .legend li > span:not(.swatch):not(.num):not(.small) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .charts .legend .num { min-width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; }
 .charts .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
@@ -919,6 +923,16 @@ td.finding b.over, .card .finding b.over { color: var(--ok); }
 .lead { flex: 0 0 auto; margin: 0 8px 8px; }
 .lead .tiles.stats { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 6px 0 10px; }
 .lead .tiles.audit-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+/* A phone: two tiles across (three of the five audit tiles, then two), the value never broken in
+   two ("-$20.0" / "0" was Recon's Net at 393px). These come AFTER the desktop
+   rules above, which share their specificity. */
+@media (max-width: 760px) {
+  .lead .tiles.stats, .tiles.stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lead .tiles.audit-stats, .tiles.audit-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tiles.stats .value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+  .tiles.stats .hint { white-space: normal; overflow: visible; text-overflow: clip; }
+  .tiles.attention .tile .hint, .tiles.attention .tile .text { white-space: normal; }
+}
 .lead details.audit-results { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-2); }
 .lead details.audit-results > summary { cursor: pointer; padding: 8px 12px; color: var(--muted); font-size: 0.9em; list-style: none; }
 .lead details.audit-results > summary::-webkit-details-marker { display: none; }
@@ -1072,6 +1086,23 @@ button:active:not(:disabled), a.button:active { transform: translateY(1px); }
   .settings-main table.entry-table, .settings-main table.grid { display: block; overflow-x: auto; max-width: 100%; }
   .filters { flex-wrap: wrap; }
   .filters .reset { margin-left: 0; }
+  /* a filter menu that would run past the right edge hangs from its right side instead (edit.js
+     sets .flip when it measures that: Status opened 30px off-screen) */
+  details.multi .menu.flip { left: auto; right: 0; }
+  /* small buttons are finger-sized (Open year / Close year were 21px tall) */
+  button.small, a.button.small, .card footer .button.small, .card footer button.small { min-height: 32px; padding-top: 5px; padding-bottom: 5px; }
+  /* the Settings sign-in and jig tables stack: each row a block, each cell led by its column's
+     name (the six-column jig table gave "comma-separated" 58px) */
+  .settings-main table.entry-table.stackable, .settings-main table.entry-table.stackable tbody { display: block; overflow: visible; }
+  .settings-main table.entry-table.stackable thead { display: none; }
+  .settings-main table.entry-table.stackable tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .settings-main table.entry-table.stackable tbody tr.new-row { border-bottom: 0; }
+  .settings-main table.entry-table.stackable tbody tr.new-row td { border-top: 0; }
+  .settings-main table.entry-table.stackable td { display: block; padding: 0; width: auto; }
+  .settings-main table.entry-table.stackable td[data-label]::before { content: attr(data-label); display: block; font-size: 0.8em; color: var(--muted); margin-bottom: 2px; }
+  .settings-main table.entry-table.stackable td .secret { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .settings-main table.entry-table.stackable td.rm { grid-column: 1 / -1; padding-top: 2px; }
+  .settings-main table.entry-table.stackable td.rm:empty { display: none; }
   .filters label.search { flex: 1 1 100%; max-width: none; }
   body.wide h1, body.wide .lead, body.wide .count, body.wide .add-row { padding-left: 12px; padding-right: 12px; }
   .add-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1177,6 +1208,10 @@ table.statement td.neg a, table.statement tr.level-net td.neg a { color: var(--b
 table.statement .cell-hint { display: block; font-size: 0.66em; color: var(--muted); font-weight: 400; letter-spacing: 0; }
 table.statement td.muted { color: var(--muted); }
 @media (max-width: 760px) {
+  /* Lifetime and the chosen month only: the year column is the one that made the statement pan
+     sideways in a 364px box; the year stays one click away on the Taxes page */
+  table.statement th.col-year, table.statement td.col-year { display: none; }
+  table.statement tbody th { white-space: normal; }  /* a long row label wraps rather than widening the table past 360px */
   table.statement th, table.statement td { padding: 6px 9px; font-size: 0.92em; }
   table.statement tr.level-net th, table.statement tr.level-net td { font-size: 1.08em; }
   table.statement tr.level-sub th { padding-left: 18px; }
@@ -1211,7 +1246,15 @@ figure.months text.net { fill: var(--fg); font-weight: 600; }
 figure.months text.net.neg { fill: var(--bad); }
 figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; }
 /* On a phone the chart keeps a legible width and scrolls sideways, like the tables. */
-@media (max-width: 560px) { figure.months { overflow-x: auto; } figure.months svg { min-width: 640px; } }
+/* A phone: the chart scales to its card through the viewBox -- it used to be a scroll box that
+   opened scrolled to its end, the left half and the legend off-screen with no affordance; the month labels grow so they stay legible at that scale. */
+@media (max-width: 560px) {
+  figure.months { padding: 10px 10px 6px; }
+  figure.months text { font-size: 15px; }
+  figure.months text.net { font-size: 14px; }
+  figure.months figcaption { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+  figure.months figcaption .key { margin-left: 0; }
+}
 
 /* The overview's two columns: statement and months left, the breakdown
    charts stacked right; one column under 1180px, where the charts go back to their own grid. */

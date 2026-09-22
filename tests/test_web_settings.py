@@ -888,8 +888,8 @@ class TestEntryCards:
             {"label": "BFMR-A", "street": "13 Sample", "zip": "03050",
              "contains": ["suite 4", "dock"]}]}]
         body = client.get("/settings").text
-        assert 'name="jig.1.label"' in body and 'placeholder="new jig"' in body
-        assert '<table class="entry-table">' in body and "BFMR-A" in body  # jigs are a table
+        assert 'name="jig.1.label"' in body and 'placeholder="new"' in body
+        assert '<table class="entry-table stackable">' in body and "BFMR-A" in body  # jigs are a table
         client.post("/settings/section/warehouses/entry/0", data={
             "buying_group": "BFMR", "jig.0.label": "BFMR-A", "jig.0.street": "13 Sample",
             "jig.0.__remove": "1", "jig.1.label": "B", "jig.1.zip": "99999"})
