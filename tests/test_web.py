@@ -2139,4 +2139,12 @@ class TestDatedCashbackByMonth:
         assert summary.income_in_month(by_year, "2026-02")["income"] == 0.0  # Honey's 3.00 has no date: a yearly figure only
         series = summary.monthly_series([], by_year, "2026-09", count=2)
         assert [(s["month"], s["income"], s["net"]) for s in series] == [("2026-08", 0.0, 0.0), ("2026-09", 1770.5, 1770.5)]
-        assert "cashback dated in the month $1,770.50" in summary.month_chart(series, "2026-09")["bars"][1]["title"]
+        chart = summary.month_chart(series, "2026-09")
+        assert "other income dated in the month $1,770.50" in chart["bars"][1]["title"]
+        # drawn, not just counted: its own segment, standing on the baseline here (no profit that month)
+        sep = chart["bars"][1]
+        assert sep["income"] == 1770.5 and sep["income_h"] > 0 and round(sep["income_y"] + sep["income_h"], 1) == chart["base"]
+        assert sep["labelled"] and not chart["empty"] and chart["bars"][0]["income_h"] == 0
+        # and on the profit, a seam between, when the month has both
+        both = summary.month_chart([{"month": "2026-09", "label": "Sep", "realized": 100.0, "income": 50.0, "expenses": 0.0, "net": 150.0, "href": "/"}], "2026-09")["bars"][0]
+        assert both["income_h"] > 0 and both["income_y"] + both["income_h"] < both["realized_y"] and both["net_y"] < both["income_y"]

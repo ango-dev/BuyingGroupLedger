@@ -277,13 +277,16 @@ def _compact_money(value: float) -> str:
 
 def month_chart(series: list[dict], selected: str) -> dict:
     """SVG geometry for the 12-month chart: realized profit up from the baseline (down, in the
-    bad colour, when negative), expenses down from it, the net over each column; the selected
-    month outlined. All in view-box units; the template only draws."""
+    bad colour, when negative) with the month's other income -- the Taxes page's dated sign-up
+    bonuses, cashback and other income -- stacked above it, expenses down from it, the
+    net over each column; the selected month outlined. All in view-box units; the template only
+    draws."""
     width, height, top, bottom, gap = 720.0, 135.0, 20.0, 34.0, 8.0  # flat, so the page fits a screen; bottom: a loss label, then the month
+    seam = 2.0  # the surface gap between stacked segments
     n = max(len(series), 1)
     slot = width / n
     w = slot - gap
-    pos = max([max(s["realized"], 0.0) for s in series] + [0.0])
+    pos = max([max(s["realized"], 0.0) + s.get("income", 0.0) for s in series] + [0.0])
     neg = max([max(-s["realized"], 0.0) + s["expenses"] for s in series] + [0.0])
     span = height - top - bottom
     scale = span / (pos + neg) if pos + neg > 0 else 0.0
@@ -293,28 +296,34 @@ def month_chart(series: list[dict], selected: str) -> dict:
         x = i * slot + gap / 2
         rh = abs(s["realized"]) * scale
         eh = s["expenses"] * scale
+        ih = s.get("income", 0.0) * scale
         if s["realized"] >= 0:
             ry, ey, peak = base - rh, base, base - rh
         else:
             ry, ey, peak = base, base + rh, base
+        # other income stands on the profit (a seam between), or on the baseline beside a loss
+        iy = (ry - seam - ih) if (ih and rh and s["realized"] > 0) else (base - ih)
+        if ih:
+            peak = iy
         # The net's label: over the column, or under it when nothing stands above the baseline
         # (a month of expenses alone); none at all for an empty month.
-        below = s["realized"] <= 0 and (rh or eh)
+        below = s["realized"] <= 0 and not ih and (rh or eh)
         net_y = min(ey + eh + 13, height - 22) if below else (peak - 6)  # never on the month name
         bars.append({
             "month": s["month"], "label": s["label"], "href": s["href"], "selected": s["month"] == selected,
-            "realized": s["realized"], "expenses": s["expenses"], "net": s["net"],
+            "realized": s["realized"], "expenses": s["expenses"], "income": s.get("income", 0.0), "net": s["net"],
             "net_label": _compact_money(s["net"]),
             "title": (f"{month_label(s['month'])}: realized profit {_money_text(s['realized'])}, "
-                      + (f"cashback dated in the month {_money_text(s['income'])}, " if s.get("income") else "")
+                      + (f"other income dated in the month {_money_text(s['income'])}, " if s.get("income") else "")
                       + f"expenses {_money_text(s['expenses'])}, net {_money_text(s['net'])}"),
             "x": round(x, 1), "w": round(w, 1), "cx": round(x + w / 2, 1),
             "realized_y": round(ry, 1), "realized_h": round(rh, 1),
             "expenses_y": round(ey, 1), "expenses_h": round(eh, 1),
-            "net_y": round(net_y, 1), "labelled": bool(s["realized"] or s["expenses"]),
+            "income_y": round(iy, 1), "income_h": round(ih, 1),
+            "net_y": round(net_y, 1), "labelled": bool(s["realized"] or s["expenses"] or s.get("income")),
         })
     return {"width": width, "height": height, "base": round(base, 1), "bars": bars,
-            "empty": not any(s["realized"] or s["expenses"] for s in series)}
+            "empty": not any(s["realized"] or s["expenses"] or s.get("income") for s in series)}
 
 
 def month_label(month: str) -> str:

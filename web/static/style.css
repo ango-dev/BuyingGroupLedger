@@ -5,6 +5,9 @@
 :root {
   --bg: #f5f5f7; --fg: #34343a; --muted: #7a7a83; --line: #e3e3e8; --card: #ffffff;
   --ok: #2f7d4f; --warn: #a8622a; --bad: #b3423f; --accent: #4361b2; --committed: #7c5cbf;
+  /* the 12-month chart's three series (dataviz-validated: light on the card surface passes as the
+     theme's own tokens; dark needs its own darker steps to sit inside the band) */
+  --chart-ok: var(--ok); --chart-income: var(--committed); --chart-warn: var(--warn);
   --ok-bg: #e9f4ee; --warn-bg: #fbf1e6;
   /* Derived tokens (2026-09-21): every colour, radius and shadow the components share.
      The status hues are the retired Google Sheet's own conditional formats -- data encoding,
@@ -34,11 +37,13 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --bg: #161618; --fg: #cfcfd4; --muted: #8d8d96; --line: #2b2b30;
     --card: #1e1e22; --accent: #9aaee3; --committed: #b39ae6; --ok: #6fbf8c; --warn: #d9a066; --bad: #d97b78;
+    --chart-ok: #4c9c6a; --chart-income: #9679d4; --chart-warn: #bf8347;
     --ok-bg: #16281d; --warn-bg: #2a2117;
     --on-accent: #15161a; --grid-line-plain: rgba(255, 255, 255, 0.1); color-scheme: dark; }
 }
 :root[data-theme="dark"] { --bg: #161618; --fg: #cfcfd4; --muted: #8d8d96; --line: #2b2b30;
   --card: #1e1e22; --accent: #9aaee3; --committed: #b39ae6; --ok: #6fbf8c; --warn: #d9a066; --bad: #d97b78;
+  --chart-ok: #4c9c6a; --chart-income: #9679d4; --chart-warn: #bf8347;
   --ok-bg: #16281d; --warn-bg: #2a2117;
     --on-accent: #15161a; --grid-line-plain: rgba(255, 255, 255, 0.1); color-scheme: dark; }
 /* The toggle shows the theme you would switch TO. */
@@ -1167,10 +1172,18 @@ figure.months .bar, figure.months .bar:hover { text-decoration: none; }
 /* A clicked column kept Chrome's default focus ring -- a black box round the whole hit area. Keyboard focus stays visible through the hit rect instead. */
 figure.months .bar:focus { outline: none; }
 figure.months .bar:focus-visible .hit { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
-figure.months .bar .realized { fill: var(--ok); }
+figure.months .bar .realized { fill: var(--chart-ok); }
 figure.months .bar .realized.loss { fill: var(--bad); }
-figure.months .bar .expenses { fill: var(--warn); }
-figure.months .bar.selected .realized, figure.months .bar.selected .expenses { stroke: var(--accent); stroke-width: 2; }
+figure.months .bar .income { fill: var(--chart-income); }
+figure.months .bar .expenses { fill: var(--chart-warn); }
+figure.months .bar.selected .realized, figure.months .bar.selected .income, figure.months .bar.selected .expenses { stroke: var(--accent); stroke-width: 2; }
+/* the legend in the caption: a swatch beside each series' name */
+figure.months figcaption .key { font-weight: 400; margin-left: 6px; }
+figure.months figcaption .key .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin: 0 4px 0 8px; vertical-align: -1px; }
+figure.months figcaption .key .sw.realized { background: var(--chart-ok); }
+figure.months figcaption .key .sw.income { background: var(--chart-income); }
+figure.months figcaption .key .sw.expenses { background: var(--chart-warn); }
+figure.months figcaption .key .sep { margin: 0 4px; }
 figure.months text { font-size: 11px; fill: var(--muted); }
 figure.months text.net { fill: var(--fg); font-weight: 600; }
 figure.months text.net.neg { fill: var(--bad); }
