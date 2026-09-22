@@ -557,7 +557,10 @@ leaves it alone.
 **What waits.** Everything else goes to the **staging sheet**: rows with a gap (the missing cells
 outlined in orange, named in the first column), rows whose status is still *ordered* or *shipped*
 (the scrapers own open orders), and rows that look like an order the ledger already holds under
-another item name or shipment, or whose tracking number another order holds. The sheet is the
+another item name or shipment, or whose tracking number another order holds. The last two are
+holds, not refusals: *Import anyway* on the row lifts them and the row lands with the next import
+once it is complete (*undo* holds it again), and a row of an order this same import landed is never
+held -- item 2 of a two-item order follows item 1 as soon as it is filled in. The sheet is the
 Orders grid -- click, type, Enter; ranges; paste; undo; the row numbers select and Delete drops --
 and *Import the complete rows* moves whatever is complete now onto the ledger. The sheet lives in
 `data/imports/<stamp>/` (`source.csv`, `mapping.json`, `staging.json`), so every backup carries it

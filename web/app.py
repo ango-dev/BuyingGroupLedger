@@ -1851,6 +1851,28 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         act("import", f"Import: {len(removed)} staged row(s) dropped", {"batch": batch.id, "rows": [r.id for r in removed]})
         return RedirectResponse(url="/tools/import?" + urlencode({"notice": f"{len(removed)} row(s) dropped from the staging sheet"}), status_code=303)
 
+    @app.post("/tools/import/rows/accept", response_class=HTMLResponse)
+    async def tools_import_rows_accept(request: Request):
+        """Import anyway on a held row (open order / near duplicate), or `undo` to hold it again.
+        Answers the row re-rendered (htmx swaps the <tr>); a plain post goes back to the sheet."""
+        form = await request.form()
+        row_id, undo = str(form.get("id", "") or ""), str(form.get("undo", "") or "") == "1"
+        batch = importer.live_batch(data_dir)
+        staging = batch.load_staging() if batch else None
+        if staging is None:
+            raise HTTPException(status_code=404, detail="no staging sheet")
+        rows = importer.accept_rows(staging, [row_id], on=not undo)
+        if not rows:
+            raise HTTPException(status_code=404, detail="no such staged row")
+        importer.classify(staging.rows, ledger_index_now())  # the row's note, as the sheet shows it (an undo gets its hold back)
+        batch.save_staging(staging)
+        act("import", f"Import: row {rows[0].source_row} {'held again' if undo else 'marked import anyway'}", {"batch": batch.id, "row": row_id})
+        if request.headers.get("HX-Request") != "true":
+            return RedirectResponse(url="/tools/import", status_code=303)
+        r = rows[0]
+        return page_no_snapshot(request, "_import_row.html", r=r, n=staging.staged.index(r) + 1,
+                                row_gaps=importer.gap_fields(r), row_gap_names=importer.gaps_for(r), editable=True)
+
     @app.post("/tools/import/commit", response_class=HTMLResponse)
     def tools_import_commit(request: Request):
         batch = importer.live_batch(data_dir)

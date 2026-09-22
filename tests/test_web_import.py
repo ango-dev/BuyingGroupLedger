@@ -194,6 +194,43 @@ class TestClassify:
             "complete": ["ok"], "incomplete": ["gap"], "duplicate": ["dup", "twice"], "staged_open": ["open"], "staged_near": ["near", "held"]}
         assert open_row.note.startswith("open order") and near.note.startswith("the ledger already holds")
 
+    def test_an_order_this_batch_imported_does_not_hold_its_own_remaining_rows(self, sheet):
+        """item 1 of an order landed on the first run put the
+        order on the ledger, so item 2 -- filled in later -- was a near duplicate of its sibling for
+        ever. The batch's own imported orders are exempt; a stranger's order is still held."""
+        index = importer.ledger_index(GridReader(sheet).load().rows)
+        index["orders"].add("111-0000001-0000001")  # item 1 landed: the ledger holds the order now
+        first = staged(id="first", item_name="First")
+        first.status = "imported"
+        second = staged(id="second", item_name="Second", shipment="2")
+        stranger = staged(id="stranger", order_id="1399000017", item_name="iPad Case")
+        buckets = importer.classify([first, second, stranger], index)
+        assert [r.id for r in buckets["complete"]] == ["second"] and [r.id for r in buckets["staged_near"]] == ["stranger"]
+
+    def test_import_anyway_lifts_the_open_and_near_holds_but_never_the_duplicate_refusal(self, sheet):
+        index = importer.ledger_index(GridReader(sheet).load().rows)
+        open_row = staged(id="open", status="shipped", order_id="111-0000005-0000005", payout_amount="", payout_date="", insurance="")
+        near = staged(id="near", order_id="1399000017", item_name="iPad Case")
+        held = staged(id="held", order_id="111-0000006-0000006", tracking_number="529900000009", payout_date="")
+        dup = staged(id="dup", order_id="1399000017", order_date="2026-08-20", item_name="iPad", shipment="1")
+        st = importer.Staging(id="b", created_at="", source_name="x", date_order="mdy", rows=[open_row, near, held, dup])
+        assert [r.id for r in importer.accept_rows(st, ["open", "near", "held", "dup", "nope"])] == ["open", "near", "held", "dup"]
+        buckets = importer.classify(st.rows, index)
+        assert {k: [r.id for r in v] for k, v in buckets.items()} == {
+            "complete": ["open", "near"], "incomplete": ["held"], "duplicate": ["dup"], "staged_open": [], "staged_near": []}
+        assert near.note == "" and held.note == ""
+        importer.accept_rows(st, ["near"], on=False)
+        assert [r.id for r in importer.classify(st.rows, index)["staged_near"]] == ["near"]
+        again = importer.Staging.from_json(st.to_json())  # the mark is kept on disk
+        assert [r.accepted for r in again.rows] == [True, False, True, True]
+
+    def test_dropping_rows_never_drops_an_import_record(self):
+        done = staged(id="done")
+        done.status = "imported"
+        st = importer.Staging(id="b", created_at="", source_name="x", date_order="mdy", rows=[done, staged(id="s", order_id="X")])
+        assert [r.id for r in importer.remove_rows(st, ["done", "s"])] == ["s"]
+        assert [r.id for r in st.rows] == ["done"]
+
 
 class TestUpdateCell:
     def test_key_cells_are_editable_here_and_checked(self):
@@ -339,6 +376,51 @@ class TestImportPages:
         page = client.get("/tools/import").text
         assert page.count("data-entry-id=") == len(importer.STAGING_FIELDS)  # one row left: the open one
         assert "1 staged row(s)" in page
+
+    def test_the_second_item_of_an_order_follows_the_first(self, client):
+        """The review's reproduction (2026-09-21, importer bug 1): two rows of one order, the second
+        lacking Payout Date. First lands on the run; Second, filled in, must land on the commit --
+        it used to stay "check: near duplicate" of its own sibling with no way out."""
+        two = (CSV.splitlines()[0] + "\n"
+               + "111-0000007-0000007,3/11/2026,First,1,50,paid,Amazon,1Z7,60,4/1/2026,alpha,https://a/7,1 Main St,Prime Visa 0315,BFMR,/receipts/a/7.pdf,1,yes\n"
+               + "111-0000007-0000007,3/11/2026,Second,1,40,paid,Amazon,1Z8,50,,alpha,https://a/7,1 Main St,Prime Visa 0315,BFMR,/receipts/a/7.pdf,1,yes\n")
+        run = upload_and_run(client, two)
+        assert "1+row%28s%29+imported" in run.headers["location"] and "1+staged" in run.headers["location"]
+        page = client.get("/tools/import").text
+        assert "check: near duplicate" not in page and 'class="chip gap">Payout Date</span>' in page
+        client.post("/tools/import/cell", data={"entry_id": "r0002-1", "field": "payout_date", "value": "2026-04-02"})
+        commit = client.post("/tools/import/commit", follow_redirects=False)
+        assert "1+row%28s%29+imported" in commit.headers["location"] and "0+staged" in commit.headers["location"]
+        assert [g[HEADER.index("Item Name")] for g in client.sheet.grid[2:]] == ["First", "Second"]
+
+    def test_import_anyway_on_a_held_row_and_its_undo(self, client):
+        """A near duplicate (the ledger's order 1399000017 under another item) and an open order are
+        holds with an escape hatch: the row's Import anyway (htmx: the <tr> comes back re-rendered)
+        lifts the hold, undo puts it back, and the commit lands the accepted row."""
+        held = (CSV.splitlines()[0] + "\n"
+                + "1399000017,8/20/2026,iPad Case,1,30,paid,Costco,529900000010,40,9/1/2026,alpha,https://c/1,1 Main St,Visa 0315,BFMR,/receipts/c/z.pdf,1,yes\n"
+                + CSV.splitlines()[3] + "\n")
+        upload_and_run(client, held)
+        page = client.get("/tools/import").text
+        assert page.count(">Import anyway</button>") == 2 and 'hx-vals=\'{"id": "r0001-1"}\'' in page
+        assert "check: near duplicate" in page and ">open order<" in page
+        swapped = client.post("/tools/import/rows/accept", data={"id": "r0001-1"}, headers={"HX-Request": "true"})
+        assert swapped.status_code == 200 and swapped.text.lstrip().startswith("<tr>")
+        assert ">import anyway</span>" in swapped.text and ">undo</button>" in swapped.text and "near duplicate" not in swapped.text
+        assert swapped.text.count("data-entry-id=") == len(importer.STAGING_FIELDS) and 'aria-label="select row 1"' in swapped.text
+        assert json.loads((client.data_dir / "imports" / "20260919T120000Z" / "staging.json").read_text(encoding="utf-8"))["rows"][0]["accepted"] is True
+        back = client.post("/tools/import/rows/accept", data={"id": "r0001-1", "undo": "1"}, headers={"HX-Request": "true"})
+        assert "check: near duplicate" in back.text and ">Import anyway</button>" in back.text
+        assert "check: near duplicate" in client.get("/tools/import").text  # the hold is back on disk too
+        assert client.post("/tools/import/rows/accept", data={"id": "nope"}, headers={"HX-Request": "true"}).status_code == 404
+        plain = client.post("/tools/import/rows/accept", data={"id": "r0001-1"}, follow_redirects=False)
+        assert plain.status_code == 303 and plain.headers["location"] == "/tools/import"
+        commit = client.post("/tools/import/commit", follow_redirects=False)
+        assert "1+row%28s%29+imported" in commit.headers["location"] and "1+staged" in commit.headers["location"]
+        assert client.sheet.grid[2][HEADER.index("Item Name")] == "iPad Case"
+        events = activity.read(client.logs_dir / "activity.jsonl")
+        assert [e["summary"] for e in events if "anyway" in e["summary"] or "held" in e["summary"]] == [
+            "Import: row 1 marked import anyway", "Import: row 1 held again", "Import: row 1 marked import anyway"]
 
     def test_a_duplicate_key_is_skipped_and_said(self, client):
         dup = CSV.splitlines()[0] + "\n" + "1399000017,8/20/2026,iPad,2,400,paid,Costco,529900000009,500,9/1/2026,alpha,https://c/1,1 Main St,Visa 0315,BFMR,/receipts/c/z.pdf,3,yes\n"

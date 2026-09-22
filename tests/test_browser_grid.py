@@ -156,6 +156,8 @@ def test_the_grid_works_by_touch(served, phone, client):
     page.touchscreen.tap(x, y)
     assert page.locator("table.sheetlike tbody tr.selected").count() == 0 and page.locator("td.sel-cell").count() == 1
     _long_press(page, x, y)
+    # (this row sits low on the phone, so the clamped menu opens OVER the finger: the release's
+    # synthetic click lands on an item and must be ignored as the opening tap, 2026-09-22)
     page.wait_for_selector(".ctx.on")
     page.wait_for_timeout(650)  # the menu ignores the tap that opened it for a moment
     item = page.locator(".ctx.on button[data-act=all]")
@@ -700,6 +702,35 @@ def test_the_staging_sheet_edits_like_the_orders_grid(served, page, client):
     page.click('dialog#settings-confirm button[value="ok"]')
     page.wait_for_url("**/tools/import**", timeout=5000)
     page.wait_for_selector('form[action="/tools/import/upload"]', timeout=5000)
+    assert page.errors == []
+
+
+def test_import_anyway_swaps_the_row_in_place_and_the_grid_still_edits(served, page, client):
+    """The staging sheet's escape hatch: Import anyway on a held row posts
+    through htmx and the <tr> comes back re-rendered -- no reload, the hold chip gone, undo offered
+    -- and the swapped row's cells still edit through edit.js."""
+    csv_text = "Order Number,Date,Item,Qty,Status\n1399000017,8/20/2026,iPad Case,1,paid\n"  # the served ledger's order
+    client.post("/tools/import/upload", files={"source": ("old.csv", csv_text.encode(), "text/csv")}, follow_redirects=False)
+    client.post("/tools/import/map", data={"map.0": "order_id", "map.1": "order_date", "map.2": "item_name", "map.3": "quantity",
+                                          "map.4": "status", "date_order": "", "profile": ""}, follow_redirects=False)
+    assert client.post("/tools/import/run", follow_redirects=False).status_code == 303
+    page.set_viewport_size({"width": 1400, "height": 800})
+    page.goto(f"{served}/tools/import")
+    row = page.locator("table.sheetlike tbody tr").first
+    assert row.locator(".chip.note").inner_text() == "check: near duplicate"
+    row.locator("button.chip.act").click()
+    page.wait_for_selector("table.sheetlike tbody tr .chip.ok", timeout=3000)
+    assert page.locator("table.sheetlike tbody tr").count() == 1
+    assert page.locator("table.sheetlike tbody tr .chip.note").count() == 0
+    assert page.locator("table.sheetlike tbody tr button.chip.act").inner_text() == "undo"
+    cell = 'td[data-field="retailer"][data-entry-id="r0001-1"]'
+    page.click(cell)
+    page.keyboard.type("Costco")
+    page.keyboard.press("Enter")
+    page.wait_for_function(f"document.querySelector('{cell}').getAttribute('data-raw') === 'Costco'", timeout=3000)
+    page.locator("table.sheetlike tbody tr button.chip.act").click()
+    page.wait_for_selector("table.sheetlike tbody tr .chip.note", timeout=3000)
+    assert page.locator("table.sheetlike tbody tr button.chip.act").inner_text() == "Import anyway"
     assert page.errors == []
 
 

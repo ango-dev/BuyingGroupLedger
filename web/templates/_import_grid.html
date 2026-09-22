@@ -9,17 +9,7 @@
   <table class="grid compact sheetlike imports" data-cell-url="/tools/import/cell">
     <thead><tr><th class="rownum" title="select / unselect every row"><input type="checkbox" id="sel-all" hidden aria-label="select all">#</th><th class="missing">Still needed</th>{% for f in STAGING_FIELDS %}<th class="col-{{ f }}">{{ header_of(f) }}</th>{% endfor %}</tr></thead>
     <tbody>
-    {% for r in rows %}
-      <tr>
-        <td class="rownum muted" title="row {{ loop.index }} (source row {{ r.source_row }}) — click to select"><input type="checkbox" name="sel" value="{{ r.id }}" hidden aria-label="select row {{ loop.index }}">{{ loop.index }}</td>
-        <td class="missing">
-          {%- for g in gap_names[r.id] %}<span class="chip gap">{{ g }}</span>{% endfor -%}
-          {%- if r.note %}<span class="chip note" title="{{ r.note }}">{{ 'open order' if r.note.startswith('open order') else 'duplicate' if r.note.startswith('already') else 'check: near duplicate' }}</span>{% endif -%}
-          {%- for w in r.warnings %}<span class="chip warn" title="{{ w }}">{{ w[:38] }}{{ '…' if w | length > 38 }}</span>{% endfor -%}
-        </td>
-        {% for field in STAGING_FIELDS %}{% with row=r, field=field, entry_id=r.id, gaps=gaps[r.id], error='' %}{% include "_import_cell.html" %}{% endwith %}{% endfor %}
-      </tr>
-    {% endfor %}
+    {% for r in rows %}{% with n=loop.index, row_gap_names=gap_names[r.id], row_gaps=gaps[r.id] %}{% include "_import_row.html" %}{% endwith %}{% endfor %}
     </tbody>
   </table>
   </div>

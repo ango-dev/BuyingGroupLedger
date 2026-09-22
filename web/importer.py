@@ -85,11 +85,14 @@ class StagedRow:
     imported_at: str | None = None
     ledger_row: int | None = None
     note: str = ""
+    #: "Import anyway" (user-set on the sheet): the open-order and near-duplicate holds no longer
+    #: apply to this row; it lands as soon as it is complete. An exact-key duplicate stays refused.
+    accepted: bool = False
 
     def to_json(self) -> dict:
         return {"id": self.id, "source_row": self.source_row, "cells": dict(self.cells),
                 "warnings": list(self.warnings), "status": self.status, "imported_at": self.imported_at,
-                "ledger_row": self.ledger_row, "note": self.note}
+                "ledger_row": self.ledger_row, "note": self.note, "accepted": self.accepted}
 
     @classmethod
     def from_json(cls, payload: Mapping) -> "StagedRow":
@@ -97,7 +100,8 @@ class StagedRow:
                    cells={str(k): str(v if v is not None else "") for k, v in (payload.get("cells") or {}).items()},
                    warnings=[str(w) for w in (payload.get("warnings") or [])],
                    status=str(payload.get("status") or "staged"), imported_at=payload.get("imported_at"),
-                   ledger_row=payload.get("ledger_row"), note=str(payload.get("note") or ""))
+                   ledger_row=payload.get("ledger_row"), note=str(payload.get("note") or ""),
+                   accepted=bool(payload.get("accepted", False)))
 
 
 @dataclass
@@ -539,9 +543,15 @@ NOTES = {
 def classify(rows: list[StagedRow], index: Mapping) -> dict[str, list[StagedRow]]:
     """Every staged row into one bucket: duplicate (exact key on the ledger, or twice in the
     file), staged_open, staged_near, incomplete (a mandatory gap), complete. The open and near
-    buckets carry their note on the row so the sheet shows why the row waits."""
+    buckets carry their note on the row so the sheet shows why the row waits.
+
+    An order THIS BATCH imported is not "already on the ledger" for its own remaining rows: item 1
+    of a multi-item order lands on the first run, and item 2 -- filled in later -- must follow it,
+    not be held as a near duplicate of its sibling for ever. A row the user
+    marked "import anyway" skips both holds; nothing skips the exact-key refusal."""
     out: dict[str, list[StagedRow]] = {"complete": [], "incomplete": [], "duplicate": [], "staged_open": [], "staged_near": []}
     seen: set[tuple] = set()
+    own_orders = {key_of(r)[0] for r in rows if r.status == "imported"}
     for row in rows:
         if row.status != "staged":
             continue
@@ -553,13 +563,19 @@ def classify(rows: list[StagedRow], index: Mapping) -> dict[str, list[StagedRow]
         seen.add(key)
         status = row.cells.get("status", "").strip().lower()
         tracking = row.cells.get("tracking_number", "").strip()
-        if status in OPEN_STATUSES:
+        elsewhere = key[0] and key[0] in index["orders"] and key[0] not in own_orders
+        held = tracking and index["trackings"].get(tracking) not in (None, key[0])
+        if row.accepted:
+            pass
+        elif status in OPEN_STATUSES:
             row.note = NOTES["staged_open"]
             out["staged_open"].append(row)
-        elif (key[0] and key[0] in index["orders"]) or (tracking and index["trackings"].get(tracking) not in (None, key[0])):
+            continue
+        elif elsewhere or held:
             row.note = NOTES["staged_near"]
             out["staged_near"].append(row)
-        elif gaps_for(row):
+            continue
+        if gaps_for(row):
             row.note = ""
             out["incomplete"].append(row)
         else:
@@ -619,9 +635,21 @@ def write_staged_cell(staging: Staging, row_id: str, field: str, value: str, *, 
 
 def remove_rows(staging: Staging, ids: Iterable[str]) -> list[StagedRow]:
     wanted = set(ids)
-    removed = [r for r in staging.rows if r.id in wanted]
-    staging.rows = [r for r in staging.rows if r.id not in wanted]
+    removed = [r for r in staging.rows if r.id in wanted and r.status == "staged"]  # an import record is never dropped
+    gone = {r.id for r in removed}
+    staging.rows = [r for r in staging.rows if r.id not in gone]
     return removed
+
+
+def accept_rows(staging: Staging, ids: Iterable[str], *, on: bool = True) -> list[StagedRow]:
+    """Mark staged rows "import anyway" (or take the mark off): the open-order / near-duplicate
+    holds stop applying, and the row lands with the next commit once it is complete."""
+    wanted = set(ids)
+    rows = [r for r in staging.staged if r.id in wanted]
+    for r in rows:
+        r.accepted = on
+        r.note = ""
+    return rows
 
 
 def staging_csv(staging: Staging) -> str:

@@ -910,6 +910,11 @@
     ctx.addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("button[data-act]") : null;
       if (!b || b.disabled) return;
+      // A long press opens the menu UNDER the finger (clamped into the window, so a low row's
+      // menu sits over the finger); the release's synthetic click then lands on whichever item is
+      // there. That click is the one that opened the menu, not a choice (2026-09-22: the staging
+      // sheet's third row, near the bottom of a phone, ran Select all and closed the menu at once).
+      if (ctxByTouch && Date.now() - ctxOpenedAt < 600) return;
       var act = b.getAttribute("data-act");
       hideCtx();
       runCtx(act);
@@ -969,8 +974,9 @@
     else if (act === "row") { if (td) selectRowOf(td); }
     else if (act === "delete-rows") { var button = document.getElementById("delete-selected"); if (button) button.click(); }
   }
-  var ctxOpenedAt = 0;
-  function openMenuAt(target, x, y) {  // the menu for the cell or header cell under (x, y); false when none applies
+  var ctxOpenedAt = 0, ctxByTouch = false;
+  function openMenuAt(target, x, y, byTouch) {  // the menu for the cell or header cell under (x, y); false when none applies
+    ctxByTouch = !!byTouch;
     var td = target.closest ? target.closest(GRID_TD) : null;
     var th = td ? null : headerOf(target);
     if (!td && !th) { hideCtx(); return false; }
@@ -1023,7 +1029,7 @@
     if (!(target.closest && (target.closest(GRID_TD) || target.closest("th")))) return;
     press = { x: t.clientX, y: t.clientY, target: target, timer: setTimeout(function () {
       press = null;
-      openMenuAt(target, t.clientX, t.clientY);
+      openMenuAt(target, t.clientX, t.clientY, true);
     }, 550) };
   }, { passive: true });
   document.addEventListener("touchmove", function (e) {

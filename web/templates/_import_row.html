@@ -1,0 +1,15 @@
+{#- ONE row of the staging sheet (Tools > Import): _import_grid.html renders every row with it and
+    POST /tools/import/rows/accept answers with it alone (htmx swaps the <tr> in place). `n` is the
+    row's number on the sheet. The first cell says what the row still needs, why it waits (open
+    order / near duplicate) and, on a waiting row, offers Import anyway -- the escape hatch for the
+    order the ledger already holds under another item. -#}
+<tr>
+  <td class="rownum muted" title="row {{ n }} (source row {{ r.source_row }}) — click to select"><input type="checkbox" name="sel" value="{{ r.id }}" hidden aria-label="select row {{ n }}">{{ n }}</td>
+  <td class="missing">
+    {%- for g in row_gap_names %}<span class="chip gap">{{ g }}</span>{% endfor -%}
+    {%- if r.accepted %}<span class="chip ok" title="the open-order and near-duplicate holds are off for this row: it imports with the next commit once it is complete">import anyway</span><button type="button" class="chip act" hx-post="/tools/import/rows/accept" hx-vals='{"id": "{{ r.id }}", "undo": "1"}' hx-target="closest tr" hx-swap="outerHTML" title="hold this row again">undo</button>
+    {%- elif r.note %}<span class="chip note" title="{{ r.note }}">{{ 'open order' if r.note.startswith('open order') else 'duplicate' if r.note.startswith('already') else 'check: near duplicate' }}</span>{% if not r.note.startswith('already') %}<button type="button" class="chip act" hx-post="/tools/import/rows/accept" hx-vals='{"id": "{{ r.id }}"}' hx-target="closest tr" hx-swap="outerHTML" title="{{ 'the scrapers will not touch this order: import it once it is complete' if r.note.startswith('open order') else 'this is a different item of that order, or the number is right: import the row once it is complete' }}">Import anyway</button>{% endif %}{% endif -%}
+    {%- for w in r.warnings %}<span class="chip warn" title="{{ w }}">{{ w[:38] }}{{ '…' if w | length > 38 }}</span>{% endfor -%}
+  </td>
+  {% for field in STAGING_FIELDS %}{% with row=r, field=field, entry_id=r.id, gaps=row_gaps, error='' %}{% include "_import_cell.html" %}{% endwith %}{% endfor %}
+</tr>

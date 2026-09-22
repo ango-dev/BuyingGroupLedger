@@ -17,7 +17,7 @@
     <form method="post" action="/tools/import/discard" data-confirm="Discard the staging sheet and its source file? The rows already imported stay on the ledger."><button type="submit" class="danger">Discard</button></form>
   </div>
   {% if not can_import %}<p class="muted small">Editing is off on this backend (a CSV snapshot): the sheet can be filled in, but nothing can be imported.</p>{% endif %}
-  <p class="muted small">A cell outlined in orange is still needed for the row's status. <em>open order</em>: the scrapers own ordered and shipped orders, so the row waits for you. <em>near duplicate</em>: the ledger already holds this order under another key, or another order holds this tracking number.</p>
+  <p class="muted small">A cell outlined in orange is still needed for the row's status. <em>open order</em>: the scrapers own ordered and shipped orders, so the row waits for you. <em>near duplicate</em>: the ledger already holds this order under another item or shipment, or another order holds this tracking number. Both are holds, not refusals: <em>Import anyway</em> on the row lifts them, and the row lands with the next import once it is complete. A row of an order this import itself landed is never held.</p>
 </section>
 {% include "_import_grid.html" %}
 
