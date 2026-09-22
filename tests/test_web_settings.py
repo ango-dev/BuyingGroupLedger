@@ -917,6 +917,35 @@ class TestSignInSettings:
             assert f'for="f-{env}"' in panel, env
         assert 'for="f-WEB_PASSWORD"' in panel
 
+    def test_a_stale_card_index_and_an_unknown_section_are_answers_not_500s(self, client, config):
+        stale = client.post("/settings/section/cards/entry/50", data={"last4": "1111", "name": "X", "cashback_rate": "1%"})
+        assert stale.status_code == 409 and "no longer in the file" in stale.text
+        stale = client.post("/settings/section/cards/entry/50", data={"last4": "1111", "name": "X", "cashback_rate": "1%"},
+                            headers={"HX-Request": "true"})
+        assert stale.status_code == 409 and "no longer in the file" in stale.text
+        assert client.post("/settings/section/nope/entry", data={"x": "1"}).status_code == 404
+        assert client.post("/settings/section/nope/entry", data={"x": "1"}, headers={"HX-Request": "true"}).status_code == 404
+
+    def test_the_settings_that_stop_the_dashboard_have_a_vocabulary(self, config):
+        """WEB_LEDGER_SOURCE=sheets saved and the dashboard did
+        not start; TZ, the URLs, the addresses and the bind host were free text."""
+        form = {s.env: "" for s in settings_form.schema()}
+        with pytest.raises(settings_form.SettingsError) as info:
+            settings_form.apply_scalars({**form, "WEB_LEDGER_SOURCE": "sheets", "TZ": "Mars/Olympus Mons",
+                                         "DISCORD_WEBHOOK_URL": "hooks.example/abc", "WEB_PUBLIC_URL": "ledger.local",
+                                         "GMAIL_ADDRESS": "nope", "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS": "a@b",
+                                         "WEB_BIND_HOST": "0.0.0.0 8765"})
+        errors = "\n".join(info.value.errors)
+        for needle in ("WEB_LEDGER_SOURCE: one of db, snapshot", "TZ: 'Mars/Olympus Mons' is not a time zone name",
+                       "DISCORD_WEBHOOK_URL: a web address", "WEB_PUBLIC_URL: a web address",
+                       "GMAIL_ADDRESS: 'nope' is not an email address", "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS: 'a@b' is not an email",
+                       "WEB_BIND_HOST: '0.0.0.0 8765' is not a host"):
+            assert needle in errors, needle
+        changes = settings_form.apply_scalars({**form, "WEB_LEDGER_SOURCE": "Snapshot", "TZ": "America/New_York",
+                                               "WEB_PUBLIC_URL": "https://ledger.example", "GMAIL_ADDRESS": "me@example.com",
+                                               "WEB_BIND_HOST": "127.0.0.1"})
+        assert changes["web.ledger_source"] == "snapshot" and changes["container.timezone"] == "America/New_York"
+
     def test_entry_cards_take_the_typed_number_rule(self, config):
         """proxy port 99999, fullwidth digits as a last 4 and a
         `nan` spend limit all saved."""

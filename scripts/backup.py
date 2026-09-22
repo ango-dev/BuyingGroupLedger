@@ -388,31 +388,55 @@ def _safe_target(root: Path, name: str) -> Path | None:
     return None
 
 
+#: A restore writes what a member DECLARES, so a 21 KB zip can spell out gigabytes (review
+#: 2026-09-22, pages bug 8): one member past this, or an archive past the total, is refused.
+MAX_MEMBER_BYTES = 1024 * 1024 * 1024
+MAX_TOTAL_BYTES = 4 * MAX_MEMBER_BYTES
+
+
 def restore_backup(archive_path: Path, root: Path | None = None, *, force: bool = False) -> dict:
     """Write the archive's files under `root`. Existing files are left alone unless `force`.
-    Returns {"restored": [...], "skipped_existing": [...], "ignored": [...]}.
+    Returns {"restored": [...], "skipped_existing": [...], "ignored": [...], "refused": [(name, why)]}
+    -- `ignored` names members outside the backup's layout, `refused` the ones too large.
 
     An EMPTY existing file does not count as existing: a fresh Docker host `touch`es config.json
     and .state.json before its first start (the bind mounts need a file to exist), and the wizard's
     Restore step must fill those stubs without the overwrite tick -- a zero-byte file holds nothing
     to keep."""
     root = Path(root) if root else ROOT
-    restored, skipped, ignored = [], [], []
+    restored, skipped, ignored, refused = [], [], [], []
     with zipfile.ZipFile(archive_path) as archive:
-        for member in archive.infolist():
+        members = archive.infolist()
+        total = sum(m.file_size for m in members)
+        if total > MAX_TOTAL_BYTES:
+            raise ValueError(f"the archive declares {total // (1024 * 1024)} MB of files, more than the "
+                             f"{MAX_TOTAL_BYTES // (1024 * 1024)} MB a restore accepts")
+        for member in members:
             target = _safe_target(root, member.filename)
             if target is None:
                 if member.filename != MANIFEST:
                     ignored.append(member.filename)
+                continue
+            if member.file_size > MAX_MEMBER_BYTES:
+                refused.append((member.filename, f"{member.file_size // (1024 * 1024)} MB, more than "
+                                                 f"{MAX_MEMBER_BYTES // (1024 * 1024)} MB"))
                 continue
             if target.exists() and not force and not (target.is_file() and target.stat().st_size == 0):
                 skipped.append(member.filename)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(member) as src, open(target, "wb") as dst:
-                dst.write(src.read())
+                remaining = member.file_size
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    if remaining < 0:  # the header lied about the size: stop before the disk fills
+                        break
+                    dst.write(chunk)
             restored.append(member.filename)
-    return {"restored": restored, "skipped_existing": skipped, "ignored": ignored}
+    return {"restored": restored, "skipped_existing": skipped, "ignored": ignored, "refused": refused}
 
 
 def main(argv: list[str] | None = None) -> int:

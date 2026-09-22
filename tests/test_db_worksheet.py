@@ -184,6 +184,59 @@ class TestTheGrid:
         assert DbWorksheet(db).get_all_values()[1][OID] == "A"
 
 
+class TestTheFileIsNeverLostOrInvented:
+
+    def test_a_write_over_a_stale_grid_is_refused_and_the_other_write_survives(self, db):
+        a = DbWorksheet(db)
+        b = DbWorksheet(db)
+        b.update(range_name="A2", values=[row(order_id="B1", order_date="2026-09-01", item_name="Thing", shipment="1")])
+        from ledger_db.store import LedgerStale
+
+        with pytest.raises(LedgerStale):
+            a.update(range_name="A2", values=[row(order_id="A1", order_date="2026-09-01", item_name="Thing", shipment="1")])
+        assert [r["order_id"] for r in db.fetch_rows()] == ["B1"]  # B's row was not reverted
+        assert a.get_all_values()[1][OID] == "B1"  # A follows the file again
+        a.update(range_name="A3", values=[row(order_id="A1", order_date="2026-09-01", item_name="Thing", shipment="1")])
+        assert [r["order_id"] for r in db.fetch_rows()] == ["B1", "A1"]
+
+    def test_the_dashboard_writer_turns_a_stale_write_into_a_conflict_and_an_import_session_retries(self, db, tmp_path):
+        from web.ledger_writer import ConflictError, LedgerCellWriter
+
+        DbWorksheet(db).update(range_name="A2", values=[row(order_id="X1", order_date="2026-09-01",
+                                                            item_name="Thing", shipment="1", status="shipped")])
+        held = DbWorksheet(db)  # a worksheet read before another writer lands
+        writer = LedgerCellWriter(opener=lambda: held, logs_dir=tmp_path)
+        DbWorksheet(db).update(range_name=f"{col('insurance')}2", values=[[9]])  # the "cell edit meanwhile"
+        key = {"order_id": "X1", "order_date": "2026-09-01", "item_name": "Thing", "shipment": "1"}
+        with pytest.raises(ConflictError, match="changed while this edit"):
+            writer.write_cell(key, "status", "delivered")
+        assert db.fetch_rows()[0]["insurance"] == 9 and db.fetch_rows()[0]["status"] == "shipped"
+        # an import session (many adds over one grid) re-reads and lands the row; the edit survives
+        fresh = DbWorksheet(db)
+        importer = LedgerCellWriter(opener=lambda: fresh, logs_dir=tmp_path)
+        session = importer.open_adds()
+        DbWorksheet(db).update(range_name=f"{col('insurance')}2", values=[[11]])
+        importer.add_row({"order_id": "X2", "order_date": "2026-09-02", "item_name": "Other", "quantity": "1",
+                          "cost_per_item": "5"}, session=session)
+        rows = db.fetch_rows()
+        assert [r["order_id"] for r in rows] == ["X1", "X2"] and rows[0]["insurance"] == 11
+        importer.add_row({"order_id": "X3", "order_date": "2026-09-02", "item_name": "Third"}, session=session)
+        assert [r["order_id"] for r in db.fetch_rows()] == ["X1", "X2", "X3"]
+
+    def test_a_reader_never_creates_the_file_and_a_corrupt_one_is_named(self, tmp_path):
+        from ledger_db.store import LedgerMissing, LedgerUnreadable
+
+        missing = tmp_path / "nope" / "ledger.sqlite3"
+        with pytest.raises(LedgerMissing, match="no ledger at"):
+            LedgerDb(missing, create=False).fetch_rows()
+        assert not missing.exists() and not missing.parent.exists()
+        assert LedgerDb(missing).fetch_rows() == [] and missing.is_file()  # a run's opener creates
+        junk = tmp_path / "junk.sqlite3"
+        junk.write_bytes(b"this is not a database at all, not even close, really it is not one")
+        with pytest.raises(LedgerUnreadable, match="not a readable ledger"):
+            LedgerDb(junk, create=False).fetch_rows()
+
+
 class TestTheWritersRunOnIt:
     """The real money-path code, unchanged, against the adapter."""
 
@@ -281,6 +334,11 @@ class TestTheFlag:
 
         monkeypatch.setattr(settings_module, "settings", dataclasses.replace(
             settings_module.settings, ledger_db_path=str(tmp_path / "l.sqlite3")))
+        from ledger_db.store import LedgerMissing
+
+        with pytest.raises(LedgerMissing):  # the audit never creates what it audits (2026-09-22)
+            audit.open_ledger_readonly()
+        LedgerDb(tmp_path / "l.sqlite3").connect().close()
         ws, title = audit.open_ledger_readonly()
         assert isinstance(ws, DbWorksheet) and ws.read_only and title == "l.sqlite3"
         ws2, title2 = audit.open_ledger_readonly()
@@ -300,5 +358,6 @@ class TestTheFlag:
 
         monkeypatch.setattr(settings_module, "settings", dataclasses.replace(
             settings_module.settings, ledger_db_path=str(tmp_path / "l.sqlite3")))
+        LedgerDb(tmp_path / "l.sqlite3").connect().close()  # the dashboard's writer never creates the file
         assert isinstance(ledger_writer._open_for_writing(), DbWorksheet)
 

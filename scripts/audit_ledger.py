@@ -141,7 +141,7 @@ def open_ledger_readonly():
     from ledger_db.store import LedgerDb
     from ledger_db.worksheet import DbWorksheet
 
-    worksheet = DbWorksheet(LedgerDb(settings.ledger_db_path), read_only=True)
+    worksheet = DbWorksheet(LedgerDb(settings.ledger_db_path, create=False), read_only=True)
     return worksheet, worksheet.title
 
 

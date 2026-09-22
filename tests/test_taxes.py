@@ -87,13 +87,41 @@ class TestStorage:
         assert bonuses == {"bonus:1": [{"date": "2025-01-01", "amount": 2, "note": "", "year": "2025", "month": "2025-01", "month_label": "January 2025"}]}
         assert [(e["date"], e["amount"], e["month_label"]) for e in programs["q"]] == [("2025-01-01", 7, "January 2025")] and sites == {}
 
-    def test_a_damaged_file_or_entry_reads_as_empty(self, tmp_path):
+    def test_a_damaged_file_is_named_and_a_damaged_value_reads_as_blank(self, tmp_path):
+        """a file that is not the store's shape used to be an
+        empty store (and the next save overwrote it) or a 500; it is a named refusal now. A bad
+        VALUE inside a year still reads as blank."""
         path = tmp_path / "tax_inputs.json"
+        assert load_year(path, 2026) == YearInputs()  # missing: empty
+        path.write_text("", encoding="utf-8")
+        assert load_year(path, 2026) == YearInputs()  # a touched stub: empty
         path.write_text("not json", encoding="utf-8")
-        assert load_year(path, 2026) == YearInputs()
+        with pytest.raises(tax_inputs.TaxInputsError, match="not valid JSON"):
+            load_year(path, 2026)
+        path.write_text("[1, 2]", encoding="utf-8")
+        with pytest.raises(tax_inputs.TaxInputsError, match="object of years, not list"):
+            load_year(path, 2026)
+        path.write_text(json.dumps({"2026": [1]}), encoding="utf-8")
+        with pytest.raises(tax_inputs.TaxInputsError, match="entry for 2026 should be an object"):
+            load_year(path, 2026)
+        path.write_text(json.dumps({"2026": {"programs": [1, 2]}}), encoding="utf-8")
+        with pytest.raises(tax_inputs.TaxInputsError, match="entry for 2026 cannot be read"):
+            load_year(path, 2026)
         path.write_text(json.dumps({"2026": {"sites": {"Rakuten": "lots"}, "other": [{"amount": 1}],
                                              "expenses": [{"amount": 5}]}}), encoding="utf-8")
         assert load_year(path, 2026) == YearInputs()
+
+    def test_a_damaged_file_keeps_the_overview_up_and_names_itself_on_taxes(self, client, tmp_path):
+        path = tmp_path / "data" / "tax_inputs.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("[1, 2]", encoding="utf-8")
+        overview = client.get("/")
+        assert overview.status_code == 200 and "tax inputs could not be read" in overview.text
+        for url in ("/taxes?year=2026", "/taxes/export?year=2026", "/taxes/expenses.csv?year=2026"):
+            r = client.get(url)
+            assert r.status_code == 503 and "Tax Inputs Unreadable" in r.text and "object of years" in r.text, url
+        saved = client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "30"}, follow_redirects=False)
+        assert saved.status_code == 503 and path.read_text(encoding="utf-8") == "[1, 2]"  # never overwritten
 
     def test_parse_form(self):
         prompts = [tax_inputs.Prompt("program", "program:a:costco", "Costco Executive — a"),

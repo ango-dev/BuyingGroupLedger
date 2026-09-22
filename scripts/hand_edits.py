@@ -24,9 +24,12 @@ def main(argv: list[str] | None = None) -> int:
 
     from config.settings import settings
     from ledger_db.hand_edits import entries, forget_order
-    from ledger_db.store import LedgerDb
+    from ledger_db.store import LedgerDb, LedgerMissing
 
-    db = LedgerDb(settings.ledger_db_path)
+    db = LedgerDb(settings.ledger_db_path, create=False)
+    if not db.path.is_file():
+        print(str(LedgerMissing(f"no ledger at {db.path}: nothing to list (a run creates it)")), file=sys.stderr)
+        return 1
     if args.forget:
         if args.field and args.field not in FIELDNAMES:
             print(f"{args.field!r} is not a ledger field", file=sys.stderr)

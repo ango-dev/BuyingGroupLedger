@@ -2,6 +2,9 @@
 {% block title %}Overview{% endblock %}
 {% block content %}
 <h1>Overview</h1>
+{% if tax_problem %}
+<div class="banner warn" role="alert">The year's tax inputs could not be read, so the statement leaves them out: {{ tax_problem }}</div>
+{% endif %}
 {#- Two columns on a desktop: the attention cards, the statement
     and the 12-month chart on the left; the four breakdown charts stacked on the right. One
     column under 1180px. -#}

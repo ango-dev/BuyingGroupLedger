@@ -46,7 +46,7 @@ from typing import Any
 from models.order import FIELDNAMES
 from ledger.sync import HEADER, _BOOL_FIELDS, _INT_FIELDS, _NUMERIC_FIELDS
 
-from ledger_db.store import FORMULA_FIELDS, LedgerDb
+from ledger_db.store import FORMULA_FIELDS, LedgerDb, LedgerStale
 
 class ValueInputOption(str, enum.Enum):
     """How a write's values are taken: RAW as typed, USER_ENTERED parsed the way a hand edit is
@@ -136,6 +136,7 @@ class DbWorksheet:
 
     # --- the grid --------------------------------------------------------------------------------
     def _load(self) -> None:
+        self._version = self.db.version()  # BEFORE the rows: a write between the two only makes the next persist retry
         self._rows = [list(HEADER)]
         for record in self.db.fetch_rows():
             # SQLite holds a bool column as 0 / 1; the grid holds bools, as the grid's stored
@@ -193,7 +194,12 @@ class DbWorksheet:
             record = {f: v for f, v in zip(FIELDNAMES, values)}
             record["sheet_row"] = position + 1
             records.append(record)
-        self.db.replace_rows(records, backend="db", source=self.title, log_run=False)
+        try:
+            self.db.replace_rows(records, backend="db", source=self.title, log_run=False,
+                                 expected_version=self._version)
+        except LedgerStale:
+            self._load()  # the grid follows the file again; the caller re-applies its write
+            raise
         self._load()
 
     # --- reads -----------------------------------------------------------------------------------

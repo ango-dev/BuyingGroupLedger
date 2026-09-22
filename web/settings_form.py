@@ -365,11 +365,69 @@ def _validate_lockout(text):
     return _validate_number(text, integer=False, least=0, most=24 * 60 * 366, what="the lock")
 
 
-#: Settings with a vocabulary or a floor of their own, checked before anything is written.
+def _validate_ledger_source(text: str) -> str:
+    from web.ledger_reader import BACKENDS
+
+    if text and text.lower() not in BACKENDS:
+        raise ValueError(f"one of {', '.join(BACKENDS)} (the dashboard refuses to start on anything else)")
+    return text.lower()
+
+
+_TZ_SHAPE = re.compile(r"^[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+)*$")
+
+
+def _validate_timezone(text: str) -> str:
+    """A tz database name ("America/New_York", "UTC"). Checked against the zone database when
+    this host has one; by shape otherwise (a Windows dev box without tzdata)."""
+    if not text:
+        return ""
+    if not _TZ_SHAPE.match(text):
+        raise ValueError(f"{text!r} is not a time zone name (write it like America/New_York)")
+    try:
+        import zoneinfo
+
+        if zoneinfo.available_timezones():
+            zoneinfo.ZoneInfo(text)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError, ImportError):
+        raise ValueError(f"{text!r} is not a time zone this host knows (write it like America/New_York)") from None
+    return text
+
+
+def _validate_url(text: str) -> str:
+    if text and not text.lower().startswith(("http://", "https://")):
+        raise ValueError("a web address starting with http:// or https://")
+    return text
+
+
+_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _validate_email(text: str) -> str:
+    if text and not _EMAIL_SHAPE.match(text):
+        raise ValueError(f"{text!r} is not an email address")
+    return text
+
+
+_HOST_SHAPE = re.compile(r"^[A-Za-z0-9.\-]+$|^\[[0-9A-Fa-f:.]+\]$|^[0-9A-Fa-f:.]+$")
+
+
+def _validate_host(text: str) -> str:
+    if text and not _HOST_SHAPE.match(text):
+        raise ValueError(f"{text!r} is not a host name or address (0.0.0.0, 127.0.0.1, or a name)")
+    return text
+
+
+#: Settings with a vocabulary or a floor of their own, checked before anything is written. The
+#: last group used to save as typed and stop the dashboard or the run on the next restart.
+#:
 _VALIDATORS = {"BACKUP_FREQUENCY": _validate_frequency, "BACKUP_TIME": _validate_time,
                "BACKUP_DAYS": _validate_days,
                "WEB_SESSION_HOURS": _validate_session_hours, "WEB_REMEMBER_DAYS": _validate_remember_days,
-               "WEB_LOGIN_ATTEMPTS": _validate_attempts, "WEB_LOGIN_LOCKOUT_MINUTES": _validate_lockout}
+               "WEB_LOGIN_ATTEMPTS": _validate_attempts, "WEB_LOGIN_LOCKOUT_MINUTES": _validate_lockout,
+               "WEB_LEDGER_SOURCE": _validate_ledger_source, "TZ": _validate_timezone,
+               "DISCORD_WEBHOOK_URL": _validate_url, "WEB_PUBLIC_URL": _validate_url,
+               "GMAIL_ADDRESS": _validate_email, "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS": _validate_email,
+               "WEB_BIND_HOST": _validate_host}
 
 
 #: Numeric settings with a range of their own: the entrypoint falls back to 6 on an interval
@@ -467,6 +525,12 @@ def apply_scalars(form: Mapping[str, str], settings: list[Setting] | None = None
                 if not raw.strip():
                     continue  # blank keeps what is stored
                 value = raw.strip()
+                if s.env in _VALIDATORS:  # a secret with a shape (the webhook URL) is checked like any other
+                    try:
+                        value = _VALIDATORS[s.env](value)
+                    except ValueError as exc:
+                        errors.append(f"{s.env}: {exc}")
+                        continue
         else:
             try:
                 value = _parse(s, str(form.get(s.env, "") or ""))

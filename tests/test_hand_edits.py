@@ -259,6 +259,8 @@ class TestTheCli:
 
         monkeypatch.setattr(cs, "settings", dataclasses.replace(cs.settings,
                                                                 ledger_db_path=str(db.path)))
+        assert main([]) == 1 and "no ledger at" in capsys.readouterr().err  # never created by a listing (2026-09-22)
+        db.connect().close()
         assert main([]) == 0 and "No hand-edited cells" in capsys.readouterr().out
         hand_edits.record(db, KEY, "cashback_rate", 0.06)
         assert main([]) == 0

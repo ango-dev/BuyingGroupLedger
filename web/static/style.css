@@ -1144,6 +1144,12 @@ textarea.paste-box { position: fixed; left: 50%; top: 18%; transform: translateX
 .restarting h1 { display: flex; align-items: center; gap: 10px; }
 .restarting .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* The refusal page (problem.html): the reason in the page's own frame, one column, phone-safe. */
+.problem { max-width: 720px; margin: 24px auto; padding: 0 16px; }
+.problem .lead { margin-left: 0; margin-right: 0; }
+.problem .banner { margin: 12px 0; border-radius: var(--r-1); overflow-wrap: anywhere; }
+.problem .advice { color: var(--muted); }
+.problem .acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 header .meta .signout { display: inline; margin: 0; }
 .warn-text { color: var(--warn); font-weight: 600; }
 

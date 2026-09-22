@@ -1129,6 +1129,38 @@ class TestHealth:
         assert test_client.get("/orders").status_code == 503
 
 
+    def test_a_missing_or_corrupt_ledger_and_a_junk_snapshot_are_503_pages_not_500s(self, tmp_path, logs_dir, failures_dir):
+        """a DbReader on a path with no file created the file
+        and reported healthy; a corrupt file and a 0-byte or binary snapshot were 500s."""
+        from web.ledger_reader import DbReader
+
+        missing = tmp_path / "nowhere" / "ledger.sqlite3"
+        app = create_app(DbReader(missing), logs_dir=logs_dir, failures_dir=failures_dir, clock=lambda: NOW, settings=_settings())
+        c = TestClient(app)
+        health = c.get("/health")
+        assert health.status_code == 503 and "no ledger at" in health.json()["error"] and health.json()["ok"] is False
+        assert not missing.exists()  # never created by a read
+        page = c.get("/orders")
+        assert page.status_code == 503 and "Ledger Unavailable" in page.text and "no ledger at" in page.text
+        assert 'href="/orders"' in page.text and "Try again" in page.text  # the page's own frame, a way back
+        assert c.get("/").status_code == 503 and c.get("/audit").status_code == 503
+
+        junk = tmp_path / "junk.sqlite3"
+        junk.write_bytes(b"this is not a database at all, not even close, really it is not one")
+        c = TestClient(create_app(DbReader(junk), logs_dir=logs_dir, failures_dir=failures_dir, clock=lambda: NOW, settings=_settings()))
+        assert c.get("/health").status_code == 503 and "not a readable ledger" in c.get("/health").json()["error"]
+        assert c.get("/orders").status_code == 503 and "not a readable ledger" in c.get("/orders").text
+
+        for payload in (b"", b"\x00\x01\x02\xff"):
+            snap = tmp_path / "ledger_backup_20260918T000000Z.csv"
+            snap.write_bytes(payload)
+            c = TestClient(create_app(SnapshotReader(snap), logs_dir=logs_dir, failures_dir=failures_dir, clock=lambda: NOW, settings=_settings()))
+            assert c.get("/health").status_code == 503, payload
+            for url in ("/", "/orders", "/audit", "/recon", "/taxes"):
+                r = c.get(url)
+                assert r.status_code == 503 and "Ledger Unavailable" in r.text, (payload, url)
+
+
 # --------------------------------------------------------------------------------------------------
 # Choosing the backend from config
 # --------------------------------------------------------------------------------------------------
@@ -1323,7 +1355,7 @@ class TestBackupScript:
         clone = tmp_path / "clone"
         clone.mkdir()
         result = restore_backup(archive, clone)
-        assert result == {"restored": manifest["files"], "skipped_existing": [], "ignored": []}
+        assert result == {"restored": manifest["files"], "skipped_existing": [], "ignored": [], "refused": []}
         assert (clone / "config.json").read_text(encoding="utf-8") == '{"secret": 1}'
         assert (clone / "data" / "ledger.sqlite3").read_bytes() == b"sqlite"
 
@@ -1441,6 +1473,41 @@ class TestBackupPage:
         assert client.get("/backup/config.json").status_code == 404
         assert client.get("/backup/ledger_backup_missing.zip").status_code == 404
         assert client.get("/backup/..%2Fconfig.json").status_code == 404
+
+    def test_restore_refuses_what_a_header_declares_too_large_and_says_what_it_skipped(self, tmp_path):
+        """a 21 KB zip declaring a 20 MB member wrote 20 MB; members
+        refused as outside the layout were dropped without a word."""
+        import zipfile
+
+        from scripts import backup as backup_module
+        from scripts.backup import restore_backup
+
+        archive = tmp_path / "big.zip"
+        with zipfile.ZipFile(archive, "w") as z:
+            z.writestr("config.json", "{}")
+            z.writestr("data/huge.bin", b"x" * 10)
+            z.writestr("main.py", "x")
+        with zipfile.ZipFile(archive, "a") as z:
+            pass
+        clone = tmp_path / "clone"
+        clone.mkdir()
+        # a member whose header declares more than the cap: refused by name, the rest restored
+        original = backup_module.MAX_MEMBER_BYTES
+        backup_module.MAX_MEMBER_BYTES = 5
+        try:
+            result = restore_backup(archive, clone)
+        finally:
+            backup_module.MAX_MEMBER_BYTES = original
+        assert result["restored"] == ["config.json"] and result["ignored"] == ["main.py"]
+        assert result["refused"] == [("data/huge.bin", "0 MB, more than 0 MB")]
+        assert not (clone / "data" / "huge.bin").exists()
+        # an archive declaring more than the total cap: refused whole
+        backup_module.MAX_TOTAL_BYTES = 5
+        try:
+            with pytest.raises(ValueError, match="declares"):
+                restore_backup(archive, clone, force=True)
+        finally:
+            backup_module.MAX_TOTAL_BYTES = 4 * original
 
     def test_restore_upload_works_on_any_host_and_keeps_existing_unless_forced(
             self, repo, snapshot_path, logs_dir, failures_dir, tmp_path):

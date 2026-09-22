@@ -226,17 +226,44 @@ def site_names(inputs: YearInputs) -> list[str]:
 # --------------------------------------------------------------------------------------------------
 
 
+class TaxInputsError(ValueError):
+    """data/tax_inputs.json cannot be read as the year store: named, so the Taxes pages say so and
+    a save never overwrites what is there."""
+
+
 def load_all(path: Path) -> dict[int, YearInputs]:
+    """Every saved year. A missing file is an empty store; a file that is there but is not the
+    store's shape raises TaxInputsError naming what is wrong (a bad value INSIDE a year still
+    reads as blank, as `from_json` has always done)."""
+    path = Path(path)
     try:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return {}
+    except OSError as exc:
+        raise TaxInputsError(f"{path} cannot be read: {exc}") from exc
+    if not text.strip():
+        return {}
+    try:
+        payload = json.loads(text)
+    except ValueError as exc:
+        raise TaxInputsError(f"{path} is not valid JSON ({exc}); fix or move the file") from exc
+    if not isinstance(payload, dict):
+        raise TaxInputsError(f"{path} should hold an object of years, not {type(payload).__name__}; fix or move the file")
     out = {}
-    for year, entry in (payload or {}).items():
+    for year, entry in payload.items():
         try:
-            out[int(year)] = YearInputs.from_json(entry or {})
-        except (TypeError, ValueError):
-            continue
+            year_number = int(year)
+        except (TypeError, ValueError) as exc:
+            raise TaxInputsError(f"{path}: {year!r} is not a year; fix or move the file") from exc
+        if entry is None:
+            entry = {}
+        if not isinstance(entry, dict):
+            raise TaxInputsError(f"{path}: the entry for {year} should be an object, not {type(entry).__name__}; fix or move the file")
+        try:
+            out[year_number] = YearInputs.from_json(entry)
+        except (TypeError, ValueError, AttributeError, KeyError) as exc:
+            raise TaxInputsError(f"{path}: the entry for {year} cannot be read ({type(exc).__name__}: {exc}); fix or move the file") from exc
     return out
 
 

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{#- A refusal a person can read: the ledger file is missing
+    or unreadable, the tax inputs file is not the store's shape. The page's own frame, the
+    reason in the ledger's words, and what to do -- where a bare 500 or a JSON body used to be. -#}
+{% block title %}{{ title }}{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+<section class="problem" aria-labelledby="problem-title">
+  <h1 id="problem-title">{{ title }}</h1>
+  <p class="lead">Nothing was changed. The dashboard answered {{ status }} because it could not read what this page needs.</p>
+  <div class="banner warn" role="alert">{{ reason }}</div>
+  {% if advice %}<p class="advice">{{ advice }}</p>{% endif %}
+  <p class="acts"><a class="button" href="{{ request.url.path }}">Try again</a> <a class="button small" href="/settings">Settings</a> <a class="button small" href="/health">Health check</a></p>
+</section>
+{% endblock %}

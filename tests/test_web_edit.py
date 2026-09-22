@@ -575,6 +575,23 @@ class TestOrdersRoutes:
         empty = client.post("/orders/delete", data={})
         assert empty.status_code == 200 and "no rows selected" in empty.text
 
+    def test_deleting_the_last_row_of_an_order_deletes_its_receipt_file(self, sheet, tmp_path, logs_dir, monkeypatch):
+        """the route read `receipt_link`; the field is
+        `receipt_url`, so the set was always empty and no file was ever deleted."""
+        from web import receipts_upload
+
+        gone = []
+        monkeypatch.setattr(receipts_upload, "delete_receipt", lambda link: gone.append(link) or True)
+        link = "/receipts/bestbuy/2026-09/BBY01-1.pdf"
+        sheet.grid[1][FIELDNAMES.index("receipt_url")] = link
+        sheet.grid.append(row(order_date="2026-09-08", status="ordered", retailer="Best Buy", item_name="MacBook",
+                              shipment="2", quantity="1", order_id="BBY01-1", receipt_url=link))
+        client = self._client(sheet, tmp_path, logs_dir)
+        first = client.post("/orders/delete", data={"sel": [json.dumps(KEY)]})
+        assert "Deleted 1 row(s)" in first.text and "receipt file(s)" not in first.text and gone == []  # shipment 2 still links it
+        second = client.post("/orders/delete", data={"sel": [json.dumps({**KEY, "shipment": "2"})]})
+        assert "Deleted 1 row(s) and 1 receipt file(s)" in second.text and gone == [link]
+
     def test_add_row_redirects_to_the_new_order(self, sheet, tmp_path, logs_dir):
         client = self._client(sheet, tmp_path, logs_dir)
         response = client.post("/orders/add", data={"order_id": "NEW-1", "order_date": "2026-09-17",

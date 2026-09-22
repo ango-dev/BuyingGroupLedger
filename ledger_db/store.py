@@ -71,23 +71,55 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+class LedgerMissing(FileNotFoundError):
+    """The ledger file is not there and this opener may not create it (the dashboard, the audit,
+    the hand-edit script): a wrong path or a broken volume mount must read as exactly that, never
+    as "no orders yet". A run (`ledger.sync._get_worksheet`)
+    creates the file."""
+
+
+class LedgerUnreadable(RuntimeError):
+    """The file exists but SQLite cannot read it as a ledger (truncated, not a database, a
+    foreign schema it refuses to migrate): named, so the page says so instead of a 500."""
+
+
+class LedgerStale(RuntimeError):
+    """`replace_rows` found the file changed since the grid it was handed was read: the write was
+    rolled back so the other writer's rows survive."""
+
+
 class LedgerDb:
     """One SQLite file. Every method opens its own short-lived connection: the web process and a
     scheduled run may touch the same file, and SQLite's own locking handles that better than a
-    shared handle would."""
+    shared handle would. `create=False` refuses to create a missing file (LedgerMissing)."""
 
-    def __init__(self, path: Path | str | None = None):
+    def __init__(self, path: Path | str | None = None, *, create: bool = True):
         path = Path(path) if path else DEFAULT_PATH
         self.path = path if path.is_absolute() else ROOT / path
+        self.create = create
 
     # --- connection + schema --------------------------------------------------------------------
     def connect(self) -> sqlite3.Connection:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.create and not self.path.is_file():
+            raise LedgerMissing(f"no ledger at {self.path}: nothing has written it yet (a run creates it: "
+                                "python main.py), or database.path points at the wrong place")
+        if self.create:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        self._ensure_schema(conn)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            self._ensure_schema(conn)
+        except sqlite3.DatabaseError as exc:
+            conn.close()
+            raise LedgerUnreadable(f"{self.path} is not a readable ledger: {exc}") from exc
         return conn
+
+    def version(self) -> int:
+        """The file's write counter (`PRAGMA user_version`): `replace_rows` bumps it on every
+        persist, and a caller that read the grid at version N asks for N back when it writes."""
+        with self.connect() as conn:
+            return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         """Create the tables, or MIGRATE ledger_rows when its columns are not FIELDNAMES in order.
@@ -139,17 +171,25 @@ class LedgerDb:
 
     # --- writes (the worksheet adapter is the only writer) --------------------------------------------------
     def replace_rows(self, records: list[dict], *, backend: str, source: str, skipped: int = 0,
-                     header_ok: bool = True, duration_ms: int = 0, log_run: bool = True) -> int:
+                     header_ok: bool = True, duration_ms: int = 0, log_run: bool = True,
+                     expected_version: int | None = None) -> int:
         """Replace every ledger row with `records` (dicts keyed by FIELDNAMES + `sheet_row`), in one
         transaction, and log the run in mirror_runs (unless `log_run` is False: the worksheet adapter
-        writes the table on every cell write and a log line per write would be noise). Returns
-        the number of rows written."""
+        writes the table on every cell write and a log line per write would be noise). With
+        `expected_version`, the write happens only if the file's version is still that one
+        (LedgerStale otherwise, nothing written); every write bumps the version. Returns the
+        number of rows written."""
         names = [name for name, _ in columns()]
         placeholders = ", ".join("?" for _ in names)
         stamp = _now()
         with self.connect() as conn:
-            conn.execute("BEGIN")
+            conn.execute("BEGIN IMMEDIATE")
             try:
+                current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+                if expected_version is not None and current != expected_version:
+                    raise LedgerStale(f"the ledger changed underneath this write (version {current}, "
+                                      f"the grid was read at {expected_version})")
+                conn.execute(f"PRAGMA user_version = {current + 1}")
                 conn.execute('DELETE FROM "ledger_rows"')
                 conn.executemany(
                     f'INSERT INTO "ledger_rows" ({", ".join(chr(34) + n + chr(34) for n in names)}) '

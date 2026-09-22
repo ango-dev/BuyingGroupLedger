@@ -24,7 +24,7 @@ from urllib.parse import urlencode
 import zipfile
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -36,6 +36,7 @@ from web import failures as failures_module
 from web import importer
 from web import setup_wizard
 from web.ledger_writer import RunInProgress, safe_href
+from ledger_db.store import LedgerMissing, LedgerUnreadable
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
 from web.audit_view import AuditCache, audit_grids, audit_key, key_of, run_audit
@@ -192,6 +193,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     except (OSError, ValueError):
         asset_version = "0"
     templates.env.globals["asset_version"] = asset_version
+    RESTORE_UPLOAD_MAX_BYTES = 512 * 1024 * 1024  # a backup zip: the ledger, its receipts, the config
     templates.env.filters["money"] = money
     templates.env.filters["percent"] = percent
     templates.env.filters["cell"] = cell
@@ -218,8 +220,46 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         force = str(request.query_params.get("refresh", "")).lower() in ("1", "true", "yes")
         try:
             return reader.load(force=force)
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, LedgerUnreadable) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def problem_page(request: Request, status: int, title: str, reason: str, advice: str = ""):
+        """A refusal a person can read: the page's own frame,
+        the reason, what to do. /health keeps its JSON; an htmx request gets the same page as a
+        fragment its caller can ignore."""
+        if request.url.path == "/health":
+            return JSONResponse({"ok": False, "error": reason}, status_code=status)
+        try:
+            return templates.TemplateResponse(request, "problem.html",
+                                              {"request": request, "backend": reader.backend, "source": "",
+                                               "title": title, "reason": reason, "advice": advice,
+                                               "status": status}, status_code=status)
+        except Exception:  # noqa: BLE001 -- the frame itself needs the ledger for its badges; never loop
+            return PlainTextResponse(f"{title}: {reason}", status_code=status)
+
+    LEDGER_ADVICE = ("Check database.path on the Settings page and the volume the container mounts; a run "
+                     "(python main.py) creates a missing ledger, and Backup and Restore brings one back.")
+    TAX_ADVICE = "Fix the file by hand or move it aside; the Taxes page starts a new one on its next save."
+
+    @app.exception_handler(HTTPException)
+    async def _http_problem(request: Request, exc: HTTPException):
+        if exc.status_code == 503:
+            return problem_page(request, 503, "Ledger Unavailable", str(exc.detail or "the ledger cannot be read"), LEDGER_ADVICE)
+        from fastapi.exception_handlers import http_exception_handler
+
+        return await http_exception_handler(request, exc)
+
+    @app.exception_handler(LedgerUnreadable)
+    async def _ledger_unreadable(request: Request, exc: LedgerUnreadable):
+        return problem_page(request, 503, "Ledger Unavailable", str(exc), LEDGER_ADVICE)
+
+    @app.exception_handler(LedgerMissing)
+    async def _ledger_missing(request: Request, exc: LedgerMissing):
+        return problem_page(request, 503, "Ledger Unavailable", str(exc), LEDGER_ADVICE)
+
+    @app.exception_handler(tax_inputs.TaxInputsError)
+    async def _tax_inputs_broken(request: Request, exc: tax_inputs.TaxInputsError):
+        return problem_page(request, 503, "Tax Inputs Unreadable", str(exc), TAX_ADVICE)
 
     def page(request: Request, name: str, **context):
         snapshot = context.get("snapshot")
@@ -512,10 +552,15 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     def index(request: Request):
         snapshot = load(request)
         month = str(request.query_params.get("month") or "")
+        tax_problem = ""
+        try:
+            inputs_by_year = tax_inputs.load_all(tax_inputs_path)
+        except tax_inputs.TaxInputsError as exc:
+            # the Overview still opens: the statement reads without the year's inputs, and says so
+            inputs_by_year, tax_problem = {}, str(exc)
         return page(request, "overview.html", snapshot=snapshot, body_class="overview",
-                    summary=overview(snapshot, month=month, today=clock().date(),
-                                     inputs_by_year=tax_inputs.load_all(tax_inputs_path)),
-                    attention=needs_attention(snapshot))
+                    summary=overview(snapshot, month=month, today=clock().date(), inputs_by_year=inputs_by_year),
+                    attention=needs_attention(snapshot), tax_problem=tax_problem)
 
     # The ledger writer: cell edits on the Orders page. The snapshot backend is a CSV, so there is
     # nothing to write to and the page stays view-only there.
@@ -1154,9 +1199,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         # the receipts the rows going away link to: deleted below once no remaining row links to
         # them (one order is one document, shared by its rows)
         going = {(k.get("order_id", ""), k.get("order_date", ""), k.get("item_name", ""), str(k.get("shipment", ""))) for k in keys}
-        links = {r.text("receipt_link") for r in load(request).rows
+        links = {r.text("receipt_url") for r in load(request).rows
                  if (r.text("order_id"), r.text("order_date"), r.text("item_name"), r.text("shipment")) in going
-                 and r.text("receipt_link").startswith("/receipts/")}
+                 and r.text("receipt_url").startswith("/receipts/")}
         try:
             result = writer.remove_rows(keys)
         except EditError as exc:
@@ -1164,7 +1209,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except Exception as exc:  # noqa: BLE001
             return table_after(request, form, error=f"{type(exc).__name__}: {exc}")
         snapshot = reader.load(force=True)
-        remaining = {r.text("receipt_link") for r in snapshot.rows}
+        remaining = {r.text("receipt_url") for r in snapshot.rows}
         removed = sum(1 for link in links - remaining if receipts_upload.delete_receipt(link))
         act("edit", f"Deleted {result['deleted']} row(s) from the ledger",
             {"rows": result["deleted"], "order_ids": sorted({k.get("order_id", "") for k in keys}),
@@ -2198,19 +2243,40 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         if not safe_name.endswith(".zip"):
             safe_name += ".zip"
         saved = backups_dir / f"uploaded_{safe_name}"
-        saved.write_bytes(await archive.read())
+        nothing = {"restored": [], "skipped_existing": [], "ignored": [], "refused": []}
+        written = 0
+        with saved.open("wb") as handle:  # streamed: never the whole upload in memory, never past the cap
+            while True:
+                chunk = await archive.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > RESTORE_UPLOAD_MAX_BYTES:
+                    handle.close()
+                    saved.unlink(missing_ok=True)
+                    return nothing, (f"That upload is larger than {RESTORE_UPLOAD_MAX_BYTES // (1024 * 1024)} MB: "
+                                     "nothing was restored.")
+                handle.write(chunk)
         try:
             result = backup_module.restore_backup(saved, repo_root, force=force)
         except zipfile.BadZipFile:
             # not a zip at all: say so on the step and keep nothing
             saved.unlink(missing_ok=True)
-            return {"restored": [], "skipped_existing": [], "ignored": []}, f"That file is not a backup zip ({safe_name}): nothing was restored."
+            return nothing, f"That file is not a backup zip ({safe_name}): nothing was restored."
+        except ValueError as exc:  # declares more than a restore accepts
+            saved.unlink(missing_ok=True)
+            return nothing, f"{safe_name}: {exc}; nothing was restored."
         message = (f"Restored {len(result['restored'])} file(s), kept {len(result['skipped_existing'])}"
                    " existing" + (" (tick overwrite to replace them)" if result["skipped_existing"]
                                   else "") + ".")
+        if result.get("ignored"):
+            message += f" {len(result['ignored'])} member(s) outside the backup layout ignored ({', '.join(result['ignored'][:3])}{', …' if len(result['ignored']) > 3 else ''})."
+        if result.get("refused"):
+            message += " Refused as too large: " + "; ".join(f"{name} ({why})" for name, why in result["refused"][:3]) + "."
         act("backup", f"Restore from {safe_name}: {message}",
             {"archive": safe_name, "force": force, "restored": result["restored"],
-             "kept": result["skipped_existing"]})
+             "kept": result["skipped_existing"], "ignored": result.get("ignored", []),
+             "refused": [name for name, _why in result.get("refused", [])]})
         return result, message
 
     @app.post("/backup/restore")
@@ -2443,8 +2509,16 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     # One entry of a card section: add, replace, delete. Errors re-render the page with the section open and nothing written.
     async def _save_entry(request: Request, path: str, index: int | None):
+        if path not in {name for name, _kind, _model, _help in settings_form.SECTIONS}:
+            raise HTTPException(status_code=404, detail=f"no settings section named {path!r}")
         form = await request.form()
         entries_before = settings_form.display_entries(path)
+        if index is not None and not 0 <= index < len(entries_before):
+            # deleted in another tab, saved from this one
+            errors = [f"That {path[:-1]} is no longer in the file (removed meanwhile); reload the page."]
+            if wants_fragment(request):
+                return settings_section(request, path, errors=errors, status=409)
+            return settings_page(request, errors=errors, open_section=path, status=409)
         before = entries_before[index] if index is not None else None
         old_key = settings_form.entry_key(path, before) if before else ""
         try:
@@ -2546,11 +2620,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     @app.get("/health")
     def health(request: Request):
-        info = reader.health()
+        info = {"backend": reader.backend}
         rows = None
         schema = None
         error = None
         try:
+            info.update(reader.health())  # inside the try: a corrupt file must answer 503, not 500
             snapshot = reader.load()
             rows, schema = len(snapshot.rows), snapshot.schema_matches
             info["source"] = snapshot.source

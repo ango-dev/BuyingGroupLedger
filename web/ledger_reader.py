@@ -401,10 +401,16 @@ class SnapshotReader:
         return self._explicit if self._explicit is not None else newest_snapshot(self._data_dir)
 
     def load(self, force: bool = False) -> Snapshot:
+        from ledger_db.store import LedgerUnreadable
+
         path = self.resolve()
-        with path.open(newline="", encoding="utf-8-sig") as handle:
-            grid = list(csv.reader(handle))
-        snapshot = rows_from_grid(grid, backend=self.backend, source=str(path))
+        try:
+            with path.open(newline="", encoding="utf-8-sig") as handle:
+                grid = list(csv.reader(handle))
+            snapshot = rows_from_grid(grid, backend=self.backend, source=str(path))
+        except (csv.Error, UnicodeDecodeError, ValueError) as exc:
+            # a 0-byte or binary file where a CSV should be: named, never a 500 on every page
+            raise LedgerUnreadable(f"{path} is not a readable ledger snapshot: {exc}") from exc
         snapshot.meta = {
             "path": str(path),
             "modified_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
@@ -455,7 +461,7 @@ class DbReader:
                  clock: Callable[[], float] = time.monotonic):
         from ledger_db.store import LedgerDb
 
-        self.db = db if isinstance(db, LedgerDb) else LedgerDb(db)
+        self.db = db if isinstance(db, LedgerDb) else LedgerDb(db, create=False)  # a reader never creates
         self.ttl_seconds = float(ttl_seconds)
         self._clock = clock
         self._lock = threading.Lock()

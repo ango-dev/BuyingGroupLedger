@@ -99,6 +99,15 @@ class RunInProgress(EditError):
     status = 423
 
 
+def _is_stale(exc: Exception) -> bool:
+    return type(exc).__name__ == "LedgerStale"
+
+
+def _stale_conflict(exc: Exception) -> ConflictError:
+    return ConflictError("the ledger changed while this edit was being written (a run or an import "
+                         f"landed rows meanwhile); nothing was written -- reload and try again ({exc})")
+
+
 def run_in_progress(logs_dir: Path | None = None, *, now: float | None = None) -> bool:
     """Is main.py's run lock live (present and younger than its stale window)?"""
     lock = Path(logs_dir or LOGS_DIR) / LOCK_FILE_NAME
@@ -115,7 +124,7 @@ def _open_for_writing():
     from ledger_db.store import LedgerDb
     from ledger_db.worksheet import DbWorksheet
 
-    return DbWorksheet(LedgerDb(settings.ledger_db_path))
+    return DbWorksheet(LedgerDb(settings.ledger_db_path, create=False))
 
 
 def _display(value) -> str:
@@ -369,10 +378,16 @@ class LedgerCellWriter:
             back = _release(worksheet, key, field)  # the run's value from before the hand edit, or ""
             if back != "":
                 coerced, restored = back, True
-        if coerced == "":
-            worksheet.update(a1, [[""]], value_input_option="USER_ENTERED")
-        else:
-            worksheet.update(a1, [[coerced]], value_input_option="RAW")
+        try:
+            if coerced == "":
+                worksheet.update(a1, [[""]], value_input_option="USER_ENTERED")
+            else:
+                worksheet.update(a1, [[coerced]], value_input_option="RAW")
+        except Exception as exc:  # noqa: BLE001
+            if _is_stale(exc):
+                raise _stale_conflict(exc) from exc
+            raise
+        if coerced != "":
             if not restored and protect:
                 _protect(worksheet, key, field, coerced, previous=_text(current))
             elif not restored:
@@ -434,10 +449,15 @@ class LedgerCellWriter:
             else:
                 values.append({"range": f"{_COL[field]}{n}", "values": [[coerced]]})
                 _protect(worksheet, key, field, coerced, previous=current)
-        if blanks:
-            worksheet.batch_update(blanks, value_input_option="USER_ENTERED")
-        if values:
-            worksheet.batch_update(values, value_input_option="RAW")
+        try:
+            if blanks:
+                worksheet.batch_update(blanks, value_input_option="USER_ENTERED")
+            if values:
+                worksheet.batch_update(values, value_input_option="RAW")
+        except Exception as exc:  # noqa: BLE001
+            if _is_stale(exc):
+                raise _stale_conflict(exc) from exc
+            raise
         return {"written": len(seen), "errors": errors, "field": field, "value": coerced}
 
     # --- a new row ------------------------------------------------------------------------------
@@ -481,20 +501,33 @@ class LedgerCellWriter:
             grid = _Grid(worksheet)
         else:
             worksheet, grid = session.worksheet, session.grid
-        try:
-            grid.locate(key)
-        except ConflictError:
-            pass  # not on the ledger: good
-        else:
-            raise EditError(f"{key_label(key)} is already on the ledger")
-        row_number = _last_occupied_row(grid.rows) + 1
-        if row_number < 2:
-            row_number = 2
-        _ensure_grid_rows(worksheet, row_number)
-        row = [values.get(f, "") for f in FIELDNAMES]
-        for f in FORMULA_FIELDS:
-            row[FIELDNAMES.index(f)] = ""
-        worksheet.update(f"A{row_number}", [_blank_to_none(row)], value_input_option="RAW")
+        for attempt in (1, 2):
+            try:
+                grid.locate(key)
+            except ConflictError:
+                pass  # not on the ledger: good
+            else:
+                raise EditError(f"{key_label(key)} is already on the ledger")
+            row_number = _last_occupied_row(grid.rows) + 1
+            if row_number < 2:
+                row_number = 2
+            _ensure_grid_rows(worksheet, row_number)
+            row = [values.get(f, "") for f in FIELDNAMES]
+            for f in FORMULA_FIELDS:
+                row[FIELDNAMES.index(f)] = ""
+            try:
+                worksheet.update(f"A{row_number}", [_blank_to_none(row)], value_input_option="RAW")
+            except Exception as exc:  # noqa: BLE001
+                if not _is_stale(exc):
+                    raise
+                if session is None or attempt == 2:
+                    raise _stale_conflict(exc) from exc
+                # An import session holds its grid across many adds while a cell edit may land
+                # between two of them: the worksheet re-read itself, so re-read the grid and
+                # place this row once more (the edit survives, the row still lands).
+                grid = session.grid = _Grid(worksheet)
+                continue
+            break
         _write_profit_formulas(worksheet, [row_number])
         if session is not None:
             # the session's grid follows the write: the next add sees this key and this row
@@ -522,7 +555,12 @@ class LedgerCellWriter:
         grid = _Grid(worksheet)
         targets = sorted({grid.locate(key) for key in keys}, reverse=True)
         for n in targets:
-            worksheet.delete_rows(n)
+            try:
+                worksheet.delete_rows(n)
+            except Exception as exc:  # noqa: BLE001
+                if _is_stale(exc):
+                    raise _stale_conflict(exc) from exc
+                raise
         for key in keys:
             _forget(worksheet, key)  # a row re-created by a scrape starts clean
         return {"deleted": len(targets), "row_numbers": targets}
