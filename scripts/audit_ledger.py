@@ -493,10 +493,13 @@ def check_package_id_per_shipment(sheet: Sheet, opts: Options) -> Result:
         for rows in v.values() if len(rows) > 1
     ]
     if split or numeric:
+        # the failure's lines are the failures; the multi-SKU cartons are information and ride in
+        # the summary only, so the Audit page never flags a normal carton
         return Result(
             "package_id_per_shipment", "FAIL",
-            f"{len(split)} package id(s) under several Shipment numbers, {len(numeric)} numeric cell(s)",
-            _truncate(split + numeric + cartons, opts.max_detail),
+            f"{len(split)} package id(s) under several Shipment numbers, {len(numeric)} numeric cell(s)"
+            + (f"; {len(cartons)} multi-SKU carton(s), normal" if cartons else ""),
+            _truncate(split + numeric, opts.max_detail),
         )
     if cartons:
         return Result(

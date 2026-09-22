@@ -1298,6 +1298,18 @@ class TestPackageIdPerShipment:
         r = result_for(sheet, "package_id_per_shipment")
         assert r.status == "FAIL"
         assert "package NxWmqLBj2 sits under shipments ['1', '2']" in r.details[0]
+        # the Audit page maps the line to its rows
+        from web.audit_view import rows_named
+        assert rows_named(r.details[0]) == [2, 3]
+
+    def test_a_failure_leaves_the_cartons_out_of_its_lines(self):
+        """A normal multi-SKU carton beside a real failure is counted in the summary, never flagged."""
+        sheet = build(self._row(2, shipment=1), self._row(3, shipment=2),
+                      self._row(4, package_id="CARTON", shipment=3, **{"Item Name": Cell("A")}),
+                      self._row(5, package_id="CARTON", shipment=3, **{"Item Name": Cell("B")}))
+        r = result_for(sheet, "package_id_per_shipment")
+        assert r.status == "FAIL" and "1 multi-SKU carton(s), normal" in r.summary
+        assert not any("CARTON" in line for line in r.details)
 
     def test_a_retired_row_keeps_its_id_under_another_number_without_failing(self):
         sheet = build(self._row(2, shipment=1),

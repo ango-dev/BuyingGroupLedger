@@ -1953,6 +1953,14 @@ class TestAuditPage:
         assert rows_named("row 157, Card Last 4: stored as a number") == [157]
         assert rows_named("rows [2, 3]: order O1 shipment '1'") == [2, 3]
         assert rows_named("12 cell(s) never filled -- run the backfill") == []
+        # a bracketed list anywhere
+        assert rows_named("order 111-1 package NxW sits under shipments ['1', '2']: rows [2, 3]") == [2, 3]
+        assert rows_named("order 111-1: Retailer differs -- 'Costco' rows [4, 5], 'Amazon' rows [6]") == [4, 5, 6]
+        assert rows_named("111-1 ship 2: key changed -- was 'A' (row 57), now 'B' (row 9)") == []  # older-snapshot rows
+        from web.audit_view import order_named
+        assert order_named("order 113-9990003-1234567: shipments [1, 3] -- 2 is missing") == ("113-9990003-1234567", "")
+        assert order_named("order 113-1 package NxWmq: shipping $5 on every row") == ("113-1", "NxWmq")
+        assert order_named("row 5: order 113-1 has no status") is None
 
     def test_the_report_refuses_every_non_get(self, client):
         assert client.post("/audit").status_code == 405

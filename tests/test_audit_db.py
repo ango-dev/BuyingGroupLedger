@@ -124,3 +124,45 @@ class TestReconOverTheDatabase:
         assert "<h1>Reconciliation</h1>" in body
         assert "1399000017" in body and "short-paid by $20.00" in body
         assert "BBY01-1" not in body.split('id="orders-table"')[1]
+
+
+def test_a_failing_line_naming_its_order_flags_that_orders_rows(tmp_path):
+    """a line
+    naming rows mid-line, or naming only its order (and package), puts those rows on the page."""
+    from scripts.audit_ledger import Result
+    from web import audit_view
+
+    class FakeSheet:
+        header = ["Order ID", "Package ID"]
+        grid = [["Order ID", "Package ID"], ["A1", "P1"], ["A1", "P2"], ["B2", ""]]
+
+        def __init__(self, grids):
+            pass
+
+        def ledger_rows(self, grid):
+            return [(n, grid[n - 1]) for n in range(2, len(grid) + 1)]
+
+        def cell(self, grid, n, name):
+            return grid[n - 1][self.header.index(name)]
+
+        def primary_key(self, grid, n):
+            return (grid[n - 1][0], "2026-01-01", f"item{n}", "1")
+
+    class Grids:
+        formatted = FakeSheet.grid
+
+    results = [Result("shipment_numbers_contiguous", "WARN", "1 order", ["order B2: shipments [1, 3] -- 2 is missing"]),
+               Result("shipping_is_cost_weighted", "FAIL", "1 package", ["order A1 package P2: the same amount on every row"]),
+               Result("package_id_per_shipment", "FAIL", "1 id", ["order A1 package P1 sits under shipments ['1', '2']: rows [2, 3]"]),
+               Result("key_changes", "WARN", "1", ["A1 ship 2: key changed -- was 'x' (row 40), now 'y' (row 3)"])]
+    original_sheet, original_run = audit_view.Sheet, audit_view.run_checks
+    audit_view.Sheet, audit_view.run_checks = FakeSheet, lambda sheet, opts: results
+    try:
+        report = audit_view.run_audit(Grids())
+    finally:
+        audit_view.Sheet, audit_view.run_checks = original_sheet, original_run
+    keys = report.keys_by_check
+    assert keys["shipment_numbers_contiguous"] == [("B2", "2026-01-01", "item4", "1")]
+    assert keys["shipping_is_cost_weighted"] == [("A1", "2026-01-01", "item3", "1")]  # the named package only
+    assert keys["package_id_per_shipment"] == [("A1", "2026-01-01", "item2", "1"), ("A1", "2026-01-01", "item3", "1")]
+    assert "key_changes" not in keys and report.notes["key_changes"]  # older-snapshot rows stay a note

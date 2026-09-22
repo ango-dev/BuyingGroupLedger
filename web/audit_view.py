@@ -18,8 +18,16 @@ from typing import Callable
 
 from scripts.audit_ledger import Grids, Options, Result, Sheet, read_grids, run_checks
 
-#: The row numbers a detail line names: "row 157: ...", "row 157, Card: ...", "rows [2, 3]: ...".
+#: The row numbers a detail line names: "row 157: ...", "row 157, Card: ...", "rows [2, 3]: ..." at
+#: the start, or a bracketed list anywhere ("... sits under shipments ['1', '2']: rows [2, 3]",
+#: "... differs -- 'Costco' rows [4, 5]"). A bare "(row 57)" mid-line is NOT read: a snapshot
+#: comparison names rows of an OLDER snapshot that way, which would point at the wrong row today.
 _ROWS = re.compile(r"^rows?\s+([\d,\s\[\]]+)")
+_ROW_LIST = re.compile(r"\brows\s+\[([\d,\s]+)\]")
+#: A line that names no row but names its order ("order 113-...: shipments [1, 3] -- ..."), and
+#: optionally one package of it ("order 113-... package NxW...: ..."): "I
+#: thought all warnings and failures show up on the audit table".
+_ORDER = re.compile(r"^order\s+(?P<order>[^\s:]+)(?:\s+package\s+(?P<package>[^\s:]+))?\s*:")
 #: Statuses whose details are findings that put a row on the page. A PASS has none, a SKIP is a
 #: note, and an INFO is information the panel shows but no row is flagged for.
 FINDING_STATUSES = ("FAIL", "WARN")
@@ -28,10 +36,20 @@ RowKey = tuple[str, str, str, str]
 
 
 def rows_named(line: str) -> list[int]:
-    match = _ROWS.match(line.strip())
-    if not match:
-        return []
-    return [int(x) for x in re.findall(r"\d+", match.group(1))]
+    text = line.strip()
+    match = _ROWS.match(text)
+    if match:
+        return [int(x) for x in re.findall(r"\d+", match.group(1))]
+    found: list[int] = []
+    for group in _ROW_LIST.findall(text):
+        found.extend(int(x) for x in re.findall(r"\d+", group))
+    return list(dict.fromkeys(found))
+
+
+def order_named(line: str) -> tuple[str, str] | None:
+    """(order id, package id or "") for a line that names its order rather than its rows."""
+    match = _ORDER.match(line.strip())
+    return (match.group("order"), match.group("package") or "") if match else None
 
 
 def key_of(order_id, order_date, item_name, shipment) -> RowKey:
@@ -89,11 +107,25 @@ def run_audit(grids: Grids, *, stale_days: int = 3, now=None) -> AuditReport:
     results = run_checks(sheet, Options(max_detail=10_000_000, stale_days=stale_days, now=now))
     report = AuditReport(results=results)
     grid = grids.formatted
+    by_order: dict[str, list[tuple[int, str]]] = {}  # order id -> [(row, package id)], built on first need
+
+    def rows_of(order_id: str, package: str) -> list[int]:
+        if not by_order:
+            has_package = "Package ID" in sheet.header
+            for n, _row in sheet.ledger_rows(grid):
+                oid = str(sheet.cell(grid, n, "Order ID")).strip()
+                pid = str(sheet.cell(grid, n, "Package ID")).strip() if has_package else ""
+                by_order.setdefault(oid, []).append((n, pid))
+        return [n for n, pid in by_order.get(order_id, []) if not package or pid == package]
+
     for r in results:
         if r.status not in FINDING_STATUSES:
             continue
         for line in r.details:
             numbers = rows_named(line)
+            if not numbers:
+                named = order_named(line)
+                numbers = rows_of(*named) if named else []
             if not numbers:
                 report.notes.setdefault(r.name, []).append(line)
                 continue
