@@ -159,7 +159,7 @@ class TestSteps:
         page = fresh.get("/setup/profiles").text
         assert 'action="/setup/profiles/entry"' in page and "Edit profiles as JSON" not in page
         added = fresh.post("/setup/profiles/entry", data={"label": "alpha", "retailers": ["costco"]}, follow_redirects=False)
-        assert added.status_code == 303 and added.headers["location"] == "/setup/profiles"
+        assert added.status_code == 303 and added.headers["location"].startswith("/setup/profiles?message=Added+profile")
         assert [p["label"] for p in config_value("profiles")] == ["alpha"]
         assert fresh.get("/", follow_redirects=False).status_code == 200  # a profile: configured now, the gate opens
         groups = fresh.get("/setup/groups").text
@@ -167,7 +167,7 @@ class TestSteps:
         assert fresh.post("/setup/groups/entry", data={"buying_group": "BFMR"}, follow_redirects=False).status_code == 303
         assert [w["buying_group"] for w in config_value("warehouses")] == ["BFMR"]
         keys = fresh.post("/setup/groups", data={"BFMR_API_KEY": "K", "BFMR_API_SECRET": "S"}, follow_redirects=False)
-        assert keys.headers["location"] == "/setup/groups" and config_value("buying_groups.bfmr.api_key") == "K"
+        assert keys.headers["location"].startswith("/setup/groups?message=Saved") and config_value("buying_groups.bfmr.api_key") == "K"
         assert fresh.post("/setup/cards/entry", data={"name": "Prime Visa", "last4": "0315", "cashback_rate": "5%"},
                           follow_redirects=False).status_code == 303
         assert config_value("cards")[0]["last4"] == "0315"
@@ -256,3 +256,111 @@ class TestSettingsPageStillWhole:
                        'action="/settings/section/profiles/entry/0/delete"', "Edit profiles as JSON", 'id="s-advanced"',
                        'for="f-LOOKBACK_DAYS"', 'id="s-setup"'):
             assert marker in body, marker
+
+
+# --------------------------------------------------------------------------------------------------
+# Trust: Done means done, the strip tells the truth, a
+# refused form keeps what was typed, errors read as sentences, twins and blanks are refused
+# --------------------------------------------------------------------------------------------------
+
+
+class TestTrust:
+    def test_done_needs_a_profile_and_the_strip_never_links_ahead_on_a_fresh_install(self, fresh):
+        """A GET of /setup/done used to stamp the install complete with zero profiles (and every step
+        chip was a link, so a click on "10. Done" did it); now it bounces to Profiles with the reason."""
+        done = fresh.get("/setup/done", follow_redirects=False)
+        assert done.status_code == 303 and done.headers["location"].startswith("/setup/profiles?message=")
+        assert "profile" in done.headers["location"].lower() and state_record().get("completed_at") is None
+        assert fresh.get("/orders", follow_redirects=False).headers["location"] == "/setup"
+        strip = fresh.get("/setup/password").text
+        strip = strip[strip.index('<ol class="setup-steps">'):strip.index("</ol>")]
+        assert 'href="/setup/restore"' in strip and 'href="/setup/password"' in strip  # behind and current: links
+        assert 'href="/setup/browser_use"' not in strip and 'href="/setup/done"' not in strip  # ahead: not links
+        assert "<span>3. Browser-Use key</span>" in strip and 'aria-current="step"' in strip
+        fresh.post("/setup/profiles/entry", data={"label": "alpha", "retailers": ["costco"]}, follow_redirects=False)
+        assert fresh.get("/setup/done").status_code == 200 and state_record()["completed_at"]
+        strip = fresh.get("/setup/password").text
+        assert 'href="/setup/done"' in strip  # configured: every step reachable
+
+    def test_the_step_ticks_mean_has_a_value_not_was_visited(self, fresh):
+        import re
+
+        def done_titles(key):
+            body = fresh.get(f"/setup/{key}").text
+            strip = body[body.index('<ol class="setup-steps">'):body.index("</ol>")]
+            chips = re.findall(r'<li class="([^"]*)"[^>]*>(?:<a[^>]*>|<span>)(\d+\. [^<]+)', strip)
+            assert len(chips) == 10
+            return [title for classes, title in chips if "done" in classes.split()]
+        assert done_titles("schedule") == ["1. Restore a backup"]  # skipping ahead ticks nothing but the optional step passed
+        fresh.post("/setup/password", data={"password": "pw", "confirm": "pw"}, follow_redirects=False)
+        fresh.post("/setup/cards/entry", data={"name": "Prime Visa", "last4": "0315", "cashback_rate": "5%"}, follow_redirects=False)
+        assert done_titles("restore") == ["2. Dashboard password", "6. Cards"]
+        fresh.post("/setup/alerts", data={"GMAIL_ADDRESS": "me@example.com", "GMAIL_ALERTS_ENABLED": "on"}, follow_redirects=False)
+        fresh.post("/setup/schedule", data={"RUN_INTERVAL_HOURS": "4"}, follow_redirects=False)
+        assert done_titles("restore") == ["2. Dashboard password", "6. Cards", "7. Alerts", "8. Schedule and backups"]
+
+    def test_a_refused_form_keeps_what_was_typed_and_says_it_in_words(self, fresh):
+        bad = fresh.post("/setup/schedule", data={"RUN_INTERVAL_HOURS": "6", "BACKUP_KEEP": "abc", "BACKUP_TIME": "0400", "TZ": "Mars/Olympus"})
+        assert bad.status_code == 400 and "Nothing was saved" in bad.text
+        assert 'value="Mars/Olympus"' in bad.text and 'value="0400"' in bad.text and 'value="abc"' in bad.text  # typed, not the file's
+        assert "is not a whole number" in bad.text and "invalid literal" not in bad.text
+        assert config_value("container.timezone") is None
+        card = fresh.post("/setup/cards/entry", data={"name": "Prime Visa", "last4": "0315", "cashback_rate": "abc"})
+        assert card.status_code == 400 and 'value="Prime Visa"' in card.text and 'value="abc"' in card.text  # the add card keeps its fields
+        assert "pydantic" not in card.text and "[type=" not in card.text and "is not a number" in card.text
+        assert 'id="add-cards" open' in card.text
+        percent = fresh.post("/setup/cards/entry", data={"name": "Prime Visa", "last4": "0315", "cashback_rate": "2"})
+        assert percent.status_code == 400 and "outside 0-1" in percent.text and "For further information" not in percent.text
+
+    def test_twins_and_blank_identities_are_refused(self, fresh):
+        assert fresh.post("/setup/profiles/entry", data={"label": "alpha", "retailers": ["costco"]}, follow_redirects=False).status_code == 303
+        twin = fresh.post("/setup/profiles/entry", data={"label": "Alpha", "retailers": ["amazon"]})
+        assert twin.status_code == 400 and "already exists (entry 1)" in twin.text and len(config_value("profiles")) == 1
+        blank = fresh.post("/setup/profiles/entry", data={"label": "   ", "retailers": ["amazon"]})
+        assert blank.status_code == 400 and "Label is required" in blank.text and len(config_value("profiles")) == 1
+        fresh.post("/setup/cards/entry", data={"name": "Prime Visa", "last4": "0315"}, follow_redirects=False)
+        assert fresh.post("/setup/cards/entry", data={"name": "Other", "last4": "0315"}).status_code == 400
+        assert fresh.post("/setup/cards/entry", data={"name": "", "last4": "1234"}).status_code == 400
+        assert "four digits" in fresh.post("/setup/cards/entry", data={"name": "Short", "last4": "12"}).text
+        assert [c["last4"] for c in config_value("cards")] == ["0315"]
+        fresh.post("/setup/groups/entry", data={"buying_group": "BFMR"}, follow_redirects=False)
+        assert "already exists" in fresh.post("/setup/groups/entry", data={"buying_group": "bfmr"}).text
+        assert "Buying group is required" in fresh.post("/setup/groups/entry", data={"buying_group": ""}).text
+        # an edit of the entry itself is not a twin of itself
+        assert fresh.post("/setup/cards/entry/0", data={"name": "Prime Visa Renamed", "last4": "0315"}, follow_redirects=False).status_code == 303
+        # a virtual number of a card that does not exist is refused, naming the control
+        orphan = fresh.post("/setup/cards/entry", data={"name": "V", "last4": "9999", "kind": "virtual", "virtual_of": "4242"})
+        assert orphan.status_code == 400 and "No card ends in 4242" in orphan.text and "Shares limits with" in orphan.text
+
+    def test_the_restart_flag_clears_with_the_restart_and_the_schedule_has_bounds(self, fresh):
+        assert fresh.post("/setup/schedule", data={"RUN_INTERVAL_HOURS": "-3"}).status_code == 400
+        assert "at least 1" in fresh.post("/setup/schedule", data={"RUN_INTERVAL_HOURS": "0"}).text
+        assert "between 1 and 23" in fresh.post("/setup/schedule", data={"RUN_INTERVAL_HOURS": "24"}).text
+        assert "at least 1" in fresh.post("/setup/schedule", data={"RUN_INTERVAL_HOURS": "4", "BACKUP_KEEP": "0"}).text
+        assert config_value("container.run_interval_hours") is None
+        fresh.post("/setup/schedule", data={"RUN_INTERVAL_HOURS": "4"}, follow_redirects=False)
+        assert state_record()["restart"] == "container"
+        fresh.post("/settings/restart-container", follow_redirects=False)
+        assert state_record()["restart"] == "" and fresh.container_restarts == [1]
+        fresh.post("/setup/password", data={"password": "pw", "confirm": "pw"}, follow_redirects=False)
+        assert state_record()["restart"] == "dashboard"
+        fresh.post("/settings/restart", follow_redirects=False)
+        assert state_record()["restart"] == "" and fresh.restarts == [1]
+
+    def test_a_file_that_is_not_a_zip_stays_on_the_step_and_is_not_kept(self, fresh):
+        response = fresh.post("/setup/restore", files={"archive": ("notes.zip", b"this is not a zip", "application/zip")}, follow_redirects=False)
+        assert response.status_code == 303 and "not+a+backup+zip" in response.headers["location"]
+        assert not list((fresh.root / "backups").glob("uploaded_*")) and state_record().get("completed_at") is None
+        assert "not a backup zip" in fresh.get(response.headers["location"]).text
+
+    def test_saves_say_so_and_the_password_change_notice_shows_on_the_next_step(self, config_file, tmp_path):
+        config_file(profiles=[PROFILE], web={"password": "old"})
+        client = _client(tmp_path, password="old")
+        client.post("/login", data={"password": "old", "next": "/"})
+        response = client.post("/setup/password?again=1", data={"password": "new", "confirm": "new"}, follow_redirects=False)
+        nxt = client.get(response.headers["location"]).text
+        assert "The password changed" in nxt and "sign in with the new one" in nxt
+        keys = client.post("/setup/groups?again=1", data={"BFMR_API_KEY": "K"}, follow_redirects=False)
+        assert "message=" in keys.headers["location"] and "Saved" in client.get(keys.headers["location"]).text
+        added = client.post("/setup/cards/entry?again=1", data={"name": "Prime Visa", "last4": "0315"}, follow_redirects=False)
+        assert "Added+card" in added.headers["location"]

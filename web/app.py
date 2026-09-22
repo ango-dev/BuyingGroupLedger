@@ -19,8 +19,9 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
-from typing import Callable
+from typing import Callable, Mapping
 from urllib.parse import urlencode
+import zipfile
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -1912,19 +1913,36 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     # ---- the setup wizard (web/setup_wizard.py): the Settings page's fields, one step at a time ------------
     def setup_page(request: Request, key: str, *, errors: list[str] | None = None, message: str = "",
-                   open_section: str = "", status: int = 200, **extra):
+                   open_section: str = "", status: int = 200, typed: Mapping | None = None, **extra):
+        """`typed`: the submitted form of a refused save, so the page shows what was typed rather
+        than the file's values."""
         step = setup_wizard.step(key)
         again = request.query_params.get("again") == "1" or setup_wizard.rerunning()
         nxt = setup_wizard.next_step(key)
         prev = setup_wizard.prev_step(key)
         suffix = "?again=1" if again else ""
         rows = settings_form.view(step.scalar_settings(), os.environ) if step.kind in ("scalars", "entries", "password") else []
+        if typed is not None:
+            for row in rows:
+                s = row["setting"]
+                if s.secret:
+                    continue
+                if s.kind == "bool":
+                    row["value"] = "on" if str(typed.get(s.env, "")).strip().lower() in ("on", "true", "1", "yes") else ""
+                elif s.env in typed:
+                    row["value"] = str(typed.get(s.env, "") or "")
         today = clock().date().isoformat()
         entries = settings_form.display_entries(step.section, today=today) if step.section else []
+        draft = settings_form.draft_entry(step.section, typed, today) if (typed is not None and step.section and open_section == step.section) else None
+        index = setup_wizard.index(key)
+        # a chip is ticked when its step has a value; an optional step once it is behind you
+        done_keys = {s.key for i, s in enumerate(setup_wizard.STEPS)
+                     if (s.optional and i < index) or setup_wizard.step_has_value(s)}
         response = page_no_snapshot(
-            request, "setup.html", step=step, steps=setup_wizard.STEPS, index=setup_wizard.index(key), again=again,
+            request, "setup.html", step=step, steps=setup_wizard.STEPS, index=index, again=again, done_keys=done_keys,
             next_url=f"/setup/{nxt.key}{suffix}" if nxt else "", prev_url=f"/setup/{prev.key}{suffix}" if prev else "",
-            rows=rows, entries=entries, errors=errors or [], message=message, open_section=open_section,
+            rows=rows, entries=entries, draft=draft, errors=errors or [], message=message, open_section=open_section,
+            signin_again=request.query_params.get("signin") == "1",
             hidden_envs=settings_form.hidden_envs(), section_title=settings_form.section_title,
             field_label=settings_form.field_label, retailer_keys=settings_form.RETAILER_KEYS,
             auth_retailers=settings_form.AUTH_RETAILERS, profile_labels=settings_form.profile_labels(),
@@ -1952,12 +1970,18 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except KeyError:
             raise HTTPException(status_code=404)
         if step.kind == "done":
+            restored = request.query_params.get("restored") == "1"
+            if not restored and not setup_wizard.is_configured():
+                # Done means done: a profile is what makes the install configured, and stamping the
+                # record without one left the next process ungated
+                again = request.query_params.get("again") == "1" or setup_wizard.rerunning()
+                return RedirectResponse(url="/setup/profiles?" + urlencode({"message": "Add at least one profile first: the setup is complete once a profile exists."})
+                                        + ("&again=1" if again else ""), status_code=303)
             setup_wizard.mark_complete(clock)
             setup_wizard.clear_rerun()
             setup_state["needed"] = False
             return setup_page(request, key, message=request.query_params.get("message", ""),
-                              restored=request.query_params.get("restored") == "1",
-                              summary=setup_summary(), signin_again=request.query_params.get("signin") == "1")
+                              restored=restored, summary=setup_summary())
         return setup_page(request, key, message=request.query_params.get("message", ""))
 
     def setup_summary() -> list[tuple[str, str]]:
@@ -2043,32 +2067,37 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         try:
             changes = settings_form.apply_scalars(form, settings=step.scalar_settings(), skip=settings_form.hidden_envs())
         except settings_form.SettingsError as exc:
-            return setup_page(request, key, errors=exc.errors, status=400)
+            return setup_page(request, key, errors=exc.errors, status=400, typed=form)
         if changes:
             setup_wizard.note_restart(settings_form.restart_needed(changes))
             act("settings", f"Setup: {step.title} saved: {', '.join(sorted(changes))}", {"changed": sorted(changes)})
         if step.kind == "entries":
-            suffix = "?again=1" if (request.query_params.get("again") == "1" or setup_wizard.rerunning()) else ""
-            return RedirectResponse(url=f"/setup/{key}{suffix}", status_code=303)
+            again = request.query_params.get("again") == "1" or setup_wizard.rerunning()
+            query = {"message": f"Saved {len(changes)} setting(s)." if changes else "Nothing changed."}
+            return RedirectResponse(url=f"/setup/{key}?" + urlencode(query) + ("&again=1" if again else ""), status_code=303)
         return setup_next(key, request)
 
     async def setup_entry(request: Request, key: str, index: int | None, delete: bool = False):
         step = setup_wizard.step(key)
         if not step.section:
             raise HTTPException(status_code=404)
-        suffix = "?again=1" if (request.query_params.get("again") == "1" or setup_wizard.rerunning()) else ""
+        again = request.query_params.get("again") == "1" or setup_wizard.rerunning()
+        form = None
         try:
             if delete:
                 label = settings_form.delete_entry(step.section, index)
+                what = f"Removed {step.section[:-1]} {label}."
                 act("settings", f"Setup: removed {step.section[:-1]} {label}", {"path": step.section})
             else:
                 form = await request.form()
                 _landed, label = settings_form.apply_entry(step.section, index, form, today=clock().date().isoformat())
+                what = f"{'Added' if index is None else 'Saved'} {step.section[:-1]} {label}."
                 act("settings", f"Setup: {'added' if index is None else 'saved'} {step.section[:-1]} {label}", {"path": step.section})
         except settings_form.SettingsError as exc:
-            return setup_page(request, key, errors=exc.errors, open_section=step.section, status=400)
+            return setup_page(request, key, errors=exc.errors, open_section=step.section if index is None else "", status=400,
+                              typed=form if index is None else None)
         setup_state["needed"] = None  # a profile may just have arrived: re-decide on the next request
-        return RedirectResponse(url=f"/setup/{key}{suffix}", status_code=303)
+        return RedirectResponse(url=f"/setup/{key}?" + urlencode({"message": what}) + ("&again=1" if again else ""), status_code=303)
 
     @app.post("/setup/{key}/entry", response_class=HTMLResponse)
     async def setup_add_entry(request: Request, key: str):
@@ -2138,7 +2167,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             safe_name += ".zip"
         saved = backups_dir / f"uploaded_{safe_name}"
         saved.write_bytes(await archive.read())
-        result = backup_module.restore_backup(saved, repo_root, force=force)
+        try:
+            result = backup_module.restore_backup(saved, repo_root, force=force)
+        except zipfile.BadZipFile:
+            # not a zip at all: say so on the step and keep nothing
+            saved.unlink(missing_ok=True)
+            return {"restored": [], "skipped_existing": [], "ignored": []}, f"That file is not a backup zip ({safe_name}): nothing was restored."
         message = (f"Restored {len(result['restored'])} file(s), kept {len(result['skipped_existing'])}"
                    " existing" + (" (tick overwrite to replace them)" if result["skipped_existing"]
                                   else "") + ".")
@@ -2463,6 +2497,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                                                   "restarting now would abort it. Try again when the "
                                                   "heartbeat shows it finished."], status=423)
         act("settings", "Container restart requested from the Settings page")
+        setup_wizard.clear_restart()  # the wizard's pending-restart note is answered
         restart_container()
         return page(request, "restarting.html", what="container", seconds=90, grace=8,
                     note="The scheduler and the dashboard come back in about half a minute; "
@@ -2471,6 +2506,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.post("/settings/restart", response_class=HTMLResponse)
     def settings_restart(request: Request):
         act("settings", "Dashboard restart requested from the Settings page")
+        setup_wizard.clear_restart()  # the wizard's pending-restart note is answered
         restart()
         return page(request, "restarting.html", what="dashboard", seconds=20, grace=2,
                     note="Back in a few seconds." if in_container

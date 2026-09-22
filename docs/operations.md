@@ -588,7 +588,11 @@ fields, each saving only its own settings: restore a backup (skip it on a new se
 `config.json` ends the wizard), the dashboard password (the browser is signed in for it at once,
 so the restart at the end does not ask), the Browser-Use key, profiles (one is what makes the
 install configured), buying groups with their API keys, cards, alerts, the schedule and backups,
-a pointer to the importer, done. The Done step lists what is set and, when a step changed a
+a pointer to the importer, done. Done needs a profile first (until one exists it sends you to
+Profiles; on a fresh install the steps ahead of the current one are not links), a step's chip is
+ticked when the step has a value rather than because you passed it, a refused save keeps what you
+typed with the reason in words, and a second profile, buying group or card with the same name or
+last 4 is refused naming the first. The Done step lists what is set and, when a step changed a
 setting the dashboard or the container reads at start, offers that restart. The record is
 `setup` in `.state.json`; an install that already has profiles is stamped complete the first time
 the dashboard sees it and is never interrupted. *Run the setup wizard again* on Settings walks the

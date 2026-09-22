@@ -14,11 +14,14 @@
 </header>
 {% endblock %}
 {% block content %}
+{#- A chip is ticked when its step HAS a value (done_keys), and on a fresh install the steps ahead
+    are not links: Done needs a profile first. -#}
 <ol class="setup-steps">
-  {% for s in steps %}<li class="{{ 'current' if s.key == step.key }}{{ ' done' if loop.index0 < index }}"><a href="/setup/{{ s.key }}{{ '?again=1' if again }}">{{ loop.index }}. {{ s.title }}</a></li>{% endfor %}
+  {% for s in steps %}<li class="{{ 'current' if s.key == step.key }}{{ ' done' if s.key in done_keys }}"{% if s.key == step.key %} aria-current="step"{% endif %}>{% if configured or again or loop.index0 <= index %}<a href="/setup/{{ s.key }}{{ '?again=1' if again }}">{{ loop.index }}. {{ s.title }}</a>{% else %}<span>{{ loop.index }}. {{ s.title }}</span>{% endif %}</li>{% endfor %}
 </ol>
 <h1>{{ step.title }}{% if step.optional %} <span class="muted small">— optional</span>{% endif %}</h1>
 {% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
+{% if signin_again %}<div class="banner warn">The password changed: after the restart, sign in with the new one.</div>{% endif %}
 {% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
 {% if again and step.kind in ('password', 'scalars', 'entries') %}
 <div class="banner ok setup-again">This is set already. Change it below, or <a href="{{ next_url }}"><strong>keep it and continue</strong></a>.</div>

@@ -23,7 +23,7 @@ from typing import Callable
 
 from config import loader
 
-__all__ = ["STEPS", "Step", "is_configured", "mark_complete", "mark_rerun", "needs_setup", "step"]
+__all__ = ["STEPS", "Step", "is_configured", "mark_complete", "mark_rerun", "needs_setup", "step", "step_has_value"]
 
 RESTART_RANK = {"": 0, "next run": 0, "dashboard": 1, "container": 2}
 #: The gate's switch. Off in the test suite (conftest.py): every test runs with an empty config,
@@ -92,6 +92,43 @@ def is_configured(config: dict | None = None) -> bool:
     config = loader.load_config() if config is None else config
     profiles = config.get("profiles")
     return isinstance(profiles, list) and len(profiles) > 0
+
+
+def step_has_value(step: Step, config: dict | None = None) -> bool:
+    """Whether the step's chip may be ticked: the step HAS a value, not merely that it was passed.
+   Optional steps and Done are the
+    page's call (an optional step is ticked once it is behind you)."""
+    config = loader.load_config() if config is None else config
+
+    def value(path: str):
+        node = config
+        for part in path.split("."):
+            node = node.get(part) if isinstance(node, dict) else None
+        return node
+
+    def has(path: str) -> bool:
+        v = value(path)
+        return bool(str(v).strip()) if isinstance(v, (str, int, float)) and not isinstance(v, bool) else bool(v)
+
+    def entries(section: str) -> bool:
+        v = config.get(section)
+        return isinstance(v, list) and len(v) > 0
+
+    if step.key == "password":
+        return has("web.password")
+    if step.key == "browser_use":
+        return has("browser_use.api_key")
+    if step.key == "profiles":
+        return entries("profiles")
+    if step.key == "groups":
+        return entries("warehouses")
+    if step.key == "cards":
+        return entries("cards")
+    if step.key == "alerts":
+        return has("alerts.discord_webhook_url") or has("alerts.gmail_address")
+    if step.key == "schedule":
+        return isinstance(config.get("container"), dict) or isinstance(config.get("backups"), dict)
+    return False
 
 
 def state() -> dict:

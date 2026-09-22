@@ -3,7 +3,7 @@
 {% if step.section == 'profiles' %}<p class="muted">One entry per browser identity: which retailers it is logged into, its proxy, and the sign-in it can perform unattended. Add at least one; the wizard is complete once a profile exists.</p>
 {% elif step.section == 'warehouses' %}<p class="muted">Each buying group and the address jigs that route an order to it; below, the groups' API access.</p>
 {% else %}<p class="muted">Cards by their last 4 digits, with the cashback rate the profit formula nets from COGS.</p>{% endif %}
-{{ entry_section(step.section, singular, entries, fields, action_base='/setup/' ~ step.key ~ ('?again=1' if again else ''), show_json=false) }}
+{{ entry_section(step.section, singular, entries, fields, action_base='/setup/' ~ step.key ~ ('?again=1' if again else ''), show_json=false, draft=draft) }}
 {% if rows %}
 <section class="panel">
   <header><h2>{{ section_title(step.sections[0])[0] }}</h2><p class="muted">{{ section_title(step.sections[0])[1] }}</p></header>

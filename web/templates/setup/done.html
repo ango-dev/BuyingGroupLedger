@@ -4,7 +4,6 @@
   <table class="grid compact summary">
     <tbody>{% for label, value in summary %}<tr><th scope="row">{{ label }}</th><td>{{ value }}</td></tr>{% endfor %}</tbody>
   </table>
-  {% if signin_again %}<div class="banner warn">The password changed: after the restart, sign in with the new one.</div>{% endif %}
 </section>
 {% if restart %}
 {% include "_restart_banner.html" %}

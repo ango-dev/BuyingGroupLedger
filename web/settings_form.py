@@ -365,26 +365,69 @@ _VALIDATORS = {"BACKUP_FREQUENCY": _validate_frequency, "BACKUP_TIME": _validate
                "WEB_LOGIN_ATTEMPTS": _validate_attempts, "WEB_LOGIN_LOCKOUT_MINUTES": _validate_lockout}
 
 
+#: Whole-number settings with a range of their own: the entrypoint falls back to 6 on an interval
+#: outside 1..23 (stderr only), and a keep of 0 would prune every backup.
+_BOUNDS: dict[str, tuple[int, int | None]] = {"RUN_INTERVAL_HOURS": (1, 23), "BACKUP_KEEP": (1, None)}
+
+
 def _parse(setting: Setting, raw: str) -> Any:
+    """The typed text as the value to store. The messages are the page's: a person reads them
+    under the field, so "invalid literal for int() with base 10" is not one of them."""
     text = (raw or "").strip()
     if setting.env in _VALIDATORS:
         return _VALIDATORS[setting.env](text)
     if setting.kind == "int":
         if not text:
             return ""
-        return int(text)
+        try:
+            value = int(text)
+        except ValueError:
+            raise ValueError(f"{text!r} is not a whole number") from None
+        low, high = _BOUNDS.get(setting.env, (None, None))
+        if low is not None and value < low:
+            raise ValueError(f"must be at least {low}")
+        if high is not None and value > high:
+            raise ValueError(f"must be between {low} and {high}")
+        return value
     if setting.kind == "float":
         if not text:
             return ""
-        return float(text)
+        try:
+            return float(text)
+        except ValueError:
+            raise ValueError(f"{text!r} is not a number") from None
     if setting.kind == "rate":
         if not text:
             return ""
-        rate = float(text[:-1].strip()) / 100 if text.endswith("%") else float(text)
+        try:
+            rate = float(text[:-1].strip()) / 100 if text.endswith("%") else float(text)
+        except ValueError:
+            raise ValueError(f"{text!r} is not a rate: write 2% or 0.02") from None
         if not 0 <= rate <= 1:
             raise ValueError("outside 0-1 (write 2% as 0.02 or \"2%\")")
         return text if text.endswith("%") else rate
     return text
+
+
+def humanise_errors(exc: Exception, where: str) -> list[str]:
+    """pydantic's report as lines a person can act on: the field's name, the message without the
+    "Value error, " prefix, and none of the `[type=..., input_value=...] For further information
+    visit https://errors.pydantic.dev/...` tail."""
+    errors = getattr(exc, "errors", None)
+    if not callable(errors):
+        return [f"{where}: {exc}"]
+    out = []
+    for e in errors():
+        loc = " › ".join(str(p).replace("_", " ") for p in (e.get("loc") or ()) if not isinstance(p, int))
+        msg = str(e.get("msg") or "")
+        for prefix in ("Value error, ", "Assertion failed, "):
+            if msg.startswith(prefix):
+                msg = msg[len(prefix):]
+        # Python's own parse messages, as a person would say them
+        msg = re.sub(r"could not convert string to float: (.+)", r"\1 is not a number", msg)
+        msg = re.sub(r"invalid literal for int\(\) with base 10: (.+)", r"\1 is not a whole number", msg)
+        out.append(f"{where}: {loc + ': ' if loc else ''}{msg}")
+    return out or [f"{where}: {exc}"]
 
 
 def apply_scalars(form: Mapping[str, str], settings: list[Setting] | None = None,
@@ -538,45 +581,62 @@ def display_entries(path: str, today: str | None = None) -> list[dict]:
         entry = strip_comments(raw) if isinstance(raw, dict) else {}
         if not isinstance(entry, dict):
             continue
-        if path == "profiles":
-            proxy = entry.get("proxy") or {}
-            auth = entry.get("auth") or {}
-            out.append({
-                "index": index, "label": entry.get("label", ""),
-                "profile_id": entry.get("profile_id", ""),
-                "retailers": [retailers_module.key_of(str(r)) for r in (entry.get("retailers") or [])],  # keys: the boxes compare them
-                "proxy": {"host": proxy.get("host", ""), "port": proxy.get("port", ""),
-                          "username": proxy.get("username", ""),
-                          "password_set": _is_set(proxy.get("password")),
-                          "enabled": proxy.get("enabled", True) is not False} if proxy else None,
-                "auth": [{"retailer": retailers_module.key_of(str(key)), "username": (a or {}).get("username", ""),
-                          "password_set": _is_set((a or {}).get("password")),
-                          "totp_set": _is_set((a or {}).get("totp_secret"))}
-                         for key, a in auth.items()],
-            })
-        elif path == "warehouses":
-            out.append({
-                "index": index, "buying_group": entry.get("buying_group", ""),
-                "jigs": [{"label": j.get("label", ""), "street": j.get("street", ""),
-                          "zip": j.get("zip", ""), "name_contains": j.get("name_contains", ""),
-                          "contains": ", ".join(j.get("contains") or [])}
-                         for j in (entry.get("jigs") or []) if isinstance(j, dict)],
-            })
-        elif path == "cards":
-            caps = [c for c in (entry.get("caps") or []) if isinstance(c, dict)]
-            out.append({
-                "index": index, "last4": entry.get("last4", ""), "name": entry.get("name", ""),
-                "cashback_rate": _rate_text(entry.get("cashback_rate", "")),
-                "profile": entry.get("profile", ""),
-                "virtual": bool(entry.get("virtual")) or bool(entry.get("virtual_of")),
-                "virtual_of": str(entry.get("virtual_of") or ""),
-                "own_bonus": bool(entry.get("own_bonus")),
-                "retailer_rates": [(r, _rate_text(v)) for r, v in (entry.get("retailer_rates") or {}).items()],
-                "caps": [_cap_display(c, today) for c in caps],
-                "rate_rows": _rate_rows(entry.get("retailer_rates") or {}, caps, today),
-                "cap_all": next(({**_cap_display(c, today), "cap_index": j} for j, c in enumerate(caps) if not c.get("retailers")), _cap_display({}, today)),
-            })
+        out.append(_display_one(path, index, entry, today))
     return out
+
+
+def draft_entry(path: str, form: Mapping[str, str], today: str | None = None) -> dict:
+    """A refused add card's fields as typed, in the shape the card macros render, so a 400 keeps
+    what the person wrote instead of a blank card. Built by the
+    same builder the save uses; a value the builder cannot read is shown as typed."""
+    try:
+        entry = _card_from_form(form, {}, today) if path == "cards" else _BUILDERS[path](form, {})
+    except Exception:  # noqa: BLE001 -- the builder's refusal is already on the page
+        entry = {"label": _text(form, "label"), "buying_group": _text(form, "buying_group"),
+                 "last4": _text(form, "last4"), "name": _text(form, "name"),
+                 "cashback_rate": _text(form, "cashback_rate"), "virtual_of": _text(form, "virtual_of")}
+    return _display_one(path, None, entry, today)
+
+
+def _display_one(path: str, index: int | None, entry: dict, today: str | None = None) -> dict:
+    """One entry as its card shows it (see display_entries)."""
+    if path == "profiles":
+        proxy = entry.get("proxy") or {}
+        auth = entry.get("auth") or {}
+        return {
+            "index": index, "label": entry.get("label", ""),
+            "profile_id": entry.get("profile_id", ""),
+            "retailers": [retailers_module.key_of(str(r)) for r in (entry.get("retailers") or [])],  # keys: the boxes compare them
+            "proxy": {"host": proxy.get("host", ""), "port": proxy.get("port", ""),
+                      "username": proxy.get("username", ""),
+                      "password_set": _is_set(proxy.get("password")),
+                      "enabled": proxy.get("enabled", True) is not False} if proxy else None,
+            "auth": [{"retailer": retailers_module.key_of(str(key)), "username": (a or {}).get("username", ""),
+                      "password_set": _is_set((a or {}).get("password")),
+                      "totp_set": _is_set((a or {}).get("totp_secret"))}
+                     for key, a in auth.items()],
+        }
+    if path == "warehouses":
+        return {
+            "index": index, "buying_group": entry.get("buying_group", ""),
+            "jigs": [{"label": j.get("label", ""), "street": j.get("street", ""),
+                      "zip": j.get("zip", ""), "name_contains": j.get("name_contains", ""),
+                      "contains": ", ".join(j.get("contains") or [])}
+                     for j in (entry.get("jigs") or []) if isinstance(j, dict)],
+        }
+    caps = [c for c in (entry.get("caps") or []) if isinstance(c, dict)]
+    return {
+        "index": index, "last4": entry.get("last4", ""), "name": entry.get("name", ""),
+        "cashback_rate": _rate_text(entry.get("cashback_rate", "")),
+        "profile": entry.get("profile", ""),
+        "virtual": bool(entry.get("virtual")) or bool(entry.get("virtual_of")),
+        "virtual_of": str(entry.get("virtual_of") or ""),
+        "own_bonus": bool(entry.get("own_bonus")),
+        "retailer_rates": [(r, _rate_text(v)) for r, v in (entry.get("retailer_rates") or {}).items()],
+        "caps": [_cap_display(c, today) for c in caps],
+        "rate_rows": _rate_rows(entry.get("retailer_rates") or {}, caps, today),
+        "cap_all": next(({**_cap_display(c, today), "cap_index": j} for j, c in enumerate(caps) if not c.get("retailers")), _cap_display({}, today)),
+    }
 
 
 def _rate_rows(retailer_rates: dict, caps: list, today: str | None = None) -> list[dict]:
@@ -801,11 +861,14 @@ def _card_from_form(form: Mapping[str, str], base: dict, today: str | None = Non
     virtual_of = _text(form, "virtual_of")
     if virtual or virtual_of:
         if not virtual_of:  # a virtual card must say which card it is a number of
-            raise SettingsError(["A virtual card must name the card it is a number of (its spend counts "
-                                 "against that card's caps): pick it under \"virtual number of\"."])
+            raise SettingsError(["A virtual card must name the card it is a virtual number of (its spend counts "
+                                 "against that card's caps): pick it under \"Shares limits with\"."])
         parent = next((e for e in _entries("cards") if isinstance(e, dict)
                        and str(e.get("last4", "")) == virtual_of), None)
-        if parent is not None and (parent.get("virtual") or parent.get("virtual_of")):
+        if parent is None:
+            raise SettingsError([f"No card ends in {virtual_of}: pick the card this number belongs to under "
+                                 "\"Shares limits with\" (add that card first)."])
+        if parent.get("virtual") or parent.get("virtual_of"):
             raise SettingsError([f"{parent.get('name', virtual_of)} …{virtual_of} is itself a virtual number: a virtual "
                                  "card belongs to a real card."])
         entry["virtual"] = True
@@ -923,6 +986,30 @@ def _money_value(text: str):
 _BUILDERS = {"profiles": _profile_from_form, "warehouses": _warehouse_from_form,
              "cards": _card_from_form}
 
+#: What names an entry of each section: the field, its label on the page, and how the file
+#: matches on it. A blank one used to save (the browser's `required` was the only guard), and a
+#: twin used to save beside the first and shadow it.
+_IDENTITY = {"profiles": ("label", "Label"), "warehouses": ("buying_group", "Buying group"), "cards": ("last4", "Last 4")}
+
+
+def _check_identity(path: str, index: int | None, entry: dict, entries: list) -> None:
+    field, label = _IDENTITY[path]
+    value = str(entry.get(field, "") or "").strip()
+    if not value:
+        raise SettingsError([f"{label} is required."])
+    if path == "cards":
+        if not (value.isdigit() and len(value) == 4):
+            raise SettingsError([f"{label} must be the card's four digits, got {value!r}."])
+        if not str(entry.get("name", "") or "").strip():
+            raise SettingsError(["Name is required."])
+    for i, other in enumerate(entries):
+        if i == index or not isinstance(other, dict):
+            continue
+        if str(other.get(field, "") or "").strip().lower() == value.lower():
+            noun = {"profiles": "profile", "warehouses": "buying group", "cards": "card"}[path]
+            raise SettingsError([f"A {noun} {'ending in' if path == 'cards' else 'named'} {value!r} already exists "
+                                 f"(entry {i + 1}): edit that one, or pick another {label.lower()}."])
+
 
 def entry_key(path: str, entry: dict) -> str:
     """The key a card on the page carries (data-key): "profiles:<label>", "warehouses:<group>", "cards:<last4>"."""
@@ -951,14 +1038,15 @@ def apply_entry(path: str, index: int | None, form: Mapping[str, str], today: st
     if index is not None and not 0 <= index < len(entries):
         raise SettingsError([f"{path}[{index}] does not exist (the page may be stale; reload it)"])
     base = dict(entries[index]) if index is not None and isinstance(entries[index], dict) else {}
+    where = f"{path}[{index}]" if index is not None else f"new {path[:-1]}"
     try:
         entry = _card_from_form(form, base, today) if path == "cards" else _BUILDERS[path](form, base)  # a card's logs date a blank row today
+        _check_identity(path, index, entry, entries)
         model.model_validate(strip_comments(entry))
     except SettingsError:
         raise
-    except Exception as exc:  # noqa: BLE001 -- pydantic's / int()'s message is the useful part
-        where = f"{path}[{index}]" if index is not None else f"new {path[:-1]}"
-        raise SettingsError([f"{where}: {exc}"]) from exc
+    except Exception as exc:  # noqa: BLE001 -- pydantic's message is the useful part, once humanised
+        raise SettingsError(humanise_errors(exc, where)) from exc
     if index is None:
         entries.append(entry)
         index = len(entries) - 1
