@@ -7,9 +7,9 @@
 <div id="toast" role="status" aria-live="polite"></div>
 {% if message %}<div class="banner ok">{{ message }}</div>{% endif %}
 <div id="restart-banner">{% include "_restart_banner.html" %}</div>
-{% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
+{% if errors %}<div class="banner warn"><strong>Nothing was saved.</strong><ul>{% for e in errors %}<li>{{ e | labelled }}</li>{% endfor %}</ul></div>{% endif %}
 
-<p class="muted">Edits <code>{{ config_path }}</code> in place. Most changes apply to the next run; <span class="tag">container restart</span> and <span class="tag">dashboard restart</span> say when one is needed, and <span class="tag stale">env override</span> means the environment wins for the running process.</p>
+<p class="muted">Edits <code>config.json</code> in place. Most changes apply to the next run; <span class="tag">container restart</span> and <span class="tag">dashboard restart</span> say when one is needed, and <span class="tag stale">env override</span> means the environment wins for the running process.</p>
 
 <div class="settings-layout">
   <nav class="settings-nav" aria-label="settings sections">
@@ -21,7 +21,7 @@
     <a href="#s-cards">Cards</a>
     <div class="group">Maintenance</div>
     <a href="#s-backup">Backup &amp; Restore</a>
-    <a href="#s-setup">Setup wizard</a>
+    <a href="#s-setup">Setup Wizard</a>
     <a href="#s-advanced" class="danger-link">Advanced</a>
   </nav>
 

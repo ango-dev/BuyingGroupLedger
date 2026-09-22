@@ -248,7 +248,7 @@ class TestSettingsPage:
         form = {s.env: "" for s in settings_form.schema()}
         response = client.post("/settings", data={**form, "LOOKBACK_DAYS": "nope"})
         assert response.status_code == 400
-        assert "Nothing was saved" in response.text and "LOOKBACK_DAYS:" in response.text
+        assert "Nothing was saved" in response.text and "Lookback days:" in response.text and "LOOKBACK_DAYS:" not in response.text
         assert config_value("scraping.lookback_days") == 3
 
     def test_structured_sections_render_and_save(self, client):
@@ -299,7 +299,7 @@ class TestSettingsPage:
     def test_the_container_prompt_offers_the_button(self, client):
         body = client.get("/settings", params={"restart": "container"}).text
         banner = body[body.index("restart-prompt"):body.index("</div>", body.index("restart-prompt"))]
-        assert "Restart the container now" in banner and 'action="/settings/restart-container"' in banner
+        assert "Restart container" in banner and 'action="/settings/restart-container"' in banner
 
     def test_the_compose_mount_is_writable_for_this_page(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
@@ -420,7 +420,7 @@ class TestEntryCards:
         body = client.get("/settings").text
         card = body[body.index('action="/settings/section/cards/entry/0"'):body.index("</article>") if "</article>" in body else len(body)]
         card = card[:card.index("</form>")]
-        assert 'form="del-cards-0"' in card and "\u2715 Remove" in card  # inside the card's own form
+        assert 'form="del-cards-0"' in card and "\u2715 Delete" in card  # inside the card's own form
         assert 'id="del-cards-0"' in body and 'action="/settings/section/cards/entry/0/delete"' in body
         assert 'class="entry-delete" hidden' in body and "display: contents" not in body
 
@@ -489,7 +489,7 @@ class TestEntryCards:
         assert config_value("cards")[1] == {"last4": "8765", "name": "Citi Double Cash",
                                             "cashback_rate": "2%", "profile": "p1"}
         response = client.post("/settings/section/cards/entry/0/delete", follow_redirects=False)
-        assert response.status_code == 303 and "Removed+card+USB" in response.headers["location"]
+        assert response.status_code == 303 and "Deleted+card+USB" in response.headers["location"]
         assert [c["last4"] for c in config_value("cards")] == ["8765"]
 
     def test_a_cards_spend_caps_round_trip_through_the_form(self, client):
@@ -585,7 +585,7 @@ class TestEntryCards:
         added = client.post("/settings/section/cards/entry", headers=hx, data={"name": "Second", "last4": "2222"})
         assert added.status_code == 200 and 'data-key="cards:2222" open>' in added.text
         removed = client.post("/settings/section/cards/entry/1/delete", headers=hx)
-        assert removed.status_code == 200 and "Removed card Second" in removed.text and 'data-key="cards:2222"' not in removed.text
+        assert removed.status_code == 200 and "Deleted card Second" in removed.text and 'data-key="cards:2222"' not in removed.text
         # the wizard's copy of the form still posts plainly
         assert "hx-post" not in client.get("/setup/cards").text.split('id="s-cards"')[-1].split("</section>")[0]
 
@@ -673,7 +673,7 @@ class TestEntryCards:
         # removing the last entry deletes its card; removing one before it shifts the others' indexes: the section
         gone = client.post("/settings/section/cards/entry/2/delete", headers={"HX-Request": "true"})
         assert gone.status_code == 200 and gone.headers["HX-Reswap"] == "delete" and gone.headers["HX-Retarget"].endswith('[data-key="cards:9999"]')
-        assert 'id="count-cards" hx-swap-oob="true">2</span>' in gone.text and "<details" not in gone.text and "Removed card" in gone.text
+        assert 'id="count-cards" hx-swap-oob="true">2</span>' in gone.text and "<details" not in gone.text and "Deleted card" in gone.text
         shifted = client.post("/settings/section/cards/entry/0/delete", headers={"HX-Request": "true"})
         assert shifted.status_code == 200 and "HX-Retarget" not in shifted.headers and '<section class="panel" id="s-cards">' in shifted.text
         assert [c["last4"] for c in config_value("cards")] == ["8765"]

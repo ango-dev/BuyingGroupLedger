@@ -55,7 +55,7 @@
   <h3>Shipment {{ s.shipment }} <span class="tag status-{{ s.status }}">{{ s.status }}</span></h3>
   <dl class="inline">
     <dt>Tracking Number</dt>
-    <dd class="mono">{% if s.tracking_number %}{% if s.tracking_url | href %}<a href="{{ s.tracking_url | href }}" rel="noopener">{{ s.tracking_number }}</a>{% else %}{{ s.tracking_number }}{% endif %}{% else %}<span class="muted">none yet</span>{% endif %}</dd>
+    {% if s.tracking_number %}<dd class="mono">{% if s.tracking_url | href %}<a href="{{ s.tracking_url | href }}" rel="noopener">{{ s.tracking_number }}</a>{% else %}{{ s.tracking_number }}{% endif %}</dd>{% else %}<dd><span class="muted">—</span></dd>{% endif %}
     <dt>Tracking Submitted</dt><dd>{{ '✓ submitted to the buying group' if s.tracking_submitted else 'not submitted' }}</dd>
     <dt>Delivery Date</dt><dd>{{ s.delivery_date or '—' }}{% if s.delivery_date and s.status in ('ordered', 'shipped') %} <span class="tag committed" title="the retailer's estimated delivery date, until the run sees the package land">est.</span>{% endif %}</dd>
     <dt>Package ID</dt><dd class="mono">{{ s.package_id or '—' }}</dd>

@@ -545,7 +545,7 @@ class TestOrdersRoutes:
         response = client.post("/orders/cell", data={**KEY, "field": "insurance", "value": "2", "expected": "6.4", "protect": "0"})
         assert response.status_code == 200 and "data-error" not in response.text
         events = (logs_dir / "activity.jsonl").read_text(encoding="utf-8")
-        assert "a correction; runs may overwrite it" in events
+        assert "not a hand edit: runs may overwrite it" in events
 
     def test_a_choice_cell_write_refreshes_the_dropdown_out_of_band(self, sheet, tmp_path, logs_dir):
         """a value typed and then changed back must not linger in the dropdown --
@@ -837,7 +837,7 @@ class TestCardsView:
         response = client.post("/orders/delete", data={"sel": [html_module.unescape(v) for v in values],
                                                        "view": "cards", "q": "BBY01-1"})
         assert "Deleted 2 row(s)" in response.text and len(sheet.deleted) == 2
-        assert "No orders match." in response.text  # re-rendered as cards, under the same filter
+        assert "Nothing to show." in response.text  # re-rendered as cards, under the same filter
 
     def test_confirmations_go_through_the_page_dialog(self, sheet, tmp_path, logs_dir):
         client = TestOrdersRoutes()._client(sheet, tmp_path, logs_dir)

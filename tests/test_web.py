@@ -934,7 +934,7 @@ class TestOrdersPage:
         cards = client.get("/orders", params={"view": "cards"}).text  # the Sort-by control is the cards view's
         assert 'name="sort" value="card_name"' in cards and 'name="sort" value="card_last4"' in cards
         body = client.get("/orders", params={"profile": "nobody"}).text
-        assert "No rows match." in body
+        assert "Nothing to show." in body
 
     def test_sort_links_and_order(self, client):
         body = client.get("/orders", params={"sort": "total_cost", "dir": "desc"},
@@ -1043,7 +1043,7 @@ class TestFailuresPage:
         self._dossier(failures_dir, name, self.REPORT)
         page = client.get("/activity", params={"type": "dossier", "days": "0"}).text
         assert f'href="/activity/dossier/{name}/download"' in page
-        assert page.index(f'href="/activity/dossier/{name}/download"') < page.index(">report</button>")
+        assert page.index(f'href="/activity/dossier/{name}/download"') < page.index(">Report</button>")
         response = client.get(f"/activity/dossier/{name}/download")
         assert response.status_code == 200 and response.headers["content-type"] == "application/zip"
         assert response.headers["content-disposition"] == f'attachment; filename="{name}.zip"'
@@ -2124,7 +2124,7 @@ class TestOverviewAttention:
         body = client.get("/").text
         assert ">Alerts<" in body and ">Failure dossiers<" in body
         assert body.count('action="/activity/acknowledge"') == 2 and 'name="kind" value="alert"' in body
-        assert ">acknowledge all<" in body and 'hx-confirm="Acknowledge all 1 alerts?' in body  # asked once
+        assert ">Acknowledge all<" in body and 'hx-confirm="Acknowledge all 1 alerts?' in body  # asked once
         assert 'hx-post="/activity/acknowledge" hx-target="closest .tile" hx-swap="outerHTML"' in body  # in place, no page load
         assert 'id="confirm"' in body  # the hx-confirm dialog (edit.js routes htmx:confirm to it)
         assert f'name="through" value="{stamp}"' in body
@@ -2164,7 +2164,7 @@ class TestOverviewAttention:
         body = client.get("/activity", params={"type": "alert", "days": "0"}).text
         assert body.count('class="ack-one"') == 2
         row = body[body.index("Costco [p]: first"):]
-        assert row.index('class="ack-one"') < row.index(">details<")  # the button sits left of details
+        assert row.index('class="ack-one"') < row.index(">Details<")  # the button sits left of details
         stamp = first.isoformat(timespec="seconds")
         assert f'name="at" value="{stamp}"' in body and 'name="next" value="/activity?type=alert&amp;days=0"' in body
         done = client.post("/activity/acknowledge", follow_redirects=False,

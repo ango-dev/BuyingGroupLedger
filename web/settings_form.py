@@ -478,6 +478,23 @@ def _parse(setting: Setting, raw: str) -> Any:
     return text
 
 
+_ENV_ERROR = re.compile(r"^([A-Z][A-Z0-9_]+): ")
+
+
+def labelled_error(text: str) -> str:
+    """"LOOKBACK_DAYS: '2.5' is not a whole number" -> "Lookback days: '2.5' is not a whole number":
+    the page shows a setting by its label, so its refusal names it the same way. SettingsError.errors keep the env name for the code and the tests."""
+    m = _ENV_ERROR.match(text or "")
+    if not m:
+        return text
+    by_env = {s.env: s for s in schema()}
+    setting = by_env.get(m.group(1))
+    if setting is None:
+        return text
+    label, group = field_label(setting)
+    return f"{label}{' (' + group + ')' if group else ''}: {text[m.end():]}"
+
+
 def humanise_errors(exc: Exception, where: str) -> list[str]:
     """pydantic's report as lines a person can act on: the field's name, the message without the
     "Value error, " prefix, and none of the `[type=..., input_value=...] For further information

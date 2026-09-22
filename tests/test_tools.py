@@ -241,7 +241,7 @@ class TestTheRoutes:
         assert 'name="label" value="p1" checked' in body
         picked = client.get("/tools", params={"tool": "backfill_tracking"}).text
         assert 'id="t-backfill_tracking"' in picked and 'action="/tools/run/backfill_tracking"' in picked
-        assert "Log a Profile In" not in picked and 'href="/tools?tool=backfill_tracking" class="current"' in picked
+        assert "<h2>Log a Profile In</h2>" not in picked and 'href="/tools?tool=backfill_tracking" class="current"' in picked
         assert "Ledger Fixes · Backfill tracking numbers" in picked
         assert "Log a Profile In" in client.get("/tools", params={"tool": "nope"}).text
 

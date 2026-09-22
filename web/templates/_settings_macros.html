@@ -88,7 +88,7 @@
             {% set have = (p.auth | map(attribute='retailer') | list) if p else [] %}
             <tr class="new-row">
               {% set addable = [] %}{% for r in auth_retailers if r not in have %}{% set _ = addable.append((r, retailer_title(r) | trim)) %}{% endfor %}
-              <td data-label="Retailer">{{ choose('auth_new_retailer', [('', '— Add —')] + addable, '', '', 'cell') }}</td>
+              <td data-label="Retailer">{{ choose('auth_new_retailer', [('', '— add —')] + addable, '', '', 'cell') }}</td>
               <td data-label="Username"><input type="text" name="auth_new_username" placeholder="user"></td>
               <td data-label="Password"><input type="password" name="auth_new_password" autocomplete="new-password" placeholder="pass"></td>
               <td data-label="TOTP seed"><input type="password" name="auth_new_totp_secret" autocomplete="new-password" placeholder="seed"></td>
@@ -139,7 +139,7 @@
     {% macro cap_cells(prefix, cap, hint='default rate') %}
       <td class="narrow"><input type="text" name="{{ prefix }}.spend_limit" value="{{ cap.spend_limit }}" placeholder="no limit"></td>
       <td class="narrow"><input type="text" name="{{ prefix }}.fallback_rate" value="{{ cap.fallback_rate }}" placeholder="{{ hint }}" title="the rate past the limit; blank: {{ hint }}, the everywhere-else rate (or its own fallback once its limit is reached)"></td>
-      <td class="resets"><span class="inline">{{ choose(prefix ~ '.resets', [('calendar-year', 'Each Calendar Year'), ('anniversary', 'On a Date Each Year'), ('never', 'Never')], cap.resets, '', 'cell') }}<input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></span></td>
+      <td class="resets"><span class="inline">{{ choose(prefix ~ '.resets', [('calendar-year', 'each calendar year'), ('anniversary', 'on a date each year'), ('never', 'never')], cap.resets, '', 'cell') }}<input type="text" name="{{ prefix }}.anniversary" value="{{ cap.anniversary }}" placeholder="MM-DD" title="the date the period starts on, MM-DD" class="mono anniversary" {{ 'hidden' if cap.resets != 'anniversary' }}></span></td>
       {#- spend the ledger never sees, as a dated log: the current period's total, the entries
           inside. Only with a spend limit -- an offset means nothing without one; the script shows it as soon as a limit is typed -#}
       {% set limited = cap.spend_limit != '' %}
@@ -160,17 +160,17 @@
       <div class="fgrid four">
         <label>Name <input type="text" name="name" value="{{ c.name if c else '' }}" required placeholder="Freedom Unlimited"></label>
         <label>Last 4 <input type="text" name="last4" value="{{ c.last4 if c else '' }}" required maxlength="4" pattern="[0-9]{4}" class="mono"></label>
-        <span class="lbl">Only for profile {{ choose('profile', [('', 'Any Account')] + (profile_labels | list), c.profile if c else '', '', 'field') }}</span>
+        <span class="lbl">Only for profile {{ choose('profile', [('', 'any account')] + (profile_labels | list), c.profile if c else '', '', 'field') }}</span>
         {#- the card type: a regular card, a virtual number of another card, or an
             employee card -- a virtual number with a sign-up bonus of its own -#}
         {% set kind = 'employee' if c and c.own_bonus else ('virtual' if c and c.virtual else '') %}
-        <span class="lbl">Card type {{ choose('kind', [('', 'Regular Card'), ('virtual', 'Virtual Card'), ('employee', 'Employee Card')], kind, '', 'field') }}</span>
+        <span class="lbl">Card type {{ choose('kind', [('', 'regular card'), ('virtual', 'virtual card'), ('employee', 'employee card')], kind, '', 'field') }}</span>
       </div>
       {#- the card a virtual number belongs to: real cards only -- a virtual number cannot belong to
           another virtual number -#}
       {% set others = [] %}{% for last4, text in card_choices if not c or last4 != c.last4 %}{% set _ = others.append((last4, text)) %}{% endfor %}
       <div class="virtual-line">
-        <span class="virtual-of" {{ 'hidden' if not kind }}><span class="muted">Shares limits with</span> {{ choose('virtual_of', [('', '— Pick the Card —')] + others, c.virtual_of if c else '', '', 'cell') }}</span>
+        <span class="virtual-of" {{ 'hidden' if not kind }}><span class="muted">Shares limits with</span> {{ choose('virtual_of', [('', '— pick the card —')] + others, c.virtual_of if c else '', '', 'cell') }}</span>
         <p class="muted small kind-help">A <b>virtual card</b> is a number of another card: it earns that card's rates and shares its limits, and the Taxes page asks it for no sign-up bonus. An <b>employee card</b> is a virtual card with a sign-up bonus of its own, which the Taxes page does ask for.</p>
       </div>
       {% if kind and not (c and c.virtual_of) %}<p class="warn small">Pick the card this number belongs to. Until then it earns its own rates and no limit applies.</p>{% endif %}
@@ -336,7 +336,7 @@
         {{ fields(e) }}
         <footer>
           <button type="submit" class="small primary">Save {{ singular }}</button>
-          <button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="remove this {{ singular }} from config.json">✕ Remove</button>
+          <button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="delete this {{ singular }} from config.json">✕ Delete</button>
         </footer>
       </form>
       {% set ask = 'Remove ' ~ singular ~ ' ' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else (e.name ~ ' …' ~ e.last4))) ~ ' from config.json?' %}

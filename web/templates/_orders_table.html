@@ -65,7 +65,7 @@
       {% endfor %}
     </tr>
     {% else %}
-    <tr><td colspan="{{ columns | length + (2 if findings is not none else 1) }}" class="muted">{{ 'Nothing to show.' if scope else 'No rows match.' }}</td></tr>
+    <tr><td colspan="{{ columns | length + (2 if findings is not none else 1) }}" class="muted">Nothing to show.</td></tr>
     {% endfor %}
   </tbody>
 </table>

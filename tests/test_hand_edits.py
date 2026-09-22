@@ -233,7 +233,7 @@ class TestThePageShowsIt:
         body = TestClient(app).get("/orders").text
         i = body.index('class="num edit hand"')
         assert 'data-field="cashback_rate"' in body[i:i + 80]
-        assert "typed by hand: runs keep this value" in body  # the tip-hand block
+        assert "a hand edit: runs keep this value" in body  # the tip-hand block
         assert 'data-tip-from="tip-hand"' in body and "tip-cell-" not in body  # the hand note, no how-to
         assert body.count(' hand"') == 1
         assert "release-hand" not in body  # no button on the count line: the key and the menu

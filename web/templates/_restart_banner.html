@@ -9,7 +9,7 @@
   {% if in_container %}
   <form method="post" action="/settings/restart-container" class="inline-form"
         data-confirm="Restart the container now? The scheduler and the dashboard come back in about half a minute. It is refused while a run is in progress.">
-    <button type="submit" class="primary">Restart the container now</button>
+    <button type="submit" class="primary">Restart container</button>
     <span class="muted small">or, on the host: <code>docker compose restart</code></span>
   </form>
   {% else %}

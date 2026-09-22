@@ -308,7 +308,7 @@ class TestThePage:
         body = client.get("/activity", params={"days": "0"}).text
         assert body.count('<tr class="kind-dossier has-num">') == 2  # one logged + one only on disk, not doubled
         assert "<h2>What failed</h2>" in body and "<strong>Boom</strong>" in body  # the report, inline
-        assert "<code>page_1.html</code>" in body and ">report<" in body
+        assert "<code>page_1.html</code>" in body and ">Report<" in body
         assert "amazon [profile-2]: failure dossier" in body and "no report.md" in body
         # the logged one keeps its run; the disk-only one has none; newest first
         assert body.index("costco_profile-1_20260917T080000Z") < body.index("amazon_profile-2_20260901T000000Z")

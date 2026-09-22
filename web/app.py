@@ -24,6 +24,7 @@ from urllib.parse import urlencode
 import zipfile
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -36,6 +37,7 @@ from web import failures as failures_module
 from web import importer
 from web import setup_wizard
 from web.ledger_writer import RunInProgress, safe_href
+from web.settings_form import labelled_error as _labelled_error
 from ledger_db.store import LedgerMissing, LedgerUnreadable
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
@@ -201,6 +203,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     templates.env.filters["query"] = query_string
     templates.env.filters["href"] = safe_href  # a link cell renders as a link only when it IS one
+    templates.env.filters["labelled"] = _labelled_error  # a settings refusal names the label, not the env
     templates.env.globals["header_of"] = FIELD_TO_HEADER.get
     from web.settings_form import plain_help
     templates.env.globals["plain_help"] = plain_help  # the setup wizard's help text, without the operator asides
@@ -241,13 +244,32 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                      "(python main.py) creates a missing ledger, and Backup and Restore brings one back.")
     TAX_ADVICE = "Fix the file by hand or move it aside; the Taxes page starts a new one on its next save."
 
+    def wants_page(request: Request) -> bool:
+        """A person following a link (not htmx, not a script): the refusal is a page, not JSON."""
+        return (request.headers.get("HX-Request", "").lower() != "true"
+                and "text/html" in request.headers.get("accept", "") and request.url.path != "/health")
+
     @app.exception_handler(HTTPException)
     async def _http_problem(request: Request, exc: HTTPException):
         if exc.status_code == 503:
             return problem_page(request, 503, "Ledger Unavailable", str(exc.detail or "the ledger cannot be read"), LEDGER_ADVICE)
+        if exc.status_code == 404 and wants_page(request):
+            # a deleted order from an old export, a dossier or backup that is gone, a mistyped path
+
+            return problem_page(request, 404, "Not Found", str(exc.detail or f"nothing here is called {request.url.path}"),
+                                "The link may be older than the ledger: the order, file or page it named is not here any more.")
         from fastapi.exception_handlers import http_exception_handler
 
         return await http_exception_handler(request, exc)
+
+    @app.exception_handler(RequestValidationError)
+    async def _not_understood(request: Request, exc: RequestValidationError):
+        if wants_page(request) and request.method == "GET":
+            return problem_page(request, 404, "Not Found", f"{request.url.path} does not name anything here",
+                                "Check the address; a settings card or a page number in it is not a number.")
+        from fastapi.exception_handlers import request_validation_exception_handler
+
+        return await request_validation_exception_handler(request, exc)
 
     @app.exception_handler(LedgerUnreadable)
     async def _ledger_unreadable(request: Request, exc: LedgerUnreadable):
@@ -1161,7 +1183,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             raise HTTPException(status_code=404, detail="no such expense")
         tax_inputs.save_year(tax_inputs_path, year, inputs)
         act("settings", f"Expense removed from {year}: {entry['description']}", {"year": year, "id": entry_id})
-        return RedirectResponse(url=f"/taxes?year={year}&notice={quote('Removed ' + entry['description'])}#s-expenses",
+        return RedirectResponse(url=f"/taxes?year={year}&notice={quote('Deleted ' + entry['description'])}#s-expenses",
                                 status_code=303)
 
     @app.get("/taxes/receipt/{entry_id}")
@@ -1288,7 +1310,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                                   None if expected is None else str(expected), protect=protect)
                 act("edit", f"{FIELD_TO_HEADER.get(field, field)} on {key['order_id']} "
                             f"(shipment {key['shipment']}): {expected!r} → {value!r}"
-                            + ("" if protect else " (a correction; runs may overwrite it)"),
+                            + ("" if protect else " (not a hand edit: runs may overwrite it)"),
                     {"order_id": key["order_id"], "item_name": key["item_name"],
                      "shipment": key["shipment"], "field": field, "was": expected, "now": value,
                      "protect": protect})
@@ -1404,7 +1426,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             if group == "Accounts":
                 # The profile login is a page of its own, not a script; it belongs with the
                 # account tools.
-                items.insert(0, ("profile", "Log a profile in"))
+                items.insert(0, ("profile", "Log a Profile In"))
             if items:
                 out.append((group, items))
         return out
@@ -1432,7 +1454,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         shown = list(tools_module.TOOLS)
         session = sessions.current()
         # One tool at a time, picked from a dropdown
-        options = [("profile", "Accounts · Log a profile in")] + [
+        options = [("profile", "Accounts · Log a Profile In")] + [
             (t.key, f"{t.group} · {t.title}") for t in shown]
         selected = str(request.query_params.get("tool") or "profile")
         if selected != "profile" and selected not in {t.key for t in shown}:
@@ -2262,10 +2284,10 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except zipfile.BadZipFile:
             # not a zip at all: say so on the step and keep nothing
             saved.unlink(missing_ok=True)
-            return nothing, f"That file is not a backup zip ({safe_name}): nothing was restored."
+            return nothing, f"That file is not a backup zip ({archive.filename or safe_name}): nothing was restored."
         except ValueError as exc:  # declares more than a restore accepts
             saved.unlink(missing_ok=True)
-            return nothing, f"{safe_name}: {exc}; nothing was restored."
+            return nothing, f"{archive.filename or safe_name}: {exc}; nothing was restored."
         message = (f"Restored {len(result['restored'])} file(s), kept {len(result['skipped_existing'])}"
                    " existing" + (" (tick overwrite to replace them)" if result["skipped_existing"]
                                   else "") + ".")
@@ -2577,8 +2599,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             if wants_fragment(request):
                 return settings_section(request, path, errors=exc.errors, status=400)
             return settings_page(request, errors=exc.errors, open_section=path, status=400)
-        message = f"Removed {path[:-1]} {label}."
-        act("settings", f"Settings: removed {path[:-1]} {label}", {"path": path, "entry": label})
+        message = f"Deleted {path[:-1]} {label}."
+        act("settings", f"Settings: deleted {path[:-1]} {label}", {"path": path, "entry": label})
         if wants_fragment(request):
             # the card alone can go when nothing else shifts: it was the last entry (the others' form
             # indexes stay), it leaves some behind, and (a card) nothing was nested under it

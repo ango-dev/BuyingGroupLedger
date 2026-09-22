@@ -141,7 +141,7 @@ def _display(value) -> str:
 def validate(field: str, value: str):
     """The coerced value to write, or raise EditError. "" means clear."""
     if field not in EDITABLE_FIELDS:
-        raise EditError(f"{field} is not editable"
+        raise EditError(f"{_header(field) or 'that column'} is not editable"
                         + (" (part of the row's key)" if field in KEY_FIELDS else
                            " (a derived column)" if field in FORMULA_FIELDS else ""))
     text = (value or "").strip()
@@ -153,12 +153,12 @@ def validate(field: str, value: str):
         return text.lower()
     if field in DATE_FIELDS:
         if not valid_iso_date(text):
-            raise EditError(f"{field} must be a real calendar date written as YYYY-MM-DD (text), or blank")
+            raise EditError(f"{_header(field)} must be a real calendar date written as YYYY-MM-DD, or blank")
         return text
     if field in _BOOL_FIELDS:
         parsed = _parse_checkbox(text)
         if parsed not in (True, False):
-            raise EditError(f"{field} must be TRUE or FALSE")
+            raise EditError(f"{_header(field)} must be TRUE or FALSE")
         return parsed
     if field in _NUMERIC_FIELDS:
         return _typed_number(field, text)

@@ -20,7 +20,7 @@
   {% if scope %}<input type="hidden" name="scope" value="{{ scope }}">{% endif %}
   {#- An option is a value, or a (value, label) pair: the Card facet files by Card Last 4 and shows
       the card's name with it. -#}
-  {% for param, label, options, chosen in (('retailer', 'Retailer', facets.retailers, filters.retailers), ('profile', 'Profile', facets.profiles, filters.profiles), ('status', 'Status', facets.statuses, filters.statuses), ('group', 'Buying group', facets.groups, filters.groups), ('card', 'Card', facets.cards, filters.cards)) %}
+  {% for param, label, options, chosen in (('retailer', 'Retailer', facets.retailers, filters.retailers), ('profile', 'Profile', facets.profiles, filters.profiles), ('status', 'Status', facets.statuses, filters.statuses), ('group', 'Buying Group', facets.groups, filters.groups), ('card', 'Card', facets.cards, filters.cards)) %}
   {% set labels = {} %}{% for o in options %}{% if o is not string %}{% set _ = labels.update({o[0]: o[1]}) %}{% endif %}{% endfor %}
   {% set ns = namespace(names=[]) %}{% for c in chosen %}{% set ns.names = ns.names + [labels.get(c, c)] %}{% endfor %}
   <details class="multi" data-param="{{ param }}">
@@ -86,7 +86,7 @@
       <label>Cost Per Item <input name="cost_per_item" value="{{ af.get('cost_per_item', '') }}" inputmode="decimal" autocomplete="off"></label>
       <label>Buying Group <input name="buying_group" value="{{ af.get('buying_group', '') }}" data-choices="buying_group" autocomplete="off"></label>
       <label class="span-2">Tracking Number <input name="tracking_number" value="{{ af.get('tracking_number', '') }}" autocomplete="off"></label>
-      <label>Card Name <input name="card_name" value="{{ af.get('card_name', '') }}" data-choices="card_name" data-pair="card_last4" autocomplete="off"></label>
+      <label>Card <input name="card_name" value="{{ af.get('card_name', '') }}" data-choices="card_name" data-pair="card_last4" autocomplete="off"></label>
       <label>Card Last 4 <input name="card_last4" value="{{ af.get('card_last4', '') }}" data-choices="card_last4" data-pair="card_name" inputmode="numeric" autocomplete="off"></label>
       <label>Profile <input name="profile_label" value="{{ af.get('profile_label', '') }}" data-choices="profile_label" autocomplete="off"></label>
       <label class="span-3">Receipt Link <input name="receipt_url" value="{{ af.get('receipt_url', '') }}" placeholder="https://... — or drop a file below" autocomplete="off"></label>

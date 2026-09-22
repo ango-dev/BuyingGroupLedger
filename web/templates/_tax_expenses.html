@@ -13,14 +13,14 @@
       is edited in the grid above. -#}
   <form method="post" action="/taxes/expense?year={{ year }}" enctype="multipart/form-data" class="expense-form" hx-post="/taxes/expense?year={{ year }}" hx-encoding="multipart/form-data" hx-target="#s-expenses" hx-swap="outerHTML">
     <div class="egrid">
-      <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
+      <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="YYYY-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
       <label>Amount <input type="text" name="amount" value="{{ draft.get('amount', '') }}" placeholder="0.00" inputmode="decimal" required></label>
-      <span class="lbl">Paid by — profile {{ choose('profile', [('', '— none —')] + (profile_labels | list), draft.get('profile', ''), '', 'pick') }}</span>
-      <label>or the email of the account that paid <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com" data-choices="email" autocomplete="off"></label>
+      <span class="lbl">Paid by (profile) {{ choose('profile', [('', '— none —')] + (profile_labels | list), draft.get('profile', ''), '', 'pick') }}</span>
+      <label>Paid by (email) <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com" data-choices="email" autocomplete="off"></label>
       <label class="span-2">Description <input type="text" name="description" value="{{ draft.get('description', '') }}" placeholder="what it was" required data-choices="description" autocomplete="off"></label>
       <label class="span-2">Category <input type="text" name="category" value="{{ draft.get('category', '') }}" placeholder="optional: supplies, membership, annual fee…" data-choices="category" autocomplete="off"></label>
-      <span class="lbl span-2">Receipt {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
-      <label class="span-2">or a link to it <input type="text" name="receipt_url" value="{{ draft.get('receipt_url', '') }}" placeholder="https://…"></label>
+      <span class="lbl span-2">Receipt (file) {{ dropzone('receipt_file', '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf', 'the receipt: photo, PDF or screenshot', required=False, klass='compact') }}</span>
+      <label class="span-2">Receipt (link) <input type="text" name="receipt_url" value="{{ draft.get('receipt_url', '') }}" placeholder="https://…"></label>
     </div>
     <div class="inline-form"><button type="submit" class="primary">Add expense</button></div>
   </form>
