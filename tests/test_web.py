@@ -842,6 +842,30 @@ class TestOverviewPage:
         assert client.get("/orders").status_code == 200
         assert calls["n"] == 1
 
+    def test_the_orders_page_exports_the_rows_in_view_as_csv(self, client):
+        """The
+        link in the count line carries the page's own query; the CSV is the ledger's columns with
+        the page's display text, every filtered row whatever the page size."""
+        from ledger.sync import HEADER
+
+        body = client.get("/orders").text
+        assert 'href="/orders.csv?' in body and ">Export CSV<" in body
+        filtered = client.get("/orders", params={"status": "paid"}).text
+        assert "status=paid" in filtered[filtered.index('href="/orders.csv?'):][:200]  # the link carries the view
+        assert 'href="/orders.csv?' in client.get("/orders", params={"view": "cards"}).text  # both views
+        assert "Export CSV" not in client.get("/audit").text  # the Orders page's own, not Audit's
+        response = client.get("/orders.csv")
+        assert response.status_code == 200 and response.headers["content-type"].startswith("text/csv")
+        assert response.headers["content-disposition"] == 'attachment; filename="orders_2026-09-17.csv"'
+        lines = response.text.splitlines()
+        assert lines[0] == ",".join(HEADER) and len(lines) == 1 + len(LEDGER_ROWS)
+        assert '"$1,259.99"' in lines[1]  # the page's display text, not the stored number
+        paid = client.get("/orders.csv", params={"status": "paid"}).text.splitlines()
+        assert len(paid) == 3 and all(",paid," in line for line in paid[1:])
+        by_cost = client.get("/orders.csv", params={"sort": "total_cost", "dir": "desc"}).text.splitlines()
+        import csv as _csv
+        assert next(_csv.reader([by_cost[1]]))[HEADER.index("Total Cost")] == "$2,000.00"  # the page's sort, too
+
     def test_heartbeat_shows_fresh(self, client):
         body = client.get("/").text
         assert "last run 3h 0m ago" in body

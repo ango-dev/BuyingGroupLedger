@@ -1051,3 +1051,22 @@ def test_form_suggestions_appear_on_typing_and_enter_takes_the_first(served, pag
     assert page.locator(".pop.on .choice").all_inner_texts() == ["membership"]
     page.keyboard.press("Escape")
     assert page.errors == []
+
+
+def test_the_export_links_download_in_the_browser(served, page):
+    """2026-09-21: Export CSV on Orders and Download year on Taxes are plain links in the page's
+    button style; each triggers a real download named for what it holds."""
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/orders?status=paid")
+    page.wait_for_selector("a.export")
+    with page.expect_download() as got:
+        page.locator("a.export").click()
+    download = got.value
+    assert download.suggested_filename.startswith("orders_") and download.suggested_filename.endswith(".csv")
+    assert "status=paid" in download.url
+    page.goto(f"{served}/taxes?year=2026")
+    page.wait_for_selector("a.download-year")
+    with page.expect_download() as got:
+        page.locator("a.download-year").click()
+    assert got.value.suggested_filename == "tax_2026.zip"
+    assert page.errors == []

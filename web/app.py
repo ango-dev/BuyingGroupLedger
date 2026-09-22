@@ -840,6 +840,45 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         text = str((form.get("year") if form is not None else None) or request.query_params.get("year") or "").strip()
         return int(text) if len(text) == 4 and text.isdigit() else default
 
+    # ---- downloads: the rows in view as CSV; a tax year as one zip ----------
+    @app.get("/orders.csv")
+    def orders_csv_download(request: Request):
+        """The Orders page's rows IN VIEW -- the same filters, search and sort the page shows,
+        every page of them -- as CSV in the ledger's column order, cells as the page displays
+        them. The link carries the query, so no remembered filter is replayed here."""
+        from web import export
+
+        snapshot = load(request)
+        filters = Filters.from_query(request.query_params)
+        rows = sort_rows(filter_rows(snapshot.rows, filters), filters)
+        name = f"orders_{clock().date().isoformat()}.csv"
+        return Response(export.orders_csv(rows, cell), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/taxes/export")
+    def taxes_export(request: Request):
+        """Everything of a tax year in one organised zip -- the Schedule C lines, the orders placed
+        and the orders paid out, the expense list with its uploaded receipts, every dated income
+        entry, the notes, and the order receipts held on disk -- the binder an audit asks for."""
+        from web import export, receipts_upload
+
+        year = requested_year(request, clock().year)
+        snapshot = load(request)
+        inputs = load_tax_inputs(year)
+        programs, cards = tax_prompts(snapshot, year)
+        labels = {p.key: p.label for p in programs}
+        labels.update({f"bonus:{p.last4}": p.label for p in cards})
+        program_logs, site_logs, bonus_logs = tax_inputs.log_entries(inputs, year)
+        data = export.year_bundle(
+            year, rows=snapshot.rows, cell=cell,
+            summary=tax_inputs.schedule_c(tax_report_for(snapshot, year), inputs),
+            inputs=inputs, labels=labels, program_logs=program_logs, site_logs=site_logs, bonus_logs=bonus_logs,
+            other_logs=tax_inputs.other_logs(inputs, year),
+            expense_file=lambda entry_id: tax_inputs.receipt_path(inputs, entry_id, data_dir=data_dir),
+            receipt_file=receipts_upload.receipt_file_path, generated_at=clock())
+        return Response(data, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="tax_{year}.zip"'})
+
     @app.get("/taxes", response_class=HTMLResponse)
     def taxes(request: Request):
         return taxes_page(request, requested_year(request, clock().year),

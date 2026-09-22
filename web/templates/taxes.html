@@ -27,6 +27,8 @@
   <form method="get" action="/taxes" class="inline-form open-year"><input type="text" name="year" placeholder="YYYY" pattern="[0-9]{4}" size="4" maxlength="4" inputmode="numeric" class="mono" title="open another year's page; it stays on the list once something is saved for it" required><button type="submit" class="small">Open year</button></form>
   {#- close the shown year: never the current year, never one with ledger rows -#}
   <form method="post" action="/taxes/close" class="inline-form close-year" data-confirm="Close {{ year }}? Its saved inputs and uploaded receipts are deleted and it leaves the list (it can be opened again, empty)."><input type="hidden" name="year" value="{{ year }}"><button type="submit" class="danger small" {% if not closable %}disabled{% endif %} title="{{ close_why if close_why else 'delete this year\'s saved inputs and receipts; it leaves the list' }}">Close year</button></form>
+  {#- everything of the year in one zip -#}
+  <a class="button small download-year" href="/taxes/export?year={{ year }}" title="download everything for {{ year }} as one zip: the Schedule C lines, the orders placed and paid out, the expenses with their receipts, every income entry, the notes, and the order receipts on this machine">Download year</a>
 </div>
 
 {% include "_tax_summary.html" %}

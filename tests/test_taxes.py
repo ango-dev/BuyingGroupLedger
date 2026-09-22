@@ -260,6 +260,73 @@ class TestTaxesPage:
         page = client.get("/taxes", params={"year": "2026"}).text  # the page itself: one summary, one form, a toast slot
         assert page.count('id="s-schedule-c"') == 1 and page.count('id="tax-form"') == 1 and '<div id="toast" role="status" aria-live="polite"></div>' in page and 'hx-swap-oob' not in page
 
+    def test_the_year_downloads_as_one_organised_zip(self, client, tmp_path):
+        """The Schedule C lines, both order bases, the expenses with their uploaded
+        receipts, every dated income entry, the notes, and a README that says what is NOT here."""
+        import io
+        import zipfile
+
+        r = client.post("/taxes/expense", data={"year": "2026", "date": "2026-03-03", "description": "shipping boxes",
+                                                "amount": "12.50", "profile": "alpha", "email": "", "category": "supplies"},
+                        files={"receipt_file": ("boxes.pdf", b"%PDF-1.4 x", "application/pdf")}, follow_redirects=False)
+        assert r.status_code == 303, r.text[:200]
+        client.post("/taxes/save", data={"year": "2026", "program:alpha:costco": "30", "site.0.name": "TopCashback",
+                                         "site.0.amount": "40", "other.0.label": "refund", "other.0.amount": "8",
+                                         "notes": "for Pat"}, follow_redirects=False)
+        response = client.get("/taxes/export", params={"year": "2026"})
+        assert response.status_code == 200 and response.headers["content-type"] == "application/zip"
+        assert response.headers["content-disposition"] == 'attachment; filename="tax_2026.zip"'
+        zf = zipfile.ZipFile(io.BytesIO(response.content))
+        names = zf.namelist()
+        for expected in ("tax_2026/README.txt", "tax_2026/schedule_c.csv", "tax_2026/orders_placed_2026.csv",
+                         "tax_2026/orders_paid_out_2026.csv", "tax_2026/expenses.csv", "tax_2026/income.csv",
+                         "tax_2026/notes.txt"):
+            assert expected in names, names
+        receipts = [n for n in names if n.startswith("tax_2026/expense_receipts/")]
+        assert len(receipts) == 1 and receipts[0].endswith("boxes.pdf") and zf.read(receipts[0]) == b"%PDF-1.4 x"
+        placed = zf.read("tax_2026/orders_placed_2026.csv").decode("utf-8").splitlines()
+        assert len(placed) == 1 + 9 and placed[0].startswith("Order Date,")  # every fixture row was placed in 2026
+        paid = zf.read("tax_2026/orders_paid_out_2026.csv").decode("utf-8").splitlines()
+        assert len(paid) == 2 and "1399000017" in paid[1]  # the one payout dated in 2026
+        assert "Gross receipts or sales,500.00" in zf.read("tax_2026/schedule_c.csv").decode("utf-8")
+        expenses = zf.read("tax_2026/expenses.csv").decode("utf-8")
+        assert "2026-03-03,shipping boxes,supplies,alpha,12.50,expense_receipts/" in expenses
+        income = zf.read("tax_2026/income.csv").decode("utf-8")
+        assert "Program cashback,Costco Executive Cashback \u2014 alpha,2026-01-01,30.00" in income
+        assert "Cashback site,TopCashback," in income and "Other income,refund," in income
+        assert zf.read("tax_2026/notes.txt").decode("utf-8") == "for Pat\n"
+        readme = zf.read("tax_2026/README.txt").decode("utf-8")
+        assert "tax year 2026" in readme and "(9 rows)" in readme and "(1 rows)" in readme
+        assert "web links, not files on this machine" in readme and "BBY01-800000000001: https://" in readme
+        assert "Orders with no receipt recorded" in readme and "1399000018 (paid)" in readme
+        assert client.get("/taxes/export", params={"year": "2031"}).status_code == 200  # an empty year still zips
+
+    def test_the_bundle_packs_a_receipt_held_on_disk_and_names_a_missing_one(self, tmp_path):
+        import io
+        import zipfile
+        from datetime import datetime, timezone
+
+        from web import export
+
+        on_disk = tmp_path / "costco" / "2026-08" / "1399000017.pdf"
+        on_disk.parent.mkdir(parents=True)
+        on_disk.write_bytes(b"%PDF-1.4 receipt")
+        rows = [_row(order_id="1399000017", order_date="2026-08-20", payout_date="2026-09-01", status="paid",
+                     receipt_url="/receipts/costco/2026-08/1399000017.pdf"),
+                _row(order_id="111-1", order_date="2026-08-01", status="delivered",
+                     receipt_url="/receipts/amazon/2026-08/111-1.pdf")]  # named, not on disk
+        data = export.year_bundle(
+            2026, rows=rows, cell=lambda row, name: row.text(name), summary={"lines": [], "straddling": {}},
+            inputs=YearInputs(), labels={}, program_logs={}, site_logs={}, bonus_logs={}, other_logs=[],
+            expense_file=lambda entry_id: None,
+            receipt_file=lambda rel: tmp_path / rel if (tmp_path / rel).is_file() else None,
+            generated_at=datetime(2026, 9, 21, 10, 0, tzinfo=timezone.utc))
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        assert zf.read("tax_2026/order_receipts/costco/2026-08/1399000017.pdf") == b"%PDF-1.4 receipt"
+        readme = zf.read("tax_2026/README.txt").decode("utf-8")
+        assert "(1 files)" in readme and "names but that are not on disk" in readme and "111-1: /receipts/amazon" in readme
+        assert "tax_2026/notes.txt" not in zf.namelist()  # no notes, no file
+
     def test_twin_receipt_names_are_numbered_across_years(self, client, tmp_path):
         def add(year, name):
             r = client.post("/taxes/expense", data={"year": str(year), "date": f"{year}-03-03", "description": name, "amount": "1",

@@ -6,6 +6,7 @@
 {% if error %}<div class="banner warn" role="alert">{{ error }}</div>{% endif %}
 <p class="muted count">{{ pager.start }}–{{ pager.end }} of {{ pager.total }} order(s) ({{ rows | length }} row(s))
   {% if not editable %}<span class="muted">· view only ({{ backend }} backend)</span>{% endif %}
+  {% if base == '/orders' %}<a class="button small export" href="/orders.csv?{{ filters.as_query() | query }}" title="download the rows in view -- these filters, this search, this sort, every page -- as a CSV">Export CSV</a>{% endif %}
 </p>
 <div class="cards-wrap">
   <div class="cards">
