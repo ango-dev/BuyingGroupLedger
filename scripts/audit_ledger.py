@@ -1355,7 +1355,12 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
         # Submitted needs a number to have been submitted, unless the row is a gift card sold to a
         # group (the tick is the card's submission); an ordered row has nothing to submit at all.
         impossible = []
-        if submitted and status == "ordered":
+        # BFMR's Costco TV rule (2026-09-21): the order number is the tracking number, submitted
+        # and insured while the row is still `ordered` -- the one ordered row that legitimately
+        # carries a number and a tick.
+        order_number_tracking = (cell("Retailer") == "Costco" and cell("Tracking Number")
+                                 and cell("Tracking Number") == cell("Order ID"))
+        if submitted and status == "ordered" and not order_number_tracking:
             impossible.append("Tracking Submitted ticked on an ordered row -- nothing has shipped")
         elif submitted and not cell("Tracking Number") and not (gift_card and group and not unrouted):
             impossible.append("Tracking Submitted ticked with no Tracking Number")
@@ -1374,7 +1379,8 @@ def check_mandatory_by_stage(sheet: Sheet, opts: Options) -> Result:
                 impossible.append(f"{name} {when} is before the Order Date {order_date}")
         if impossible:
             fails.append(f"row {row_number} ({status or 'no status'}): {'; '.join(impossible)}")
-        stale = [name for name in UNEXPECTED_BY_STAGE.get(status, ()) if cell(name)]
+        stale = [name for name in UNEXPECTED_BY_STAGE.get(status, ())
+                 if cell(name) and not (name == "Tracking Number" and order_number_tracking)]
         if stale:
             warns.append(f"row {row_number} ({status}): carries {', '.join(stale)} -- is the status stale?")
     if fails:

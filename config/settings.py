@@ -84,6 +84,8 @@ ENV_TO_CONFIG = {
     "BFMR_API_KEY": "buying_groups.bfmr.api_key",
     "BFMR_API_SECRET": "buying_groups.bfmr.api_secret",
     "BFMR_MIN_INSURANCE_VALUE": "buying_groups.bfmr.min_insurance_value",
+    "BFMR_COSTCO_TV_ORDER_NUMBER_AS_TRACKING": "buying_groups.bfmr.costco_tv_order_number_as_tracking",
+    "BFMR_COSTCO_TV_ITEM_PATTERN": "buying_groups.bfmr.costco_tv_item_pattern",
     "BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED": "buying_groups.bfmr.combined_package_autoreply_enabled",
     "BFMR_COMBINED_PACKAGE_SENDER_DOMAINS": "buying_groups.bfmr.combined_package_sender_domains",
     "BFMR_COMBINED_PACKAGE_REPLY_CC": "buying_groups.bfmr.combined_package_reply_cc",
@@ -307,6 +309,15 @@ class Settings:
     # same reason as sync_enabled: it sends outward-facing mail to a third party unattended, and
     # should only run after a manual dry run and a supervised first send. `python -m
     # respond_bfmr` ignores this — an explicit command is already an explicit decision.
+    # BFMR's rule for Costco TVs: the ORDER NUMBER is the tracking number --
+    # freight TVs carry no carrier number BFMR can use. On, a Costco row routed to BFMR whose item
+    # name matches the pattern carries its order number as Tracking Number from `ordered` on, so
+    # the sync submits and insures it the run after it is ordered, and keeps that identity when
+    # Costco later reports a carrier number (the row's progress still follows Costco's packages).
+    bfmr_costco_tv_order_number_as_tracking: bool = _get_bool(
+        "BFMR_COSTCO_TV_ORDER_NUMBER_AS_TRACKING", True)
+    # Which Costco item names count as a TV for that rule -- a regular expression, case-insensitive.
+    bfmr_costco_tv_item_pattern: str = _get_str("BFMR_COSTCO_TV_ITEM_PATTERN", r"\bTV\b")
     bfmr_combined_package_autoreply_enabled: bool = _get_bool(
         "BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED", False)
     # Which From-domains count as BFMR when scanning that inbox for combined-package requests.

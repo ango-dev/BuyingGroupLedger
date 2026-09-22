@@ -1326,6 +1326,17 @@ class TestMandatoryByStage:
         assert any("row 2 (delivered): missing Profile" in d for d in result.details)
         assert any("row 3 (delivered): missing Cost Per Item" in d for d in result.details)
 
+    def test_a_costco_tv_carrying_its_order_number_is_the_rule_not_a_stale_status(self):
+        # BFMR's Costco TV rule (2026-09-21): submitted and insured while still `ordered`.
+        tv = build(row_cells(2, Status=Cell("ordered"), Retailer=Cell("Costco"),
+                             **{"Order ID": Cell("1399000022"), "Tracking Number": Cell("1399000022"),
+                                "Tracking Submitted": Cell(True), "Delivery Date": Cell("")}))
+        assert result_for(tv, "mandatory_by_stage").status == "PASS"
+        # Any other ordered row with a tick is still impossible.
+        other = build(row_cells(2, Status=Cell("ordered"), **{"Tracking Submitted": Cell(True),
+                                                             "Delivery Date": Cell("")}))
+        assert "ticked on an ordered row" in result_for(other, "mandatory_by_stage").details[0]
+
     def test_each_stage_requires_its_own_cells(self):
         shipped = build(row_cells(2, Status=Cell("shipped"), **{"Tracking Number": Cell("")}))
         assert "missing Tracking Number" in result_for(shipped, "mandatory_by_stage").details[0]

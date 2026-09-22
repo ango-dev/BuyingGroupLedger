@@ -44,6 +44,7 @@ open in the ledger; a brand-new fully-cancelled order (not in that set) is ignor
 a recorded order that has since been cancelled is emitted as `cancelled` so its rows go terminal.
 """
 
+import logging
 import re
 
 from config.warehouses import GIFT_CARD
@@ -525,3 +526,35 @@ def _rows_for_group(
             )
         )
     return rows
+
+
+
+log = logging.getLogger(__name__)
+
+
+def order_number_as_tracking(items, item_pattern: str, group: str = "BFMR") -> int:
+    """BFMR's rule for Costco TVs, applied in place: the ORDER NUMBER is the tracking number.
+
+    Freight TVs carry no carrier number BFMR can use, so BFMR asks for the order number instead.
+   Every Costco row routed to `group` whose item name matches
+    `item_pattern` takes its order number as Tracking Number from `ordered` on -- which is what
+    makes the sync submit and insure it the run after it is ordered -- and KEEPS it when Costco
+    later reports a package: the carrier number would otherwise read as a changed tracking number
+    and open the split path, while BFMR knows the box only by the order number. The row's status
+    and delivery date still follow Costco's packages. Returns how many rows were set."""
+    try:
+        pattern = re.compile(item_pattern, re.IGNORECASE)
+    except re.error:
+        log.warning("Costco TV item pattern %r is not a valid regular expression; rule skipped.", item_pattern)
+        return 0
+    count = 0
+    for item in items:
+        if getattr(item, "retailer", "") != RETAILER or (getattr(item, "buying_group", "") or "") != group:
+            continue
+        order_id = getattr(item, "order_id", "") or ""
+        if not order_id or not pattern.search(getattr(item, "item_name", "") or ""):
+            continue
+        if getattr(item, "tracking_number", "") != order_id:
+            item.tracking_number = order_id
+            count += 1
+    return count

@@ -206,6 +206,17 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
                             {"retailer": scraper.retailer_name, "profile": scraper.profile.label})
             return
 
+        # BFMR's rule for Costco TVs: the order number IS the tracking number.
+        # After routing, because only rows shipping to BFMR take it; the sync then submits and
+        # insures the box the run after it is ordered. See costco_mapping.order_number_as_tracking.
+        if settings.bfmr_costco_tv_order_number_as_tracking:
+            from scrapers.costco_mapping import order_number_as_tracking
+
+            aliased = order_number_as_tracking(items, settings.bfmr_costco_tv_item_pattern)
+            if aliased:
+                log.info("%s: %d Costco TV row(s) carry their order number as the tracking number "
+                         "(BFMR's rule).", label, aliased)
+
         # After the personal-address drop, so no work is spent resolving cards for rows we discard.
         _tag_cards(items, label)
 

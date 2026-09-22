@@ -58,6 +58,8 @@ fails closed on a typo rather than turning itself on.
 | `BFMR_API_KEY` | `buying_groups.bfmr.api_key` |
 | `BFMR_API_SECRET` | `buying_groups.bfmr.api_secret` |
 | `BFMR_MIN_INSURANCE_VALUE` | `buying_groups.bfmr.min_insurance_value` |
+| `BFMR_COSTCO_TV_ORDER_NUMBER_AS_TRACKING` † | `buying_groups.bfmr.costco_tv_order_number_as_tracking` |
+| `BFMR_COSTCO_TV_ITEM_PATTERN` | `buying_groups.bfmr.costco_tv_item_pattern` |
 | `BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED` † | `buying_groups.bfmr.combined_package_autoreply_enabled` |
 | `BFMR_COMBINED_PACKAGE_SENDER_DOMAINS` | `buying_groups.bfmr.combined_package_sender_domains` |
 | `BFMR_COMBINED_PACKAGE_REPLY_CC` | `buying_groups.bfmr.combined_package_reply_cc` |

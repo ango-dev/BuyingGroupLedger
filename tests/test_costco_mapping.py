@@ -476,3 +476,45 @@ def test_package_id_is_shared_by_rows_boxed_together_and_distinct_across_boxes(d
             assert len(ids) == 1, (order_id, shipment, ids)  # one carton per Shipment number
         all_ids = [next(iter(ids)) for ids in shipments.values()]
         assert len(all_ids) == len(set(all_ids)), (order_id, all_ids)  # one Shipment number per carton
+
+
+
+class TestOrderNumberAsTracking:
+    """BFMR's rule for Costco TVs: the order number is the tracking number,
+    from `ordered` on, kept when a carrier number appears, and only for rows routed to BFMR."""
+
+    def _item(self, **v):
+        from models.order import OrderItem
+        base = dict(retailer="Costco", profile_label="profile-alpha", order_id="1399000022",
+                    order_date="2026-09-21", status="ordered", shipment="1", quantity=5,
+                    cost_per_item=164.99, buying_group="BFMR",
+                    item_name='Hisense 55" Class - QD7 Series - 4K Hi-QLED Smart TV - Allstate 3-Year Protection Plan Bundle (Item #9655750)')
+        base.update(v)
+        return OrderItem(**base)
+
+    def test_an_ordered_tv_takes_its_order_number(self):
+        from scrapers.costco_mapping import order_number_as_tracking
+        tv = self._item()
+        assert order_number_as_tracking([tv], r"\bTV\b") == 1
+        assert tv.tracking_number == "1399000022" and tv.status == "ordered"
+
+    def test_a_carrier_number_reported_later_never_replaces_it(self):
+        from scrapers.costco_mapping import order_number_as_tracking
+        shipped = self._item(status="shipped", tracking_number="1Z999FREIGHT01")
+        order_number_as_tracking([shipped], r"\bTV\b")
+        assert shipped.tracking_number == "1399000022" and shipped.status == "shipped"
+
+    def test_other_rows_are_untouched(self):
+        from scrapers.costco_mapping import order_number_as_tracking
+        laptop = self._item(item_name="ASUS Vivobook 15 (Item #1)")
+        mod = self._item(buying_group="MOD")
+        amazon = self._item(retailer="Amazon Business")
+        assert order_number_as_tracking([laptop, mod, amazon], r"\bTV\b") == 0
+        assert (laptop.tracking_number, mod.tracking_number, amazon.tracking_number) == ("", "", "")
+
+    def test_the_pattern_is_configurable_and_a_bad_one_skips_the_rule(self):
+        from scrapers.costco_mapping import order_number_as_tracking
+        tv = self._item()
+        assert order_number_as_tracking([tv], r"television") == 0
+        assert order_number_as_tracking([tv], r"(unclosed") == 0
+        assert order_number_as_tracking([tv], r"smart\s+tv") == 1
