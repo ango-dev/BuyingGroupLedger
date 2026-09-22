@@ -19,7 +19,10 @@
   --status-ordered: #EA9999; --status-shipped: #F9CB9C; --status-delivered: #FFE599;
   --status-paid: #B6D7A8; --status-return: #DD7E6B; --status-cancelled: #CCCCCC;
   --status-superseded: #666666; --status-ink: #1a1a1a; --status-ink-inverse: #f4f4f4;
-  --status-link: #2f4a8a; --status-link-inverse: #cfe0ff;
+  --status-cancelled-ink: #1a1a1a;
+  /* links inside a tinted row: #2f4a8a on the ordered pink was 3.9:1, so the blue is deeper;
+     the inverse on the superseded grey is lighter */
+  --status-link: #1e315f; --status-link-inverse: #e3ecff; --status-link-cancelled: #1e315f;
   --cat-ordered: #cc4b4b; --cat-shipped: #e0731f; --cat-delivered: #c9a800;
   --cat-paid: #4f9d3a; --cat-return: #b8472f; --cat-neutral: #9a9a9a;
   --grid-line: rgba(0, 0, 0, 0.12);      /* over the pastel status rows */
@@ -39,12 +42,16 @@
     --card: #1e1e22; --accent: #9aaee3; --committed: #b39ae6; --ok: #6fbf8c; --warn: #d9a066; --bad: #d97b78;
     --chart-ok: #4c9c6a; --chart-income: #9679d4; --chart-warn: #bf8347;
     --ok-bg: #16281d; --warn-bg: #2a2117;
+    --status-cancelled: #3d3d44; --status-cancelled-ink: #c4c4cb; --status-superseded: #55555c;
+    --status-link-cancelled: #cfe0ff;
     --on-accent: #15161a; --grid-line-plain: rgba(255, 255, 255, 0.1); color-scheme: dark; }
 }
 :root[data-theme="dark"] { --bg: #161618; --fg: #cfcfd4; --muted: #8d8d96; --line: #2b2b30;
   --card: #1e1e22; --accent: #9aaee3; --committed: #b39ae6; --ok: #6fbf8c; --warn: #d9a066; --bad: #d97b78;
   --chart-ok: #4c9c6a; --chart-income: #9679d4; --chart-warn: #bf8347;
   --ok-bg: #16281d; --warn-bg: #2a2117;
+    --status-cancelled: #3d3d44; --status-cancelled-ink: #c4c4cb; --status-superseded: #55555c;
+    --status-link-cancelled: #cfe0ff;
     --on-accent: #15161a; --grid-line-plain: rgba(255, 255, 255, 0.1); color-scheme: dark; }
 /* The toggle shows the theme you would switch TO. */
 .only-dark { display: none; }
@@ -290,9 +297,8 @@ table.sheetlike tr.status-shipped td    { background: var(--status-shipped); col
 table.sheetlike tr.status-delivered td  { background: var(--status-delivered); color: var(--status-ink); }
 table.sheetlike tr.status-paid td       { background: var(--status-paid); color: var(--status-ink); }
 table.sheetlike tr.status-return td     { background: var(--status-return); color: var(--status-ink); }
-table.sheetlike tr.status-cancelled td  { background: var(--status-cancelled); color: var(--status-ink); text-decoration: line-through; }
+table.sheetlike tr.status-cancelled td  { background: var(--status-cancelled); color: var(--status-cancelled-ink); text-decoration: line-through; }
 table.sheetlike tr.status-superseded td { background: var(--status-superseded); color: var(--status-ink-inverse); text-decoration: line-through; }
-table.sheetlike tr.status-superseded td a { color: var(--status-link-inverse); }
 table.sheetlike tr[class*="status-"] td.rownum { background: var(--bg); color: var(--muted); text-decoration: none; }
 /* ---- the tables' hint pill (a light bulb + "hint"), its tooltip a table ---- */
 .hint-mark { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 0.8em; font-weight: 500; cursor: help; user-select: none; }
@@ -503,7 +509,7 @@ details.multi .menu label.add-one input { width: 100%; box-sizing: border-box; f
 .card tr.status-delivered td[data-field="status"]  { background: var(--status-delivered); color: var(--status-ink); }
 .card tr.status-paid td[data-field="status"]       { background: var(--status-paid); color: var(--status-ink); }
 .card tr.status-return td[data-field="status"]     { background: var(--status-return); color: var(--status-ink); }
-.card tr.status-cancelled td[data-field="status"]  { background: var(--status-cancelled); color: var(--status-ink); text-decoration: line-through; }
+.card tr.status-cancelled td[data-field="status"]  { background: var(--status-cancelled); color: var(--status-cancelled-ink); text-decoration: line-through; }
 .card tr.status-superseded td[data-field="status"] { background: var(--status-superseded); color: var(--status-ink-inverse); text-decoration: line-through; }
 /* the caret sits inside the dropdown box */
 details.multi .summary-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -544,6 +550,10 @@ table.order-rows tr.status-superseded td[data-field="status"] { background: var(
 .card header .order-id { color: var(--fg); }
 .card header .order-id:hover { color: var(--accent); }
 table.sheetlike tr[class*="status-"] td a { color: var(--status-link); }
+/* after the rule above, which shares its specificity: the superseded link used to lose to it and
+   read #2f4a8a on the dark grey, 1.5:1 */
+table.sheetlike tr.status-superseded td a { color: var(--status-link-inverse); }
+table.sheetlike tr.status-cancelled td a { color: var(--status-link-cancelled); }
 h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
 
 /* ---- Settings: a side index, one panel per section, fields in a label / input grid, entry

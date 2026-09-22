@@ -895,6 +895,22 @@ def test_the_dark_theme_keeps_filled_controls_and_grid_lines_readable(served, pa
     assert page.evaluate(
         "getComputedStyle(document.querySelector('table.sheetlike tbody tr[class*=status-] td')).borderRightColor"
     ) == "rgba(0, 0, 0, 0.12)"
+    # links inside tinted rows read at AA in BOTH themes, and the cancelled tint has
+    # a dark step instead of staying the one bright band in the grid
+    contrast = """(sel) => {
+        const el = document.querySelector(sel); if (!el) return null;
+        const td = el.closest('td');
+        const rgb = s => s.match(/[\\d.]+/g).slice(0, 3).map(Number);
+        const lum = ([r, g, b]) => { const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+        const a = lum(rgb(getComputedStyle(el).color)), b = lum(rgb(getComputedStyle(td).backgroundColor));
+        return Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 10) / 10; }"""
+    for theme in ("dark", "light"):
+        page.evaluate(f"document.documentElement.setAttribute('data-theme', '{theme}')")
+        for status in ("ordered", "shipped", "delivered", "paid", "cancelled", "superseded"):
+            ratio = page.evaluate(contrast, f"table.sheetlike tbody tr.status-{status} td a")
+            assert ratio is None or ratio >= 4.5, (theme, status, ratio)
+    page.evaluate("document.documentElement.setAttribute('data-theme', 'dark')")
+    assert page.evaluate("getComputedStyle(document.querySelector('table.sheetlike tbody tr.status-cancelled td:not(.rownum)')).backgroundColor") == "rgb(61, 61, 68)"
     # and the light theme still reads white on the accent
     page.evaluate("document.documentElement.setAttribute('data-theme', 'light')")
     assert page.evaluate(
