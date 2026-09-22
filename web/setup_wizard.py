@@ -54,7 +54,9 @@ STEPS: tuple[Step, ...] = (
     Step("password", "Dashboard password", "password", envs=("WEB_PASSWORD",)),
     Step("browser_use", "Browser-Use key", "scalars", envs=("BROWSER_USE_API_KEY",)),
     Step("profiles", "Profiles", "entries", section="profiles"),
-    Step("groups", "Buying groups", "entries", section="warehouses", sections=("buying_groups",)),
+    # the keys only; the rest is Settings'
+    Step("groups", "Buying groups", "entries", section="warehouses",
+         envs=("BFMR_API_KEY", "BFMR_API_SECRET", "MAXOUTDEALS_API_KEY", "MAXOUTDEALS_USER_ID", "MAXOUTDEALS_EMAIL")),
     Step("cards", "Cards", "entries", section="cards"),
     Step("alerts", "Alerts", "scalars", sections=("alerts",)),
     Step("schedule", "Schedule and backups", "scalars", sections=("container", "backups")),

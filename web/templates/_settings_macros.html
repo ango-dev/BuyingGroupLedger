@@ -7,34 +7,36 @@
 {#- One scalar setting's row: its label, tags, control and help. `form_id` binds the control to a
     form it does not sit inside (the Advanced panel at the foot of the page, saved by the main
     form's button). -#}
-{% macro setting_row(row, section, ns, form_id='') %}
+{% macro setting_row(row, section, ns, form_id='', plain=false, autofocus=false) %}
+          {#- `plain` (the setup wizard): no env name, no tags, the help without its operator asides -#}
           {% set s = row.setting %}
           {% if s.subgroup != ns.group %}{% set ns.group = s.subgroup %}{% if ns.group %}<h3 class="subgroup" id="s-{{ section }}-{{ ns.group | lower }}">{{ ns.group }}</h3>{% endif %}{% endif %}
           {% set label, sub = field_label(s) %}
+          {% set focus = ' autofocus' if autofocus else '' %}
           <div class="field">
             <div class="field-label">
               <label for="f-{{ s.env }}">{% if sub %}<span class="sub">{{ sub }} · </span>{% endif %}{{ label }}</label>
-              <div class="meta">
+              {% if not plain %}<div class="meta">
                 <span class="mono small muted">{{ s.env }}</span>
                 {% if row.overridden %}<span class="tag stale" title="set in the environment: the file's value is saved but the process keeps the exported one">env override</span>{% endif %}
                 {% if row.defaulted %}<span class="tag" title="not in config.json: the code's default applies; saving writes it to the file">default</span>{% endif %}
                 {% if row.restart == 'container' %}<span class="tag" title="the container reads this once at start: docker compose restart to apply">container restart</span>
                 {% elif row.restart == 'dashboard' %}<span class="tag" title="the dashboard reads this once at start: Restart dashboard to apply">dashboard restart</span>{% endif %}
-              </div>
+              </div>{% endif %}
             </div>
             <div class="field-input">
               {% if s.kind == 'bool' %}
-                <label class="switch"><input type="checkbox" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="on" {{ 'checked' if row.value is sameas true or row.value in ('true', 'True', '1', 'yes', 'on') }}> <span class="muted small">enabled</span></label>
+                <label class="switch"><input type="checkbox" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="on" {{ 'checked' if row.value is sameas true or row.value in ('true', 'True', '1', 'yes', 'on') }}{{ focus }}> <span class="muted small">enabled</span></label>
               {% elif s.secret %}
-                <input type="password" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="" autocomplete="new-password"
+                <input type="password" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="" autocomplete="new-password"{{ focus }}
                        placeholder="{{ '•••••••• (set; blank keeps it)' if row.secret_set else '(not set)' }}">
                 {% if row.secret_set %}<label class="small clear"><input type="checkbox" name="{{ s.env }}__clear"{% if form_id %} form="{{ form_id }}"{% endif %} value="1"> clear</label>{% endif %}
               {% elif s.kind in ('int', 'float') %}
-                <input type="number" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="{{ row.value }}" step="{{ '1' if s.kind == 'int' else 'any' }}">
+                <input type="number" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="{{ row.value }}" step="{{ '1' if s.kind == 'int' else 'any' }}"{{ focus }}>
               {% else %}
-                <input type="text" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="{{ row.value }}" {% if s.kind == 'rate' %}placeholder="0.02 or 2%"{% endif %}>
+                <input type="text" id="f-{{ s.env }}" name="{{ s.env }}"{% if row.restart in ('container', 'dashboard') %} data-restart="{{ row.restart }}"{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %} value="{{ row.value }}" {% if s.kind == 'rate' %}placeholder="0.02 or 2%"{% endif %}{{ focus }}>
               {% endif %}
-              {% if s.help %}<div class="muted small help">{{ s.help }}</div>{% endif %}
+              {% if s.help %}<div class="muted small help">{{ plain_help(s.help) if plain else s.help }}</div>{% endif %}
             </div>
           </div>
 {% endmacro %}

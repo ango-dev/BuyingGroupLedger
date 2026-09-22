@@ -10,4 +10,4 @@
     <button type="submit" class="primary">Restore</button>
   </form>
 </section>
-<div class="setup-actions"><a class="button" href="{{ next_url }}">Skip — start fresh</a></div>
+<div class="setup-actions"><a class="button" href="{{ next_url }}">{{ 'Skip — keep this install' if configured else 'Skip — start fresh' }}</a></div>

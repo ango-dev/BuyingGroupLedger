@@ -901,7 +901,7 @@ class TestEntryCards:
         assert settings_form.section_title("brand_new") == ("Brand new", "")
         by_env = {s.env: s for s in settings_form.schema()}
         assert settings_form.field_label(by_env["LOOKBACK_DAYS"]) == ("Lookback days", "")
-        assert settings_form.field_label(by_env["BFMR_API_KEY"]) == ("Api key", "bfmr")
+        assert settings_form.field_label(by_env["BFMR_API_KEY"]) == ("API key", "bfmr")  # API stays upper (2026-09-22)
         assert settings_form.RETAILER_KEYS == ("amazon", "amazon-business", "bestbuy", "costco")
 
 

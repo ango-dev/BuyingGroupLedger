@@ -6,13 +6,15 @@
 <p class="muted small lead">Say which ledger column each column of <strong>{{ batch.source_name }}</strong> holds. Columns you leave as <em>ignore</em> are not read.</p>
 {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
 {% include "_import_steps.html" %}
+{% if unmapped %}<div class="banner warn"><strong>{{ unmapped | join(', ') if unmapped | length < 3 else (unmapped[:-1] | join(', ')) ~ ' and ' ~ unmapped[-1] }} {{ 'is' if unmapped | length == 1 else 'are' }} not mapped yet.</strong> A row needs Order ID, Order Date and Item Name before it can be a row at all; without them every row would be incomplete and wait on the staging sheet.</div>{% endif %}
 <form method="post" action="/tools/import/map" class="import-map">
   <section class="panel">
+    <p class="muted small">A ledger column named exactly as the ledger names it is taken as is; a <span class="tag guess">guessed</span> pick came from the column's name and is worth a glance.</p>
     <table class="grid compact map">
       <thead><tr><th>Your column</th><th>Sample values</th><th>Ledger column</th></tr></thead>
       <tbody>
       {% for c in columns %}
-        <tr><td class="mono">{{ c.header }}</td><td class="muted small">{{ c.samples | join(' · ') }}</td><td>{{ choose('map.' ~ loop.index0, targets, c.suggested, '', 'cell') }}</td></tr>
+        <tr><td class="mono">{{ c.header }}{% if c.suggested and not c.exact %}<span class="tag guess" title="picked from the column's name: check it">guessed</span>{% endif %}</td><td class="muted small samples">{{ c.samples | join(' · ') }}</td><td>{{ choose('map.' ~ loop.index0, targets, c.suggested, '', 'cell', aria=c.header) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

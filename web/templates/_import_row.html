@@ -6,7 +6,14 @@
 <tr>
   <td class="rownum muted" title="row {{ n }} (source row {{ r.source_row }}) — click to select"><input type="checkbox" name="sel" value="{{ r.id }}" hidden aria-label="select row {{ n }}">{{ n }}</td>
   <td class="missing">
-    {%- for g in row_gap_names %}<span class="chip gap">{{ g }}</span>{% endfor -%}
+    {#- the three landing fields first and in their own tone, three more, the rest folded; a held
+        row shows its hold and no gaps -#}
+    {%- if r.accepted or not r.note -%}
+      {%- set keys = [] %}{% set rest = [] %}{% for g in row_gap_names %}{% if g in ('Order ID', 'Order Date', 'Item Name') %}{% set _ = keys.append(g) %}{% else %}{% set _ = rest.append(g) %}{% endif %}{% endfor -%}
+      {%- for g in keys %}<span class="chip gap key">{{ g }}</span>{% endfor -%}
+      {%- for g in rest[:3] %}<span class="chip gap">{{ g }}</span>{% endfor -%}
+      {%- if rest | length > 3 %}<details class="gaps-more"><summary>+{{ rest | length - 3 }} more</summary>{% for g in rest[3:] %}<span class="chip gap">{{ g }}</span>{% endfor %}</details>{% endif -%}
+    {%- endif -%}
     {%- if r.accepted %}<span class="chip ok" title="the open-order and near-duplicate holds are off for this row: it imports with the next commit once it is complete">import anyway</span><button type="button" class="chip act" hx-post="/tools/import/rows/accept" hx-vals='{"id": "{{ r.id }}", "undo": "1"}' hx-target="closest tr" hx-swap="outerHTML" title="hold this row again">undo</button>
     {%- elif r.note %}<span class="chip note" title="{{ r.note }}">{{ 'open order' if r.note.startswith('open order') else 'duplicate' if r.note.startswith('already') else 'check: near duplicate' }}</span>{% if not r.note.startswith('already') %}<button type="button" class="chip act" hx-post="/tools/import/rows/accept" hx-vals='{"id": "{{ r.id }}"}' hx-target="closest tr" hx-swap="outerHTML" title="{{ 'the scrapers will not touch this order: import it once it is complete' if r.note.startswith('open order') else 'this is a different item of that order, or the number is right: import the row once it is complete' }}">Import anyway</button>{% endif %}{% endif -%}
     {%- for w in r.warnings %}<span class="chip warn" title="{{ w }}">{{ w[:38] }}{{ '…' if w | length > 38 }}</span>{% endfor -%}

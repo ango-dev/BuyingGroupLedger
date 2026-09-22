@@ -6,12 +6,12 @@
     choose(name, options, chosen, label='', klass='')
       options: (value, text) pairs, or bare values used as both; chosen: the current value
       (compared as text). -#}
-{% macro choose(name, options, chosen, label='', klass='') -%}
+{% macro choose(name, options, chosen, label='', klass='', aria='') -%}
 {%- set ns = namespace(text='', pairs=[]) -%}
 {%- for item in options %}{% if item is string or item is number %}{% set ns.pairs = ns.pairs + [(item, item)] %}{% else %}{% set ns.pairs = ns.pairs + [(item[0], item[1])] %}{% endif %}{% endfor -%}
 {%- for value, text in ns.pairs %}{% if value | string == chosen | string %}{% set ns.text = text %}{% endif %}{% endfor -%}
 {%- if not ns.text and ns.pairs %}{% set ns.text = ns.pairs[0][1] %}{% endif -%}
-<details class="multi single {{ klass }}" data-param="{{ name }}">
+<details class="multi single {{ klass }}" data-param="{{ name }}"{% if aria %} aria-label="{{ aria }}"{% endif %}>
   <summary>{% if label %}<span class="lbl">{{ label }}</span> {% endif %}<span class="summary-text"><span class="summary-value">{{ ns.text }}</span><span class="caret">▾</span></span></summary>
   <div class="menu">
     {% for value, text in ns.pairs %}<label><input type="radio" name="{{ name }}" value="{{ value }}" {{ 'checked' if value | string == chosen | string }}> {{ text }}</label>

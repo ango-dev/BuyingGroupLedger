@@ -541,11 +541,30 @@ def section_title(section: str) -> tuple[str, str]:
     return SECTION_TITLES.get(section, (section.replace("_", " ").capitalize(), ""))
 
 
+#: Words a label keeps upper-case ("API key", not "Api key").
+_UPPER_WORDS = {"api", "url", "id", "cc", "tz", "totp"}
+
+
 def field_label(setting: Setting) -> tuple[str, str]:
-    """("Lookback days", "") for scraping.lookback_days; ("Api key", "bfmr") for
+    """("Lookback days", "") for scraping.lookback_days; ("API key", "bfmr") for
     buying_groups.bfmr.api_key -- the last part humanised, the sub-group beside it."""
     parts = setting.key.split(".")
-    return parts[-1].replace("_", " ").capitalize(), ".".join(parts[:-1])
+    words = parts[-1].split("_")
+    label = " ".join(w.upper() if w in _UPPER_WORDS else (w.capitalize() if i == 0 else w) for i, w in enumerate(words))
+    return label, ".".join(parts[:-1])
+
+
+_ENV_PREFIX = re.compile(r"^[A-Z0-9_]+(?:\s*/\s*[A-Z0-9_]+)?\s+[—-]+\s+")
+_COMMAND_ASIDE = re.compile(r"\s*[^.]*`python -m[^`]*`[^.]*\.?")
+
+
+def plain_help(text: str) -> str:
+    """A setting's help for the setup wizard: the example file's comment without the `ENV_NAME — `
+    prefix it opens with and without the command-line asides (`python -m ...` ignores this) --
+    those are the operator's, on the Settings page. The warnings stay."""
+    out = _ENV_PREFIX.sub("", str(text or ""), count=1)
+    out = _COMMAND_ASIDE.sub("", out)
+    return out.strip()
 
 
 # --------------------------------------------------------------------------------------------------

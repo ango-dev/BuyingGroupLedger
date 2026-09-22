@@ -1,17 +1,22 @@
-<section class="panel">
-  {% set title, blurb = section_title(step.sections[0] if step.sections else 'browser_use') %}
-  <p class="muted">{{ blurb }}</p>
-  <form method="post" action="/setup/{{ step.key }}{{ '?again=1' if again }}" class="settings" autocomplete="off">
+{#- A scalar step: one panel per section the step saves (the schedule step is "Schedule" then
+    "Backups", so its Enabled reads as the backups' switch), the rows in the
+    wizard's plain mode (no env names or tags), the first input focused. -#}
+<form method="post" action="/setup/{{ step.key }}{{ '?again=1' if again }}" class="settings" autocomplete="off">
+  {% set ns = namespace(group='', first=true) %}
+  {% for section in (step.sections if step.sections else ['browser_use']) %}
+  <section class="panel">
+    {% set title, blurb = section_title(section) %}
+    {% if step.sections | length > 1 %}<header><h2>{{ title }}</h2><p class="muted">{{ blurb }}</p></header>{% else %}<p class="muted">{{ blurb }}</p>{% endif %}
     <div class="fields">
-      {% set ns = namespace(group='') %}
-      {% for row in rows if row.setting.env not in hidden_envs %}
-{{ setting_row(row, step.key, ns) }}
+      {% for row in rows if row.setting.env not in hidden_envs and row.setting.section == section %}
+{{ setting_row(row, step.key, ns, plain=true, autofocus=ns.first) }}{% set ns.first = false %}
       {% endfor %}
     </div>
-    <div class="setup-actions">
-      <button type="submit" class="primary">{{ 'Change and continue' if again else 'Save and continue' }}</button>
-      <a class="button" href="{{ next_url }}">{{ 'Keep and continue' if again else 'Skip' }}</a>
-      {% if prev_url %}<a class="button" href="{{ prev_url }}">Back</a>{% endif %}
-    </div>
-  </form>
-</section>
+  </section>
+  {% endfor %}
+  <div class="setup-actions">
+    <button type="submit" class="primary">{{ 'Change and continue' if again else 'Save and continue' }}</button>
+    <a class="button" href="{{ next_url }}">{{ 'Keep and continue' if again else 'Skip' }}</a>
+    {% if prev_url %}<a class="button" href="{{ prev_url }}">Back</a>{% endif %}
+  </div>
+</form>

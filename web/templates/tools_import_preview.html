@@ -11,6 +11,7 @@
   <div class="tile"><div class="label">Near duplicates</div><div class="value">{{ counts.staged_near }}</div><div class="hint">staged: check them</div></div>
   <div class="tile"><div class="label">Duplicates</div><div class="value">{{ counts.duplicate }}</div><div class="hint">already on the ledger: skipped</div></div>
 </section>
+<p class="muted small">Complete rows land on the ledger. Incomplete, open-order and near-duplicate rows go to the staging sheet, where you fill them in or lift a hold with <em>Import anyway</em>. Duplicates -- the same order, date, item and shipment as a ledger row -- are dropped and never imported.</p>
 {% if not editable %}<div class="banner warn">Editing is off on this backend (a CSV snapshot): every row goes to the staging sheet and nothing is imported.</div>{% endif %}
 {% if touched %}<p class="muted small">Shipping, tax, gift card or rewards given as the order's total on every row were split by Total Cost for: {{ touched | join(', ') }}.</p>{% endif %}
 {% if warnings %}
@@ -18,7 +19,7 @@
   <ul class="small">{% for n, w in warnings %}<li>row {{ n }}: {{ w }}</li>{% endfor %}{% if warning_total > warnings | length %}<li class="muted">… and {{ warning_total - warnings | length }} more</li>{% endif %}</ul>
 </details>
 {% endif %}
-<div class="sheet">
+<div class="sheet scroll-x">
 <table class="grid compact preview">
   <thead><tr><th>Row</th><th>Result</th><th>Order ID</th><th>Order Date</th><th>Item</th><th>Status</th><th>Qty</th><th>Cost/item</th><th>Still needed</th></tr></thead>
   <tbody>
@@ -36,7 +37,7 @@
 </table>
 </div>
 <div class="inline-form">
-  <form method="post" action="/tools/import/run" data-confirm="Run the import? The complete rows go onto the ledger now (their cells kept as hand edits); the rest wait on the staging sheet."><button type="submit" class="primary">Run the import</button></form>
+  <form method="post" action="/tools/import/run" data-confirm="Import the complete rows? They go onto the ledger now (their cells kept as hand edits); the rest wait on the staging sheet."><button type="submit" class="primary">Import the complete rows</button></form>
   <a class="button" href="/tools/import/map">Back to the mapping</a>
   <form method="post" action="/tools/import/discard" data-confirm="Discard the uploaded file?"><button type="submit" class="danger">Discard</button></form>
 </div>

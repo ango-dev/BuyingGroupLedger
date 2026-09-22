@@ -21,7 +21,7 @@
 {% elif restart == 'dashboard' %}
 <div class="banner warn restart-prompt">
   <strong>Restart the dashboard to apply this change.</strong> It is saved; the web process reads
-  settings once at start. Use <em>Restart dashboard</em> at the bottom of this page (the scheduler is
+  settings once at start. Use <em>Restart dashboard</em> {{ 'below' if setup else 'at the bottom of this page' }} (the scheduler is
   untouched).
 </div>
 {% endif %}

@@ -1257,7 +1257,24 @@ figure.months .bar.selected text.month { fill: var(--accent); font-weight: 700; 
 }
 
 /* Tools > Import (web/importer.py): the step strip, the chips and the staging sheet's gaps. */
-.import-steps { display: flex; gap: 6px; list-style: none; margin: 4px 0 14px; padding: 0; font-size: 0.85em; }
+.import-steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 4px 0 14px; padding: 0; font-size: 0.85em; }
+/* the map and preview tables scroll inside their own box at 360px, the page never pans */
+.scroll-x { overflow: auto; max-width: 100%; }
+table.map td.samples { white-space: normal; overflow-wrap: anywhere; }  /* the map table fits 360px by wrapping, no scroll box (its dropdowns would clip) */
+.preview-counts .tile .hint { white-space: normal; overflow: visible; text-overflow: clip; }
+.import-map .egrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; align-items: start; }
+.import-map .egrid .span-2 { grid-column: span 2; }
+.import-map .egrid fieldset { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: var(--r-1); padding: 8px 12px; margin: 0; }
+.import-map .egrid fieldset label { display: flex; align-items: flex-start; gap: 6px; }
+.import-map .egrid fieldset label input { flex: 0 0 auto; margin-top: 3px; }
+.import-map .egrid > label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9em; color: var(--muted); }
+.import-map .tag.guess { font-size: 0.72em; margin-left: 6px; }
+table.imports details.gaps-more { display: inline-block; }
+table.imports details.gaps-more > summary { display: inline-block; list-style: none; cursor: pointer; margin: 1px 4px 1px 0; padding: 0 7px; border-radius: 999px; font-size: 0.76em; line-height: 1.6; border: 1px dashed var(--warn); color: var(--warn); }
+table.imports details.gaps-more > summary::-webkit-details-marker { display: none; }
+table.imports details.gaps-more[open] > summary { display: none; }
+.chip.gap.key { font-weight: 600; background: var(--warn); color: var(--on-accent); }
+@media (max-width: 760px) { .import-map .egrid { grid-template-columns: 1fr; } .import-map .egrid .span-2 { grid-column: span 1; } }
 .import-steps li { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--card); }
 .import-steps li.done { color: var(--ok); border-color: var(--ok); }
 .import-steps li.current { color: var(--accent); border-color: var(--accent); font-weight: 600; }
@@ -1281,6 +1298,12 @@ header.setup-top .setup-title { padding: 14px 10px; color: var(--muted); font-we
 .setup-steps li { border: 1px solid var(--line); border-radius: 999px; background: var(--card); }
 .setup-steps li a, .setup-steps li span { display: block; padding: 3px 10px; color: var(--muted); text-decoration: none; }
 .setup-steps li span { opacity: .7; }  /* a step ahead on a fresh install: not a link yet (2026-09-22) */
+.setup-steps .of { display: none; }
+/* a phone shows the current step alone, "Step 6 of 10 · Cards" (the strip took four rows) */
+@media (max-width: 760px) {
+  .setup-steps li:not(.current) { display: none; }
+  .setup-steps .of { display: inline; }
+}
 .setup-steps li.done { border-color: var(--ok); } .setup-steps li.done a { color: var(--ok); }
 .setup-steps li.current { border-color: var(--accent); } .setup-steps li.current a { color: var(--accent); font-weight: 600; }
 .setup-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 14px 0 24px; }

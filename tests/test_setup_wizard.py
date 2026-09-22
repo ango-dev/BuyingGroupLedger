@@ -288,7 +288,7 @@ class TestTrust:
         def done_titles(key):
             body = fresh.get(f"/setup/{key}").text
             strip = body[body.index('<ol class="setup-steps">'):body.index("</ol>")]
-            chips = re.findall(r'<li class="([^"]*)"[^>]*>(?:<a[^>]*>|<span>)(\d+\. [^<]+)', strip)
+            chips = re.findall(r'<li class="([^"]*)"[^>]*>(?:<a[^>]*>|<span>)(?:<span class="of">[^<]*</span>)?(\d+\. [^<]+)', strip)
             assert len(chips) == 10
             return [title for classes, title in chips if "done" in classes.split()]
         assert done_titles("schedule") == ["1. Restore a backup"]  # skipping ahead ticks nothing but the optional step passed
@@ -364,3 +364,45 @@ class TestTrust:
         assert "message=" in keys.headers["location"] and "Saved" in client.get(keys.headers["location"]).text
         added = client.post("/setup/cards/entry?again=1", data={"name": "Prime Visa", "last4": "0315"}, follow_redirects=False)
         assert "Added+card" in added.headers["location"]
+
+
+# --------------------------------------------------------------------------------------------------
+# Copy and layout: no operator chrome on a first-run step, the
+# groups step asks for the keys only, the schedule step names its two groups, the small copy fixes
+# --------------------------------------------------------------------------------------------------
+
+
+class TestFirstRunCopy:
+    def test_a_first_run_step_shows_no_operator_chrome(self, fresh):
+        page = fresh.get("/setup/browser_use").text
+        assert 'for="f-BROWSER_USE_API_KEY"' in page and ">API key<" in page
+        assert '<span class="mono small muted">BROWSER_USE_API_KEY</span>' not in page  # the env name is Settings' business
+        assert 'class="tag"' not in page and "env override" not in page and "container restart" not in page
+        assert "BROWSER_USE_API_KEY — " not in page  # the help text drops its env-name prefix
+        assert "python -m" not in page  # and the command-line asides
+        settings = fresh.get("/settings").text
+        assert '<span class="mono small muted">BROWSER_USE_API_KEY</span>' in settings  # unchanged there
+        assert 'autofocus' in page
+
+    def test_the_groups_step_asks_for_the_keys_only_and_the_schedule_step_names_its_groups(self, fresh):
+        groups = fresh.get("/setup/groups").text
+        for env in ("BFMR_API_KEY", "BFMR_API_SECRET", "MAXOUTDEALS_API_KEY", "MAXOUTDEALS_USER_ID", "MAXOUTDEALS_EMAIL"):
+            assert f'for="f-{env}"' in groups, env
+        for env in ("BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD", "BFMR_COSTCO_TV_ITEM_PATTERN", "BUYING_GROUP_SYNC_ENABLED", "BFMR_MIN_INSURANCE_VALUE"):
+            assert f'for="f-{env}"' not in groups, env
+        assert ">API access<" in groups and "everything else about the groups is on the Settings page" in groups
+        assert fresh.post("/setup/groups", data={"BFMR_API_KEY": "K"}, follow_redirects=False).status_code == 303
+        assert config_value("buying_groups.bfmr.api_key") == "K"
+        schedule = fresh.get("/setup/schedule").text
+        assert schedule.index("<h2>Schedule</h2>") < schedule.index('for="f-RUN_INTERVAL_HOURS"') < schedule.index("<h2>Backups</h2>") < schedule.index('for="f-BACKUP_ENABLED"')
+
+    def test_the_small_copy_fixes(self, fresh):
+        password = fresh.get("/setup/password").text
+        assert "Confirm password" in password and ">Again <" not in password
+        assert "Skip — start fresh" in fresh.get("/setup/restore").text
+        fresh.post("/setup/password", data={"password": "pw", "confirm": "pw"}, follow_redirects=False)
+        fresh.post("/setup/profiles/entry", data={"label": "alpha", "retailers": ["costco"]}, follow_redirects=False)
+        assert "Skip — keep this install" in fresh.get("/setup/restore?again=1").text  # configured now
+        done = fresh.get("/setup/done").text
+        assert "Restart dashboard" in done and "at the bottom of this page" not in done and "below" in done
+        assert 'class="of"' in fresh.get("/setup/cards").text  # the phone's "Step 6 of 10"

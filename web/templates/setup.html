@@ -17,7 +17,7 @@
 {#- A chip is ticked when its step HAS a value (done_keys), and on a fresh install the steps ahead
     are not links: Done needs a profile first. -#}
 <ol class="setup-steps">
-  {% for s in steps %}<li class="{{ 'current' if s.key == step.key }}{{ ' done' if s.key in done_keys }}"{% if s.key == step.key %} aria-current="step"{% endif %}>{% if configured or again or loop.index0 <= index %}<a href="/setup/{{ s.key }}{{ '?again=1' if again }}">{{ loop.index }}. {{ s.title }}</a>{% else %}<span>{{ loop.index }}. {{ s.title }}</span>{% endif %}</li>{% endfor %}
+  {% for s in steps %}<li class="{{ 'current' if s.key == step.key }}{{ ' done' if s.key in done_keys }}"{% if s.key == step.key %} aria-current="step"{% endif %}>{% if configured or again or loop.index0 <= index %}<a href="/setup/{{ s.key }}{{ '?again=1' if again }}">{% if s.key == step.key %}<span class="of">Step {{ loop.index }} of {{ steps | length }} · </span>{% endif %}{{ loop.index }}. {{ s.title }}</a>{% else %}<span>{{ loop.index }}. {{ s.title }}</span>{% endif %}</li>{% endfor %}
 </ol>
 <h1>{{ step.title }}{% if step.optional %} <span class="muted small">— optional</span>{% endif %}</h1>
 {% if message %}<div class="banner ok">{{ message }}</div>{% endif %}

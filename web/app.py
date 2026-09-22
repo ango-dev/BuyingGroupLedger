@@ -199,6 +199,8 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     templates.env.filters["query"] = query_string
     templates.env.globals["header_of"] = FIELD_TO_HEADER.get
+    from web.settings_form import plain_help
+    templates.env.globals["plain_help"] = plain_help  # the setup wizard's help text, without the operator asides
 
     def heartbeat() -> dict:
         return heartbeat_module.read_heartbeat(logs_dir, now=clock(), interval_hours=interval_hours,
@@ -1718,8 +1720,11 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             page_no = 1
         ipager = paginate(every, per or max(len(every), 1), page_no)
         rows = ipager["items"]
+        complete = len(importer.classify(staging.rows, ledger_index_now())["complete"]) if every else 0
+        mapped = bool(batch and staging is None and (batch.load_mapping() or {}).get("mapping"))
         response = page_no_snapshot(
             request, "tools_import.html", wide=bool(every), batch=batch, staging=staging, rows=rows, ipager=ipager, iper=per,
+            complete=complete, mapped=mapped,
             gaps={r.id: importer.gap_fields(r) for r in rows}, gap_names={r.id: importer.gaps_for(r) for r in rows},
             editable=True, can_import=writer is not None, choices=importer.choices_for(staging, ledger_choices_now()),
             unfinished=bool(batch and staging is None), error=error, notice=notice,
@@ -1770,6 +1775,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             verdict, samples = None, []
             error = error or str(exc)
         response = page_no_snapshot(request, "tools_import_map.html", batch=batch, columns=columns,
+                                    unmapped=importer.unmapped_landing(mapping.get("mapping") or suggested),
                                     targets=importer.target_options(), verdict=verdict, samples=samples,
                                     date_order=str(mapping.get("date_order") or ""), profile=str(mapping.get("profile") or ""),
                                     profiles=settings_form.profile_labels(), error=error, step="map")
@@ -1967,7 +1973,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             request, "setup.html", step=step, steps=setup_wizard.STEPS, index=index, again=again, done_keys=done_keys,
             next_url=f"/setup/{nxt.key}{suffix}" if nxt else "", prev_url=f"/setup/{prev.key}{suffix}" if prev else "",
             rows=rows, entries=entries, draft=draft, errors=errors or [], message=message, open_section=open_section,
-            signin_again=request.query_params.get("signin") == "1",
+            signin_again=request.query_params.get("signin") == "1", setup=True,
             hidden_envs=settings_form.hidden_envs(), section_title=settings_form.section_title,
             field_label=settings_form.field_label, retailer_keys=settings_form.RETAILER_KEYS,
             auth_retailers=settings_form.AUTH_RETAILERS, profile_labels=settings_form.profile_labels(),

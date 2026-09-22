@@ -601,3 +601,58 @@ class TestAtScale:
         assert importer.staged_count(client.data_dir) == 2 and len(loads) == first  # cached on the sheet's stamp
         client.get("/")
         assert len(loads) == first
+
+
+# --------------------------------------------------------------------------------------------------
+# Copy and layout: the chips say what matters first, the mapping
+# page warns before the preview does, the landing knows where the batch stands
+# --------------------------------------------------------------------------------------------------
+
+
+class TestImportCopy:
+    def test_the_still_needed_cell_leads_with_the_landing_fields_and_folds_the_rest(self, client):
+        no_id = CSV.splitlines()[0] + "\n" + ",3/11/2026,Nameless,2,100,paid,Amazon,1Z9,120,,alpha,,,,,,,\n"
+        upload_and_run(client, no_id)
+        page = client.get("/tools/import").text
+        cell = page[page.index('<td class="missing">'):page.index("</td>", page.index('<td class="missing">'))]
+        assert cell.index('class="chip gap key">Order ID<') < cell.index('class="chip gap">')  # identity first, in its own tone
+        assert cell[:cell.index("<details")].count('class="chip gap">') == 3 and '<details class="gaps-more"><summary>+' in cell  # three more, the rest folded
+        assert "more</summary>" in cell
+        # a held row shows its hold, not a wall of gaps
+        held = CSV.splitlines()[0] + "\n" + CSV.splitlines()[3] + "\n"
+        client.post("/tools/import/discard", follow_redirects=False)
+        upload_and_run(client, held)
+        page = client.get("/tools/import").text
+        cell = page[page.index('<td class="missing">'):page.index("</td>", page.index('<td class="missing">'))]
+        assert ">open order<" in cell and 'class="chip gap' not in cell
+        assert "set Status to delivered or paid" in cell  # the chip's title says what finishes it
+
+    def test_the_mapping_page_warns_on_an_unmapped_landing_column_and_tags_guesses(self, client):
+        client.post("/tools/import/upload", files={"source": ("old.csv", b"Number,When,Thing,Qty\n1,3/11/2026,x,1\n", "text/csv")}, follow_redirects=False)
+        page = client.get("/tools/import/map").text
+        assert "Order ID, Order Date and Item Name are not mapped yet" in page and "every row would be incomplete" in page
+        assert 'aria-label="Number"' in page  # the dropdown names its column
+        client.post("/tools/import/upload", files={"source": ("x.csv", b"Order ID,Date,Item Name\n1,3/11/2026,x\n", "text/csv")}, follow_redirects=False) if False else None
+        client.post("/tools/import/discard", follow_redirects=False)
+        client.post("/tools/import/upload", files={"source": ("x.csv", b"Order ID,Date,Item Name\n1,3/11/2026,x\n", "text/csv")}, follow_redirects=False)
+        page = client.get("/tools/import/map").text
+        assert "are not mapped yet" not in page
+        assert page.count('<span class="tag guess" title=') == 1  # Date was guessed; the two exact names were not (the legend's tag aside)
+        assert "Order ID" in page and "Item Name" in page
+
+    def test_the_landing_page_knows_a_mapped_batch_waits_for_its_preview(self, client):
+        client.post("/tools/import/upload", files={"source": ("old.csv", CSV.encode(), "text/csv")}, follow_redirects=False)
+        assert "waiting for its column mapping" in client.get("/tools/import").text
+        client.post("/tools/import/map", data={**MAPPING, "date_order": "", "profile": ""}, follow_redirects=False)
+        landing = client.get("/tools/import").text
+        assert "is mapped and waiting for its preview" in landing and 'href="/tools/import/preview"' in landing
+        preview = client.get("/tools/import/preview").text
+        assert ">Import the complete rows<" in preview and "Run the import" not in preview
+        assert "are dropped and never imported" in preview  # the tiles' legend says where every row goes
+        run = client.post("/tools/import/run", follow_redirects=False)
+        assert run.status_code == 303
+        sheet = client.get("/tools/import").text
+        assert "Import the 0 complete rows" in sheet and 'disabled' in sheet[sheet.index("Import the 0 complete"):sheet.index("Import the 0 complete") + 200] or ">Import the 0 complete rows</button>" in sheet
+        assert "Discard this sheet first" in sheet
+        client.post("/tools/import/cell", data={"entry_id": "r0002-1", "field": "payout_date", "value": "2026-04-02"})
+        assert ">Import the 1 complete row<" in client.get("/tools/import").text

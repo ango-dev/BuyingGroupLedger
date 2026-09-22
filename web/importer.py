@@ -323,8 +323,20 @@ def source_columns(batch: Batch, overrides: Mapping[str, str] | None = None) -> 
                 samples.append(value)
             if len(samples) == 3:
                 break
-        out.append({"header": h, "samples": samples, "suggested": suggested.get(h, "")})
+        out.append({"header": h, "samples": samples, "suggested": suggested.get(h, ""),
+                    "exact": h in exact or h in (overrides or {})})  # a guess is tagged on the page
     return out
+
+
+#: The three cells a row needs before it can be a row at all (the add-row path's own rule).
+LANDING_FIELDS = ("order_id", "order_date", "item_name")
+
+
+def unmapped_landing(mapping: Mapping[str, str]) -> list[str]:
+    """The landing fields no source column maps to, as display names, for the mapping page's
+    warning."""
+    mapped = set((mapping or {}).values())
+    return [_DISPLAY[f] for f in LANDING_FIELDS if f not in mapped]
 
 
 def mapping_from_form(headers: list[str], form: Mapping[str, str]) -> dict[str, str]:
@@ -571,7 +583,8 @@ def ledger_index(ledger_rows: Iterable) -> dict:
 
 NOTES = {
     "duplicate": "already on the ledger under this key: skipped",
-    "staged_open": "open order (ordered / shipped): the scrapers own it -- import by hand once you are sure",
+    "staged_open": "open order (ordered / shipped): the scrapers own it -- set Status to delivered or paid, "
+                   "or leave it for the scrapers; Import anyway keeps it as it is",
     "staged_near": "the ledger already holds this order under another item name or shipment, or another order "
                    "holds this tracking number: check before importing",
 }

@@ -12,8 +12,8 @@
 <section class="panel import-actions">
   <div class="inline-form">
     <span><strong>{{ staging.source_name }}</strong> <span class="muted small">— uploaded {{ staging.created_at[:16].replace('T', ' ') }} · {{ rows | length }} row(s) still to import</span></span>
-    <form method="post" action="/tools/import/commit" data-confirm="Import every row that is complete now? Each becomes a row of the ledger, its cells kept as hand edits."><button type="submit" class="primary" {{ '' if can_import else 'disabled' }}>Import the complete rows</button></form>
-    <a class="button" href="/tools/import/staging.csv" title="the staged rows in the ledger's columns: fix them in a spreadsheet, then upload the file again">Download the staging CSV</a>
+    <form method="post" action="/tools/import/commit" data-confirm="Import every row that is complete now? Each becomes a row of the ledger, its cells kept as hand edits."><button type="submit" class="primary" {{ '' if (can_import and complete) else 'disabled' }}>Import the {{ complete }} complete row{{ '' if complete == 1 else 's' }}</button></form>
+    <a class="button" href="/tools/import/staging.csv" title="the staged rows in the ledger's columns: fix them in a spreadsheet, then upload the file again">Download the staging CSV</a><span class="muted small">to upload the fixed file, Discard this sheet first</span>
     <form method="post" action="/tools/import/discard" data-confirm="Discard the staging sheet and its source file? The rows already imported stay on the ledger."><button type="submit" class="danger">Discard</button></form>
   </div>
   {% if not can_import %}<p class="muted small">Editing is off on this backend (a CSV snapshot): the sheet can be filled in, but nothing can be imported.</p>{% endif %}
@@ -23,9 +23,9 @@
 
 {% elif unfinished %}
 <section class="panel">
-  <p>An upload, <strong>{{ batch.source_name }}</strong>, is waiting for its column mapping.</p>
+  <p>An upload, <strong>{{ batch.source_name }}</strong>, {{ 'is mapped and waiting for its preview' if mapped else 'is waiting for its column mapping' }}.</p>
   <div class="inline-form">
-    <a class="button primary" href="/tools/import/map">Continue</a>
+    <a class="button primary" href="{{ '/tools/import/preview' if mapped else '/tools/import/map' }}">{{ 'Continue to the preview' if mapped else 'Continue' }}</a>
     <form method="post" action="/tools/import/discard" data-confirm="Discard the uploaded file?"><button type="submit" class="danger">Discard</button></form>
   </div>
 </section>
