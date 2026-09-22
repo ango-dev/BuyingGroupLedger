@@ -291,7 +291,7 @@ class TestTaxesPage:
         assert 'data-choices="category"' in body and 'data-choices="email"' in body
         choices = json.loads(body.split('id="cell-choices">')[1].split("</script>")[0])
         assert choices["values"]["description"] == ["Shipping boxes"] and choices["values"]["category"] == ["supplies"]  # 2025's, on 2026's page
-        assert choices["values"]["amount"] == ["12.00"] and 'data-choices="amount"' in body  # every box but links and receipts
+        assert "amount" not in choices["values"] and 'data-choices="amount"' not in body  # the date, amount and link are the row's own (2026-09-21)
 
     def test_an_expense_adds_in_place(self, client, tmp_path):
         """the expense add posts in place -- the panel, the summary and a toast; a refusal keeps what was typed."""

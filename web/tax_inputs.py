@@ -692,7 +692,6 @@ def expense_choices_all(all_inputs: Mapping[int, YearInputs]) -> dict:
     expenses = [e for inputs in all_inputs.values() for e in inputs.expenses]
     for field in ("description", "category", "profile", "email"):
         values[field] = sorted({str(e.get(field) or "").strip() for e in expenses} - {""}, key=str.lower)
-    values["amount"] = sorted({f"{float(e.get('amount') or 0):.2f}" for e in expenses if e.get("amount")}, key=float)
     return {"values": values, "card_pairs": []}
 
 

@@ -1033,6 +1033,18 @@ def test_form_suggestions_appear_on_typing_and_enter_takes_the_first(served, pag
     assert page.locator(".pop.on .choice.hi").inner_text().strip() == "Shipping tape"
     page.keyboard.press("Enter")
     assert box.input_value() == "Shipping tape"
+    # Tab starts the selection in the list: first, then next, Shift+Tab back; Enter takes it
+    box.fill("")
+    page.keyboard.type("Sh")
+    page.wait_for_selector(".pop.on .choice")
+    page.keyboard.press("Tab")
+    assert page.locator(".pop.on .choice.hi").inner_text().strip() == "Shipping boxes" and page.evaluate("document.activeElement.name") == "description"
+    page.keyboard.press("Tab")
+    assert page.locator(".pop.on .choice.hi").inner_text().strip() == "Shipping tape"
+    page.keyboard.press("Shift+Tab")
+    assert page.locator(".pop.on .choice.hi").inner_text().strip() == "Shipping boxes"
+    page.keyboard.press("Enter")
+    assert box.input_value() == "Shipping boxes" and page.locator(".pop.on").count() == 0
     page.locator("#expense-form input[name='category']").click()
     page.keyboard.type("mem")
     page.wait_for_selector(".pop.on .choice")

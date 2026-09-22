@@ -19,8 +19,9 @@ LINK_FIELDS = ("order_url", "tracking_url", "receipt_url")
 #: Columns whose cell editor offers the ledger's previous answers -- and takes a new one, which
 #: is a previous answer from then on.
 CHOICE_FIELDS = ("status", "retailer", "buying_group", "card_name", "card_last4", "profile_label")
-#: Every box on the Orders add row suggests from its column; CHOICE_FIELDS stay the grid's choice cells.
-SUGGEST_FIELDS = CHOICE_FIELDS + ("order_id", "shipment", "item_name", "quantity", "cost_per_item")
+#: The boxes on the Orders add row that suggest from their column: the choice cells and the item
+#: name; CHOICE_FIELDS stay the grid's choice cells.
+SUGGEST_FIELDS = CHOICE_FIELDS + ("item_name",)
 
 
 def choice_values(rows) -> dict[str, list[str]]:

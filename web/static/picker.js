@@ -201,7 +201,18 @@
   document.addEventListener("keydown", function (e) {
     if (!owner || e.target !== owner) return;
     if (e.key === "Escape") { close(); return; }  // the editor's own Esc still cancels the edit
-    if (e.key === "Tab") { close(); return; }
+    if (e.key === "Tab") {
+      // with suggestions showing, Tab starts the selection: the first one, then the next (Shift+Tab
+      // back), Enter takes it; with none, Tab moves on as usual
+      if (kind === "choices" && state && state.shown.length) {
+        e.preventDefault();
+        state.hi = e.shiftKey ? Math.max(state.hi - 1, 0) : Math.min(state.hi + 1, state.shown.length - 1);
+        render();
+        return;
+      }
+      close();
+      return;
+    }
     if (kind !== "choices" || !state) return;
     if (e.key === "ArrowDown") { e.preventDefault(); state.hi = Math.min(state.hi + 1, state.shown.length - 1); render(); }
     else if (e.key === "ArrowUp") { e.preventDefault(); state.hi = Math.max(state.hi - 1, -1); render(); }
