@@ -518,3 +518,46 @@ class TestOrderNumberAsTracking:
         assert order_number_as_tracking([tv], r"television") == 0
         assert order_number_as_tracking([tv], r"(unclosed") == 0
         assert order_number_as_tracking([tv], r"smart\s+tv") == 1
+
+
+
+class TestAProtectionPlanJoinsTheItemItProtects:
+    """a "Protection Plan Bundle" TV's discount covers the
+    Allstate plan too, and the plan is its own DIGITAL line -- dropped, it understated each TV by
+    the plan's price ($164.99 booked, $199.98 paid)."""
+
+    @staticmethod
+    def _order(lines):
+        return [{
+            "orderNumber": "1399000022", "orderPlacedDate": "2026-09-21T10:00:00",
+            "status": "Order Received", "shippingAndHandling": 0.0,
+            "orderPayment": [{"paymentType": "VI", "cardNumber": "************4335", "totalCharged": 999.90}],
+            "shipToAddress": [{"firstName": "Test", "lastName": "Buyer", "line1": "THIRTEEN SAMMPLE DR1VE",
+                               "city": "Testville", "state": "NH", "postalCode": "03050", "orderLineItems": lines}],
+        }]
+
+    TV = {"itemNumber": "9655750", "quantity": 5, "price": 279.99, "discountAmount": 575.0,
+          "carrierItemCategory": "LTL", "orderedShipMethod": "LTR", "isFeeItem": False,
+          "itemStatus": {"cancelled": [], "delivered": []}, "shipment": [],
+          "itemDescription": 'Hisense 55" Class - QD7 Series - 4K Hi-QLED Smart TV - Allstate 3-Year Protection Plan Bundle Includ'}
+    PLAN = {"itemNumber": "1575678", "quantity": 5, "price": 34.99, "discountAmount": 0.0,
+            "carrierItemCategory": "Digital", "orderedShipMethod": "EDG", "isFeeItem": False,
+            "itemStatus": {"cancelled": [], "delivered": []}, "shipment": [],
+            "itemDescription": "Allstate 3 Years (For TVs Under $500)"}
+
+    def test_the_bundle_tv_carries_the_plans_price(self):
+        rows = build_order_items(self._order([self.TV, self.PLAN]), "profile-alpha")
+        assert len(rows) == 1 and rows[0].quantity == 5
+        assert rows[0].cost_per_item == 199.98 and rows[0].total_cost == 999.9
+
+    def test_a_bundle_order_without_a_plan_line_is_unchanged(self):
+        # The TCL order 1399000021: no Allstate line at all -- $279.99 x 2 less $100.
+        tv = {**self.TV, "itemNumber": "9555677", "quantity": 2, "discountAmount": 100.0}
+        rows = build_order_items(self._order([tv]), "profile-alpha")
+        assert rows[0].cost_per_item == 229.99
+
+    def test_a_plan_no_single_item_can_claim_leaves_the_cost_unread(self):
+        other = {**self.TV, "itemNumber": "1", "itemDescription": "Soundbar", "discountAmount": 0.0}
+        tv = {**self.TV, "itemDescription": "Some 55in TV"}
+        rows = build_order_items(self._order([tv, other, self.PLAN]), "profile-alpha")
+        assert all(r.cost_per_item is None for r in rows)

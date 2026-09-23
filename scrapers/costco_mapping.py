@@ -109,6 +109,15 @@ def _is_digital(line_item: dict) -> bool:
 
 
 _SHOP_CARD_RE = re.compile(r"shop\s*card", re.IGNORECASE)
+# An Allstate protection plan sold with an item ("Allstate 3 Years (For TVs Under $500)"). It is a
+# DIGITAL line, so it is dropped like software -- but on a "Protection Plan Bundle" TV the bundle
+# discount sits on the TV line and covers the plan too, so dropping the plan understated each TV
+# by the plan's price ($164.99 booked, $199.98 paid). The plan's price joins the item it protects.
+_PROTECTION_PLAN_RE = re.compile(r"\ballstate\b", re.IGNORECASE)
+
+
+def _is_protection_plan(line_item: dict) -> bool:
+    return bool(_PROTECTION_PLAN_RE.search(str(line_item.get("itemDescription") or "")))
 
 
 def _is_shop_card(line_item: dict) -> bool:
@@ -310,12 +319,15 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids,
     groups: dict[str, dict] = {}
     order_keys: list[str] = []
     shop_card_lines: list[tuple[dict, str]] = []
+    plan_lines: list[dict] = []
     for shipto in detail.get("shipToAddress") or []:
         address = _format_address(shipto)
         for line_item in shipto.get("orderLineItems") or []:
             if _is_digital(line_item):
                 if _is_shop_card(line_item) and card_last4 in keep_digital_last4s:
                     shop_card_lines.append((line_item, address))
+                elif _is_protection_plan(line_item) and not _order_cancelled(line_item):
+                    plan_lines.append(line_item)
                 continue
             item_number = str(line_item.get("itemNumber") or "").strip()
             description = (line_item.get("itemDescription") or "").strip()
@@ -385,6 +397,8 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids,
     # back out over quantity to get the true per-unit cost. (`discountAmount` is fetched even on the
     # DIGITAL lines skipped above, e.g. a $0.01 e-delivery item discounted to $0 — but that money never
     # reaches this loop, since digital lines never become a group, so it's correctly excluded here.)
+    _fold_protection_plans(plan_lines, groups, order_keys, order_id)
+
     for key in order_keys:
         group = groups[key]
         if group["quantity"] and not group["price_unreadable"]:
@@ -460,6 +474,37 @@ def _build_one_order(detail: dict, profile_label: str, known_open_ids,
     if rows and all(r.status == "cancelled" for r in rows) and order_id not in known_open_ids:
         return []
     return rows
+
+
+def _fold_protection_plans(plan_lines: list[dict], groups: dict, order_keys: list, order_id: str) -> None:
+    """Add each protection plan's price to the physical item it was bought with, in place.
+
+    The item is the one physical line whose quantity equals the plan's -- preferring a line that
+    names Allstate itself (the "Protection Plan Bundle" TVs) -- or, failing that, the order's only
+    physical line. The plan's own discount, if any, nets the same way. No quantity is added: the
+    plan is part of each unit's cost, not a unit. When no single item can be told apart, the
+    candidates' Cost Per Item is left UNREAD rather than understated -- the capture gate then
+    reports it as a dossier problem naming the field, with the payload attached."""
+    physical = [groups[k] for k in order_keys if not groups[k].get("cancelled")]
+    for plan in plan_lines:
+        quantity = _int(plan.get("quantity"))
+        price = _num(plan.get("price"))
+        if not quantity or price is None:
+            continue
+        same_qty = [g for g in physical if g["quantity"] == quantity]
+        named = [g for g in same_qty if _PROTECTION_PLAN_RE.search(g["description"] or "")]
+        target = (named if len(named) == 1 else same_qty if len(same_qty) == 1
+                  else physical if len(physical) == 1 else [])
+        if len(target) != 1:
+            log.warning("Costco order %s: protection plan %r matches no single item -- the "
+                        "candidates' cost is left unread rather than understated.",
+                        order_id, plan.get("itemDescription"))
+            for g in (same_qty or physical):
+                g["price_unreadable"] = True
+            continue
+        group = target[0]
+        group["gross_total"] += price * quantity
+        group["discount_total"] += _num(plan.get("discountAmount")) or 0.0
 
 
 def _rows_for_group(
