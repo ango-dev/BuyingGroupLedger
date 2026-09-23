@@ -211,6 +211,13 @@ class TestTheThresholds:
         assert caps.threshold_state(usage, 0, 200) == "close" and caps.threshold_state(usage, 0, 100) is None
         assert caps.threshold_state({"used": 1000.0, "limit": 1000.0, "left": 0.0, "fraction": 1.0}, 0, 0) == "reached"
 
+    def test_an_archived_card_warns_no_one(self):
+        """a card no longer in use keeps its spend for its old orders, but its
+        limits are nobody's concern any more."""
+        cards = [card(caps=[{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": "1%"}], archived=True)]
+        rows = [row(order_id="A0", order_date="2026-01-05", total_cost="1850")]
+        assert caps.alerts_due(rows, cards, "2026-06-01", 80, 0, {}) == ([], {})
+
     def test_alerts_are_due_once_per_state_per_period_and_escalate(self):
         cards = [card(caps=[{"retailers": ["Amazon"], "spend_limit": 1000, "fallback_rate": "1%"}])]
         rows = [row(order_id="A0", order_date="2026-01-05", total_cost="850")]

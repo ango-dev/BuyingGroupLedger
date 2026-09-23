@@ -226,6 +226,11 @@ class Card(BaseModel):
     #: card's rates and limits like any virtual number, but the Taxes page still asks for its bonus.
     #:Only meaningful with `virtual`.
     own_bonus: bool = False
+    #: A card no longer in use. It stays in the list,
+    #: so its old orders keep their card name and rate and the audit's card check stays quiet;
+    #: the Settings page folds it under Archived, no virtual number can pick it, and its spend
+    #: limits send no warnings.
+    archived: bool = False
 
     @field_validator("last4", mode="before")
     @classmethod

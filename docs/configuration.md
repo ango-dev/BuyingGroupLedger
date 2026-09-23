@@ -200,6 +200,10 @@ Details:
   does not ask for a sign-up bonus for it — unless **`own_bonus: true`**, an Amex employee card:
   a virtual number that shares the limits but earned a bonus of its own. The Settings page insists
   on the link; an older entry without it loads with a warning and stands on its own rates.
+- **`archived: true`** marks a card no longer in use (Settings › Cards › Archive). It stays in the list, so
+  its old orders keep their card name and rate and the Audit does not report them as unknown cards;
+  the Settings page folds it under Archived, a virtual number can no longer pick it, and its spend
+  limits send no warnings. Its virtual numbers are archived and restored with it.
 - `last4` is matched **normalized**, so it doesn't matter that Amazon says "ending in 4321", Best Buy
   sends `************4321`, and Costco sends `xxxx4321`.
 - Two *different* cards can genuinely share a last 4 across accounts. Add an optional **`profile`** (a

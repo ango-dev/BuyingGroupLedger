@@ -243,6 +243,8 @@ def alerts_due(rows: list[dict], cards: list[Card], today: str, warn_percent: fl
     memory = dict(memory or {})
     for (i, j), usage in allowances(rows, cards, today).items():
         card, cap = cards[i], cards[i].caps[j]
+        if getattr(card, "archived", False):
+            continue  # a card no longer in use: its limits warn no one
         state = threshold_state(usage, warn_percent, warn_dollars)
         key = f"{card.last4}:{j}:{usage['period']}"
         if _RANK[state] <= _RANK.get(memory.get(key)):

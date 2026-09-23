@@ -1515,6 +1515,15 @@ class TestCardsNotOnTheList:
         from web.audit_view import rows_named
         assert rows_named(result.details[-1]) == [2]
 
+    def test_an_archived_card_still_knows_its_old_orders(self, monkeypatch):
+        """archiving (not deleting) a card keeps its old orders off the audit."""
+        from models.card import Card
+
+        monkeypatch.setattr("config.cards.load_cards", lambda: [Card(last4="4331", name="Amex Business Gold",
+                                                                      cashback_rate="4%", archived=True)])
+        sheet = build(row_cells(2, **{"Card Last 4": Cell("4331"), "Card": Cell("Amex Business Gold"), "Cashback Rate": Cell(0.04, fmt="percent")}))
+        assert result_for(sheet, "card_and_rate_coverage").status == "PASS"
+
     def test_a_known_card_passes(self, monkeypatch):
         from models.card import Card
 

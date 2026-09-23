@@ -752,6 +752,7 @@ def _display_one(path: str, index: int | None, entry: dict, today: str | None = 
         "virtual": bool(entry.get("virtual")) or bool(entry.get("virtual_of")),
         "virtual_of": str(entry.get("virtual_of") or ""),
         "own_bonus": bool(entry.get("own_bonus")),
+        "archived": bool(entry.get("archived")),
         "retailer_rates": [(r, _rate_text(v)) for r, v in (entry.get("retailer_rates") or {}).items()],
         "caps": [_cap_display(c, today) for c in caps],
         "rate_rows": _rate_rows(entry.get("retailer_rates") or {}, caps, today),
@@ -1199,6 +1200,30 @@ def toggle_proxy(index: int) -> tuple[str, bool]:
     _set_path(data, "profiles", entries)
     save_config(data)
     return str(entry.get("label", "")), on
+
+
+def toggle_archive(index: int) -> tuple[str, bool]:
+    """Archive a card, or bring it back. Its virtual numbers follow it: a
+    number of a card no longer in use is not in use either. Returns (label, now archived). Raises
+    SettingsError when the card does not exist or is itself a virtual number."""
+    entries = _entries("cards")
+    if not 0 <= index < len(entries) or not isinstance(entries[index], dict):
+        raise SettingsError([f"cards[{index}] does not exist (the page may be stale; reload it)"])
+    entry = entries[index]
+    if entry.get("virtual") or entry.get("virtual_of"):
+        raise SettingsError(["A virtual number is archived with its card: archive the card it belongs to."])
+    archived = not entry.get("archived")
+    last4 = str(entry.get("last4", ""))
+    for e in entries:
+        if isinstance(e, dict) and (e is entry or str(e.get("virtual_of", "")) == last4):
+            if archived:
+                e["archived"] = True
+            else:
+                e.pop("archived", None)
+    data = load_config()
+    _set_path(data, "cards", entries)
+    save_config(data)
+    return f"{entry.get('name', '')} …{last4}", archived
 
 
 def delete_entry(path: str, index: int) -> str:

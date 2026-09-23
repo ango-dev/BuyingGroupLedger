@@ -566,7 +566,7 @@ class TestEntryCards:
         hx = {"HX-Request": "true"}
         body = client.get("/settings").text
         assert 'hx-post="/settings/section/cards/entry/0" hx-target="#s-cards" hx-swap="outerHTML"' in body
-        assert 'hx-post="/settings/section/cards/entry/0/delete" hx-target="#s-cards" hx-swap="outerHTML" hx-confirm="Remove card' in body
+        assert 'hx-post="/settings/section/cards/entry/0/delete" hx-target="#s-cards" hx-swap="outerHTML" hx-confirm="Delete card' in body
         saved = client.post("/settings/section/cards/entry/0", headers=hx, data={
             "name": "USB Prime Business", "last4": "0315", "cashback_rate": "5%"})
         assert saved.status_code == 200 and "<html" not in saved.text
@@ -629,6 +629,35 @@ class TestEntryCards:
         assert config_value("cards")[0]["caps"][0]["retailers"] == ["Amazon", "Woot"]
         body = client.get("/settings").text
         assert 'value="woot" data-text="Woot" checked>' in body and "Amazon, Woot 5% up to 1,000" in body
+
+    def test_a_card_no_longer_in_use_archives_and_comes_back(self, client, config):
+        config(cards=[{"last4": "0315", "name": "USB Prime Business", "cashback_rate": "5%"},
+                      {"last4": "9999", "name": "USB virtual", "virtual_of": "0315"},
+                      {"last4": "8765", "name": "Citi", "cashback_rate": "2%"}])
+        page = client.get("/settings").text
+        assert 'hx-post="/settings/section/cards/entry/0/archive"' in page and "archived-cards" not in page
+        assert 'hx-post="/settings/section/cards/entry/1/archive"' not in page  # a virtual number goes with its card
+        done = client.post("/settings/section/cards/entry/0/archive", headers={"HX-Request": "true"})
+        assert done.status_code == 200 and "Archived card USB Prime Business …0315." in done.text
+        stored = config_value("cards")
+        assert stored[0]["archived"] is True and stored[1]["archived"] is True and "archived" not in stored[2]
+        body = done.text
+        assert body.index('data-key="cards:8765"') < body.index('id="add-cards"') < body.index('class="archived-cards"') < body.index('data-key="cards:0315"')
+        assert ">Restore</button>" in body and "kept for their old orders" in body
+        # an archived card is no longer offered to a virtual number
+        new_card = body[body.index('id="add-cards"'):body.index('class="archived-cards"')]
+        assert "USB Prime Business …0315" not in new_card and "Citi …8765" in new_card
+        # a card save keeps it archived
+        client.post("/settings/section/cards/entry/0", data={"name": "USB Prime Business", "last4": "0315", "cashback_rate": "5%"},
+                    headers={"HX-Request": "true"})
+        assert config_value("cards")[0]["archived"] is True
+        # a virtual number cannot be archived on its own
+        refused = client.post("/settings/section/cards/entry/1/archive", headers={"HX-Request": "true"})
+        assert refused.status_code == 400 and "archived with its card" in refused.text
+        back = client.post("/settings/section/cards/entry/0/archive", headers={"HX-Request": "true"})
+        assert "Restored card USB Prime Business …0315." in back.text and "archived-cards" not in back.text
+        assert all("archived" not in c for c in config_value("cards"))
+        assert client.post("/settings/section/cards/entry/9/archive").status_code == 400
 
     def test_a_saved_card_comes_back_alone_so_the_other_cards_keep_their_edits(self, client, config):
         """a save on an existing entry answers with

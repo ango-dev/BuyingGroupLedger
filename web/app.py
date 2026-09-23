@@ -2364,7 +2364,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         """(last4, "name …last4") for every REAL card: what a virtual number picks its card from (a
         virtual number cannot belong to another virtual number)."""
         return [(str(e["last4"]), f"{e['name']} …{e['last4']}")
-                for e in settings_form.display_entries("cards") if not e["virtual"]]
+                for e in settings_form.display_entries("cards") if not e["virtual"] and not e["archived"]]
 
     def cap_usage() -> dict:
         """{(card index, cap index): allowance} over the ledger, for the bars on the card's form;
@@ -2616,6 +2616,22 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     @app.post("/settings/section/{path}/entry/{index}", response_class=HTMLResponse)
     async def settings_save_entry(request: Request, path: str, index: int):
         return await _save_entry(request, path, index)
+
+    @app.post("/settings/section/cards/entry/{index}/archive", response_class=HTMLResponse)
+    async def settings_toggle_archive(request: Request, index: int):
+        """Archive a card no longer in use, or bring it back: it stays in the
+        cards list for its old orders, folded under Archived. Swaps the section in place."""
+        try:
+            label, archived = settings_form.toggle_archive(index)
+        except settings_form.SettingsError as exc:
+            if wants_fragment(request):
+                return settings_section(request, "cards", errors=exc.errors, status=400)
+            return settings_page(request, errors=exc.errors, open_section="cards", status=400)
+        message = f"{'Archived' if archived else 'Restored'} card {label}."
+        act("settings", f"Settings: {'archived' if archived else 'restored'} card {label}", {"path": "cards", "entry": label})
+        if wants_fragment(request):
+            return settings_section(request, "cards", message=message)
+        return RedirectResponse(url=f"/settings?message={message.replace(' ', '+')}#s-cards", status_code=303)
 
     @app.post("/settings/section/profiles/entry/{index}/proxy", response_class=HTMLResponse)
     async def settings_toggle_proxy(request: Request, index: int):
