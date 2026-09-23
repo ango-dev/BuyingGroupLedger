@@ -336,12 +336,12 @@ def run_scheduled(root: Path | None = None, out_dir: Path | None = None) -> int:
         target = create_backup(root, out_dir)
         deleted = prune_backups(out_dir, schedule.keep)
     except Exception as exc:
-        from alerts.notifier import alert
+        from alerts.notifier import alert, compose
 
-        alert("Scheduled backup FAILED",
-              f"The scheduled backup could not be written: {type(exc).__name__}: {exc}\n"
-              f"Backups land in {out_dir}; the schedule is {schedule.describe()}. Make one from the "
-              "dashboard's Settings page to check the path, and look at docker compose logs.",
+        alert("Scheduled backup failed",
+              compose(f"The backup could not be written: {type(exc).__name__}: {exc}",
+                      do=f"Make one from Settings › Backup to test the folder ({out_dir}); "
+                         f"the schedule is {schedule.describe()}."),
               kind="backup")
         print(f"Scheduled backup failed: {exc}", file=sys.stderr)
         return 1

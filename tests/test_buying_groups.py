@@ -230,7 +230,7 @@ class TestBfmrSubmission:
         result = bfmr.submit_tracking([submission()])
         assert not result.submitted
         message = result.needs_manual[0][1]
-        assert "no purchase recorded" in message and "LAPSED" in message
+        assert "no purchase for order" in message and "lapsed" in message
 
     def test_a_cancelled_purchase_is_not_misreported_as_a_combined_package(self, bfmr, transport):
         """BFMR halts on an inactive purchase, so submitting against a CANCELLED one fails in exactly
@@ -243,8 +243,8 @@ class TestBfmrSubmission:
         result = bfmr.submit_tracking([submission(order_id="O1")])
 
         message = result.needs_manual[0][1]
-        assert "CANCELLED the purchase" in message
-        assert "NOT the Best Buy combined-package case" in message
+        assert "cancelled the purchase" in message
+        assert "after their deadline" in message and "reinstate" in message
         assert len(transport.calls) == 1, "nothing was posted against a dead purchase"
 
     def test_an_active_purchase_wins_over_a_cancelled_one_for_the_same_order(self, bfmr, transport):
@@ -636,7 +636,7 @@ class TestBfmrInsurance:
         ]
         result = bfmr.file_insurance([submission(tracking_number="TBA1")])
         assert result.submitted == []
-        assert "MAY OR MAY NOT BE COVERED" in result.needs_manual[0][1]
+        assert "coverage is unconfirmed" in result.needs_manual[0][1]
 
     def test_package_value_is_never_sent(self, bfmr, transport):
         """BFMR derives the value from the shipment items it already holds. Declaring our own
@@ -1283,7 +1283,7 @@ class TestSilentlyDroppedSubmission:
         result = bfmr.submit_tracking([submission(order_id="O1", tracking_number="529900000009")])
         assert result.submitted == []
         assert result.failed == [], "not a transient failure — no retry of ours can clear it"
-        assert "NO spelling" in result.needs_manual[0][1]
+        assert "under any spelling" in result.needs_manual[0][1]
 
     def test_the_alert_only_asks_for_a_human_once_our_own_retries_are_spent(self, bfmr, transport):
         """BFMR appended the duplicate letter itself between 2026-08-13 and 2026-08-23; it no longer
@@ -1304,9 +1304,9 @@ class TestSilentlyDroppedSubmission:
         message = result.needs_manual[0][1]
 
         assert "25 suffixed spelling(s)" in message, "B..Z, so the reader knows nothing is left"
-        assert "NEITHER SUBMITTED NOR INSURED" in message, "state the exposure plainly"
-        assert "support.bfmr.com/hc/en-us/articles/50968170907547" in message
-        assert "NOTHING TO EDIT ON THE LEDGER" in message
+        assert "not submitted or insured" in message, "state the exposure plainly"
+        assert "My Tracker" in message and "nothing to edit on the ledger" in message
+        assert "nothing to edit on the ledger" in message
         # The promise that BFMR finishes the job is exactly what stopped being true.
         assert "RESOLVES ITSELF" not in message
 

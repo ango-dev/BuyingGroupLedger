@@ -36,8 +36,8 @@ NOTIFY="${NOTIFY_CMD:-python -m alerts.notifier}"
 unhealthy() {  # $1 = reason
     echo "$1"
     if [ ! -f "$MARKER" ]; then
-        body="$1. The container is up but no run has completed in time: check 'docker compose logs --tail=200', 'cat logs/.last_run', and the run lock (logs/.run.lock). This alert is sent once; an all-clear follows when a run completes."
-        if (cd /app 2>/dev/null || true; ALERT_KIND=health $NOTIFY "Ledger container UNHEALTHY -- scheduler is not producing runs" "$body" >/dev/null 2>&1); then
+        body="$1. Do: check 'docker compose logs --tail=200', logs/.last_run and the run lock (logs/.run.lock). Sent once; an all-clear follows when a run completes."
+        if (cd /app 2>/dev/null || true; ALERT_KIND=health $NOTIFY "Ledger container unhealthy: no runs completing" "$body" >/dev/null 2>&1); then
             date -u +%FT%TZ > "$MARKER"
         fi
     fi

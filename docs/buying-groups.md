@@ -153,7 +153,7 @@ rows record a real `0`.
 > [asks you to append B/C/D](https://support.bfmr.com/hc/en-us/articles/50968170907547) until it's
 > accepted — their record then reads `529900000009B` where your ledger reads `529900000009`.
 >
-> You get an **ACTION NEEDED** alert naming the three manual steps: add the tracking by hand (with
+> You get an **Action needed** alert naming the manual steps: add the tracking by hand (with
 > the order number on it), **file the insurance by hand**, and raise a support ticket with proof of
 > purchase. The tool won't do any of them for you — until the tracking exists, BFMR has no shipment
 > to insure, and an automatic filing would post against nothing while reporting success.

@@ -39,7 +39,7 @@ logging.basicConfig(
 
 from functools import lru_cache  # noqa: E402
 
-from alerts.notifier import alert  # noqa: E402
+from alerts.notifier import alert, compose  # noqa: E402
 from diagnostics import activity  # noqa: E402
 from config.cards import add_promos, load_cards, tag_cards  # noqa: E402
 from config.profiles import load_profiles_for_retailer  # noqa: E402
@@ -158,8 +158,8 @@ def _capture_receipts(items: list, scraper: BaseRetailerScraper, label: str) -> 
     except Exception:
         log.exception("Receipt capture failed for %s", label)
         alert(f"{label}: receipt capture failed",
-              "The orders themselves were still recorded and synced; only their Receipt Link is "
-              "missing, and the next run retries. Check logs/run.log.")
+              compose("The orders were recorded; only their Receipt Link is missing, and the next run retries.",
+                      do="If it repeats, see logs/run.log."))
 
 
 def run_scrape(scraper: BaseRetailerScraper) -> None:
@@ -185,7 +185,9 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
         return
     except Exception:
         log.exception("Scrape failed for %s", label)
-        alert(f"{label}: scrape failed", "Unhandled error during scrape. Check logs/run.log.")
+        alert(f"{label}: scrape failed",
+              compose("An unexpected error stopped the scrape; nothing was recorded for it this run.",
+                      do="See logs/run.log."))
         return
 
     if not items:
@@ -228,7 +230,7 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
     except Exception:
         log.exception("Post-scrape processing failed for %s", label)
         alert(f"{label}: post-scrape processing failed",
-              "Orders were scraped but could not be classified/tagged/written. Check logs/run.log.")
+              compose("The orders were scraped but could not be tagged or written.", do="See logs/run.log."))
         return
     log.info("Wrote %d line item(s) to %s", len(items), csv_path)
 
@@ -241,11 +243,10 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
         # twice — so the count and the retailer are the facts worth putting in front of someone.
         log.exception("Ledger sync failed for %s (%d row(s) NOT recorded)", csv_path, len(items))
         alert(
-            f"{label}: ledger sync FAILED — {len(items)} row(s) not recorded",
-            f"{len(items)} scraped row(s) could not be written to the ledger and are not "
-            f"recorded. The CSV is kept at {csv_path} if they are needed. Open orders will be "
-            "re-scraped next run; a newly-discovered order is only re-found while it stays in the "
-            "lookback window. Check logs/run.log.",
+            f"{label}: {len(items)} row(s) not recorded — the ledger write failed",
+            compose(f"The scraped rows could not be written; they are kept in {csv_path}. Open orders are "
+                    "re-scraped next run, a new order only while it stays in the lookback window.",
+                    do="See logs/run.log."),
         )
         return
 
@@ -265,9 +266,9 @@ def run_scrape(scraper: BaseRetailerScraper) -> None:
             log.exception("Ledger sort failed after syncing %s", csv_path)
             alert(
                 "Ledger sort failed",
-                f"Rows from {csv_path.name} were written to the ledger, but the newest-first re-sort "
-                "afterwards failed, so the ledger may be out of order. The data itself is intact. "
-                "Run `python -m scripts.sort_ledger --apply` to fix. Check logs/run.log.",
+                compose(f"Rows from {csv_path.name} were written, but the newest-first sort afterwards failed; "
+                        "the data is intact.",
+                        do="Run python -m scripts.sort_ledger --apply."),
             )
     summary = result or {}
     activity.record(
@@ -316,7 +317,7 @@ def main(retailers: list[str]) -> None:
                 log.exception("Retailer '%s' [%s] failed; continuing with the rest of the run.",
                               name, profile.label)
                 alert(f"{name} [{profile.label}]: run failed",
-                      "That retailer was skipped; the rest of the run continued. Check logs/run.log.")
+                      compose("That retailer was skipped; the rest of the run continued.", do="See logs/run.log."))
 
     # Deliberately outside the loop AND reached even if every retailer failed: the sync submits
     # tracking for rows already in the ledger from earlier runs, so it has work to do regardless.
@@ -359,7 +360,8 @@ def run_buying_group_sync() -> None:
     except Exception:
         log.exception("Buying-group sync failed")
         alert("Buying-group sync failed",
-              "Tracking numbers may not have been submitted. Check logs/run.log.")
+              compose("Tracking numbers may not have been submitted this run; the next run retries.",
+                      do="If it repeats, see logs/run.log."))
 
 
 def _pairs(items) -> list[str]:
@@ -450,7 +452,8 @@ def run_bfmr_email_autoreply() -> None:
     except Exception:
         log.exception("BFMR email auto-reply failed")
         alert("BFMR email auto-reply failed",
-              "BFMR's combined-package emails may still be unanswered. Check logs/run.log.")
+              compose("BFMR's combined-package emails may still be unanswered; the next run retries.",
+                      do="If it repeats, see logs/run.log."))
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ from datetime import datetime, timezone
 from ledger_db.worksheet import ValueRenderOption
 
 from alerts import notifier
-from alerts.notifier import alert
+from alerts.notifier import alert, compose
 from buying_groups.bfmr import bfmr_spellings
 from buying_groups.bfmr_email import (
     attribute_serials, build_reply, parse_request, resolve_box, split_serials,
@@ -179,9 +179,8 @@ def run(apply: bool = False, limit: int | None = None, tracking: str | None = No
                         "UNANSWERED — re-flagging, not re-sending.", label)
             outcome["skipped"].append((label, "already replied per .state.json"))
             _alert(apply, f"BFMR combined package {label}: reply already sent",
-                   "A reply was sent earlier but the mailbox flag write failed, so the email "
-                   "still shows unanswered. Nothing was re-sent. If the reply is in Gmail Sent, "
-                   "no action is needed.")
+                   compose("The reply went out earlier, but marking the email as answered failed; nothing was re-sent.",
+                           do="Nothing, if the reply is in Gmail's Sent folder."))
             if apply:
                 _try_mark_answered(mailbox, request, label)
             continue
@@ -214,8 +213,8 @@ def run(apply: bool = False, limit: int | None = None, tracking: str | None = No
                 log.exception("Serial fetch for %s failed", label)
                 outcome["failed"].append((label, str(exc)))
                 _alert(apply, f"BFMR combined package {label}: auto-reply failed",
-                       f"Reading serials from Best Buy failed: {exc}\n"
-                       f"The email stays unanswered. Check logs/run.log.")
+                       compose(f"Reading serials from Best Buy failed: {exc}. The email stays unanswered and is "
+                               "retried next run.", do="If it repeats, see logs/run.log."))
                 continue
             serials_of_order, gaps = attribute_serials(resolution, fetched)
             if gaps:
@@ -237,7 +236,8 @@ def run(apply: bool = False, limit: int | None = None, tracking: str | None = No
             log.exception("Building the reply for %s failed", label)
             outcome["failed"].append((label, str(exc)))
             _alert(apply, f"BFMR combined package {label}: auto-reply failed",
-                   f"{exc}\nThe email stays unanswered. Check logs/run.log.")
+                   compose(f"{exc}. The email stays unanswered and is retried next run.",
+                           do="If it repeats, see logs/run.log."))
             continue
 
         if not apply:
@@ -255,7 +255,8 @@ def run(apply: bool = False, limit: int | None = None, tracking: str | None = No
             log.exception("Sending the reply for %s failed", label)
             outcome["failed"].append((label, str(exc)))
             _alert(apply, f"BFMR combined package {label}: auto-reply failed",
-                   f"SMTP send failed: {exc}\nThe email stays unanswered. Check logs/run.log.")
+                   compose(f"Sending the reply failed: {exc}. The email stays unanswered and is retried next run.",
+                           do="If it repeats, see logs/run.log."))
             continue
 
         log.info("Replied for combined package %s (%d order(s), %d attachment(s)).",
@@ -280,11 +281,11 @@ def _needs_manual(outcome: dict, apply: bool, label: str, gaps: list[str]) -> No
     log.warning("Cannot auto-reply for %s:\n%s", label, detail)
     outcome["needs_manual"].append((label, gaps))
     _alert(apply,
-           f"ACTION NEEDED — BFMR combined package {label}: cannot auto-reply",
-           f"BFMR asked for serial numbers and a PDF receipt for combined package "
-           f"{label}, and the reply is blocked until these are fixed:\n{detail}\n\n"
-           f"The email stays unanswered and is retried on the next run. "
-           f"Dry-run first: python -m respond_bfmr --tracking {label}")
+           f"Action needed: BFMR combined package {label} — cannot auto-reply",
+           compose("BFMR asked for serial numbers and a PDF receipt, and the reply is blocked by the items "
+                   "below. The email is retried on the next run.",
+                   do=f"Fix them, then dry-run: python -m respond_bfmr --tracking {label}",
+                   items=gaps))
 
 
 def _fetch_serials_for_box(resolution, fetch_serials) -> dict[str, list[str]]:

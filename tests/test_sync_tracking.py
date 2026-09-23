@@ -465,9 +465,9 @@ class TestPartiallyCancelledOrders:
         sync_tracking._alert_on_over_reserved_orders("BFMR", client, self._plan(), apply=True)
         assert len(sent) == 1
         subject, body = sent[0]
-        assert subject == "ACTION NEEDED — BFMR: 1 order(s) show more units there than are coming"
+        assert subject == "Action needed: BFMR — 1 order(s) expect more units than are coming"
         assert "order HALF: 1 unit(s) still coming, BFMR shows 2 (cancelled rows: 3)" in body
-        assert "Reduce the purchase quantity by hand" in body and "never cancels or reduces" in body
+        assert "Reduce the purchase quantity in My Tracker" in body and "never reduces" in body
 
     def test_the_mismatch_alerts_with_no_cancelled_row_on_the_ledger(self, monkeypatch):
         # the cancelled line of a live order is no longer recorded -- the alert
@@ -497,8 +497,8 @@ class TestPartiallyCancelledOrders:
         monkeypatch.setattr("sync_tracking.alert", lambda subject, body: sent.append((subject, body)))
         client = self.FakeClient(open_orders={"GONE"}, held={})
         sync_tracking._alert_on_cancelled_orders("BFMR", client, self._plan(), apply=True)
-        assert len(sent) == 1 and sent[0][0] == "ACTION NEEDED — BFMR: 1 cancelled order(s) still open there"
-        assert "row 4: order GONE" in sent[0][1] and "HALF" not in sent[0][1]
+        assert len(sent) == 1 and sent[0][0] == "Action needed: BFMR — 1 cancelled order(s) still hold a purchase"
+        assert "order GONE (row 4)" in sent[0][1] and "HALF" not in sent[0][1]
 
     def test_a_group_that_cannot_report_quantities_is_not_asked_about_partials(self, monkeypatch):
         sent = []
@@ -612,9 +612,9 @@ class TestUnsubmittableAlertsImmediately:
         plan = self._plan(unroutable_tracked=[(7, "ORDER-1", "1Z999", "AI")])
         sync_tracking._alert_on_unroutable(plan, apply=True)
         subject, body = sent[0]
-        assert subject == "Buying group not configured: AI -- 1 shipped package(s) waiting"
+        assert subject == "Buying group not set up: AI — 1 shipped package(s) waiting"
         assert "ACTION NEEDED" not in subject and "BEFORE DELIVERY" not in body
-        assert "row 7" in body and "1Z999" in body and "'AI'" in body and "once per group name" in body
+        assert "row 7" in body and "1Z999" in body and "once per group" in body
         assert load_state()["unroutable_groups_alerted"]["AI"]
         assert activity.read()[0]["summary"].startswith("1 shipped row(s) have a Buying Group that is not configured (AI)")
 
@@ -683,13 +683,13 @@ class TestCancelledPurchaseAlert:
             self._plan([(4, "COMING"), (5, "FINE")]), apply=True)
 
         subject, body = sent[0]
-        assert subject.startswith("ACTION NEEDED")
-        assert "CANCELLED purchase" in subject
+        assert subject.startswith("Action needed")
+        assert "cancelled purchase" in subject
         assert "row 4" in body and "COMING" in body
         assert "FINE" not in body, "only the affected order"
         # The two things that make it actionable rather than merely alarming.
-        assert "NOTHING WILL BE PAID" in body
-        assert "only fixable NOW" in body
+        assert "nothing will be paid" in body
+        assert "Before they arrive" in body
 
     def test_it_says_plainly_that_nothing_was_changed(self, monkeypatch):
         """This tool never cancels anything at a buying group. The alert has to say so, or a reader

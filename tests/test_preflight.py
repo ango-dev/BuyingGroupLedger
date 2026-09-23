@@ -407,7 +407,7 @@ class TestExitCode:
         assert preflight.main(["--alert"]) == 1
         assert len(sent) == 1
         subject, body = sent[0]
-        assert "Preflight FAILED" in subject
+        assert "Preflight failed" in subject
         assert "scrapers.cdp" in body
         assert "cards.json" not in body  # warnings are not worth waking someone up for
 

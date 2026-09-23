@@ -1053,10 +1053,9 @@ class BFMRClient(HttpClient):
             else:
                 result.needs_manual.append((
                     number,
-                    f"{number}: BFMR accepted an insurance filing for {spelling} but the shipment is "
-                    f"not in their insured list afterwards. IT MAY OR MAY NOT BE COVERED, AND IT IS "
-                    f"NOT RETRIED — a retry is the one thing that could charge you twice. Check the "
-                    f"package in BFMR's insurance list and file it by hand if it is genuinely absent.",
+                    f"{number}: insurance was filed for {spelling}, but it is not in BFMR's insured "
+                    f"list; coverage is unconfirmed. Check it there and file by hand if it is missing "
+                    f"(not retried, to avoid paying twice).",
                 ))
 
     def void_insurance(self, tracking_numbers: list[str]) -> SubmissionResult:
@@ -1334,16 +1333,9 @@ def _no_purchase_hint(row) -> str:
     not that this tool skipped a step.
     """
     return (
-        f"{row.tracking_number}: BFMR has no purchase recorded for order {row.order_id}, so there "
-        f"is nothing to attach the tracking to.\n"
-        f"\n"
-        f"A reservation only stays valid if its order number is submitted right after ordering, so a "
-        f"SHIPPED package with no purchase usually means the reservation LAPSED, or the order number "
-        f"was never entered. This tool does not create purchases: picking the right reservation "
-        f"means matching on item name alone, and a wrong pick books the wrong deal.\n"
-        f"\n"
-        f"Check My Tracker for order {row.order_id}. If the reservation is still live, enter the "
-        f"order number and the tracking number by hand — the next run picks it up with no ledger edit."
+        f"{row.tracking_number}: BFMR has no purchase for order {row.order_id} (the reservation "
+        f"lapsed, or the order number was never entered). If the reservation is still live, enter "
+        f"the order and tracking numbers in My Tracker; the next run picks it up."
     )
 
 
@@ -1374,16 +1366,9 @@ def _box_does_not_fit_hint(row, remaining: int, unshipped: list[dict]) -> str:
 def _cancelled_purchase_hint(row) -> str:
     """The purchase exists but BFMR cancelled it, so tracking cannot be attached to it."""
     return (
-        f"{row.tracking_number}: BFMR has CANCELLED the purchase for order {row.order_id}. Their own "
-        f"docs say the process halts on a purchase that is not active, so the tracking cannot be "
-        f"attached and this package will not be paid.\n"
-        f"\n"
-        f"The usual cause is tracking arriving after BFMR's deadline. This is NOT the Best Buy "
-        f"combined-package case, which BFMR now resolves itself by appending a letter — the problem "
-        f"here is the reservation rather than the number, so no spelling of it will be accepted.\n"
-        f"\n"
-        f"Check My Tracker for order {row.order_id}. If the package is genuinely on its way, raise a "
-        f"BFMR support ticket with proof of purchase and ask them to reinstate it."
+        f"{row.tracking_number}: BFMR cancelled the purchase for order {row.order_id} (usually tracking "
+        f"after their deadline), so it will not be paid. If the package is on its way, ask BFMR "
+        f"support to reinstate the purchase."
     )
 
 
@@ -1416,24 +1401,12 @@ def _duplicate_tracking_hint(tracking_number: str, attempts: int = 0, *,
     """
     tried = (f"tried the bare number and then {attempts} suffixed spelling(s) "
              f"(e.g. {tracking_number}B)" if attempts else "tried the bare number")
-    why = (f"BFMR rejected it outright: {invalid}\n" if rejected and invalid else
-           "BFMR accepted the request but recorded nothing under any spelling.\n")
+    why = (f"rejected it: {invalid}" if rejected and invalid else
+           "accepted it but recorded nothing under any spelling")
     return (
-        f"{tracking_number}: could not be handed to BFMR. We {tried}, and the number is in My "
-        f"Tracker under NO spelling.\n"
-        f"\n"
-        f"{why}"
-        f"\n"
-        f"THIS PACKAGE IS NEITHER SUBMITTED NOR INSURED, so it needs a hand. Add the tracking to the "
-        f"purchase by hand in My Tracker (the purchase already carries the order number you submitted "
-        f"when you ordered, which is what lets the next run match it back), appending a letter "
-        f"yourself if BFMR says the number is already in use. Raise a support ticket with the "
-        f"tracking number and proof of purchase if it still won't take it.\n"
-        f"\n"
-        f"Background: https://support.bfmr.com/hc/en-us/articles/50968170907547\n"
-        f"\n"
-        f"NOTHING TO EDIT ON THE LEDGER. The next run reads My Tracker, matches whichever letter ends "
-        f"up there back to {tracking_number}, and fills the payout, premium and status as they arrive."
+        f"{tracking_number}: not submitted or insured. BFMR {why} ({tried}). Add it to the purchase "
+        f"in My Tracker by hand, with a letter appended if BFMR says the number is in use, and raise a "
+        f"BFMR ticket with proof of purchase if it still won't take it; nothing to edit on the ledger."
     )
 
 

@@ -71,7 +71,7 @@ import re
 
 from ledger_db.worksheet import ValueInputOption, ValueRenderOption
 
-from alerts.notifier import alert
+from alerts.notifier import alert, compose
 from buying_groups.base import BuyingGroupError, PayoutRecord, TrackingSubmission
 from config.warehouses import is_deliberately_unrouted
 from buying_groups.registry import PROVIDERS, get_client, resolve_group
@@ -866,11 +866,13 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
             outcomes[group_key] = _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only)
         except BuyingGroupError as exc:
             log.error("%s: %s", group_key, exc)
-            _alert(apply, f"{group_key}: buying-group sync failed", str(exc))
+            _alert(apply, f"{group_key}: buying-group sync failed",
+                   compose(f"{exc}. The next run retries.", do="If it repeats, see logs/run.log."))
         except Exception:
             log.exception("%s: unexpected failure", group_key)
             _alert(apply, f"{group_key}: buying-group sync failed",
-                   "Unexpected error — check logs/run.log.")
+                   compose("An unexpected error stopped this group's sync; the next run retries.",
+                           do="If it repeats, see logs/run.log."))
 
     if all_writes:
         _write_payout_cells(worksheet, _drop_protected(all_writes, plan, worksheet), apply)
@@ -907,14 +909,11 @@ def _alert_on_cancelled_orders(group_key, client, plan, apply) -> None:
             log.warning("%s: %d cancelled order(s) still have an open purchase", group_key, len(affected))
             _alert(
                 apply,
-                f"ACTION NEEDED — {group_key}: {len(affected)} cancelled order(s) still open there",
-                f"These orders are CANCELLED at the retailer, but {group_key} still shows an active "
-                f"purchase against the reservation:\n{detail}\n\n"
-                f"Decide and act by hand in My Tracker. This tool deliberately never cancels: cancelling "
-                f"releases the RESERVATION, and a retailer-cancelled order is often one you want to "
-                f"re-order into the same spot — which may not be reclaimable once given up.\n\n"
-                f"If you are not re-ordering, cancel the purchase there so it doesn't sit against your "
-                f"quota.",
+                f"Action needed: {group_key} — {len(affected)} cancelled order(s) still hold a purchase",
+                compose(f"These orders are cancelled at the retailer, but {group_key} still holds their purchase.",
+                        do="Re-order into the same reservation, or cancel the purchase in My Tracker so it does not "
+                           "count against your quota.",
+                        items=[f"order {order_id} (row {row})" for row, order_id in affected]),
             )
 
 
@@ -961,11 +960,11 @@ def _alert_on_over_reserved_orders(group_key, client, plan, apply) -> None:
     log.warning("%s: %d open order(s) show more units there than are coming", group_key, len(over))
     _alert(
         apply,
-        f"ACTION NEEDED — {group_key}: {len(over)} order(s) show more units there than are coming",
-        f"{group_key} still expects more units than the ledger shows coming for these orders -- "
-        f"usually part of the order was cancelled at the retailer:\n" + "\n".join(lines) + "\n\n"
-        f"Reduce the purchase quantity by hand in My Tracker (BFMR only ever lets a quantity "
-        f"go DOWN, and this tool never cancels or reduces anything there itself).",
+        f"Action needed: {group_key} — {len(over)} order(s) expect more units than are coming",
+        compose(f"{group_key} holds more units than the ledger shows coming; usually part of the order "
+                "was cancelled at the retailer.",
+                do="Reduce the purchase quantity in My Tracker (this tool never reduces it).",
+                items=[line.strip() for line in lines]),
     )
 
 
@@ -998,16 +997,12 @@ def _alert_on_cancelled_purchases(group_key, client, plan, apply) -> None:
     log.warning("%s: %d awaiting order(s) have a CANCELLED purchase", group_key, len(affected))
     _alert(
         apply,
-        f"ACTION NEEDED — {group_key}: {len(affected)} incoming order(s) have a CANCELLED purchase",
-        f"{group_key} has CANCELLED the purchase for these orders, but the retailer has NOT "
-        f"cancelled them — they are still on their way:\n{detail}\n\n"
-        f"The usual cause is the tracking number missing {group_key}'s deadline. The deal is gone, so "
-        f"as things stand the package will arrive at the warehouse and NOTHING WILL BE PAID for it.\n\n"
-        f"This is only fixable NOW, before it lands: raise a support ticket with proof of purchase "
-        f"and ask them to reinstate the purchase, or decide not to keep the goods and cancel at the "
-        f"retailer while you still can. Once it ships and the tracking is submitted there is nothing "
-        f"for the number to attach to.\n\n"
-        f"This tool never cancels anything at a buying group, so nothing has been changed for you.",
+        f"Action needed: {group_key} — {len(affected)} incoming order(s) have a cancelled purchase",
+        compose(f"{group_key} cancelled these purchases (usually a missed tracking deadline), but the orders "
+                "are still coming: as things stand nothing will be paid for them. This tool never cancels "
+                "anything at a buying group, so nothing was changed there.",
+                do=f"Before they arrive, ask {group_key} support to reinstate the purchase, or cancel at the retailer.",
+                items=[f"order {order_id} (row {row})" for row, order_id in affected]),
     )
 
 
@@ -1056,7 +1051,8 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
         _alert(
             apply,
             f"{group_key}: {len(push.failed)} tracking number(s) rejected",
-            "\n".join(reason for _t, reason in push.failed),
+            compose(f"{group_key} refused these tracking numbers.",
+                    items=[reason for _t, reason in push.failed]),
         )
 
     for _tracking, reason in push.needs_manual:
@@ -1075,8 +1071,9 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
         # a false alarm costs one glance at My Tracker.
         _alert(
             apply,
-            f"ACTION NEEDED — {group_key}: {len(push.needs_manual)} package(s) could not be submitted",
-            "\n\n".join(reason for _t, reason in push.needs_manual),
+            f"Action needed: {group_key} — {len(push.needs_manual)} package(s) could not be submitted",
+            compose("These packages are not submitted or insured until you act on each.",
+                    items=[reason for _t, reason in push.needs_manual]),
         )
 
     insurance = None
@@ -1116,7 +1113,7 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
             _alert(
                 apply,
                 f"{group_key}: {len(insurance.failed)} insurance filing(s) rejected",
-                "\n".join(reason for _t, reason in insurance.failed),
+                compose("These packages are not insured.", items=[reason for _t, reason in insurance.failed]),
             )
 
     payouts = _in_ledger_spelling(client.fetch_payouts([r.tracking_number for r in rows]),
@@ -1134,12 +1131,11 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
     if mismatches:
         _alert(
             apply,
-            f"ACTION NEEDED — {group_key}: {len(mismatches)} payout(s) disagree with the "
-            "committed price",
-            f"{group_key} settled these packages at a different amount than the payout price it "
-            "committed to. The PAID amount is what landed on the ledger — check the deal terms in "
-            "My Tracker and raise it with them if the shortfall is real:\n"
-            + "\n".join(mismatches),
+            f"Action needed: {group_key} — {len(mismatches)} payout(s) differ from the committed price",
+            compose(f"{group_key} paid these packages a different amount than it committed to; the paid amount "
+                    "is on the ledger.",
+                    do=f"Check the deal in My Tracker and raise any shortfall with {group_key}.",
+                    items=mismatches),
         )
 
     # The committed price, written into Expected Payout from the moment the purchase links the
@@ -1170,10 +1166,9 @@ def _run_one_group(group_key, rows, plan, all_writes, apply, payouts_only: bool 
             _alert(
                 apply,
                 f"{group_key}: {len(price_changes)} committed payout price(s) changed",
-                f"{group_key} changed the payout price it commits to on these orders. Expected "
-                "Payout now carries the NEW commitment (nothing has been paid yet). If a drop is "
-                "not one you agreed to, take it up with them before the package settles:\n"
-                + "\n".join(price_changes),
+                compose("Expected Payout now shows the new price; nothing has been paid yet.",
+                        do="If a drop is not one you agreed to, raise it before the package settles.",
+                        items=price_changes),
             )
 
     _alert_on_cancelled_orders(group_key, client, plan, apply)
@@ -1331,13 +1326,12 @@ def _alert_on_unroutable(plan: dict, apply: bool) -> None:
         return
     _alert(
         apply,
-        f"Buying group not configured: {', '.join(fresh)} -- {len(rows)} shipped package(s) waiting",
-        f"Buying Group {', '.join(repr(l) for l in fresh)} is not set up as a provider, so the run "
-        "cannot submit or insure these packages until it is. Add it to config.json (a `warehouses` "
-        "entry for its address, and a `buying_groups` provider if it has an API), or set the row's "
-        "Buying Group by hand, and the next run submits them.\n\n"
-        "This is sent once per group name; the Activity page lists the rows on every run.\n\n"
-        f"{detail}",
+        f"Buying group not set up: {', '.join(fresh)} — {len(rows)} shipped package(s) waiting",
+        compose("These packages cannot be submitted or insured until the group is set up. This is sent "
+                "once per group; the Activity page lists the rows on every run.",
+                do="Add the group in Settings (Warehouses, and Buying Groups if it has an API), or set the "
+                   "rows' Buying Group by hand.",
+                items=[d.strip() for d in detail.splitlines() if d.strip()]),
     )
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     state["unroutable_groups_alerted"] = {**already, **{label: stamp for label in fresh}}
@@ -1363,10 +1357,10 @@ def _alert_on_unresolved_splits(plan: dict, apply: bool) -> None:
     log.warning("%d row(s) have an unresolved split quantity and cannot be submitted", len(rows))
     _alert(
         apply,
-        f"{len(rows)} package(s) cannot be submitted to a buying group",
-        "These rows carry Quantity '*' from the undisclosed-split safety net, so no buying group "
-        "will accept them. Set the real per-box quantity on each row and they'll go out on the "
-        f"next run:\n{detail}",
+        f"Action needed: {len(rows)} package(s) need a quantity before they can be submitted",
+        compose("These rows carry Quantity '*' from a split shipment, and no buying group accepts that.",
+                do="Set each box's real quantity on the Orders page; they go out on the next run.",
+                items=[f"order {oid}, tracking {t} (row {n})" for n, oid, t in rows], link="/orders"),
     )
 
 
@@ -1385,11 +1379,11 @@ def _alert_on_corrupted_tracking(plan: dict, apply: bool) -> None:
     log.warning("%d row(s) have a float-corrupted tracking number and cannot be submitted", len(rows))
     _alert(
         apply,
-        f"{len(rows)} tracking number(s) were stored as numbers and need re-typing",
-        "These Tracking Number cells were stored as NUMBERS and rendered in scientific "
-        "notation and the trailing digits are permanently gone from the ledger. The rows are "
-        "withheld from every submission until fixed. Re-type each number from the carrier "
-        "email/page AS TEXT — start the cell with an apostrophe ('):\n" + detail,
+        f"Action needed: {len(rows)} tracking number(s) lost digits and need re-typing",
+        compose("These Tracking Number cells were stored as numbers, so their trailing digits are gone; "
+                "the rows are held back from every submission.",
+                do="Re-type each number from the carrier's email on the Orders page.",
+                items=[f"order {oid}: the cell shows {t!r} (row {n})" for n, oid, t in rows], link="/orders"),
     )
 
 

@@ -12,7 +12,7 @@ import logging
 import re
 from pathlib import Path
 
-from alerts.notifier import alert
+from alerts.notifier import alert, compose
 from config.settings import settings
 from config.warehouses import classify_address, is_deliberately_unrouted, is_personal
 from models.order import (
@@ -319,16 +319,15 @@ def _alert_key_conflicts(conflicts: list[dict]) -> None:
         for c in conflicts
     ]
     log.error("Same-key conflict on %d order line(s) -- NOT written: %s", len(conflicts), lines)
-    from alerts.notifier import alert  # lazy: keeps ledger_sync free of an alerts dependency at load
+    from alerts.notifier import alert, compose  # lazy: keeps ledger_sync free of an alerts dependency at load
 
     alert(
-        f"Same-key conflict on {len(conflicts)} order line(s) — NOT recorded",
-        "Two rows from one scrape landed on the same ledger key (Order ID + Order Date + Item Name + "
-        "Shipment) with DIFFERENT values, which means the page holds two lines the parser could not "
-        "tell apart -- an unknown page shape. Merging them would silently drop one line's money "
-        "(this is how a $649 iPad once vanished), so NEITHER row was written; every other row in the "
-        "run was. Fix the mapping from the failure dossier, then the next run records the order:\n\n"
-        + "\n".join(lines),
+        f"{len(conflicts)} order line(s) not recorded — two lines share one key",
+        compose("One scrape produced two different lines with the same Order ID, Order Date, Item Name "
+                "and Shipment, so neither was written (merging would drop one line's money); every other "
+                "row was.",
+                do="Fix the page mapping from the failure dossier; the next run then records the order.",
+                items=[line.removeprefix("- ") for line in lines]),
     )
 
 
@@ -1126,14 +1125,14 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
             for e in split_events
         ]
         # Lazy import: keep ledger_sync free of an alerts dependency at module load.
-        from alerts.notifier import alert
+        from alerts.notifier import alert, compose
 
         alert(
-            f"Split shipment detected on {len(split_events)} row(s) — set the quantities",
-            "A shipment's tracking number changed to a new value, which usually means the order shipped "
-            "in more than one box while the retailer reports only one tracking number at a time. A new "
-            "row was added per new box with Quantity '*'. Set the per-box quantities (and adjust the "
-            "ORIGINAL row's quantity to match), then verify each tracking number:\n\n" + "\n".join(lines),
+            f"Action needed: split shipment on {len(split_events)} row(s) — set the quantities",
+            compose("An order shipped in more than one box: a row was added per new box with Quantity '*'.",
+                    do="Set each box's quantity (and the original row's) on the Orders page, then check the "
+                       "tracking numbers.",
+                    items=[line.removeprefix("- ") for line in lines], link="/orders"),
         )
 
     if relabel_events:
@@ -1142,15 +1141,14 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
             f"the dead number is kept as shipment {e['retired_shipment']} (superseded, no money)"
             for e in relabel_events
         ]
-        from alerts.notifier import alert
+        from alerts.notifier import alert, compose
 
         alert(
             f"Re-labelled package on {len(relabel_events)} row(s) — new tracking number recorded",
-            "A single-unit shipment's tracking number changed. One unit cannot split, so the carrier "
-            "re-issued the label. The row now carries the NEW number (the buying-group sync submits it "
-            "on its next run) and the old number is kept as a `superseded` row that carries no money. "
-            "Nothing to set by hand — but if the buying group already holds the old number, tell them "
-            "the new one:\n\n" + "\n".join(lines),
+            compose("The carrier re-issued the label: the row carries the new number (the buying-group sync "
+                    "submits it) and the old one is kept as a superseded row with no money.",
+                    do="If the buying group already holds the old number, tell them the new one.",
+                    items=[line.removeprefix("- ") for line in lines]),
         )
 
     if suspect_tracking:
@@ -1159,18 +1157,14 @@ def sync_csv_to_ledger(csv_path: Path) -> None:
             f"shipments {', '.join(e['shipments'])}"
             for e in suspect_tracking
         ]
-        from alerts.notifier import alert
+        from alerts.notifier import alert, compose
 
         alert(
-            f"Repeated tracking number on {len(suspect_tracking)} order(s) — tracking not updated",
-            "One tracking number was reported for two different boxes of the same order, which is "
-            "impossible: a carrier issues one number per package. That means the scrape MIS-READ the "
-            "tracking (the Costco agent fallback has done this, repeating box 1's number for box 2 "
-            "and dropping box 2's).\n\n"
-            "The tracking numbers already on the ledger were LEFT ALONE for these orders, and no rows "
-            "were added. Everything else on those rows — cost, status, delivery date — did update.\n\n"
-            "Nothing to do if the ledger's numbers are right. If they aren't, re-run the retailer on "
-            "its API path (not the agent) and it will correct them:\n\n" + "\n".join(lines),
+            f"Repeated tracking number on {len(suspect_tracking)} order(s) — tracking left unchanged",
+            compose("One tracking number was reported for two boxes of the same order, so the scrape misread "
+                    "it. The ledger's tracking numbers were left alone; everything else on those rows updated.",
+                    do="Nothing, if the ledger's numbers are right; otherwise re-run the retailer.",
+                    items=[line.removeprefix("- ") for line in lines]),
         )
 
     log.info(
@@ -1410,7 +1404,7 @@ def _alert_cashback_caps(worksheet, cards) -> None:
     Fails soft."""
     from datetime import date
 
-    from alerts.notifier import alert
+    from alerts.notifier import alert, compose
     from config import loader
     from ledger.cashback_caps import alerts_due, rows_by_field
 
@@ -1420,8 +1414,9 @@ def _alert_cashback_caps(worksheet, cards) -> None:
                                  settings.cap_warn_percent, settings.cap_warn_dollars, state.get("cap_alerts") or {})
         for item in due:
             alert(item["summary"],
-                  f"Card ...{item['last4']}, {item['period']}: {item['used']:,.2f} of {item['limit']:,.2f} spent, "
-                  f"{item['left']:,.2f} left. The Settings page's card shows the limit; acknowledge the card on the overview.",
+                  compose(f"Card …{item['last4']}, {item['period']}: ${item['used']:,.2f} of "
+                          f"${item['limit']:,.2f} spent, ${item['left']:,.2f} left.",
+                          do="Acknowledge it on the Overview; the limit is on the card in Settings."),
                   kind="cap")
         if memory != (state.get("cap_alerts") or {}):
             state["cap_alerts"] = memory
@@ -1875,11 +1870,9 @@ def load_order_state(profile_label: str | None = None, since: str | None = None,
         # log a warning and carry on looking like a normal run, which is the failure mode CLAUDE.md
         # ranks worst ("silently records nothing"). The run still continues — that part is correct.
         alert(
-            f"Ledger: order state unreadable ({who}) — re-checks skipped this run",
-            "The scrape could not read the ledger, so it did not re-check any already-recorded open "
-            "order; it only looked for brand-new orders in the lookback window. Any status or "
-            "tracking-number change on an open order was missed for this cycle and will be picked up "
-            "on the next successful run. Check logs/run.log.",
+            f"Ledger: order state unreadable ({who}) — open orders not re-checked",
+            compose("Only brand-new orders were fetched this run; changes to open orders wait for the next run.",
+                    do="Nothing, unless it repeats: then see logs/run.log."),
         )
         return empty
 

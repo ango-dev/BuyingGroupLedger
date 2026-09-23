@@ -66,6 +66,35 @@ def send_discord(message: str) -> None:
     response.raise_for_status()
 
 
+#: Items one alert lists; the rest are counted, and the whole list goes to run.log.
+MAX_ITEMS = 10
+
+
+def compose(what: str, *, do: str = "", items=(), link: str = "") -> str:
+    """Every alert body has ONE shape:
+    what happened in a sentence or two, one "Do:" line when there is something to do, the items
+    (at most MAX_ITEMS, then a count), and the dashboard page when `web.public_url` is set and a
+    `link` path is given. WHY a thing happens is explained in the code and the docs, not in the
+    message a phone shows at 3am.
+
+        compose("BFMR refused these tracking numbers.", do="Re-type them.", items=["1Z...: bad"])
+    """
+    parts = [" ".join(str(what).split())]
+    if do:
+        parts.append("Do: " + " ".join(str(do).split()))
+    lines = [" ".join(str(item).split()) for item in items if str(item).strip()]
+    if lines:
+        shown = [f"• {line}" for line in lines[:MAX_ITEMS]]
+        if len(lines) > MAX_ITEMS:
+            shown.append(f"…and {len(lines) - MAX_ITEMS} more (the full list is in logs/run.log)")
+            log.info("Alert items, all %d:\n%s", len(lines), "\n".join(lines))
+        parts.append("\n".join(shown))
+    public = str(getattr(settings, "web_public_url", "") or "").rstrip("/")
+    if link and public:
+        parts.append(f"Open: {public}{link}")
+    return "\n\n".join(parts)
+
+
 def alert(subject: str, message: str, *, kind: str = "alert") -> None:
     """Fire both alert channels independently so one failing doesn't suppress the other.
     `kind` is the activity-log type the alert is recorded under: "alert" for the app's own,

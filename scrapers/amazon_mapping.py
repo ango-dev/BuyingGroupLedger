@@ -951,17 +951,14 @@ def _collapse_same_package_cards(rows: list[OrderItem], subtotal: float | None,
         "%s: order-details rendered the same package twice (shipmentId %s) — kept %d of %d row(s).",
         order_id, ", ".join(ids), len(survivors), len(rows),
     )
-    from alerts.notifier import alert  # local: keeps this module importable without the alert stack
+    from alerts.notifier import alert, compose  # local: keeps this module importable without the alert stack
 
     alert(
         f"{RETAILER} {order_id}: a package was rendered twice",
-        f"Two shipment cards on the order-details page carried the same shipmentId "
-        f"({', '.join(ids)}) with identical items — a delayed package re-issued a tracking number "
-        f"while its old card was still on the page. {len(rows) - len(survivors)} duplicate row(s) "
-        f"dropped; the card carrying a tracking number was kept.\n\n"
-        f"If a row for the superseded tracking number is already on the ledger, mark it superseded "
-        f"(the row stays, its money is blanked) with:\n"
-        f"  python -m scripts.fix_superseded_shipments --order {order_id}",
+        compose(f"The order page showed one package twice (shipmentId {', '.join(ids)}); "
+                f"{len(rows) - len(survivors)} duplicate row(s) dropped, the one with a tracking number kept.",
+                do=f"If the old tracking number already has a row, mark it superseded: "
+                   f"python -m scripts.fix_superseded_shipments --order {order_id}"),
     )
     return survivors
 
@@ -1024,21 +1021,19 @@ def _reconcile_against_subtotal(rows: list[OrderItem], subtotal: float | None,
         order_id, len(rows), before, subtotal, len(survivors), after,
         "" if resolved else " Still short of the subtotal, so quantities are left unresolved ('*').",
     )
-    from alerts.notifier import alert  # local: keeps this module importable without the alert stack
+    from alerts.notifier import alert, compose  # local: keeps this module importable without the alert stack
 
     tail = "" if resolved else (
         "\n\nThe surviving cards still do not match the subtotal, so their quantities are recorded "
         "as '*' and need setting by hand."
     )
     alert(
-        f"Amazon {order_id}: a shipment was recorded twice",
-        f"The order-details page rendered {len(rows)} shipment card(s) totalling ${before:.2f} for an "
-        f"order whose subtotal is ${subtotal:.2f} — the hallmark of a delayed package that was "
-        f"re-issued a new tracking number while the old card was still on the page.\n\n"
-        f"{len(survivors)} card(s) worth ${after:.2f} were kept.{tail}\n\n"
-        f"If a row for the superseded tracking number is already on the ledger, mark it superseded "
-        f"(the row stays, its money is blanked) with:\n"
-        f"  python -m scripts.fix_superseded_shipments --order {order_id}",
+        f"{RETAILER} {order_id}: a shipment was recorded twice",
+        compose(f"The order page showed {len(rows)} shipment card(s) worth ${before:.2f} for a "
+                f"${subtotal:.2f} order (a re-issued tracking number); kept {len(survivors)} worth "
+                f"${after:.2f}." + (" Their quantities are recorded as '*' and need setting by hand." if tail else ""),
+                do=f"If the old tracking number already has a row, mark it superseded: "
+                   f"python -m scripts.fix_superseded_shipments --order {order_id}"),
     )
     return survivors
 

@@ -3,7 +3,7 @@ import logging
 import diagnostics
 from datetime import datetime, timedelta, timezone
 
-from alerts.notifier import alert
+from alerts.notifier import alert, compose
 from config.settings import settings
 from scrapers.base import (
     ApiLoginError,
@@ -99,13 +99,9 @@ class CostcoScraper(BaseRetailerScraper):
                         self.profile.label, exc)
             alert(
                 f"Costco [{self.profile.label}]: API auth failed — not recorded this run",
-                f"The Costco API could not authenticate ({exc}), and the automatic token refresh "
-                f"over CDP did not recover it — which usually means the Browser-Use profile's own "
-                f"Costco session is logged out, since that session is what the refresh reads from.\n\n"
-                f"Log the profile back into costco.com:\n"
-                f"  python -m scripts.create_profile --label {self.profile.label}\n"
-                f"then either re-run, or grab a token directly:\n"
-                f"  python -m scripts.costco_token --label {self.profile.label} --grab"
+                compose(f"The Costco API refused the token ({exc}) and the automatic refresh did not recover it.",
+                        do=f"Log the profile into costco.com again (Tools › Log a Profile In), or grab a token: "
+                           f"python -m scripts.costco_token --label {self.profile.label} --grab")
                 + self._dossier_line(dossier, exc),
             )
             raise LoggedOutError(f"Costco:{self.profile.label}") from exc
@@ -122,13 +118,9 @@ class CostcoScraper(BaseRetailerScraper):
                 )
                 alert(
                     f"Costco [{self.profile.label}]: proxy unreachable — not recorded this run",
-                    f"The request never reached Costco, so nothing was scraped this run.\n\n"
-                    f"Reason: {reason}\n\n"
-                    f"THIS IS NOT A LOGIN PROBLEM — do not re-authorize the token. The profile's "
-                    f"proxy ({self.profile.proxy.host}:{self.profile.proxy.port}) failed to get a "
-                    f"connection out.\n\n"
-                    f"Usually transient — the next scheduled run picks the orders up. If it repeats, "
-                    f"check the proxy is alive and that its IP is still allowlisted."
+                    compose(f"The request never reached Costco: {reason}. Not a sign-in problem: the proxy "
+                            f"{self.profile.proxy.host}:{self.profile.proxy.port} could not connect.",
+                            do="Usually clears by the next run; if it repeats, check the proxy is up and its IP is allowlisted.")
                     + self._dossier_line(dossier, exc),
                 )
                 raise ScrapeUnavailableError(
@@ -136,9 +128,8 @@ class CostcoScraper(BaseRetailerScraper):
                 ) from exc
             return self._on_deterministic_failure(
                 exc, dossier,
-                hint="The dossier holds the GraphQL request/response that failed. If the API schema "
-                     "changed, update scrapers/costco_api.py's queries; if auth is the problem, "
-                     f"re-authorize with `python -m scripts.costco_token --label {self.profile.label} ...`.",
+                hint="If the API changed, update the queries in scrapers/costco_api.py; if it is auth, re-authorize: "
+                     f"python -m scripts.costco_token --label {self.profile.label} --grab",
             )
         self._report_soft_problems(dossier)
         return items

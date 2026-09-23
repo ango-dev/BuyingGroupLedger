@@ -2,7 +2,7 @@ import logging
 
 import diagnostics
 
-from alerts.notifier import alert
+from alerts.notifier import alert, compose
 from config.settings import settings
 from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
 from scrapers.bestbuy_api import DIAGNOSTIC_SELECTORS
@@ -40,19 +40,17 @@ class BestBuyScraper(BaseRetailerScraper):
                 where = ("" if getattr(exc, "recognised", False)
                          else self._dossier_line(dossier, exc))
                 alert(
-                    f"Best Buy [{self.profile.label}]: session logged out — API login failed, "
-                    f"not recorded this run",
-                    f"The Best Buy deterministic path could not sign in ({exc}). Re-login the profile "
-                    f"(scripts/create_profile)."
-                    + (where or "\n\n(No dossier: the sign-in page said what the problem is, so "
-                                "there is nothing to capture.)"),
+                    f"Best Buy [{self.profile.label}]: session logged out — not recorded this run",
+                    compose(f"Best Buy sign-in failed: {exc}",
+                            do="Log the profile in again (Tools › Log a Profile In).")
+                    + (where or "\n\n(No dossier: the sign-in page said what the problem is.)"),
                 )
                 raise LoggedOutError(f"Best Buy:{self.profile.label}") from exc
             except Exception as exc:  # noqa: BLE001 — a NON-login failure (page shape)
                 return self._on_deterministic_failure(
                     exc, dossier,
-                    hint="If this persists, check the sign-in flow / page shape "
-                         "(scripts/bestbuy_capture.py re-captures it).",
+                    hint="If it repeats, check the sign-in flow and re-capture the page "
+                         "(scripts/bestbuy_capture.py).",
                 )
             self._report_soft_problems(dossier)
             return items

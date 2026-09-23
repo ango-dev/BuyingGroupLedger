@@ -198,7 +198,7 @@ class TestTheCronJob:
         root = _repo(tmp_path)
         monkeypatch.setattr(backup, "create_backup", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
         assert run_scheduled(root, root / "backups") == 1
-        assert sent == [("Scheduled backup FAILED", "backup")]
+        assert sent == [("Scheduled backup failed", "backup")]
 
 
 class TestTheSettingsPage:

@@ -53,7 +53,7 @@ def test_a_stale_heartbeat_alerts_once_then_stays_quiet(tmp_path):
     proc, marker, sent = _run(tmp_path, stamp_age_s=3 * 3600, hours=1)   # grace is 2h
     assert proc.returncode == 1 and "expected one every 1h" in proc.stdout
     assert marker.exists()
-    assert len(sent) == 2 and sent[0].startswith("Ledger container UNHEALTHY") and "logs/.run.lock" in sent[1]
+    assert len(sent) == 2 and sent[0].startswith("Ledger container unhealthy") and "logs/.run.lock" in sent[1]
 
     proc, marker, sent = _run(tmp_path, stamp_age_s=3 * 3600, hours=1)   # second check: no second alert
     assert proc.returncode == 1 and sent == [] and marker.exists()

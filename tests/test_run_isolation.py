@@ -190,7 +190,7 @@ class TestLedgerFailuresAreLoudNotSilent:
 
         assert state["open_orders"] == [], "must still fail soft and let the run continue"
         assert fired, "an unreadable ledger must alert"
-        assert "re-checks skipped" in fired[0].lower()
+        assert "not re-checked" in fired[0].lower()
 
     def test_the_warning_no_longer_claims_it_treats_everything_as_new(self, monkeypatch, caplog):
         """The old wording read as conservative OVER-fetching. The real effect is the opposite: the

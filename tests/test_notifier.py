@@ -90,3 +90,31 @@ def test_each_channel_has_its_own_switch(monkeypatch):
         notifier.settings, discord_alerts_enabled=True))
     with pytest.raises(AssertionError, match="nothing may be sent"):
         notifier.send_discord("message")
+
+
+class TestCompose:
+    """every body is what happened,
+    one Do: line, the items (at most ten, then a count) and the dashboard page."""
+
+    def test_the_shape(self, monkeypatch):
+        import dataclasses
+
+        from config import settings as cs
+
+        monkeypatch.setattr(notifier, "settings", dataclasses.replace(cs.settings, web_public_url="http://192.0.2.10:8765/"))
+        body = notifier.compose("BFMR refused   these\n tracking numbers.", do="Re-type them.",
+                                items=[f"1Z{i}: bad" for i in range(13)] + ["  "], link="/orders")
+        what, do, items, link = body.split("\n\n")
+        assert what == "BFMR refused these tracking numbers." and do == "Do: Re-type them."
+        lines = items.split("\n")
+        assert lines[0] == "• 1Z0: bad" and len(lines) == 11
+        assert lines[-1] == "…and 3 more (the full list is in logs/run.log)"
+        assert link == "Open: http://192.0.2.10:8765/orders"
+
+    def test_without_do_items_or_an_address_it_is_one_sentence(self, monkeypatch):
+        import dataclasses
+
+        from config import settings as cs
+
+        monkeypatch.setattr(notifier, "settings", dataclasses.replace(cs.settings, web_public_url=""))
+        assert notifier.compose("Nothing to do.", link="/orders") == "Nothing to do."

@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import diagnostics
-from alerts.notifier import alert
+from alerts.notifier import alert, compose
 from config.settings import settings
 from models.order import OrderItem
 from models.profile import ProfileConfig
@@ -149,11 +149,10 @@ class BaseRetailerScraper(abc.ABC):
         log.error("%s [%s]: deterministic path failed (%s); nothing recorded this run. Dossier: %s",
                   name, label, reason, dossier.path, exc_info=True)
         alert(
-            f"{name} [{label}]: deterministic path failed — NOT recorded this run",
-            f"The {name} deterministic path could not run, so NOTHING was recorded for {name} this "
-            f"run. The next scheduled run retries.\n\nReason: {reason}\n\n{hint}{where}\n\n"
-            f"The dossier holds the traceback, the page HTML + screenshot at the failure, and a "
-            f"selector audit. Hand it to your coding agent to fix the selector, then re-run.",
+            f"{name} [{label}]: scrape failed — not recorded this run",
+            compose(f"{reason}. Nothing was recorded for {name}; the next run retries.",
+                    do=hint or "Fix it from the failure dossier: its report names the selector that broke.")
+            + where,
         )
         raise DeterministicPathError(f"{name}:{label} {reason}") from exc
 
@@ -171,9 +170,11 @@ class BaseRetailerScraper(abc.ABC):
         log.warning("%s [%s]: scrape completed with %d problem(s); dossier: %s",
                     self.retailer_name, self.profile.label, len(dossier.problems), dossier.path)
         alert(
-            f"{self.retailer_name} [{self.profile.label}]: scrape completed with "
-            f"{len(dossier.problems)} problem(s) — check the dossier",
-            f"The orders were recorded, but part of the page could not be read:\n\n{summary}{where}",
+            f"{self.retailer_name} [{self.profile.label}]: recorded, but {len(dossier.problems)} "
+            "problem(s) reading the page",
+            compose("The orders were recorded, but part of the page could not be read.",
+                    items=dossier.problems)
+            + where,
         )
 
     def _load_order_state(self) -> dict:
@@ -203,10 +204,9 @@ class BaseRetailerScraper(abc.ABC):
                 self.retailer_name, exc_info=True,
             )
             alert(
-                f"{self.retailer_name} [{self.profile.label}]: order state unavailable — "
-                "re-checks skipped this run",
-                "The scrape could not determine which orders are still open, so it re-checked none "
-                "of them and only looked for brand-new orders. Any status or tracking-number change "
-                "on an open order was missed for this cycle. Check logs/run.log.",
+                f"{self.retailer_name} [{self.profile.label}]: open orders not re-checked this run",
+                compose("The ledger's open orders could not be read, so only brand-new orders were fetched; "
+                        "changes to open orders wait for the next run.",
+                        do="Nothing, unless it repeats: then see logs/run.log."),
             )
             return {"delivered_ids": [], "open_orders": []}

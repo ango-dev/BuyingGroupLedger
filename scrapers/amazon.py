@@ -1,6 +1,6 @@
 import logging
 
-from alerts.notifier import alert
+from alerts.notifier import alert, compose
 from config.settings import settings
 from scrapers import amazon_mapping
 from scrapers.base import ApiLoginError, BaseRetailerScraper, LoggedOutError
@@ -34,16 +34,16 @@ class AmazonScraper(BaseRetailerScraper):
                             self.profile.label, exc)
                 alert(
                     f"Amazon [{self.profile.label}]: session logged out — not recorded this run",
-                    f"The Amazon deterministic path found a logged-out session ({exc}). Re-login the "
-                    f"profile (scripts/create_profile)."
+                    compose(f"The session is logged out ({exc}).",
+                            do="Log the profile in again (Tools › Log a Profile In).")
                     + self._dossier_line(dossier, exc),
                 )
                 raise LoggedOutError(f"Amazon:{self.profile.label}") from exc
             except Exception as exc:  # noqa: BLE001 — a NON-login failure (page shape)
                 return self._on_deterministic_failure(
                     exc, dossier,
-                    hint="If this persists, re-capture the page shape (scripts/amazon_capture.py) "
-                         "or check whether the session is logged out.",
+                    hint="If it repeats, re-capture the page (scripts/amazon_capture.py) or check "
+                         "the session is still signed in.",
                 )
             self._report_soft_problems(dossier)
             return items

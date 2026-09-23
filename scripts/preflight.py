@@ -657,10 +657,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if failures and args.alert:
         try:
-            from alerts.notifier import alert
+            from alerts.notifier import alert, compose
             body = "\n".join(f"- {r.name}: {r.detail}" for r in failures)
-            alert("Preflight FAILED — the ledger is misconfigured",
-                  f"{len(failures)} check(s) failed on this host:\n\n{body}")
+            alert(f"Preflight failed: {len(failures)} check(s)",
+                  compose("The configuration check found problems on this host.",
+                          do="Run python -m scripts.preflight for the full report.",
+                          items=[f"{r.name}: {r.detail}" for r in failures]))
         except Exception:  # noqa: BLE001 — an unsendable alert must not mask the real failures
             print("(could not send the alert; the failures above still stand)", file=sys.stderr)
 

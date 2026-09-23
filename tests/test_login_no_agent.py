@@ -89,7 +89,7 @@ class TestNonLoginFailures:
             scraper.scrape()
 
         subject, body = alerts[-1]
-        assert "NOT recorded" in subject
+        assert "not recorded" in subject.lower()
         assert "Failure dossier:" in body
         dossiers = list((tmp_path / "failures").iterdir())
         assert len(dossiers) == 1
@@ -199,7 +199,7 @@ class TestCostcoSelfHealsADeadToken:
         assert "API auth failed" in subject
         # The refresh reads from the profile's Costco session, so its failure narrows the diagnosis:
         # point at re-logging the PROFILE in, not just at pasting a token.
-        assert "create_profile" in body
+        assert "Log a Profile In" in body and "costco_token" in body
 
     def test_a_refresh_that_blows_up_does_not_replace_the_real_diagnosis(self, monkeypatch):
         """The recovery runs on an already-failing path. If it throws, the caller must still report
@@ -271,7 +271,7 @@ class TestCostcoSharedProxyFailure:
         assert "proxy unreachable" in subject
         # The alert has to actively steer AWAY from the token, because the symptom that reached the
         # user last time was "session is logged out".
-        assert "NOT A LOGIN PROBLEM" in body
+        assert "Not a sign-in problem" in body
 
     def test_it_is_not_reported_as_a_logout(self, monkeypatch):
         """ScrapeUnavailableError must not be a LoggedOutError. main.run_scrape branches on the two
@@ -308,4 +308,4 @@ class TestCostcoSharedProxyFailure:
         with pytest.raises(DeterministicPathError):
             scraper.scrape()
         assert not any("proxy unreachable" in s for s in subjects)
-        assert any("NOT recorded" in s for s in subjects)
+        assert any("not recorded" in s.lower() for s in subjects)

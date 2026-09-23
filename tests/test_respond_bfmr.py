@@ -184,7 +184,7 @@ def test_no_serials_found_leaves_message_unanswered_and_alerts_once(sent, alerts
     assert len(outcome["needs_manual"]) == 1
     assert len(alerts) == 1
     subject, message = alerts[0]
-    assert subject.startswith("ACTION NEEDED") and TRACKING in subject
+    assert subject.startswith("Action needed") and TRACKING in subject
     assert "no serial numbers found" in message and "--serials" in message
 
 

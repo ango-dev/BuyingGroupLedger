@@ -717,7 +717,7 @@ class TestUndisclosedSplit:
         assert rows[2][FIELDNAMES.index("quantity")] == "*"
         assert rows[2][FIELDNAMES.index("total_cost")] == ""
         assert rows[2][FIELDNAMES.index("item_name")] == "HP - 14 Laptop"
-        assert len(alerts) == 1 and "Split shipment" in alerts[0][0]
+        assert len(alerts) == 1 and "split shipment" in alerts[0][0].lower()
 
     def test_idempotent_once_new_box_has_its_own_row(self, sheet, tmp_path, alerts):
         # After a split, the API keeps reporting the new number against the old shipment line. It must
@@ -952,7 +952,7 @@ class TestRepeatedTrackingNumberIsAMisRead:
         sync_csv_to_ledger(path)
 
         assert len(sheet.data_rows()) == 2
-        assert len(alerts) == 1 and "Split shipment" in alerts[0][0]
+        assert len(alerts) == 1 and "split shipment" in alerts[0][0].lower()
 
 
 class TestLoadOrderState:
@@ -1785,7 +1785,7 @@ class TestAReLabelledSingleUnitIsNotASplit:
         rows = {r[FIELDNAMES.index("shipment")]: r for r in sheet.data_rows()}
         assert rows["1"][FIELDNAMES.index("tracking_number")] == "OLD"
         assert rows[2][FIELDNAMES.index("quantity")] == "*"
-        assert "Split shipment" in alerts[0][0]
+        assert "split shipment" in alerts[0][0].lower()
 
     def test_an_incoming_quantity_that_is_not_one_is_still_a_split(self, sheet, tmp_path, alerts):
         self._seed(sheet, quantity="1")
@@ -1796,7 +1796,7 @@ class TestAReLabelledSingleUnitIsNotASplit:
 
         sync_csv_to_ledger(path)
 
-        assert "Split shipment" in alerts[0][0]
+        assert "split shipment" in alerts[0][0].lower()
 
 
 class TestConflictingSameKeyRowsAreNeverMerged:
@@ -1827,7 +1827,7 @@ class TestConflictingSameKeyRowsAreNeverMerged:
 
         assert result["skipped_conflicts"] == 1 and result["appended"] == 1
         assert [r[FIELDNAMES.index("order_id")] for r in sheet.data_rows()] == ["B2"]
-        assert len(alerts) == 1 and "NOT recorded" in alerts[0][0]
+        assert len(alerts) == 1 and "not recorded" in alerts[0][0].lower()
         assert "A1" in alerts[0][1] and "cost_per_item '626.29' vs '649.00'" in alerts[0][1]
 
     def test_half_rows_still_merge(self, sheet, tmp_path, alerts):
@@ -2418,7 +2418,7 @@ class TestPackageIdDeferral:
         assert rows["1"][_F["package_id"]] == "NWfgPHR2F"
         assert rows["2"][_F["tracking_number"]] == "TBA-NEW" and rows["2"][_F["quantity"]] == "*"
         assert rows["2"][_F["total_cost"]] in ("", None) and rows["2"][_F["package_id"]] == "NxWmqLBj2"
-        assert len(alerts) == 1 and "Split shipment" in alerts[0][0]
+        assert len(alerts) == 1 and "split shipment" in alerts[0][0].lower()
 
     def test_a_qty_1_re_label_with_a_new_id_takes_the_row_and_the_new_id(self, sheet, tmp_path, alerts):
         sheet.rows = [list(HEADER), self._existing(shipment="1", tracking_number="TBA-OLD", package_id="OLD-ID")]
