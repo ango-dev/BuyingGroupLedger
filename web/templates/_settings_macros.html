@@ -300,10 +300,11 @@
         <strong>{{ e.label or '(unlabelled)' }}</strong>
         {% for r in e.retailers %}<span class="chip">{{ retailer_title(r) | trim }}</span>{% endfor %}
         {% if not e.retailers %}<span class="chip muted">No Retailers</span>{% endif %}
-        {#- the proxy switch:
-            posts in place from the summary line, without opening the card -#}
-        {% if e.proxy %}<button type="button" class="chip switch {{ 'on' if e.proxy.enabled else 'off' }}" hx-post="/settings/section/profiles/entry/{{ e.index }}/proxy" hx-target="#s-profiles" hx-swap="outerHTML" onclick="event.preventDefault()" title="{{ 'the proxy is in use: click to switch it off' if e.proxy.enabled else 'the proxy is switched off: click to use it' }}">Proxy {{ 'On' if e.proxy.enabled else 'Off' }}</button>{% endif %}
+        {#- the sign-ins and the proxy switch sit together at the right edge, the switch last. The switch posts in place from the summary line, without opening the card -#}
+        {% if e.auth or e.proxy %}<span class="summary-end">
         {% for a in e.auth %}<span class="chip ok">Sign-in: {{ retailer_title(a.retailer) | trim }}</span>{% endfor %}
+        {% if e.proxy %}<button type="button" class="chip switch {{ 'on' if e.proxy.enabled else 'off' }}" hx-post="/settings/section/profiles/entry/{{ e.index }}/proxy" hx-target="#s-profiles" hx-swap="outerHTML" onclick="event.preventDefault()" title="{{ 'the proxy is in use: click to switch it off' if e.proxy.enabled else 'the proxy is switched off: click to use it' }}">Proxy {{ 'On' if e.proxy.enabled else 'Off' }}</button>{% endif %}
+        </span>{% endif %}
       {% elif path == 'warehouses' %}
         <strong>{{ e.buying_group or '(unnamed)' }}</strong>
         {% if e.builtin %}<span class="chip muted" title="named by the app: it cannot be renamed or deleted">Built-in</span>{% endif %}

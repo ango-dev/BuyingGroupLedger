@@ -666,6 +666,8 @@ table.entry-table tr.new-row td { border-top: 1px dashed var(--line); padding-to
 .entry-card summary .chip.switch.on { background: color-mix(in srgb, var(--ok) 18%, var(--card)); border-color: var(--ok); color: var(--ok); }
 .entry-card summary .chip.switch.off { background: var(--bg); color: var(--muted); text-decoration: line-through; }
 .entry-card summary .chip.switch:hover { border-color: var(--accent); }
+/* a profile's sign-ins and proxy switch, together at the right edge of its line */
+.entry-card summary .summary-end { order: 1; margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .entry-card .ftitle:has(label.check.inline) { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
 .entry-card .ftitle label.check.inline { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .entry-card .ftitle label.check.inline input { margin: 0; }
