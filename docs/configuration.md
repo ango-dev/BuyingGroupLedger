@@ -154,6 +154,11 @@ file order) wins and its `buying_group` is written to the row.
   many — a real warehouse you forgot to add stands out instead of silently vanishing. A jig with no match
   fields is rejected (it would match everything).
 - No `warehouses` section at all = every non-blank address is `Unclassified` (nothing is guessed).
+- **BFMR, MOD and Personal are built in**: the code routes, submits and reports by those names, so the
+  Settings page always shows their cards (an empty one saves into the file on its first save), greys
+  their Buying Group box and offers no Delete; renaming or removing one is refused there and in the JSON
+  editor. A provider added to `buying_groups/registry.py` (and its names to `config/buying_group_names.py`, which the registry checks) becomes built in by itself. Only a warehouse
+  you added has an editable name.
 - Editing the file re-tags **open** orders on the next run (they get re-read); already-delivered rows
   keep their tag. Classification is offline and free — no live run is needed to change it.
 

@@ -630,6 +630,12 @@ def apply_section(path: str, text: str) -> int:
             raise SettingsError(errors)
     elif not isinstance(value, dict):
         raise SettingsError([f"{path}: must be a JSON object"])
+    if path == "warehouses":
+        kept = {builtin_group(e.get("buying_group", "")) for e in value if isinstance(e, dict)}
+        gone = [builtin_group(e.get("buying_group", "")) for e in _entries(path)
+                if isinstance(e, dict) and builtin_group(e.get("buying_group", "")) not in kept]
+        if [g for g in gone if g]:
+            raise SettingsError([f"warehouses: {', '.join(g for g in gone if g)} is built in and cannot be removed or renamed"])
     data = load_config()
     _set_path(data, path, value)
     save_config(data)
@@ -772,6 +778,7 @@ def _display_one(path: str, index: int | None, entry: dict, today: str | None = 
     if path == "warehouses":
         return {
             "index": index, "buying_group": entry.get("buying_group", ""),
+            "builtin": builtin_group(entry.get("buying_group", "")),
             "jigs": [{"label": j.get("label", ""), "street": j.get("street", ""),
                       "zip": j.get("zip", ""), "name_contains": j.get("name_contains", ""),
                       "contains": ", ".join(j.get("contains") or [])}
@@ -1198,6 +1205,7 @@ def apply_entry(path: str, index: int | None, form: Mapping[str, str], today: st
     try:
         entry = _card_from_form(form, base, today) if path == "cards" else _BUILDERS[path](form, base)  # a card's logs date a blank row today
         _check_identity(path, index, entry, entries)
+        _guard_builtin(path, index, entry, entries)
         model.model_validate(strip_comments(entry))
     except SettingsError:
         raise
@@ -1212,6 +1220,60 @@ def apply_entry(path: str, index: int | None, form: Mapping[str, str], today: st
     _set_path(data, path, entries)
     save_config(data)
     return index, entry_label(path, entry)
+
+
+def builtin_groups() -> list[str]:
+    """The buying groups the code itself is keyed on: every provider with an adapter (config.buying_group_names, which
+    the registry checks itself against), then Personal. A new provider joins by itself."""
+    from config.buying_group_names import PROVIDER_KEYS
+    from config.warehouses import PERSONAL
+
+    return list(PROVIDER_KEYS) + [PERSONAL]
+
+
+def builtin_group(name: str) -> str:
+    """The built-in group a warehouse's Buying Group names ("MOD" and "MaxOutDeals" are both MOD),
+    or "" for a group the user added."""
+    from config.buying_group_names import canonical
+    from config.warehouses import PERSONAL
+    from models.card import normalize_retailer
+
+    text = str(name or "").strip()
+    if not text:
+        return ""
+    if normalize_retailer(text) == normalize_retailer(PERSONAL):
+        return PERSONAL
+    return canonical(text)
+
+
+def page_entries(path: str, today: str | None = None) -> list[dict]:
+    """The entries a section's cards show: display_entries, and for warehouses the built-in groups
+    first, in their fixed order -- one missing from config.json shows as an empty card (index
+    None) whose save ADDS it, so reading the page never writes the file."""
+    entries = display_entries(path, today=today)
+    if path != "warehouses":
+        return entries
+    builtin, own = [], []
+    for e in entries:
+        (builtin if e.get("builtin") else own).append(e)
+    order = builtin_groups()
+    present = {e["builtin"] for e in builtin}
+    for key in order:
+        if key not in present:
+            builtin.append({"index": None, "buying_group": key, "jigs": [], "builtin": key, "placeholder": True})
+    builtin.sort(key=lambda e: order.index(e["builtin"]) if e["builtin"] in order else len(order))
+    return builtin + own
+
+
+def _guard_builtin(path: str, index: int | None, entry: dict, entries: list) -> None:
+    """A built-in warehouse keeps its name, and a user's warehouse cannot take one."""
+    if path != "warehouses":
+        return
+    new = builtin_group(entry.get("buying_group", ""))
+    old = builtin_group(entries[index].get("buying_group", "")) if index is not None and isinstance(entries[index], dict) else ""
+    if old and new != old:
+        raise SettingsError([f"{old} is a built-in buying group: the app routes, submits and reports by that "
+                             "name, so it cannot be renamed. Add your own warehouse for another group."])
 
 
 def toggle_proxy(index: int) -> tuple[str, bool]:
@@ -1266,6 +1328,9 @@ def delete_entry(path: str, index: int) -> str:
     entries = _entries(path)
     if not 0 <= index < len(entries):
         raise SettingsError([f"{path}[{index}] does not exist (the page may be stale; reload it)"])
+    if path == "warehouses" and isinstance(entries[index], dict) and builtin_group(entries[index].get("buying_group", "")):
+        raise SettingsError([f"{entries[index].get('buying_group')} is a built-in buying group and cannot be deleted; "
+                             "delete its jigs instead if it has none of your addresses."])
     removed = entries.pop(index)
     data = load_config()
     _set_path(data, path, entries)

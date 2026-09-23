@@ -101,7 +101,11 @@
 
     {% macro warehouse_fields(w) %}
       <div class="fgrid two">
+        {% if w and w.builtin %}
+        <label>Buying group <input type="text" name="buying_group" value="{{ w.buying_group }}" readonly class="locked" data-tip="A built-in group: the app routes, submits and reports by this name, so it cannot be renamed or deleted. Add your own warehouse for another group."></label>
+        {% else %}
         <label>Buying group <input type="text" name="buying_group" value="{{ w.buying_group if w else '' }}" required placeholder="BFMR" data-tip="The name written to the ledger's Buying Group column for orders delivered to this warehouse."></label>
+        {% endif %}
       </div>
       <div class="fblock">
         <div class="ftitle">Address jigs <span class="muted">— a jig matches when every filled field appears in the address</span></div>
@@ -302,6 +306,7 @@
         {% for a in e.auth %}<span class="chip ok">Sign-in: {{ retailer_title(a.retailer) | trim }}</span>{% endfor %}
       {% elif path == 'warehouses' %}
         <strong>{{ e.buying_group or '(unnamed)' }}</strong>
+        {% if e.builtin %}<span class="chip muted" title="named by the app: it cannot be renamed or deleted">Built-in</span>{% endif %}
         <span class="chip">{{ e.jigs | length }} jig(s)</span>
         {% for j in e.jigs[:4] %}<span class="chip muted">{{ j.label or j.street or j.zip }}</span>{% endfor %}
         {% if e.jigs | length > 4 %}<span class="chip muted">+{{ e.jigs | length - 4 }}</span>{% endif %}
@@ -333,11 +338,13 @@
     <details class="entry-card{{ ' has-numbers' if children }}" data-key="{{ key }}"{% if (open_index is defined and open_index == e.index) or child_open %} open{% endif %}>
       <summary>{{ entry_summary(path, e, inplace) }}{% if children %} <span class="chip muted" title="its virtual and employee numbers, inside">{{ children | length }} number{{ 's' if children | length != 1 }}</span>{% endif %}</summary>
       {% if card_errors %}<div class="banner warn small"><strong>Nothing was saved.</strong><ul>{% for err in card_errors %}<li>{{ err }}</li>{% endfor %}</ul></div>{% endif %}
-      <form method="post" action="{{ base }}/entry/{{ e.index }}" class="entry-form" autocomplete="off"{% if inplace %} hx-post="{{ base }}/entry/{{ e.index }}" hx-target="#s-{{ path }}" hx-swap="outerHTML"{% endif %}>
+      {#- a built-in warehouse not yet in config.json (index none) saves through the add route -#}
+      {% set entry_url = base ~ '/entry' ~ ('' if e.index is none else '/' ~ e.index) %}
+      <form method="post" action="{{ entry_url }}" class="entry-form" autocomplete="off"{% if inplace %} hx-post="{{ entry_url }}" hx-target="#s-{{ path }}" hx-swap="outerHTML"{% endif %}>
         {{ fields(e) }}
         <footer>
           <button type="submit" class="small primary">Save {{ singular }}</button>
-          <button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="delete this {{ singular }} from config.json">✕ Delete</button>
+          {% if not e.builtin %}<button type="submit" form="del-{{ path }}-{{ e.index }}" class="danger small entry-delete-button" title="delete this {{ singular }} from config.json">✕ Delete</button>{% endif %}
         </footer>
       </form>
       {% set ask = 'Delete ' ~ singular ~ ' ' ~ (e.label if path == 'profiles' else (e.buying_group if path == 'warehouses' else (e.name ~ ' …' ~ e.last4))) ~ ' from config.json?' %}

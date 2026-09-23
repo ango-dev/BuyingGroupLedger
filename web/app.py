@@ -2076,7 +2076,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                 elif s.env in typed:
                     row["value"] = str(typed.get(s.env, "") or "")
         today = clock().date().isoformat()
-        entries = settings_form.display_entries(step.section, today=today) if step.section else []
+        entries = settings_form.page_entries(step.section, today=today) if step.section else []
         draft = settings_form.draft_entry(step.section, typed, today) if (typed is not None and step.section and open_section == step.section) else None
         index = setup_wizard.index(key)
         # a chip is ticked when its step has a value; an optional step once it is behind you
@@ -2391,7 +2391,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         forms = [(path, shape, help_text, texts.get(path, settings_form.section_text(path)))
                  for path, shape, _model, help_text in settings_form.SECTIONS]
         today = clock().date().isoformat()  # the dated logs' new row, and which period a cap's total is
-        entries = {path: settings_form.display_entries(path, today=today) for path in settings_form.CARD_SECTIONS}
+        entries = {path: settings_form.page_entries(path, today=today) for path in settings_form.CARD_SECTIONS}
         usage = cap_usage()
         for i, card in enumerate(entries.get("cards", [])):  # each cap row learns where its allowance stands
             for row in card.get("rate_rows", []):

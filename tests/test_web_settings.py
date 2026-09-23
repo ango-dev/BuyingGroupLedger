@@ -421,7 +421,10 @@ class TestEntryCards:
         assert '<span class="chip">Costco</span>' in body  # the profile's retailers, at a glance
         assert "settings-open" in client.get("/static/settings.js").text
         assert "USB Prime Business" in body and 'value="0315"' in body
-        assert "No warehouses yet." in body
+        assert "No warehouses yet." not in body  # the built-in groups are always there (2026-09-22)
+        wh = body[body.index('id="s-warehouses"'):body.index("</section>", body.index('id="s-warehouses"'))]
+        assert wh.index('data-key="warehouses:BFMR"') < wh.index('data-key="warehouses:MOD"') < wh.index('data-key="warehouses:Personal"')
+        assert wh.count(">Built-in</span>") == 3 and "✕ Delete" not in wh.split('id="add-warehouses"')[0]
         assert 'src="/static/settings.js' in body and 'id="settings-confirm"' in body
         # the scalar form's save bar
         assert 'id="scalar-form"' in body and 'id="dirty"' in body
@@ -942,6 +945,36 @@ class TestEntryCards:
         assert settings_form.field_label(by_env["LOOKBACK_DAYS"]) == ("Lookback days", "")
         assert settings_form.field_label(by_env["BFMR_API_KEY"]) == ("API key", "bfmr")  # API stays upper (2026-09-22)
         assert settings_form.RETAILER_KEYS == ("amazon", "amazon-business", "bestbuy", "costco")
+
+
+class TestBuiltInWarehouses:
+
+    def test_the_built_ins_are_fixed_and_a_missing_one_is_added_on_save(self, client, config):
+        config(warehouses=[{"buying_group": "MaxOutDeals", "jigs": [{"label": "MOD-1", "zip": "30303"}]},
+                           {"buying_group": "Acme Group", "jigs": [{"label": "A", "zip": "10001"}]}])
+        body = client.get("/settings").text
+        wh = body[body.index('id="s-warehouses"'):body.index("</section>", body.index('id="s-warehouses"'))]
+        # the built-ins first in their order (a stored "MaxOutDeals" is MOD), then the user's own
+        assert wh.index('data-key="warehouses:BFMR"') < wh.index('data-key="warehouses:MaxOutDeals"')             < wh.index('data-key="warehouses:Personal"') < wh.index('data-key="warehouses:Acme Group"')
+        assert 'name="buying_group" value="MaxOutDeals" readonly class="locked"' in wh
+        assert 'name="buying_group" value="Acme Group" required' in wh  # a user's group stays editable
+        assert 'action="/settings/section/warehouses/entry" class="entry-form"' in wh.split('id="add-warehouses"')[0]  # BFMR, not stored yet
+        # a built-in cannot be renamed or deleted, by card or by JSON
+        refused = client.post("/settings/section/warehouses/entry/0", data={"buying_group": "Something", "jig.0.label": "x", "jig.0.zip": "1"})
+        assert refused.status_code == 400 and "MOD is a built-in buying group" in refused.text
+        assert client.post("/settings/section/warehouses/entry/0/delete").status_code == 400
+        assert config_value("warehouses")[0]["buying_group"] == "MaxOutDeals"
+        import json
+        gone = client.post("/settings/section/warehouses", data={"text": json.dumps([{"buying_group": "Acme Group", "jigs": []}])})
+        assert gone.status_code == 400 and "MOD is built in" in gone.text
+        # the missing BFMR saves through the add route; a user's warehouse still renames and deletes
+        added = client.post("/settings/section/warehouses/entry", data={"buying_group": "BFMR", "jig.0.label": "B", "jig.0.zip": "03050"},
+                            follow_redirects=False)
+        assert added.status_code == 303 and [w["buying_group"] for w in config_value("warehouses")] == ["MaxOutDeals", "Acme Group", "BFMR"]
+        renamed = client.post("/settings/section/warehouses/entry/1", data={"buying_group": "Acme Two", "jig.0.label": "A", "jig.0.zip": "10001"},
+                              follow_redirects=False)
+        assert renamed.status_code == 303 and config_value("warehouses")[1]["buying_group"] == "Acme Two"
+        assert client.post("/settings/section/warehouses/entry/1/delete", follow_redirects=False).status_code == 303
 
 
 class TestPanelLayout:

@@ -16,6 +16,7 @@ from buying_groups.base import BuyingGroupClient, normalize_group
 from buying_groups.bfmr import BFMRClient
 from buying_groups.maxoutdeals import MaxOutDealsClient
 from config.warehouses import DELIBERATELY_UNROUTED, PERSONAL, UNCLASSIFIED
+from config.buying_group_names import ALIASES, PROVIDER_KEYS
 
 __all__ = ["PROVIDERS", "ENABLED_SETTING", "get_client", "is_enabled", "resolve_group"]
 
@@ -44,14 +45,14 @@ def is_enabled(group_key: str) -> bool:
     return True if field is None else bool(getattr(settings, field, True))
 
 
-#: Every spelling that means a given provider, folded through normalize_group.
+#: Every spelling that means a given provider, folded through normalize_group -- from
+#: config/buying_group_names.py, the data-only list the dashboard reads too.
 _ALIASES: dict[str, str] = {
-    normalize_group("BFMR"): "BFMR",
-    normalize_group("BuyForMeRetail"): "BFMR",
-    normalize_group("MOD"): "MOD",
-    normalize_group("MaxOutDeals"): "MOD",
-    normalize_group("Max Out Deals"): "MOD",
+    normalize_group(spelling): canon for canon, spellings in ALIASES.items() for spelling in spellings
 }
+if set(PROVIDERS) != set(PROVIDER_KEYS):  # a provider added in one place and not the other
+    raise ImportError(f"buying_groups.registry PROVIDERS {sorted(PROVIDERS)} and "
+                      f"config.buying_group_names {sorted(PROVIDER_KEYS)} disagree: add it to both")
 
 
 def resolve_group(buying_group: str) -> str:

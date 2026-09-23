@@ -779,6 +779,8 @@ td:hover .cell-empty { opacity: 0.8; }
 .pop .cal-head > span > button { font-weight: 600; padding: 2px 6px; }
 .pop .cal-head > button:disabled { opacity: .3; cursor: default; }
 /* Settings > Cards: the archived cards, folded at the end of the list (2026-09-22) */
+/* a built-in warehouse's name: fixed, greyed (Settings > Warehouses; 2026-09-22) */
+input.locked[readonly] { background: var(--bg); color: var(--muted); cursor: not-allowed; border-style: dashed; }
 details.archived-cards { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
 details.archived-cards > summary { cursor: pointer; color: var(--muted); font-weight: 600; padding: 4px 0; }
 details.archived-cards .entry-card > summary > strong { color: var(--muted); }
