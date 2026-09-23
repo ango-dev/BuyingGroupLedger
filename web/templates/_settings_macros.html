@@ -319,7 +319,7 @@
         {% for r in e.rate_rows %}<span class="chip muted">{% for k in r.retailers.split(', ') %}{{ retailer_title(k) | trim }}{{ ', ' if not loop.last }}{% endfor %} {{ r.rate }}{{ limit_text(r, base) }}</span>{% endfor %}
         {% endif %}
         {% if e.profile %}<span class="chip">{{ e.profile }}</span>{% endif %}
-        {% if not e.virtual and inplace %}<button type="button" class="chip switch archive" hx-post="/settings/section/cards/entry/{{ e.index }}/archive" hx-target="#s-cards" hx-swap="outerHTML" onclick="event.preventDefault()" title="{{ 'archived: kept for its old orders. Click to use it again' if e.archived else 'in use. Click to archive it: it stays for its old orders' }}">{{ 'Restore' if e.archived else 'Archive' }}</button>{% endif %}
+        {% if not e.virtual and inplace %}<button type="button" class="chip switch archive{{ ' restore' if e.archived }}" hx-post="/settings/section/cards/entry/{{ e.index }}/archive" hx-target="#s-cards" hx-swap="outerHTML" onclick="event.preventDefault()" title="{{ 'archived: kept for its old orders. Click to use it again' if e.archived else 'in use. Click to archive it: it stays for its old orders' }}">{{ 'Restore' if e.archived else 'Archive' }}</button>{% endif %}
         {% if e.virtual %}<span class="chip virtual" title="{{ 'an employee card: a virtual number with a sign-up bonus of its own' if e.own_bonus else 'a virtual number of another card: it earns that card\'s rates and shares its limits' }}">{{ 'Employee Card' if e.own_bonus else 'Virtual Card' }}{% if e.virtual_of %} of …{{ e.virtual_of }}{% else %} — No Card Named{% endif %}</span>{% endif %}
       {% endif %}
     {% endmacro %}

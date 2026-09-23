@@ -777,14 +777,21 @@ td:hover .cell-empty { opacity: 0.8; }
 .pop .cal-month.today { outline: 1px solid var(--accent); outline-offset: -1px; }
 .pop .cal-month.chosen { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .pop .cal-head > span > button { font-weight: 600; padding: 2px 6px; }
-.pop .cal-head > button:disabled { opacity: .3; cursor: default; }
-/* Settings > Cards: the archived cards, folded at the end of the list (2026-09-22) */
+.pop .cal-head > button:disabled { opacity: .3; cursor: default; }  /* a year-locked calendar at January / December */
 /* a built-in warehouse's name: fixed, greyed (Settings > Warehouses; 2026-09-22) */
 input.locked[readonly] { background: var(--bg); color: var(--muted); cursor: not-allowed; border-style: dashed; }
+/* Settings > Cards: the archived cards, folded at the end of the list (2026-09-22) */
 details.archived-cards { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
 details.archived-cards > summary { cursor: pointer; color: var(--muted); font-weight: 600; padding: 4px 0; }
 details.archived-cards .entry-card > summary > strong { color: var(--muted); }
-.entry-card summary .chip.switch.archive { background: var(--bg); color: var(--muted); }  /* a year-locked calendar at January / December */
+/* Archive / Restore sits at the right edge of the card's line, amber to put a
+   card away, the accent to bring it back */
+.entry-card summary .chip.switch.archive { order: 1; margin-left: auto; font-weight: 600;
+  background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); color: var(--warn); }
+.entry-card summary .chip.switch.archive:hover { background: var(--warn); border-color: var(--warn); color: var(--on-accent); }
+.entry-card summary .chip.switch.archive.restore { background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); }
+.entry-card summary .chip.switch.archive.restore:hover { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .pop.month { width: 252px; }
 .pop .cal-dow { color: var(--muted); font-size: 0.8em; padding: 2px 0; }
 .pop .cal-day.today { outline: 1px solid var(--accent); outline-offset: -1px; }
