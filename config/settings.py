@@ -80,6 +80,7 @@ ENV_TO_CONFIG = {
     "CASHBACK_CAP_WARN_PERCENT": "alerts.cap_warn_percent",
     "CASHBACK_CAP_WARN_DOLLARS": "alerts.cap_warn_dollars",
     "BUYING_GROUP_SYNC_ENABLED": "buying_groups.sync_enabled",
+    "BFMR_ENABLED": "buying_groups.bfmr.enabled",
     "BFMR_API_BASE_URL": "buying_groups.bfmr.api_base_url",
     "BFMR_API_KEY": "buying_groups.bfmr.api_key",
     "BFMR_API_SECRET": "buying_groups.bfmr.api_secret",
@@ -91,6 +92,7 @@ ENV_TO_CONFIG = {
     "BFMR_COMBINED_PACKAGE_REPLY_CC": "buying_groups.bfmr.combined_package_reply_cc",
     "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS": "buying_groups.bfmr.combined_package_gmail_address",
     "BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD": "buying_groups.bfmr.combined_package_gmail_app_password",
+    "MAXOUTDEALS_ENABLED": "buying_groups.mod.enabled",
     "MAXOUTDEALS_API_BASE_URL": "buying_groups.mod.api_base_url",
     "MAXOUTDEALS_API_KEY": "buying_groups.mod.api_key",
     "MAXOUTDEALS_USER_ID": "buying_groups.mod.user_id",
@@ -287,6 +289,10 @@ class Settings:
 
     # BFMR authenticates with TWO headers, API-KEY and API-SECRET — not a bearer token. Spec:
     # https://api.bfmr.com/storage/api-docs.json (the page at https://api.bfmr.com/ just renders it).
+    # Each group's own switch under the sync's: off, the sync leaves that group alone -- nothing submitted,
+    # insured or read back for it -- while the other runs. `--group` on the command line overrides.
+    bfmr_enabled: bool = _get_bool("BFMR_ENABLED", True)
+    mod_enabled: bool = _get_bool("MAXOUTDEALS_ENABLED", True)
     bfmr_api_base_url: str = _get_str(
         "BFMR_API_BASE_URL", "https://api.bfmr.com")
     bfmr_api_key: str = field(

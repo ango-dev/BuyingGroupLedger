@@ -49,6 +49,20 @@ def shipped(order_id, tracking, group="BFMR", **overrides):
     return row(**base)
 
 
+class TestAGroupSwitchedOff:
+    """each buying group has its own switch under the sync's."""
+
+    def test_a_group_switched_off_is_skipped_unless_named(self, monkeypatch):
+        import dataclasses
+        import sys
+
+        cs = sys.modules["config.settings"]  # the module is_enabled imports from, whatever another test swapped
+        monkeypatch.setattr(cs, "settings", dataclasses.replace(cs.settings, bfmr_enabled=True, mod_enabled=False))
+        by_group = {"MOD": ["m"], "BFMR": ["b"], "Other": ["o"]}
+        assert sync_tracking._groups_to_run(by_group, None) == [("BFMR", ["b"]), ("Other", ["o"])]
+        assert sync_tracking._groups_to_run(by_group, "MOD") == [("MOD", ["m"])]  # an explicit --group overrides
+
+
 class TestEligibility:
     def test_a_shipped_row_with_a_tracking_number_is_submitted(self):
         plan = plan_tracking_submissions(HEADER_LIST, [shipped("O1", "T1")])

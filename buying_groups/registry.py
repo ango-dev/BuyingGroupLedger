@@ -17,7 +17,7 @@ from buying_groups.bfmr import BFMRClient
 from buying_groups.maxoutdeals import MaxOutDealsClient
 from config.warehouses import DELIBERATELY_UNROUTED, PERSONAL, UNCLASSIFIED
 
-__all__ = ["PROVIDERS", "get_client", "resolve_group"]
+__all__ = ["PROVIDERS", "ENABLED_SETTING", "get_client", "is_enabled", "resolve_group"]
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +26,23 @@ PROVIDERS: dict[str, type] = {
     "BFMR": BFMRClient,
     "MOD": MaxOutDealsClient,
 }
+
+#: Canonical group key -> the Settings field that switches it on and off. A new
+#: provider adds its line here and a `<KEY>_ENABLED` setting beside its keys; one without a switch
+#: is always on.
+ENABLED_SETTING: dict[str, str] = {
+    "BFMR": "bfmr_enabled",
+    "MOD": "mod_enabled",
+}
+
+
+def is_enabled(group_key: str) -> bool:
+    """Is this group switched on (Settings > Buying Groups > its dropdown)?"""
+    from config.settings import settings
+
+    field = ENABLED_SETTING.get(group_key)
+    return True if field is None else bool(getattr(settings, field, True))
+
 
 #: Every spelling that means a given provider, folded through normalize_group.
 _ALIASES: dict[str, str] = {

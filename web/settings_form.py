@@ -70,7 +70,40 @@ SUBGROUP_OF_ENV: dict[str, str] = {
     # The Dashboard panel's sign-in (web/auth.py).
     "WEB_PASSWORD": "Sign-in", "WEB_SESSION_HOURS": "Sign-in", "WEB_REMEMBER_DAYS": "Sign-in",
     "WEB_LOGIN_ATTEMPTS": "Sign-in", "WEB_LOGIN_LOCKOUT_MINUTES": "Sign-in",
+    # The Buying Groups panel, one group each
+    **{env: "BFMR" for env in ("BFMR_ENABLED", "BFMR_API_BASE_URL", "BFMR_API_KEY", "BFMR_API_SECRET",
+                               "BFMR_MIN_INSURANCE_VALUE", "BFMR_COSTCO_TV_ORDER_NUMBER_AS_TRACKING",
+                               "BFMR_COSTCO_TV_ITEM_PATTERN", "BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED",
+                               "BFMR_COMBINED_PACKAGE_SENDER_DOMAINS", "BFMR_COMBINED_PACKAGE_REPLY_CC",
+                               "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS", "BFMR_COMBINED_PACKAGE_GMAIL_APP_PASSWORD")},
+    **{env: "MOD" for env in ("MAXOUTDEALS_ENABLED", "MAXOUTDEALS_API_BASE_URL", "MAXOUTDEALS_API_KEY",
+                              "MAXOUTDEALS_USER_ID", "MAXOUTDEALS_EMAIL")},
 }
+
+#: A sub-group shown as a DROPDOWN with its own switch inside: group -> the setting that switches it; the folded
+#: header shows Enabled / Disabled. A future buying group adds its line here.
+FOLD_SUBGROUPS: dict[str, str] = {"BFMR": "BFMR_ENABLED", "MOD": "MAXOUTDEALS_ENABLED"}
+
+#: Rows that lead their panel whatever the settings table's order.
+PAGE_FIRST: tuple[str, ...] = ("CASHBACK_CAP_WARN_PERCENT", "CASHBACK_CAP_WARN_DOLLARS", "BUYING_GROUP_SYNC_ENABLED")
+
+
+def section_blocks(rows: list[dict], section: str, hidden=()) -> list[dict]:
+    """One panel's rows in page order, cut where the sub-group changes: [{"group", "fold", "on",
+    "rows"}] -- `fold` for a FOLD_SUBGROUPS group, `on` its switch's state."""
+    mine = [r for r in rows if r["setting"].section == section and r["setting"].env not in hidden
+            and not r["setting"].advanced]
+    mine.sort(key=lambda r: 0 if r["setting"].env in PAGE_FIRST else 1)  # stable: the rest keep their order
+    blocks: list[dict] = []
+    for r in mine:
+        group = r["setting"].subgroup
+        if not blocks or blocks[-1]["group"] != group:
+            blocks.append({"group": group, "fold": group in FOLD_SUBGROUPS, "on": None, "rows": []})
+        blocks[-1]["rows"].append(r)
+        if FOLD_SUBGROUPS.get(group) == r["setting"].env:
+            value = r["value"]
+            blocks[-1]["on"] = value is True or str(value).strip().lower() in ("true", "1", "yes", "on")
+    return blocks
 
 
 #: Settings nobody should touch without knowing exactly why.

@@ -41,6 +41,8 @@
     "sync_enabled": false,
     "bfmr": {
       "// ": "BFMR authenticates with TWO HEADERS (API-KEY / API-SECRET), not a bearer token. Both from Developer Tools in your BFMR account settings.",
+      "// enabled": "BFMR_ENABLED — this group's own switch under sync_enabled. Off, the sync leaves BFMR alone (nothing submitted, insured or read back) while other groups still run. `python -m sync_tracking --group BFMR` overrides it.",
+      "enabled": true,
       "api_base_url": "https://api.bfmr.com",
       "api_key": "",
       "api_secret": "",
@@ -63,6 +65,8 @@
     },
     "mod": {
       "// ": "MaxOutDeals needs a bearer token AND an IP allowlist — add this machine under the firewall tab in your MOD profile, or every call is rejected however valid the token. user_id and email are required in the BODY of every request.",
+      "// enabled": "MAXOUTDEALS_ENABLED — this group's own switch under sync_enabled. Off, the sync leaves MOD alone while other groups still run. `python -m sync_tracking --group MOD` overrides it.",
+      "enabled": true,
       "api_base_url": "https://www.maxoutdeals.com",
       "api_key": "",
       "user_id": "",

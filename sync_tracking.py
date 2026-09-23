@@ -74,7 +74,7 @@ from ledger_db.worksheet import ValueInputOption, ValueRenderOption
 from alerts.notifier import alert, compose
 from buying_groups.base import BuyingGroupError, PayoutRecord, TrackingSubmission
 from config.warehouses import is_deliberately_unrouted
-from buying_groups.registry import PROVIDERS, get_client, resolve_group
+from buying_groups.registry import PROVIDERS, get_client, is_enabled, resolve_group
 from models.order import FIELDNAMES, RETIRED_STATUSES
 from ledger.sync import (
     HEADER,
@@ -857,9 +857,7 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
     all_writes: dict[int, dict] = {}
     outcomes: dict[str, dict] = {}
 
-    for group_key, rows in sorted(plan["by_group"].items()):
-        if only_group and group_key != only_group:
-            continue
+    for group_key, rows in _groups_to_run(plan["by_group"], only_group):
         if limit is not None:
             rows = _first_n_packages(rows, limit)
         try:
@@ -877,6 +875,24 @@ def run(apply: bool = False, limit: int | None = None, only_group: str | None = 
     if all_writes:
         _write_payout_cells(worksheet, _drop_protected(all_writes, plan, worksheet), apply)
     return {"plan": plan, "outcomes": outcomes, "writes": all_writes}
+
+
+def _groups_to_run(by_group: dict, only_group: str | None) -> list[tuple[str, list]]:
+    """The groups this pass talks to, in name order: `only_group` alone when given (an explicit
+    command overrides the group's switch, as it overrides sync_enabled), else every group
+    switched on in Settings -- one switched off is skipped with a log line."""
+    out = []
+    for group_key, rows in sorted(by_group.items()):
+        if only_group:
+            if group_key == only_group:
+                out.append((group_key, rows))
+            continue
+        if not is_enabled(group_key):
+            log.info("%s is switched off in Settings (Buying Groups); %d row(s) left for it this run.",
+                     group_key, len(rows))
+            continue
+        out.append((group_key, rows))
+    return out
 
 
 def _alert_on_cancelled_orders(group_key, client, plan, apply) -> None:

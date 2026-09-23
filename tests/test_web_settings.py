@@ -944,6 +944,29 @@ class TestEntryCards:
         assert settings_form.RETAILER_KEYS == ("amazon", "amazon-business", "bestbuy", "costco")
 
 
+class TestPanelLayout:
+    """(Discord and Gmail stay as they are)."""
+
+    def test_alerts_lead_with_the_cap_warnings_and_the_groups_fold_with_their_switch(self, client, config):
+        config(buying_groups={"sync_enabled": True, "mod": {"enabled": False}})
+        body = client.get("/settings").text
+        alerts = body[body.index('id="s-alerts"'):body.index("</section>", body.index('id="s-alerts"'))]
+        assert alerts.index('for="f-CASHBACK_CAP_WARN_PERCENT"') < alerts.index('for="f-CASHBACK_CAP_WARN_DOLLARS"') < alerts.index('id="s-alerts-discord"')
+        assert "subgroup-fold" not in alerts  # Discord and Gmail stay headings
+        groups = body[body.index('id="s-buying_groups"'):body.index("</section>", body.index('id="s-buying_groups"'))]
+        assert groups.index('for="f-BUYING_GROUP_SYNC_ENABLED"') < groups.index('id="s-buying_groups-bfmr"') < groups.index('id="s-buying_groups-mod"')
+        bfmr = groups[groups.index('id="s-buying_groups-bfmr"'):groups.index('id="s-buying_groups-mod"')]
+        assert '<details class="subgroup-fold"' in groups and '<span class="chip ok">Enabled</span>' in bfmr
+        assert bfmr.index('for="f-BFMR_ENABLED"') < bfmr.index('for="f-BFMR_API_KEY"')
+        mod = groups[groups.index('id="s-buying_groups-mod"'):]
+        assert '<span class="chip muted">Disabled</span>' in mod and 'for="f-MAXOUTDEALS_API_KEY"' in mod
+
+    def test_a_group_switch_saves_like_any_setting(self, config):
+        form = {s.env: "" for s in settings_form.schema()}
+        changes = settings_form.apply_scalars({**form, "BFMR_ENABLED": "on"})
+        assert changes["buying_groups.mod.enabled"] is False and "buying_groups.bfmr.enabled" not in changes  # default on
+
+
 class TestSignInSettings:
     """the password, both sign-in lengths and the rate limit are settings."""
 

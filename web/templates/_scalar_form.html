@@ -9,8 +9,20 @@
         <header><h2>{{ title }}</h2>{% if blurb %}<p class="muted">{{ blurb }}</p>{% endif %}</header>
         <div class="fields">
           {% set ns = namespace(group='') %}
-          {% for row in rows if row.setting.section == section and row.setting.env not in hidden_envs and not row.setting.advanced %}
+          {% for b in section_blocks(rows, section, hidden_envs) %}
+          {% if b.fold %}
+          {#- a group of its own with its switch inside: folded, the header says whether it is on -#}
+          <details class="subgroup-fold" id="s-{{ section }}-{{ b.group | lower }}">
+            <summary><h3 class="subgroup">{{ b.group }}</h3> <span class="chip {{ 'ok' if b.on else 'muted' }}">{{ 'Enabled' if b.on else 'Disabled' }}</span></summary>
+            {% set ns.group = b.group %}
+            {% for row in b.rows %}
+{{ setting_row(row, section, ns) }}            {% endfor %}
+          </details>
+          {% else %}
+          {% for row in b.rows %}
 {{ setting_row(row, section, ns) }}          {% endfor %}
+          {% endif %}
+          {% endfor %}
         </div>
       </section>
       {% endfor %}

@@ -15,7 +15,7 @@
           {% set focus = ' autofocus' if autofocus else '' %}
           <div class="field">
             <div class="field-label">
-              <label for="f-{{ s.env }}">{% if sub %}<span class="sub">{{ sub }} · </span>{% endif %}{{ label }}</label>
+              <label for="f-{{ s.env }}">{% if sub and sub != (ns.group | lower) %}<span class="sub">{{ sub }} · </span>{% endif %}{{ label }}</label>
               {% if not plain %}<div class="meta">
                 <span class="mono small muted">{{ s.env }}</span>
                 {% if row.overridden %}<span class="tag stale" title="set in the environment: the file's value is saved but the process keeps the exported one">env override</span>{% endif %}

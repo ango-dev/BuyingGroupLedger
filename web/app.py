@@ -38,7 +38,7 @@ from web import failures as failures_module
 from web import importer
 from web import setup_wizard
 from web.ledger_writer import FIRST_YEAR, LAST_YEAR, RunInProgress, safe_href
-from web.settings_form import labelled_error as _labelled_error
+from web.settings_form import labelled_error as _labelled_error, section_blocks as _section_blocks
 from ledger_db.store import LedgerMissing, LedgerUnreadable
 from web import heartbeat as heartbeat_module
 from web.ledger_reader import FIELD_TO_HEADER, LedgerReader, Snapshot, reader_from_settings
@@ -204,6 +204,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
     templates.env.filters["query"] = query_string
     templates.env.filters["href"] = safe_href  # a link cell renders as a link only when it IS one
+    templates.env.globals["section_blocks"] = _section_blocks  # a panel's rows, grouped and ordered
     templates.env.filters["labelled"] = _labelled_error  # a settings refusal names the label, not the env
     templates.env.globals["header_of"] = FIELD_TO_HEADER.get
     from web.settings_form import plain_help
