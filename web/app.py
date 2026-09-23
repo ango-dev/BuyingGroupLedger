@@ -932,6 +932,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         ordered = tax_inputs.sort_expenses(inputs.expenses, esort or "date", edir == "desc" if esort else True)
         epager = paginate(ordered, eper or max(1, len(ordered)), epage)
         return dict(snapshot=snapshot, year=year, years=years, epager=epager, eper=eper,
+                    eper_default=expenses_per_default(request),
                     inputs=inputs, summary=summary, program_prompts=programs, card_prompts=cards,
                     site_names=tax_inputs.site_names(inputs), profile_labels=labels,
                     program_logs=program_logs, site_logs=site_logs, bonus_logs=bonus_logs,
@@ -942,20 +943,35 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                     expenses=epager["items"],
                     esort=esort, edir=edir, **extra)
 
-    EXPENSES_PER_CHOICES = (25, 50, 100, 0)  # 0 = all of them
+    EXPENSES_PER_CHOICES = (10, 25, 50, 100, 0)  # 0 = all of them
     EXPENSES_PER_DEFAULT = 25  # 25 a page
+    EXPENSES_PER_PHONE = 10
+
+    def is_phone(request: Request) -> bool:
+        """The browser says it is a phone: Chrome's `Sec-CH-UA-Mobile: ?1` hint (sent on a secure
+        origin), else "Mobi" in the user agent -- Android's "Mobile", the iPhone's "Mobile/". The
+        server cannot see the screen, and an iPad asking for the desktop site is a PC here, which
+        is what it asked to be."""
+        if request.headers.get("sec-ch-ua-mobile", "").strip() == "?1":
+            return True
+        return "Mobi" in request.headers.get("user-agent", "")
+
+    def expenses_per_default(request: Request) -> int:
+        return EXPENSES_PER_PHONE if is_phone(request) else EXPENSES_PER_DEFAULT
     EXPENSES_PER_COOKIE = "expenses-per"
 
     def _expenses_per(request: Request) -> int:
-        """The expenses page size: the query's preset, else this browser's remembered one, else 25."""
+        """The expenses page size: the query's preset, else this browser's remembered one, else 10
+        on a phone and 25 elsewhere."""
+        default = expenses_per_default(request)
         raw = request.query_params.get("eper")
         if raw is None or raw == "":
             raw = request.cookies.get(EXPENSES_PER_COOKIE, "")
         try:
             per = int(str(raw))
         except ValueError:
-            return EXPENSES_PER_DEFAULT
-        return per if per in EXPENSES_PER_CHOICES else EXPENSES_PER_DEFAULT
+            return default
+        return per if per in EXPENSES_PER_CHOICES else default
 
     def load_tax_inputs(year: int):
         return tax_inputs.load_year(tax_inputs_path, year)

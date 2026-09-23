@@ -258,10 +258,11 @@ def client(tmp_path, config_file):
 class TestTaxesPage:
     def test_the_summary_and_the_prompts(self, client):
         body = client.get("/taxes", params={"year": "2026"}).text
-        assert "<h1>Taxes</h1>" in body and "Schedule C Summary — 2026" in body
+        assert "<h1>Taxes</h1>" in body and "<h2>Schedule C Summary</h2>" in body and "Summary — 2026" not in body
+        assert "<h2>Expenses</h2>" in body and 'data-year-lock="2026"' in body and 'placeholder="2026-MM-DD"' in body
         # every panel folds, open by default
         assert body.count('<details class="panel"') == 6 and body.count('<details class="panel" id="s-') == 6
-        assert 'id="s-expenses" open>' in body and "<summary><h2>Expenses" in body and "<section" not in body
+        assert 'id="s-expenses" open data-year-lock="2026">' in body and "<summary><h2>Expenses" in body and "<section" not in body
         assert "Gross receipts or sales" in body and "$500.00" in body  # row 5: a dated payout in 2026
         assert "Costco Executive Cashback — alpha" in body and "Prime Business Rewards — alpha" in body
         assert "cashback the program paid this year" not in body
@@ -457,7 +458,7 @@ class TestTaxesPage:
                                headers={"HX-Request": "true"})
         assert response.status_code == 200, response.text[:300]
         body = response.text
-        assert body.lstrip().startswith('<details class="panel" id="s-expenses" open>') and "<html" not in body
+        assert body.lstrip().startswith('<details class="panel" id="s-expenses" open data-year-lock="2026">') and "<html" not in body
         assert '<details class="panel" id="s-schedule-c" open hx-swap-oob="true">' in body
         assert '<div class="toast ok" role="status">Added boxes</div>' in body and "boxes" in body
         refused = client.post("/taxes/expense", data={"year": "2026", "date": "2026-03-03", "description": "tape", "amount": "lots"},

@@ -2,8 +2,8 @@
     toast) and the grid. -#}
 {% from "_select.html" import choose %}
 {% from "_dropzone.html" import dropzone %}
-<details class="panel" id="s-expenses" open>
-  <summary><h2>Expenses — {{ year }}</h2></summary><header>
+<details class="panel" id="s-expenses" open data-year-lock="{{ year }}">
+  <summary><h2>Expenses</h2></summary><header>
     <p class="muted">Business spending beyond the ledger's purchases: supplies, memberships, card annual fees. Each needs a date, an amount, who paid and a receipt. Line 27a.</p></header>
   {#- Above the list, folded like Orders' "Add a row": closed by default, open
       when a refused add re-renders with what was typed. -#}
@@ -13,7 +13,7 @@
       is edited in the grid above. -#}
   <form method="post" action="/taxes/expense?year={{ year }}" enctype="multipart/form-data" class="expense-form" hx-post="/taxes/expense?year={{ year }}" hx-encoding="multipart/form-data" hx-target="#s-expenses" hx-swap="outerHTML">
     <div class="egrid">
-      <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="YYYY-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
+      <label>Date <input type="text" name="date" data-date autocomplete="off" value="{{ draft.get('date', '') }}" placeholder="{{ year }}-MM-DD" required pattern="\d{4}-\d{2}-\d{2}"></label>
       <label>Amount <input type="text" name="amount" value="{{ draft.get('amount', '') }}" placeholder="0.00" inputmode="decimal" required></label>
       <span class="lbl">Paid by (profile) {{ choose('profile', [('', '— none —')] + (profile_labels | list), draft.get('profile', ''), '', 'pick') }}</span>
       <label>Paid by (email) <input type="email" name="email" value="{{ draft.get('email', '') }}" placeholder="you@example.com" data-choices="email" autocomplete="off"></label>
@@ -32,7 +32,7 @@
       posts to data-cell-url and gets the <td> back; the receipt cell's ⤒ uploads a file. No
       per-row buttons. -#}
   <form id="bulk" method="post" action="/taxes/expenses/delete?year={{ year }}" data-confirm="Delete every selected expense? Their uploaded receipts are deleted too.">
-    {%- set esuffix = (('&esort=' ~ esort ~ '&edir=' ~ edir) if esort else '') ~ (('&eper=' ~ eper) if eper != 25 else '') -%}
+    {%- set esuffix = (('&esort=' ~ esort ~ '&edir=' ~ edir) if esort else '') ~ (('&eper=' ~ eper) if eper != eper_default else '') -%}
     <div class="muted count">{% if epager.total %}{{ epager.start }}–{{ epager.end }} of {% endif %}{{ epager.total }} expense(s) · <span id="sel-count">0</span> selected {% with id='expense-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}
       <a class="button small export" href="/taxes/expenses.csv?year={{ year }}{{ esuffix | safe }}" title="download the year's expenses as the grid sorts them, every page, as a CSV">Export CSV</a></div>
     <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Delete the selected expense? Its uploaded receipt is deleted too." data-confirm-many="Delete the {n} selected expenses? Their uploaded receipts are deleted too.">Delete selected</button>
@@ -68,7 +68,7 @@
     {% endif %}
     <form method="get" action="/taxes" id="eper-form" class="inline-form eper-form">
       <input type="hidden" name="year" value="{{ year }}">{% if esort %}<input type="hidden" name="esort" value="{{ esort }}"><input type="hidden" name="edir" value="{{ edir }}">{% endif %}
-      {{ choose('eper', [(25, '25'), (50, '50'), (100, '100'), (0, 'all')], eper, 'Per page', 'inline') }}
+      {{ choose('eper', [(10, '10'), (25, '25'), (50, '50'), (100, '100'), (0, 'all')], eper, 'Per page', 'inline') }}
     </form>
   </div>
   {% else %}

@@ -1,6 +1,6 @@
 {#- The Schedule C summary panel; `oob` set: swapped out of band after an in-place save -#}
 <details class="panel" id="s-schedule-c" open{% if oob %} hx-swap-oob="true"{% endif %}>
-  <summary><h2>Schedule C Summary — {{ year }}</h2></summary><header>
+  <summary><h2>Schedule C Summary</h2></summary><header>
     <p class="muted">Cash basis: income by Payout Date, cost of goods and insurance by Order Date. A summary for your preparer, not tax advice.</p></header>
   {# the table scrolls inside the panel on a narrow screen, never the page (2026-09-21) #}
   <div class="scroll">

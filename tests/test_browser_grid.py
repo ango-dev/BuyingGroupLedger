@@ -1237,3 +1237,55 @@ def test_a_phone_keeps_tiles_whole_menus_inside_and_stacks_the_settings_tables(s
     small = phone.evaluate("Array.from(document.querySelectorAll('button.small, a.button.small')).filter(b => b.offsetParent).map(b => Math.round(b.getBoundingClientRect().height))")
     assert small and min(small) >= 31, small
     assert phone.errors == []
+
+
+def test_the_expense_calendar_keeps_to_the_year_and_a_phone_pages_ten(served, page, client):
+    """the calendar on the 2025
+    page opens on 2025 and cannot leave it; "for mobile ... default pagination for expenses to 10
+    and keep it as 25 on pc"."""
+    for i in range(30):
+        client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                    data={"date": f"2026-02-{i % 28 + 1:02d}", "description": f"thing {i:02d}", "amount": "1",
+                          "profile": "alpha", "category": "", "receipt_url": "https://x/r"})
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.goto(f"{served}/taxes?year=2026")
+    page.wait_for_selector("table.expenses tbody tr")
+    assert page.locator("table.expenses tbody tr").count() == 25  # a PC
+    page.goto(f"{served}/taxes?year=2025")
+    page.locator("#expense-form > summary").click()
+    page.locator("#s-expenses input[name=date]").click()
+    page.wait_for_selector(".pop .cal-grid")
+    head = page.locator(".pop .cal-head").inner_text()
+    assert "December" in head and "2025" in head
+    assert page.locator(".pop [data-view=years]").count() == 0  # no way to another year
+    assert page.locator(".pop .cal-foot [data-pick]", has_text="Today").count() == 0  # today is not in 2025
+    assert page.locator(".pop .cal-head button[aria-label=next]").is_disabled()
+    page.locator(".pop [data-view=months]").click()
+    assert page.locator(".pop .cal-head button[aria-label=previous]").is_disabled()
+    page.locator(".pop [data-month='0']").click()
+    assert page.locator(".pop .cal-head button[aria-label=previous]").is_disabled()  # January stops there
+    page.locator(".pop [data-pick='2025-01-15']").click()
+    assert page.locator("#s-expenses input[name=date]").input_value() == "2025-01-15"
+    assert page.errors == []
+
+
+def test_a_phone_pages_the_expenses_ten_at_a_time(served, client):
+    """A phone says so in its user agent ("Mobile"); the Pixel 5 descriptor carries one."""
+    for i in range(30):
+        client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                    data={"date": f"2026-02-{i % 28 + 1:02d}", "description": f"thing {i:02d}", "amount": "1",
+                          "profile": "alpha", "category": "", "receipt_url": "https://x/r"})
+    with playwright.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(channel="chrome", headless=True)
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"no local Chrome for Playwright: {type(exc).__name__}")
+        phone = browser.new_context(**p.devices["Pixel 5"]).new_page()
+        phone.goto(f"{served}/taxes?year=2026")
+        phone.wait_for_selector("table.expenses tbody tr")
+        assert phone.locator("table.expenses tbody tr").count() == 10
+        phone.goto(f"{served}/taxes?year=2026&eper=25")  # a size picked is kept
+        phone.goto(f"{served}/taxes?year=2026")
+        phone.wait_for_selector("table.expenses tbody tr")
+        assert phone.locator("table.expenses tbody tr").count() == 25
+        browser.close()

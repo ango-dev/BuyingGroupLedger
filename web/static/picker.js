@@ -79,10 +79,23 @@
     var m = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec((s || "").trim());
     return m ? new Date(+m[1], +m[2] - 1, m[3] ? +m[3] : 1) : null;
   }
+  // A box inside [data-year-lock="2026"] (the Taxes page's expenses, user 2026-09-22: "make sure
+  // that expenses year is enforced") opens on that year and cannot leave it: the year arrows and
+  // the year grid are gone, the month arrows stop at January and December, Today shows only when
+  // today falls in the year. The server refuses any other year all the same.
+  function lockedYear() {
+    var holder = owner && owner.closest ? owner.closest("[data-year-lock]") : null;
+    var y = holder ? parseInt(holder.getAttribute("data-year-lock"), 10) : NaN;
+    return isNaN(y) ? null : y;
+  }
   function dateState() {
     if (state) return state;
     var base = parseIso(owner.value) || new Date();
-    state = { y: base.getFullYear(), m: base.getMonth(), view: kind === "month" ? "months" : "days" };
+    var lock = lockedYear();
+    if (lock !== null && base.getFullYear() !== lock) {
+      base = new Date(lock, lock < new Date().getFullYear() ? 11 : 0, 1);  // a past year opens on December
+    }
+    state = { y: base.getFullYear(), m: base.getMonth(), view: kind === "month" ? "months" : "days", lock: lock };
     return state;
   }
   function head(prevAttr, nextAttr, middle) {
@@ -94,9 +107,11 @@
     var lead = (new Date(s.y, s.m, 1).getDay() + 6) % 7;  // Monday first
     var days = new Date(s.y, s.m + 1, 0).getDate();
     var today = iso(new Date());
-    var html = head('data-nav="-1"', 'data-nav="1"',
+    var locked = s.lock !== null && s.lock !== undefined;
+    var html = head(locked && s.m === 0 ? "disabled" : 'data-nav="-1"', locked && s.m === 11 ? "disabled" : 'data-nav="1"',
       '<button type="button" data-view="months" title="pick a month">' + MONTHS[s.m] + "</button> " +
-      '<button type="button" data-view="years" title="pick a year">' + s.y + "</button>") + '<div class="cal-grid">';
+      (locked ? "<span>" + s.y + "</span>"
+              : '<button type="button" data-view="years" title="pick a year">' + s.y + "</button>")) + '<div class="cal-grid">';
     DOW.forEach(function (d) { html += '<span class="cal-dow">' + d + "</span>"; });
     for (var i = 0; i < lead; i++) html += "<span></span>";
     for (var d = 1; d <= days; d++) {
@@ -104,15 +119,19 @@
       var cls = "cal-day" + (v === today ? " today" : "") + (chosen && v === iso(chosen) ? " chosen" : "");
       html += '<button type="button" class="' + cls + '" data-pick="' + v + '">' + d + "</button>";
     }
-    html += '</div><div class="cal-foot"><button type="button" data-pick="' + today + '">Today</button>' +
+    html += '</div><div class="cal-foot">' +
+      (locked && today.slice(0, 4) !== String(s.y) ? "" : '<button type="button" data-pick="' + today + '">Today</button>') +
       '<button type="button" data-pick="">Clear</button></div>';
     return html;
   }
   function renderMonths(s) {
     var chosen = parseIso(owner.value);
     var now = new Date();
-    var html = head('data-year="-1"', 'data-year="1"',
-      '<button type="button" data-view="years" title="pick a year">' + s.y + "</button>") + '<div class="cal-months">';
+    var locked = s.lock !== null && s.lock !== undefined;
+    var html = (locked ? head("disabled", "disabled", "<span>" + s.y + "</span>")
+                       : head('data-year="-1"', 'data-year="1"',
+                              '<button type="button" data-view="years" title="pick a year">' + s.y + "</button>")) +
+      '<div class="cal-months">';
     SHORT.forEach(function (name, i) {
       var cls = "cal-month" + (s.y === now.getFullYear() && i === now.getMonth() ? " today" : "") +
         (chosen && chosen.getFullYear() === s.y && chosen.getMonth() === i ? " chosen" : "");
@@ -138,6 +157,7 @@
   }
   function renderDate() {
     var s = dateState();
+    if (s.view === "years" && s.lock !== null && s.lock !== undefined) s.view = "months";
     pop.innerHTML = s.view === "days" ? renderDays(s) : s.view === "months" ? renderMonths(s) : renderYears(s);
   }
 
@@ -177,7 +197,9 @@
     var el;
     if ((el = t("[data-nav]"))) {  // a month either way
       var s = dateState();
-      s.m += parseInt(el.getAttribute("data-nav"), 10);
+      var next = s.m + parseInt(el.getAttribute("data-nav"), 10);
+      if (s.lock !== null && s.lock !== undefined && (next < 0 || next > 11)) return;  // the year is fixed
+      s.m = next;
       if (s.m < 0) { s.m = 11; s.y -= 1; }
       if (s.m > 11) { s.m = 0; s.y += 1; }
     } else if ((el = t("[data-year]"))) { dateState().y += parseInt(el.getAttribute("data-year"), 10); }

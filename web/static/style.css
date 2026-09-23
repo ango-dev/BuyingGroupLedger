@@ -769,6 +769,7 @@ td:hover .cell-empty { opacity: 0.8; }
 .pop .cal-month.today { outline: 1px solid var(--accent); outline-offset: -1px; }
 .pop .cal-month.chosen { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .pop .cal-head > span > button { font-weight: 600; padding: 2px 6px; }
+.pop .cal-head > button:disabled { opacity: .3; cursor: default; }  /* a year-locked calendar at January / December */
 .pop.month { width: 252px; }
 .pop .cal-dow { color: var(--muted); font-size: 0.8em; padding: 2px 0; }
 .pop .cal-day.today { outline: 1px solid var(--accent); outline-offset: -1px; }

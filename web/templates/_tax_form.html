@@ -5,7 +5,7 @@
   <input type="hidden" name="year" value="{{ year }}">
 
   <details class="panel" id="s-programs" open>
-    <summary><h2>Program Cashback — {{ year }}</h2></summary><header><p class="muted">What Prime, Prime Business and Costco Executive paid you in {{ year }}, per retailer login: open an amount for its dated log. Line 6.</p></header>
+    <summary><h2>Program Cashback</h2></summary><header><p class="muted">What Prime, Prime Business and Costco Executive paid you in {{ year }}, per retailer login: open an amount for its dated log. Line 6.</p></header>
     {% if program_prompts %}
     <table class="entry-table"><thead><tr><th>Program</th><th>Cashback</th></tr></thead><tbody>
       {% for p in program_prompts %}
@@ -17,7 +17,7 @@
   </details>
 
   <details class="panel" id="s-cards" open>
-    <summary><h2>Cards — {{ year }}</h2></summary><header><p class="muted">Every card on {{ year }}'s orders, virtual cards left out: the sign-up bonus received in {{ year }}, dated the day it was earned. Line 6. Annual fees go in Expenses.</p></header>
+    <summary><h2>Cards</h2></summary><header><p class="muted">Every card on {{ year }}'s orders, virtual cards left out: the sign-up bonus received in {{ year }}, dated the day it was earned. Line 6. Annual fees go in Expenses.</p></header>
     {% if card_prompts %}
     <table class="entry-table"><thead><tr><th>Card</th><th>Sign-up Bonus</th></tr></thead><tbody>
       {% for p in card_prompts %}
@@ -30,7 +30,7 @@
   </details>
 
   <details class="panel" id="s-sites" open>
-    <summary><h2>Cashback Sites — {{ year }}</h2></summary><header><p class="muted">Portal cashback paid out in {{ year }}: TopCashback, Rakuten and the like. Add a site in the empty row; blank a name to drop it. Line 6.</p></header>
+    <summary><h2>Cashback Sites</h2></summary><header><p class="muted">Portal cashback paid out in {{ year }}: TopCashback, Rakuten and the like. Add a site in the empty row; blank a name to drop it. Line 6.</p></header>
     <table class="entry-table"><thead><tr><th>Site</th><th>Cashback</th></tr></thead><tbody>
       {% for name in site_names %}
       <tr><td><input type="text" name="site.{{ loop.index0 }}.name" value="{{ name }}"></td>
@@ -42,7 +42,7 @@
   </details>
 
   <details class="panel" id="s-other" open>
-    <summary><h2>Other Income — {{ year }}</h2></summary><header><p class="muted">Anything else the business earned in {{ year }}. Blank a label to drop the row. Line 6.</p></header>
+    <summary><h2>Other Income</h2></summary><header><p class="muted">Anything else the business earned in {{ year }}. Blank a label to drop the row. Line 6.</p></header>
     <table class="entry-table"><thead><tr><th>What</th><th>Amount</th></tr></thead><tbody>
       {% for o in inputs.other %}
       <tr><td><input type="text" name="other.{{ loop.index0 }}.label" value="{{ o.label }}"></td>
