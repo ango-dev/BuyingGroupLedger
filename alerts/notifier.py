@@ -57,42 +57,109 @@ def _smtp_send(msg, recipients: list[str], account: tuple[str, str] | None = Non
 #: Embed colours, the dashboard's own (style.css --gold / --badge / --edge-pass / the accent).
 _ACTION, _FAILURE, _RECOVERED, _INFO = 0xE0A800, 0xD64545, 0x2E9E5B, 0x4361B2
 _FAILURE_WORDS = ("failed", "not recorded", "unhealthy", "unreadable", "unavailable", "rejected", "could not")
-DISCORD_DESCRIPTION_MAX = 4000  # Discord's limit is 4096
+DISCORD_DESCRIPTION_MAX = 4000  # Discord's limits: 4,096 for the description,
+DISCORD_FIELD_MAX = 1024        # 1,024 for a field's value,
+DISCORD_TITLE_MAX = 256         # 256 for the title
+#: The notification text: Discord's
+#: @everyone, allowed explicitly below so the ping actually rings.
+DISCORD_PING = "@everyone"
+_KIND_LABEL = {"alert": "Alert", "health": "Health check", "cap": "Spend limit", "backup": "Backup"}
 
 
-def _embed_colour(subject: str) -> int:
+def _severity(subject: str) -> tuple[str, int]:
     text = subject.lower()
     if text.startswith("action needed"):
-        return _ACTION
+        return "Action needed", _ACTION
     if "healthy again" in text:
-        return _RECOVERED
+        return "Recovered", _RECOVERED
     if any(word in text for word in _FAILURE_WORDS):
-        return _FAILURE
-    return _INFO
+        return "Failure", _FAILURE
+    return "Notice", _INFO
 
 
-def discord_payload(subject: str, body: str = "", *, when=None) -> dict:
-    """The webhook's JSON for one alert. The CONTENT is the plain subject --
-    it is what the notification badge shows, so it carries no markdown; the EMBED carries the body
-    (its "Do:" line in bold, which an embed renders), a colour for how urgent it is, the time and
-    the app's name. Mentions are off: an alert never pings anyone by accident."""
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _sections(body: str) -> dict:
+    """compose()'s body taken apart again: {"what", "do", "items", "more", "open", "dossier", "rest"}."""
+    out = {"what": [], "do": "", "items": [], "more": "", "open": "", "dossier": "", "rest": []}
+    for para in [p.strip() for p in str(body or "").split("\n\n") if p.strip()]:
+        lines = para.split("\n")
+        if para.startswith("Do: "):
+            out["do"] = para[4:].strip()
+        elif para.startswith("Open: "):
+            out["open"] = para[6:].strip()
+        elif para.startswith("Failure dossier: "):
+            out["dossier"] = para[len("Failure dossier: "):].strip()
+        elif all(line.startswith(("• ", "…and ")) for line in lines):
+            out["items"] += [line[2:] for line in lines if line.startswith("• ")]
+            out["more"] = next((line for line in lines if line.startswith("…and ")), out["more"])
+        elif not out["what"] and not out["items"] and not out["do"]:
+            out["what"].append(para)
+        else:
+            out["rest"].append(para)
+    return out
+
+
+def _items_field(items: list[str], more: str) -> str:
+    """The items as one field value inside Discord's 1,024 characters: whole lines only, the rest
+    counted."""
+    lines, used = [], 0
+    for i, item in enumerate(items):
+        line = "• " + item
+        if used + len(line) + 1 > DISCORD_FIELD_MAX - 40:
+            left = len(items) - i
+            lines.append(f"…and {left} more" + (f" ({more.split('(', 1)[1]}" if "(" in more else ""))
+            return "\n".join(lines)
+        lines.append(line)
+        used += len(line) + 1
+    if more:
+        lines.append(more)
+    return "\n".join(lines)
+
+
+def discord_payload(subject: str, body: str = "", *, kind: str = "alert", when=None) -> dict:
+    """The webhook's JSON for one alert. The message text is @everyone -- the ping
+    and all the notification shows. The embed: the subject as its title, what happened as its
+    description, then fields -- severity and type side by side, What to do, the items (counted in
+    the field's name), the failure dossier and the dashboard link -- a colour for how urgent it is,
+    the time and the app's name. A paragraph compose() did not shape stays in the description."""
     from datetime import datetime, timezone
 
     subject = " ".join(str(subject or "").split())
-    text = str(body or "").strip()
-    text = "\n".join("**Do:** " + line[4:] if line.startswith("Do: ") else line for line in text.split("\n"))
-    if len(text) > DISCORD_DESCRIPTION_MAX:
-        text = text[:DISCORD_DESCRIPTION_MAX - 1] + "…"
-    stamp = (when or datetime.now(timezone.utc)).isoformat(timespec="seconds")
-    return {
-        "content": subject[:2000],
-        "embeds": [{"description": text or subject, "color": _embed_colour(subject),
-                    "timestamp": stamp, "footer": {"text": "Buying Group Ledger"}}],
-        "allowed_mentions": {"parse": []},
+    severity, colour = _severity(subject)
+    parts = _sections(body)
+    description = "\n\n".join(parts["what"] + parts["rest"]) or subject
+    fields = [
+        {"name": "Severity", "value": severity, "inline": True},
+        {"name": "Type", "value": _KIND_LABEL.get(kind, kind.title() or "Alert"), "inline": True},
+    ]
+    if parts["do"]:
+        fields.append({"name": "What to do", "value": _cut(parts["do"], DISCORD_FIELD_MAX), "inline": False})
+    if parts["items"]:
+        total = len(parts["items"])
+        if parts["more"]:
+            digits = "".join(c for c in parts["more"].split("more")[0] if c.isdigit())
+            total += int(digits) if digits else 0
+        fields.append({"name": f"Details ({total})", "value": _items_field(parts["items"], parts["more"]), "inline": False})
+    if parts["dossier"]:
+        fields.append({"name": "Failure dossier", "value": _cut(parts["dossier"], DISCORD_FIELD_MAX), "inline": False})
+    embed = {
+        "title": _cut(subject, DISCORD_TITLE_MAX),
+        "description": _cut(description, DISCORD_DESCRIPTION_MAX),
+        "color": colour,
+        "fields": fields,
+        "timestamp": (when or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
+        "footer": {"text": "Buying Group Ledger"},
     }
+    if parts["open"].startswith(("http://", "https://")):
+        embed["url"] = parts["open"]  # the title links to the dashboard page
+        fields.append({"name": "Open", "value": parts["open"], "inline": False})
+    return {"content": DISCORD_PING, "embeds": [embed], "allowed_mentions": {"parse": ["everyone"]}}
 
 
-def send_discord(subject: str, body: str = "") -> None:
+def send_discord(subject: str, body: str = "", *, kind: str = "alert") -> None:
     if not settings.discord_alerts_enabled:
         log.info("Discord alerts are off (alerts.discord_enabled); not posting.")
         return
@@ -100,7 +167,7 @@ def send_discord(subject: str, body: str = "") -> None:
         log.warning("Discord webhook not configured, skipping alert")
         return
 
-    response = requests.post(settings.discord_webhook_url, json=discord_payload(subject, body), timeout=10)
+    response = requests.post(settings.discord_webhook_url, json=discord_payload(subject, body, kind=kind), timeout=10)
     response.raise_for_status()
 
 
@@ -154,7 +221,7 @@ def alert(subject: str, message: str, *, kind: str = "alert") -> None:
         log.exception("Failed to send email alert: %s", subject)
 
     try:
-        send_discord(subject, message)
+        send_discord(subject, message, kind=kind)
     except Exception:
         log.exception("Failed to send Discord alert: %s", subject)
 

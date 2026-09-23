@@ -93,26 +93,44 @@ def test_each_channel_has_its_own_switch(monkeypatch):
 
 
 class TestDiscordEmbed:
+    """then "for the plain text just make it @everybody, for the embed make it detailed but
+    neat and organized"."""
 
-    def test_the_badge_reads_the_plain_subject_and_the_embed_carries_the_body(self):
+    def test_the_text_pings_everyone_and_the_embed_is_organised(self, monkeypatch):
+        import dataclasses
         from datetime import datetime, timezone
 
-        body = notifier.compose("These packages are not submitted.", do="Act on each.", items=["1Z1: bad"])
-        payload = notifier.discord_payload("Action needed: BFMR — 1 package(s) could not be submitted", body,
+        monkeypatch.setattr(notifier, "settings", dataclasses.replace(notifier.settings, web_public_url="http://192.0.2.10:8765"))
+        body = notifier.compose("These packages are not submitted.", do="Act on each.", items=["1Z1: bad", "1Z2: worse"],
+                                link="/orders")
+        payload = notifier.discord_payload("Action needed: BFMR — 2 package(s) could not be submitted", body,
                                            when=datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc))
-        assert payload["content"] == "Action needed: BFMR — 1 package(s) could not be submitted" and "**" not in payload["content"]
+        assert payload["content"] == "@everyone" and payload["allowed_mentions"] == {"parse": ["everyone"]}
         embed = payload["embeds"][0]
-        assert embed["description"] == "These packages are not submitted.\n\n**Do:** Act on each.\n\n• 1Z1: bad"
+        assert embed["title"] == "Action needed: BFMR — 2 package(s) could not be submitted"
+        assert embed["description"] == "These packages are not submitted."
         assert embed["color"] == 0xE0A800 and embed["timestamp"] == "2026-09-22T12:00:00+00:00"
-        assert embed["footer"] == {"text": "Buying Group Ledger"} and payload["allowed_mentions"] == {"parse": []}
+        assert embed["footer"] == {"text": "Buying Group Ledger"} and embed["url"] == "http://192.0.2.10:8765/orders"
+        assert [(f["name"], f["inline"]) for f in embed["fields"]] == [
+            ("Severity", True), ("Type", True), ("What to do", False), ("Details (2)", False), ("Open", False)]
+        fields = {f["name"]: f["value"] for f in embed["fields"]}
+        assert fields["Severity"] == "Action needed" and fields["Type"] == "Alert" and fields["What to do"] == "Act on each."
+        assert fields["Details (2)"] == "• 1Z1: bad\n• 1Z2: worse"
 
-    def test_the_colour_follows_the_subject_and_a_long_body_is_cut(self):
-        assert notifier.discord_payload("Amazon [p]: scrape failed — not recorded this run")["embeds"][0]["color"] == 0xD64545
-        assert notifier.discord_payload("Ledger container healthy again")["embeds"][0]["color"] == 0x2E9E5B
-        assert notifier.discord_payload("Re-labelled package on 1 row(s)")["embeds"][0]["color"] == 0x4361B2
-        long = notifier.discord_payload("s", "x" * 5000)["embeds"][0]["description"]
-        assert len(long) == notifier.DISCORD_DESCRIPTION_MAX and long.endswith("…")
-        assert notifier.discord_payload("Only a subject")["embeds"][0]["description"] == "Only a subject"
+    def test_a_dossier_a_long_list_and_the_colours(self):
+        body = notifier.compose("Nothing was recorded.", items=[f"order {i}: " + "x" * 80 for i in range(14)]) \
+            + "\n\nFailure dossier: logs/failures/costco_p_1\n(open it on the dashboard's Activity page)"
+        embed = notifier.discord_payload("Costco [p]: scrape failed — not recorded this run", body, kind="alert")["embeds"][0]
+        fields = {f["name"]: f["value"] for f in embed["fields"]}
+        assert embed["color"] == 0xD64545 and fields["Severity"] == "Failure"
+        details = fields["Details (14)"]
+        assert len(details) <= notifier.DISCORD_FIELD_MAX and "…and" in details.split("\n")[-1]
+        assert fields["Failure dossier"].startswith("logs/failures/costco_p_1")
+        health = notifier.discord_payload("Ledger container healthy again", "last run 5m ago.", kind="health")["embeds"][0]
+        assert health["color"] == 0x2E9E5B and {f["name"]: f["value"] for f in health["fields"]}["Type"] == "Health check"
+        plain = notifier.discord_payload("Only a subject")["embeds"][0]
+        assert plain["description"] == "Only a subject" and plain["color"] == 0x4361B2 and "url" not in plain
+        assert len(notifier.discord_payload("s", "x" * 5000)["embeds"][0]["description"]) == notifier.DISCORD_DESCRIPTION_MAX
 
     def test_the_webhook_is_posted_the_payload(self, monkeypatch):
         import dataclasses
@@ -131,9 +149,11 @@ class TestDiscordEmbed:
         monkeypatch.setattr(notifier, "settings", dataclasses.replace(
             notifier.settings, discord_alerts_enabled=True, discord_webhook_url="https://discord.example/hook"))
         monkeypatch.setattr(notifier.requests, "post", post)
-        notifier.send_discord("Scheduled backup failed", "The backup could not be written.")
-        assert sent["url"] == "https://discord.example/hook" and sent["json"]["content"] == "Scheduled backup failed"
-        assert sent["json"]["embeds"][0]["description"] == "The backup could not be written."
+        notifier.send_discord("Scheduled backup failed", "The backup could not be written.", kind="backup")
+        assert sent["url"] == "https://discord.example/hook" and sent["json"]["content"] == "@everyone"
+        embed = sent["json"]["embeds"][0]
+        assert embed["title"] == "Scheduled backup failed" and embed["description"] == "The backup could not be written."
+        assert {f["name"]: f["value"] for f in embed["fields"]}["Type"] == "Backup"
 
 
 class TestCompose:
