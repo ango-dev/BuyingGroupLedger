@@ -9,7 +9,7 @@ from alerts import notifier
 
 def test_the_body_is_logged_even_when_no_channel_is_configured(monkeypatch, caplog):
     monkeypatch.setattr(notifier, "send_email", lambda s, b: None)
-    monkeypatch.setattr(notifier, "send_discord", lambda m: None)
+    monkeypatch.setattr(notifier, "send_discord", lambda *a, **k: None)
     with caplog.at_level(logging.INFO, logger="alerts.notifier"):
         notifier.alert("Amazon [p]: deterministic path failed", "Failure dossier: https://par/x/report.md\n  page_1.html: https://par/x/page_1.html")
     assert "ALERT: Amazon [p]: deterministic path failed" in caplog.text
@@ -90,6 +90,50 @@ def test_each_channel_has_its_own_switch(monkeypatch):
         notifier.settings, discord_alerts_enabled=True))
     with pytest.raises(AssertionError, match="nothing may be sent"):
         notifier.send_discord("message")
+
+
+class TestDiscordEmbed:
+
+    def test_the_badge_reads_the_plain_subject_and_the_embed_carries_the_body(self):
+        from datetime import datetime, timezone
+
+        body = notifier.compose("These packages are not submitted.", do="Act on each.", items=["1Z1: bad"])
+        payload = notifier.discord_payload("Action needed: BFMR — 1 package(s) could not be submitted", body,
+                                           when=datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc))
+        assert payload["content"] == "Action needed: BFMR — 1 package(s) could not be submitted" and "**" not in payload["content"]
+        embed = payload["embeds"][0]
+        assert embed["description"] == "These packages are not submitted.\n\n**Do:** Act on each.\n\n• 1Z1: bad"
+        assert embed["color"] == 0xE0A800 and embed["timestamp"] == "2026-09-22T12:00:00+00:00"
+        assert embed["footer"] == {"text": "Buying Group Ledger"} and payload["allowed_mentions"] == {"parse": []}
+
+    def test_the_colour_follows_the_subject_and_a_long_body_is_cut(self):
+        assert notifier.discord_payload("Amazon [p]: scrape failed — not recorded this run")["embeds"][0]["color"] == 0xD64545
+        assert notifier.discord_payload("Ledger container healthy again")["embeds"][0]["color"] == 0x2E9E5B
+        assert notifier.discord_payload("Re-labelled package on 1 row(s)")["embeds"][0]["color"] == 0x4361B2
+        long = notifier.discord_payload("s", "x" * 5000)["embeds"][0]["description"]
+        assert len(long) == notifier.DISCORD_DESCRIPTION_MAX and long.endswith("…")
+        assert notifier.discord_payload("Only a subject")["embeds"][0]["description"] == "Only a subject"
+
+    def test_the_webhook_is_posted_the_payload(self, monkeypatch):
+        import dataclasses
+
+        monkeypatch.undo()  # conftest stubs send_discord; this test needs the real one
+        sent = {}
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+        def post(url, json, timeout):
+            sent.update(url=url, json=json)
+            return Response()
+
+        monkeypatch.setattr(notifier, "settings", dataclasses.replace(
+            notifier.settings, discord_alerts_enabled=True, discord_webhook_url="https://discord.example/hook"))
+        monkeypatch.setattr(notifier.requests, "post", post)
+        notifier.send_discord("Scheduled backup failed", "The backup could not be written.")
+        assert sent["url"] == "https://discord.example/hook" and sent["json"]["content"] == "Scheduled backup failed"
+        assert sent["json"]["embeds"][0]["description"] == "The backup could not be written."
 
 
 class TestCompose:

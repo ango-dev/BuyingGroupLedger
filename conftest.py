@@ -21,7 +21,7 @@ def _block_real_alerts(monkeypatch):
     never touches alert() — only what it calls.
     """
     monkeypatch.setattr("alerts.notifier.send_email", lambda subject, body: None)
-    monkeypatch.setattr("alerts.notifier.send_discord", lambda message: None)
+    monkeypatch.setattr("alerts.notifier.send_discord", lambda *a, **k: None)
     # The third sender (2026-09-11): respond_bfmr replies to BFMR with a real MIME message
     # through this name. Same rule, same boundary.
     monkeypatch.setattr("alerts.notifier.send_message",

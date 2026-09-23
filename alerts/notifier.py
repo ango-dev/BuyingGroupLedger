@@ -54,7 +54,45 @@ def _smtp_send(msg, recipients: list[str], account: tuple[str, str] | None = Non
         server.sendmail(address, recipients, msg.as_string())
 
 
-def send_discord(message: str) -> None:
+#: Embed colours, the dashboard's own (style.css --gold / --badge / --edge-pass / the accent).
+_ACTION, _FAILURE, _RECOVERED, _INFO = 0xE0A800, 0xD64545, 0x2E9E5B, 0x4361B2
+_FAILURE_WORDS = ("failed", "not recorded", "unhealthy", "unreadable", "unavailable", "rejected", "could not")
+DISCORD_DESCRIPTION_MAX = 4000  # Discord's limit is 4096
+
+
+def _embed_colour(subject: str) -> int:
+    text = subject.lower()
+    if text.startswith("action needed"):
+        return _ACTION
+    if "healthy again" in text:
+        return _RECOVERED
+    if any(word in text for word in _FAILURE_WORDS):
+        return _FAILURE
+    return _INFO
+
+
+def discord_payload(subject: str, body: str = "", *, when=None) -> dict:
+    """The webhook's JSON for one alert. The CONTENT is the plain subject --
+    it is what the notification badge shows, so it carries no markdown; the EMBED carries the body
+    (its "Do:" line in bold, which an embed renders), a colour for how urgent it is, the time and
+    the app's name. Mentions are off: an alert never pings anyone by accident."""
+    from datetime import datetime, timezone
+
+    subject = " ".join(str(subject or "").split())
+    text = str(body or "").strip()
+    text = "\n".join("**Do:** " + line[4:] if line.startswith("Do: ") else line for line in text.split("\n"))
+    if len(text) > DISCORD_DESCRIPTION_MAX:
+        text = text[:DISCORD_DESCRIPTION_MAX - 1] + "…"
+    stamp = (when or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+    return {
+        "content": subject[:2000],
+        "embeds": [{"description": text or subject, "color": _embed_colour(subject),
+                    "timestamp": stamp, "footer": {"text": "Buying Group Ledger"}}],
+        "allowed_mentions": {"parse": []},
+    }
+
+
+def send_discord(subject: str, body: str = "") -> None:
     if not settings.discord_alerts_enabled:
         log.info("Discord alerts are off (alerts.discord_enabled); not posting.")
         return
@@ -62,7 +100,7 @@ def send_discord(message: str) -> None:
         log.warning("Discord webhook not configured, skipping alert")
         return
 
-    response = requests.post(settings.discord_webhook_url, json={"content": message}, timeout=10)
+    response = requests.post(settings.discord_webhook_url, json=discord_payload(subject, body), timeout=10)
     response.raise_for_status()
 
 
@@ -116,7 +154,7 @@ def alert(subject: str, message: str, *, kind: str = "alert") -> None:
         log.exception("Failed to send email alert: %s", subject)
 
     try:
-        send_discord(f"**{subject}**\n{message}")
+        send_discord(subject, message)
     except Exception:
         log.exception("Failed to send Discord alert: %s", subject)
 
