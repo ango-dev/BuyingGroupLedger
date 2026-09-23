@@ -210,3 +210,74 @@ class TestLegacyShippedLayout:
         for cls in (AmazonScraper, AmazonBusinessScraper):
             assert cls.diagnostic_selectors["pt_legacy_tracking_number"] == ".carrierRelatedInfo-trackingId-text"
             assert cls.legacy_tracking_number_selector == AmazonScraper.legacy_tracking_number_selector
+
+
+# The legacy layout for a DELAYED order that has NOT shipped: no promise container, no carrier card, no pt-* element
+# -- only the exception box below, and an "Order Info" card offering "View or Change this order" /
+# "Cancel order". The reader required either the pt headline or the promise container, so Amazon's
+# own "being prepared to ship" read as "selectors did not match". Redacted fragment of that DOM.
+LEGACY_DELAYED_FRAGMENT = """
+<div class="a-row a-spacing-small" id="topContent-container"><div class="a-row a-spacing-medium max-container-x" id="topContent-inner">
+<div class="a-row widgetContainer background-normal" id="promise-background-container"></div></div></div>
+<div class="a-row a-spacing-small max-container-x" id="mainContent-container"><div class="a-row" id="pageContainer-inner">
+<div class="a-row a-spacing-small visible" id="split-container"><div class="a-column a-span5" id="leftColumn-container">
+<div class="a-row a-spacing-small a-spacing-top-base widgetContainer" id="lexicalExceptionMessage-container">
+<div class="a-row a-spacing-large lexicalExceptionMessage-container">
+<h3>We're sorry your order is delayed. It's being prepared to ship and we'll notify you when it's on its way. If you need to, you can manage your order using the options below.</h3>
+</div></div></div></div></div></div>
+<div class="a-row max-container-x" id="cardsContainer"><div class="a-column a-span4">
+<div class="a-row a-spacing-small cardContainer-wrapper" id="ordersInPackage-container"><div class="a-row cardContainer">
+<div class="a-row"><h1 class="a-spacing-small widgetHeader">Order Info</h1></div>
+<div class="a-row"><a class="a-link-normal" href="/gp/css/order-details?orderID=111-9990015-9990015">View or Change this order</a></div>
+<div class="a-row"><a class="a-link-normal" href="/progress-tracker/package/preship/cancel-items?orderID=111-9990015-9990015">Cancel order</a></div>
+</div></div></div></div>
+"""
+
+
+class TestLegacyDelayedPreShip:
+    """A delayed, unshipped order on the legacy layout is a legitimate 'ordered' -- on Amazon's
+    "being prepared to ship" wording only, and only with no number on the page."""
+
+    scraper = AmazonScraper(ProfileConfig(label="p1", profile_id="x", retailers=["amazon"]))
+    X = AmazonScraper.legacy_exception_selector
+    L = AmazonScraper.legacy_tracking_number_selector
+    DELAYED = ("We're sorry your order is delayed. It's being prepared to ship and we'll notify you "
+               "when it's on its way.")
+
+    def read(self, elements):
+        return AmazonScraper.read_tracking_page(self.scraper, SelectorPage(elements))
+
+    def test_the_dossier_page_reads_ordered_with_no_number(self):
+        info = AmazonScraper.read_tracking_page(self.scraper, SoupPage(LEGACY_DELAYED_FRAGMENT))
+        assert info is not None
+        assert info["status"] == "ordered" and info["tracking_number"] == ""
+        assert info["delivery_promise"].startswith("We're sorry your order is delayed")
+
+    def test_business_twin_reads_the_same_page(self):
+        from scrapers.amazon_business import AmazonBusinessScraper
+        s = AmazonBusinessScraper(ProfileConfig(label="p2", profile_id="y",
+                                                retailers=["amazon-business"]))
+        info = AmazonBusinessScraper.read_tracking_page(s, SoupPage(LEGACY_DELAYED_FRAGMENT))
+        assert info is not None and info["status"] == "ordered" and info["tracking_number"] == ""
+
+    def test_any_other_exception_wording_is_still_unreadable(self):
+        assert self.read({self.X: "We're sorry, something went wrong with your order."}) is None
+
+    def test_an_exception_box_beside_a_carrier_number_is_unreadable(self):
+        # Amazon saying "being prepared to ship" next to a tracking number is a contradiction,
+        # not a state to record either way.
+        assert self.read({self.X: self.DELAYED, self.L: "Tracking ID: TBA300000000001"}) is None
+
+    def test_an_empty_page_is_still_unreadable(self):
+        assert self.read({}) is None
+
+    def test_the_promise_container_still_wins_when_both_render(self):
+        info = self.read({AmazonScraper.preship_promise_selector: "Order received",
+                          self.X: self.DELAYED})
+        assert info["status"] == "ordered"
+
+    def test_both_scrapers_declare_the_exception_selector_for_the_dossier_audit(self):
+        from scrapers.amazon_business import AmazonBusinessScraper
+        for cls in (AmazonScraper, AmazonBusinessScraper):
+            assert cls.diagnostic_selectors["pt_legacy_exception"] == "#lexicalExceptionMessage-container"
+            assert cls.legacy_exception_selector == AmazonScraper.legacy_exception_selector

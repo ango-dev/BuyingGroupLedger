@@ -83,6 +83,10 @@ class AmazonScraper(BaseRetailerScraper):
     # The same legacy layout once the package has SHIPPED: still no pt-* elements; the carrier card is a "Shipped
     # with Amazon" widget whose h4 reads "Tracking ID: <number>". Twin in the other Amazon scraper.
     legacy_tracking_number_selector = ".carrierRelatedInfo-trackingId-text"
+    # The legacy layout for a DELAYED order that has NOT shipped: no promise container at all, no carrier card -- just
+    # this exception box reading "We're sorry your order is delayed. It's being prepared to ship
+    # and we'll notify you when it's on its way." Twin in the other Amazon scraper.
+    legacy_exception_selector = "#lexicalExceptionMessage-container"
 
     # Audited against the captured page by the failure dossier (see BaseRetailerScraper).
     diagnostic_selectors = {
@@ -92,6 +96,7 @@ class AmazonScraper(BaseRetailerScraper):
         "pt_tracking_number": tracking_number_selector,
         "pt_preship_promise": preship_promise_selector,
         "pt_legacy_tracking_number": legacy_tracking_number_selector,
+        "pt_legacy_exception": legacy_exception_selector,
         "signin_email": "#ap_email",
         "signin_password": "#ap_password",
         "signin_claim": "#ap-claim",
@@ -126,9 +131,21 @@ class AmazonScraper(BaseRetailerScraper):
         PRE-ESTIMATE: before Amazon has a delivery
         estimate the container reads "Order received" and there is no carrier card — a legitimate
         'ordered', on that exact wording only.
+
+        PRE-SHIP DELAYED: the
+        page has NO promise container and no carrier card, only an exception box saying the order
+        "is delayed. It's being prepared to ship" — Amazon's own statement that it has not
+        shipped, so a legitimate 'ordered' on that wording only, and only with no number on the
+        page (a number beside that text would be a contradiction worth a dossier).
         """
         early = page.query_selector(self.preship_promise_selector)
         if early is None:
+            exception = page.query_selector(self.legacy_exception_selector)
+            if exception is not None and \
+                    not self._read_tracking_number(page, self.legacy_tracking_number_selector):
+                text = exception.inner_text().strip()
+                if "prepared to ship" in text.lower():
+                    return {"status": "ordered", "tracking_number": "", "delivery_promise": text}
             return None  # unexpected layout / not the tracking page → dossier problem
         promise = early.inner_text().strip()
         tracking_number = self._read_tracking_number(page, self.legacy_tracking_number_selector)
