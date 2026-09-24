@@ -96,7 +96,7 @@ The run flowchart, the cost model and a shipment's lifecycle are in
 
 ## Quickstart
 
-Requires Python 3.11+ and a Browser-Use Cloud account with the **Dev tier** (custom proxies need a
+Requires Python 3.12+ and a Browser-Use Cloud account with the **Dev tier** (custom proxies need a
 paid plan).
 
 ```bash
@@ -182,7 +182,7 @@ Dockerfile / docker-compose.yml / docker/   containerized, self-scheduling, with
 
 ## License
 
-Copyright (C) 2026 Alpha
+Copyright (C) 2026 ango-dev
 
 This program is free software: you can redistribute it and/or modify it under the terms of the **GNU
 General Public License** as published by the Free Software Foundation, either version 3 of the
