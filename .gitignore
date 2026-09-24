@@ -31,11 +31,12 @@ __pycache__/
 venv/
 .pytest_cache/
 
-# Claude Code personal permission allowlist (machine-local, not project config)
-.claude/settings.local.json
-
-# Portable Claude Code session store — holds full transcripts (real PII). Never commit.
+# Claude Code, machine-local: .claude/ holds the permission allowlist and the portable session store
+# (full transcripts, real PII); CLAUDE.local.md is personal notes; .mcp.json can carry MCP server
+# keys. Never commit.
 .claude/
+CLAUDE.local.md
+.mcp.json
 .vscode/
 PORTABLE.md
 setup-portable.cmd

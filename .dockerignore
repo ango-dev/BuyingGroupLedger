@@ -27,6 +27,8 @@ cards.json
 .costco_signin_capture/
 # Claude Code's session store holds full transcripts (real PII); the rest is the dev machine's own.
 .claude/
+CLAUDE.local.md
+.mcp.json
 .vscode/
 PORTABLE.md
 setup-portable.cmd
