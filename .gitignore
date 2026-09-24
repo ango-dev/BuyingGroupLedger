@@ -10,6 +10,8 @@ config.json
 profiles.json
 warehouses.json
 cards.json
+# The legacy Google private key scripts/migrate_config.py still reads from the repo root.
+service_account.json
 .costco/
 .bestbuy_capture/
 .amazon_capture/

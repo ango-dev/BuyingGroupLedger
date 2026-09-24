@@ -22,6 +22,18 @@ cards.json
 .bestbuy_capture/
 .bg_capture/
 .receipt_capture/
+.amazon_business_signin_capture/
+.amazon_consumer_signin_capture/
+.costco_signin_capture/
+# Claude Code's session store holds full transcripts (real PII); the rest is the dev machine's own.
+.claude/
+.vscode/
+PORTABLE.md
+setup-portable.cmd
+setup-portable.ps1
+# The legacy Google key a pre-config.json checkout may still hold (scripts/migrate_config.py).
+service_account.json
+.pytest_cache/
 .venv/
 __pycache__/
 *.pyc
