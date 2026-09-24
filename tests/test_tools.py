@@ -291,6 +291,24 @@ class TestTheRoutes:
             bad = client.post("/tools/run/backfill_receipts", data={"--limit": bad_limit})
             assert bad.status_code == 400 and "from 1 to 1,000,000" in bad.text, bad_limit
 
+    def test_a_pasted_token_reaches_the_script_and_nothing_that_is_shown(self, client):
+        """The Costco token field is a credential: the subprocess gets it, while the activity
+        record, the job log's command line and the job page carry a mask -- and the form asks
+        for it in a password box."""
+        secret = "rt-SECRET-0123456789"
+        response = client.post("/tools/run/costco_token", data={"--label": "profile-1", "--token": secret},
+                               follow_redirects=False)
+        assert response.status_code == 303
+        assert client.started[0][-2:] == ["--token", secret]  # the script itself gets the real value
+        raw_activity = (client.logs / "activity.jsonl").read_text(encoding="utf-8")
+        assert secret not in raw_activity and tools.SECRET_MASK in raw_activity
+        job = client.app.state.tool_runner.recent()[0]
+        job._process.wait()
+        assert secret not in job.log_path.read_text(encoding="utf-8") and secret not in " ".join(job.argv)
+        assert secret not in client.get(f"/tools/jobs/{job.id}").text
+        page = client.get("/tools", params={"tool": "costco_token"}).text
+        assert 'type="password" name="--token"' in page and 'type="text" name="--label"' in page
+
     def test_a_writing_tool_is_refused_while_a_run_is_in_progress(self, client):
         (client.logs / ".run.lock").write_text("1", encoding="utf-8")
         refused = client.post("/tools/run/sort_ledger", data={"--apply": "on"})

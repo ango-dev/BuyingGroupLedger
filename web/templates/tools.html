@@ -68,7 +68,7 @@
       {% elif f.kind == 'select' %}
         <span class="field-block">{{ f.label }} {{ choose(fname, f.choices | map('string') | list, f.default, '', 'cell') }}</span>
       {% else %}
-        <label class="field-block">{{ f.label }}{% if f.required %} *{% endif %} <input type="text" name="{{ fname }}" value="{{ f.default }}" placeholder="{{ f.help }}" {{ 'required' if f.required }}></label>
+        <label class="field-block">{{ f.label }}{% if f.required %} *{% endif %} <input type="{{ 'password' if f.secret else 'text' }}" name="{{ fname }}" value="{{ f.default }}" placeholder="{{ f.help }}" {{ 'required' if f.required }}{{ ' autocomplete=off' if f.secret }}></label>
       {% endif %}
     {% endfor %}
     <button type="submit" id="run-{{ t.key }}" class="small {{ 'danger' if t.writes else 'primary' }}" {{ 'disabled' if job and job.running }}>{{ 'Running…' if job and job.running else 'Run' }}</button>

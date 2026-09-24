@@ -1541,8 +1541,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
             job = app.state.tool_runner.start(t, argv)
         except RuntimeError as exc:
             return tools_page(request, error=str(exc), status=409)
-        act("tool", f"Ran {t.title}: python -m {t.module} {' '.join(argv)}".strip(),
-            {"tool": t.key, "argv": argv, "job": job.id, "writes": t.writes})
+        shown = t.display_argv(argv)  # a pasted secret (the Costco token) never reaches the log
+        act("tool", f"Ran {t.title}: python -m {t.module} {' '.join(shown)}".strip(),
+            {"tool": t.key, "argv": shown, "job": job.id, "writes": t.writes})
         return RedirectResponse(url=f"/tools?tool={t.key}#t-{t.key}", status_code=303)
 
     @app.get("/tools/jobs/{job_id}", response_class=HTMLResponse)

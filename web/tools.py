@@ -52,6 +52,12 @@ class Field:
     default: str = ""
     choices: tuple[str, ...] = ()
     required: bool = False
+    #: A credential (a pasted token): asked for in a password box, and never written anywhere the
+    #: page or a log shows -- the command line in the job log and the activity record carry a mask.
+    secret: bool = False
+
+
+SECRET_MASK = "••••••"
 
 
 @dataclass(frozen=True)
@@ -101,6 +107,11 @@ class Tool:
                 args.append(raw)
         return args
 
+    def display_argv(self, argv: list[str]) -> list[str]:
+        """`argv` as it may be shown or logged: the value after a secret field's option masked."""
+        secret = {f.name for f in self.fields if f.secret and f.name}
+        return [SECRET_MASK if i and argv[i - 1] in secret else arg for i, arg in enumerate(argv)]
+
 
 APPLY = Field("--apply", "Apply", "flag", "write for real (unticked = dry run: shows what it would do)")
 RETAILER = Field("--retailer", "Retailer", "select", "one retailer only", choices=RETAILER_CHOICES)
@@ -135,7 +146,7 @@ TOOLS: tuple[Tool, ...] = (
          "Save or inspect the refresh token the Costco API path signs in with. Grab reads it from the profile's logged-in session.",
          "Accounts", (Field("--label", "Profile", "text", "the profile label that owns the Costco membership", required=True),
                       Field("--grab", "Grab from the profile", "flag", "read the token from the profile's browser storage (opens a cloud session)"),
-                      Field("--token", "Token", "text", "or paste the refresh token secret by hand"),
+                      Field("--token", "Token", "text", "or paste the refresh token secret by hand", secret=True),
                       Field("--warehouses", "Warehouses", "text", "comma-separated warehouse numbers, e.g. 847"),
                       Field("--show", "Show only", "flag", "print what is stored (token masked)")),
          writes=True, spends="a cloud browser session when grabbing"),
@@ -257,12 +268,12 @@ class JobRunner:
                 raise RuntimeError(f"{t.title} is already running")
             self.dir.mkdir(parents=True, exist_ok=True)
             job_id = self.clock().strftime("%Y%m%dT%H%M%SZ") + "-" + t.key + "-" + uuid.uuid4().hex[:6]
-            job = Job(id=job_id, tool_key=t.key, argv=list(argv), started_at=self.clock(),
+            job = Job(id=job_id, tool_key=t.key, argv=t.display_argv(argv), started_at=self.clock(),
                       log_path=self.dir / f"{job_id}.log", heartbeat=t.heartbeat)
             command = [self.python, "-m", t.module, *argv]
             try:
                 handle = job.log_path.open("w", encoding="utf-8")
-                handle.write(f"$ python -m {t.module} {' '.join(argv)}\n\n")
+                handle.write(f"$ python -m {t.module} {' '.join(t.display_argv(argv))}\n\n")
                 handle.flush()
                 job._process = self.launch(command, handle)
             except Exception as exc:  # noqa: BLE001 -- the page shows why it could not start
