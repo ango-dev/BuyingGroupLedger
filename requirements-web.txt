@@ -1,13 +1,13 @@
-# The read-only web dashboard (web/) -- an OPTIONAL extra. Deliberately NOT in requirements.txt:
-# the scheduler image installs only runtime deps and never imports any of these; only the `web`
-# compose profile (web/Dockerfile) and a developer running `python -m web` need them.
+# The web dashboard (web/) -- an OPTIONAL extra on a desktop, deliberately NOT in requirements.txt:
+# the scraper never imports any of these. The one Docker image installs them too, since the
+# dashboard runs inside that same container beside the scheduler (docker/entrypoint.sh).
 #   .venv\Scripts\pip install -r requirements-web.txt   (Windows)
 #   .venv/bin/pip install -r requirements-web.txt       (Linux)
 # Pinned exactly: the dashboard has no build step, so these ARE the stack.
 fastapi==0.141.1
 jinja2==3.1.6
 uvicorn==0.52.1
-# Renders each failure dossier's report.md on /failures. Pure Python.
+# Renders each failure dossier's report.md on the Activity page. Pure Python.
 markdown-it-py==4.2.0
-# The Backup page's restore form uploads a zip (multipart). Pure Python.
+# Uploads (a backup to restore, a spreadsheet to import, a receipt) are multipart. Pure Python.
 python-multipart==0.0.32

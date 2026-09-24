@@ -87,12 +87,14 @@ echo "[entrypoint] timezone: $(date +%Z) ($(date -u +%FT%TZ) UTC)"
 echo "[entrypoint] scheduled every ${HOURS}h -> $(cat /app/crontab)"
 
 # --- the web dashboard ----------------------------------------------------------------------
-# Read-only over the ledger (web/), served from THIS container beside the scheduler. It never writes the ledger and never touches a scrape: it is
-# a separate process that shares the image, the config and the mounted data/ + logs/. Restarted in
+# The dashboard (web/), served from THIS container beside the scheduler (one container, not two).
+# Its only ledger writes are the ones a person makes on the Orders page, refused while a run holds
+# the lock; it is a separate process that shares the image, the config and the mounted data/ +
+# logs/. Restarted in
 # a loop if it ever exits, so a crash costs seconds, not a container restart; healthcheck.sh probes
 # it. WEB_ENABLED=false (config web.enabled) keeps this container a pure scheduler.
 if [ "${WEB_ENABLED:-true}" = "true" ]; then
-    echo "[entrypoint] starting the web dashboard on 0.0.0.0:8765 (read-only)"
+    echo "[entrypoint] starting the web dashboard on 0.0.0.0:8765"
     (
         while true; do
             python -m web --host 0.0.0.0 --port 8765 || true

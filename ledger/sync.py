@@ -75,7 +75,7 @@ HEADER = [
     "Profile",  # which browser profile scraped it — never read while reconciling
     "Order Link",
     "Tracking Link",
-    "Receipt Link",  # the order's captured receipt in object storage (receipts/capture.py)
+    "Receipt Link",  # the order's captured receipt, a file under data/receipts (receipts/capture.py)
     "Delivery Address",  # the raw address Buying Group was classified from
     "Card Last 4",
     "Package ID",  # the retailer's own per-package identity (Amazon shipmentId / Costco packageNumber /

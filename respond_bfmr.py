@@ -3,10 +3,9 @@
 BFMR receives a combined Best Buy box and emails asking for the units' serial numbers and the
 Best Buy receipt in PDF — and their email says "please reply to this email", so a reply is the
 sanctioned channel (their API has no serials or upload endpoint). This module reads the request
-mailbox over IMAP — BY DEFAULT the alerts Gmail account (same app password), or its own account
-when buying_groups.bfmr.combined_package_gmail_address/_app_password are BOTH set
-(settings.bfmr_reply_account() resolves the choice once, so reading and replying can never use
-different mailboxes) — matches each request to the ledger rows sharing its tracking number, PULLS THE SERIALS OFF THE BEST BUY SITE for the
+mailbox over IMAP — its OWN Gmail account, buying_groups.bfmr.combined_package_gmail_address and
+_app_password, both required (never the alerts account; settings.bfmr_reply_account() resolves it
+once, so reading and replying can never use different mailboxes) — matches each request to the ledger rows sharing its tracking number, PULLS THE SERIALS OFF THE BEST BUY SITE for the
 box's order ids at that moment (scrapers/bestbuy_serials.py — there is no serial column; only
 Best Buy has the combined-package issue), and replies with the orders' captured receipts
 attached.

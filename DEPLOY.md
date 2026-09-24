@@ -1,20 +1,18 @@
 # Deploying to a Linux server
 
-A runbook for moving the ledger off a desktop and onto a host that runs it unattended. Written for an
-**Ubuntu 24.04 LTS VM** (the reference target); a Raspberry Pi on 64-bit Pi OS works the same way,
-with the few differences called out inline.
+A runbook for moving the ledger off a desktop onto a host that runs it unattended. Written for an
+**Ubuntu 24.04 LTS VM**; a Raspberry Pi on 64-bit Pi OS works the same way, with the differences
+called out inline. The README explains how the system works; this explains how to keep it running
+somewhere you aren't watching.
 
-The README explains how the system works. This explains how to make it *keep* running somewhere you
-aren't watching.
-
-Two paths are supported, and you can switch between them freely because both run off the same files
-— `config.json` and the `data/` directory that holds the ledger (`data/ledger.sqlite3`) and the
-receipts — and the browser profiles live in Browser-Use Cloud.
+Two paths, and you can switch between them freely: both run off the same `config.json` and `data/`
+directory (the ledger `data/ledger.sqlite3` and the receipts), and the browser profiles live in
+Browser-Use Cloud.
 
 | | **Docker** (recommended) | **venv + cron** |
 |---|---|---|
 | scheduling | supercronic, inside the container | host crontab |
-| Python | pinned 3.12 in the image | the host's (24.04 ships 3.12, so this is fine) |
+| Python | pinned 3.12 in the image | the host's (3.12+; 24.04 ships 3.12) |
 | upgrade | `git pull && docker compose up -d --build` | `git pull && .venv/bin/pip install -r requirements.txt` |
 | health | `docker ps` shows healthy/unhealthy | `logs/.last_run` + your own eyes |
 | best for | leaving it alone | debugging over SSH |
@@ -23,21 +21,18 @@ receipts — and the browser profiles live in Browser-Use Cloud.
 
 ## What the host does, and how small it can be
 
-Worth being clear about, because it sets the hardware bar very low: **no browser ever runs on this
-machine.** Chromium runs in Browser-Use Cloud, and `scrapers/cdp.py` connects to it over the network
-— Playwright is used purely as a CDP *client*. Costco doesn't even do that; it's plain HTTPS.
+**No browser ever runs on this machine.** Chromium runs in Browser-Use Cloud and `scrapers/cdp.py`
+connects to it over the network (Playwright is only a CDP *client*); Costco is plain HTTPS. The host
+does HTTP requests, HTML parsing and SQLite writes: **1 vCPU and 1–2 GB RAM is ample**, and a few GB
+of disk for the image and logs.
 
-So the host does HTTP requests, HTML parsing and SQLite writes. **1 vCPU and 1–2 GB RAM is ample**,
-and a run is I/O-bound on the network rather than CPU-bound. Disk is a few GB for the image plus
-logs.
-
-What it *does* need is a correct clock — every date in the ledger comes from the host, and `Order
-Date` is part of the upsert key, so a skewed clock writes duplicate rows. `timedatectl` should show
-NTP synchronised.
+It does need a **correct clock**: every date in the ledger comes from the host, and `Order Date` is
+part of the upsert key, so a skewed clock writes duplicate rows. `timedatectl` should show NTP
+synchronised.
 
 > **On a Raspberry Pi, use the 64-bit OS** (`uname -m` → `aarch64`). `curl_cffi`, which Costco's TLS
-> impersonation depends on, ships prebuilt wheels for `aarch64` but not reliably for `armv7l`, so a
-> 32-bit host tries to compile it from source and usually fails. Not a concern on an x86 VM.
+> impersonation needs, ships prebuilt wheels for `aarch64` but not reliably for `armv7l`, where the
+> source build usually fails.
 
 ---
 
@@ -50,12 +45,11 @@ docker compose version   # v2.24+ (the plugin, not the old docker-compose binary
 timedatectl              # confirm the timezone and that NTP is synced
 ```
 
-**v2.24 (Dec 2023) is the floor**, because `docker-compose.yml` marks `.env` as `required: false` —
-without that, every compose command fails with "env file not found" on a host that has no overrides,
-which is now the normal state. On an older Compose either `touch .env` or delete the `env_file:`
-block.
+**Compose v2.24 is the floor**, because `docker-compose.yml` marks `.env` as `required: false`;
+older versions fail every command with "env file not found" when there is no `.env`. On an older
+Compose, `touch .env` or delete the `env_file:` block.
 
-Ubuntu 24.04 ships neither Docker nor a recent Node by default. Install Docker:
+Ubuntu 24.04 does not ship Docker. Install it:
 
 ```bash
 curl -fsSL https://get.docker.com | sh
@@ -66,37 +60,35 @@ sudo usermod -aG docker "$USER"     # then log out and back in, or `newgrp docke
 
 ## 1. Get the code and the secrets across
 
-The repo is safe to clone; the things that make it *work* are all gitignored. Clone the code, then
-copy the secrets separately.
+The repo is safe to clone; everything that makes it *work* is gitignored and copied separately.
 
 ```bash
-# the `internal` remote in .git/config is the LAN Gitea — use that from inside the network
-git clone http://<gitea-host>:3000/pi/BuyingGroupLedger.git ~/BuyingGroupLedger
+git clone https://github.com/ango-dev/BuyingGroupLedger.git ~/BuyingGroupLedger
 cd ~/BuyingGroupLedger
 ```
 
-From the machine that currently runs it, copy these across. They hold live credentials and the
-ledger itself — use `scp`/`rsync` over SSH, not email or a cloud drive:
+
+From the machine that runs it today, copy these across over SSH (`scp` / `rsync`, never email or a
+cloud drive) — they hold live credentials and the ledger itself:
 
 | Path | Contains | Required? |
 |---|---|---|
 | `config.json` | everything: API keys, passwords, profiles, warehouse jigs, cards | **yes** |
-| `.state.json` | Costco's rotating refresh token | if you use Costco |
+| `.state.json` | Costco's rotating refresh token, the dashboard's session secret | if you use Costco |
 | `data/` | the ledger (`ledger.sqlite3`), the receipts, the CSV safety copies | if you are moving an existing ledger — a fresh host starts an empty one |
 
 The one-zip way is `python -m scripts.backup` on the old machine and `python -m scripts.backup
---restore <zip>` on the new one: it carries all three (plus `.env`), is standard library only, so it
-runs with the system Python before the venv or the image exists, and keeps existing files unless
-`--force`. By hand:
+--restore <zip>` here: it carries all three (plus `.env`), runs with the system Python (standard
+library only), and keeps existing files unless `--force`. By hand:
 
 ```powershell
 # from the project dir on Windows
 scp -r config.json .state.json data you@ledger-vm:~/BuyingGroupLedger/
 ```
 
-`.env` is OPTIONAL — it is purely the override layer now, and NOTHING is environment-only. Copy it
-only if this host needs a value to differ from the shared config (a different `RUN_INTERVAL_HOURS`,
-say, or a scratch `LEDGER_DB_PATH` on a staging box). Anything set there wins over `config.json`.
+`.env` is optional — purely an override layer; nothing is environment-only. Copy it only if this host
+needs a value to differ from the shared config (a different `RUN_INTERVAL_HOURS`, say). Anything set
+there wins over `config.json`.
 
 Then lock them down — `config.json` holds every password in plaintext:
 
@@ -104,80 +96,44 @@ Then lock them down — `config.json` holds every password in plaintext:
 chmod 600 config.json .state.json
 ```
 
-**Or let the dashboard ask.** Create the two files EMPTY, start the container, and open the
-dashboard: a fresh install lands on the setup wizard at `/setup`, which walks restore-a-backup,
-the password, the keys, profiles, groups, cards, alerts and the schedule, each step saving into
-`config.json` the way the Settings page does (docs/operations.md, "First-time setup"). If you
-published the dashboard beyond loopback (`WEB_PUBLISH_HOST`) before it has a password, it first
-asks for one on its own page, with the setup token from `docker compose logs ledger`.
+**Or let the dashboard ask.** Create the two files empty, start the container, and open the
+dashboard: a fresh install lands on the setup wizard at `/setup` (restore a backup, password, keys,
+profiles, groups, cards, alerts, schedule), each step saving into `config.json` as the Settings page
+does ([docs/operations.md](docs/operations.md#first-time-setup-setup)). Published beyond loopback
+before it has a password, it first asks for one, with a setup token from its log (step 4a).
 
 ```bash
 touch config.json .state.json && chmod 600 config.json .state.json   # BEFORE the first `up`
 ```
 
-The empty files are load-bearing: `docker-compose.yml` bind-mounts both as files, and when the
-host file is missing at the first `docker compose up` Docker creates an empty *directory* in its
-place — the container then cannot write either, and every wizard save fails. If that has already
-happened, the entrypoint's log and preflight both say so and give the fix: `docker compose down`,
+The empty files matter: `docker-compose.yml` bind-mounts both, and a host file missing at the first
+`docker compose up` becomes an empty *directory* that nothing can write, so every wizard save fails.
+If that has happened, the entrypoint's log and preflight say so with the fix: `docker compose down`,
 `rmdir` the directory, `touch` the file, `up` again.
 
-### Upgrading a host that is already running the old six-file layout
 
-**Order matters here, and getting it wrong fails quietly.** A bind mount whose host file is missing
-makes Docker create an empty *directory* in its place, so starting the container before `config.json`
-is on the host leaves you with a `config.json/` directory: preflight names that case specifically,
-but the container still starts and scrapes nothing on every schedule until someone reads the alert.
-
-```bash
-docker compose down                     # on the host: stop the scheduler first
-
-# from your main PC — copy the migrated files across BEFORE pulling
-scp config.json .state.json you@ledger-vm:~/BuyingGroupLedger/
-
-# back on the host
-cd ~/BuyingGroupLedger && git pull
-chmod 600 config.json .state.json
-: > .env                                # see below — do NOT delete it if Compose is older than 2.24
-docker compose build
-docker compose run --rm --entrypoint python ledger -m scripts.preflight   # must pass BEFORE starting
-docker compose up -d && docker compose logs -f
-```
-
-> **Empty the old `.env`, don't leave it populated.** Every value in it now lives in `config.json`,
-> and `.env` still *wins* — so a stale copy silently overrides the file you edit from then on, and
-> the symptom is a config change that appears to do nothing. Emptying it keeps the file present for
-> older Compose versions while giving it no values; a blank `FOO=` does not override either.
->
-> The old `profiles.json` / `warehouses.json` / `cards.json` / `service_account.json` / `.costco/`
-> can stay on the host — nothing reads them — but preflight warns while they linger, precisely so
-> nobody edits a file that has no effect. Delete them once a run has proven the new config works.
-
----
-
-> **The `warehouses` and `cards` sections are optional but are NOT no-ops if you skip them.** Without
-> `warehouses` every order tags `Unclassified`, which means **nothing is ever submitted to a
-> buying group** — the sync skips unclassified rows rather than guessing. Without `cards` every
-> row falls back to `DEFAULT_CASHBACK_RATE` and your profit column is wrong but plausible-looking.
-> Preflight (step 3) reports both.
+> **The `warehouses` and `cards` sections are optional but not no-ops.** Without `warehouses` every
+> order tags `Unclassified`, so **nothing is ever submitted to a buying group** (the sync skips
+> unclassified rows). Without `cards` every row falls back to `DEFAULT_CASHBACK_RATE` and the profit
+> column is wrong but plausible. Preflight (step 3) reports both.
 
 ---
 
 ## 2. The one thing that breaks on a new host: the MaxOutDeals IP allowlist
 
-**MOD rejects every call from an unregistered IP, whatever the token.** Moving hosts can change the
-egress IP, so tracking pushes start failing the moment you cut over.
+**MOD rejects every call from an unregistered IP, whatever the token.** A new host can mean a new
+egress IP, and tracking pushes fail from the moment you cut over.
 
 ```bash
 curl -s https://api.ipify.org; echo      # this host's public IP
 ```
 
-Compare it to the IP you registered for the machine running it today. **If the VM sits behind the
-same NAT/router as that machine, the public IP is identical and there is nothing to do** — worth
-checking before you go editing anything. If it differs, add it under the **firewall tab** in your MOD
-profile. Re-check whenever your ISP rotates your address.
+If the host sits behind the same NAT/router as the machine running it today, the public IP is the
+same and there is nothing to do. Otherwise add it under the **firewall tab** in your MOD profile, and
+re-check whenever your ISP rotates your address.
 
-BFMR has no allowlist. Costco routes through the profile's own static ISP proxy (not the host IP), so
-it's unaffected — see the design notes (the engineering journal) about that having been fixed deliberately.
+BFMR has no allowlist. Costco is unaffected: it connects through the profile's own static ISP proxy,
+not the host's IP.
 
 ---
 
@@ -187,23 +143,18 @@ it's unaffected — see the design notes (the engineering journal) about that ha
 docker compose run --rm --entrypoint python ledger -m scripts.preflight
 ```
 
-Or natively, if you've built the venv: `.venv/bin/python -m scripts.preflight`.
+Or natively: `.venv/bin/python -m scripts.preflight`. It is offline and free. It exists for the
+failures that **keep working while doing the wrong thing**:
 
-It's offline and free — no Browser-Use run, no network at all. It exists because the
-failures that matter on an unattended host are the ones that **keep working while doing the wrong
-thing**, and so never raise:
+- **a broken deterministic-path import** — the retailer fails every run with a dossier that looks
+  like a selector problem;
+- **a bind mount whose host file is missing** — Docker creates an empty *directory*, read as "not
+  configured" and unwritable (wizard saves, Costco's token) until you `rmdir` it and `touch` the file;
+- **a missing Costco refresh token** — self-heals from the `auth.costco` credentials; without those,
+  Costco alerts and skips every run.
 
-- **a deterministic-path import that broke** — `scrape()` catches `ImportError`, so a missing
-  dependency fails that retailer on every run with a failure dossier blaming a "selector";
-- **a bind mount whose host file is missing** — Docker creates an empty *directory* there, the
-  config loaders read that as "not configured", and nothing can be written to it (the setup
-  wizard's saves, Costco's token) until the host `rmdir`s it and `touch`es the file;
-- **a missing Costco refresh token** — self-heals from `auth.costco` creds; without those, alerts and
-  skips every run.
-
-Fix every `FAIL` before continuing. A `WARN` is a judgement call. Nothing on this machine can
-verify the MOD allowlist (step 2); the first tracking push tells you, with "Authorization header is
-not recognized".
+Fix every `FAIL` before continuing; a `WARN` is a judgement call. Nothing offline can verify the MOD
+allowlist (step 2): the first tracking push tells you, with "Authorization header is not recognized".
 
 ---
 
@@ -214,10 +165,10 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-The image builds for the host's own architecture and smoke-tests the supercronic binary during the
-build, so a wrong-architecture download fails the build loudly instead of crash-looping at 03:00.
+The image builds for the host's architecture and smoke-tests the supercronic binary during the build,
+so a wrong-architecture download fails the build instead of crash-looping at 03:00.
 
-Container settings live in **`config.json`** under `container`, like everything else:
+Container settings live in `config.json` under `container`:
 
 | `container.*` key | Env override | Default | Notes |
 |---|---|---|---|
@@ -226,28 +177,31 @@ Container settings live in **`config.json`** under `container`, like everything 
 | `timezone` | `TZ` | `UTC` | The cron schedule follows this. |
 | `preflight_strict` | `PREFLIGHT_STRICT` | `false` | `true` = refuse to start when preflight fails. |
 
-`docker-compose.yml` interpolates its own variables *before* any Python runs, so it cannot read
-`config.json` itself — `docker/entrypoint.sh` resolves these four on start via
-`python -m scripts.container_settings` and sources the result. An exported variable still wins, so
-compose passes them through with no defaults of its own.
-
-Change the interval by editing `config.json` and recreating the container:
+Compose cannot read `config.json` itself, so `docker/entrypoint.sh` resolves these on every start
+(`python -m scripts.container_settings`); an exported variable still wins. Change the interval in
+`config.json` (or on the dashboard's Settings page), then:
 
 ```bash
 docker compose restart        # the entrypoint re-reads the mounted config.json on start
 docker compose logs | grep "scheduled every"
 ```
 
-`restart` is enough now: `config.json` is a bind mount and the entrypoint resolves the schedule from
-it every time the container starts. (It did NOT used to be — the interval came from the compose
-file's `environment:` block, which `restart` reuses, so a changed schedule was silently ignored until
-`up -d`. Use `up -d` if you edited `docker-compose.yml` itself, or if you set `RUN_INTERVAL_HOURS`
-as an environment override, since that is still baked in at create time.)
+Use `docker compose up -d` instead if you edited `docker-compose.yml` or set `RUN_INTERVAL_HOURS` in
+`.env`, since those are fixed when the container is created.
+
+**The dashboard** runs in the same container, published on the host's loopback
+(`127.0.0.1:8765`). To reach it from your LAN or over Tailscale / WireGuard, set `WEB_PUBLISH_HOST`
+(`0.0.0.0`, or one interface's IP) in `.env` and re-create with `docker compose up -d`. Compose passes
+`WEB_PUBLISH_HOST` into the container, so the dashboard knows it is reachable: **published beyond
+loopback with no `web.password`, it serves only a page that sets one**, and that page asks for a
+one-time setup token printed to the dashboard's log (`docker compose logs ledger`). Reach it under a
+host name (`ledger.local`, a Tailscale name)? Add the name to `web.allowed_hosts`, or the dashboard
+answers 400. Never port-forward it to the internet. Details: [docs/operations.md](docs/operations.md#security).
 
 ### Choosing an interval
 
-**A third party sets the floor, not this code.** MaxOutDeals allows **10 received-items calls per
-day**, and every run spends exactly one, so:
+**A third party sets the floor.** MaxOutDeals allows **10 received-items calls per day**, and every
+run spends one:
 
 | Interval | Runs/day | MOD receipts used | Headroom |
 |---|---|---|---|
@@ -256,25 +210,18 @@ day**, and every run spends exactly one, so:
 | **3h** | **8** | **8 of 10** | **2 spare — the practical floor** |
 | 2h | 12 | over quota | payout write-back fails daily |
 
-Two things make that tighter than it looks:
+- **A dry run spends one too.** `python -m sync_tracking` without `--apply` still reads payouts, as
+  does `scripts.bg_probe`. At 3h there is room for about two of those a day.
+- **Nothing local stops you.** `DailyCallBudget` is per-process and cannot see the day's total; MOD's
+  server just starts refusing.
 
-- **A dry run spends one too.** `fetch_payouts` is a non-mutating read, and `dry_run` only suppresses
-  *mutating* calls — so `python -m sync_tracking` with no `--apply` still costs a receipts call, as
-  does `scripts.bg_probe`. At 3h you have room for about two of those a day.
-- **Nothing local stops you.** `DailyCallBudget` is deliberately per-process, so it bounds one run's
-  behaviour and cannot see the day's total across scheduled runs. MOD's server is the only real
-  authority, and it just starts refusing.
+Going over affects only the payout / premium / status **write-back**, not tracking submission (the
+30/day push limit is comfortable at 8 runs): payouts stop updating until the daily reset, and the run
+alerts.
 
-The failure mode is contained: going over affects only the payout/premium/status **write-back**, not
-tracking submission (the 30/day push limit stays comfortable at 8 runs). Payouts simply stop updating
-until the daily reset, and the run alerts rather than failing silently. Still, if you want to run
-more often than 3h, raise the interval back up and let the retailers' own delivery signal carry the
-status — it's free, and it's already what the scrapers read.
-
-**Preflight runs on every container start and alerts but does not abort.** That's deliberate and it
-matches the project's "reliability beats cost" rule: a container that refuses to start also stops
-scraping, and a missed order costs more than a wasted agent run. Set `PREFLIGHT_STRICT=true` if you'd
-rather fail fast.
+**Preflight runs on every container start and alerts but does not abort**: a container that refuses
+to start also stops scraping, and a missed order costs reimbursement money. Set `preflight_strict` to
+`true` if you'd rather fail fast.
 
 ### Verify the first run
 
@@ -284,16 +231,15 @@ docker compose logs --tail=100
 docker ps                                                 # STATUS should read (healthy)
 ```
 
-`docker ps` showing "Up 3 weeks" proves supercronic is alive, **not** that it ever ran anything. The
-healthcheck closes that gap: every completed run stamps `logs/.last_run`, and the container goes
-unhealthy once that's older than two intervals — and sends the same email/Discord alert as
-everything else, once per outage, with an all-clear when a run completes again (2026-08-30).
+"Up 3 weeks" proves supercronic is alive, **not** that it ran anything. Every completed run stamps
+`logs/.last_run`; once that is older than two intervals the container goes unhealthy and sends the
+usual email / Discord alert, once per outage, with an all-clear when a run completes again.
 
 ---
 
 ## 4b. Or run it with venv + cron
 
-Simpler to poke at over SSH. Ubuntu 24.04 ships Python 3.12, so this needs no deadsnakes PPA:
+Simpler to poke at over SSH. Ubuntu 24.04 ships Python 3.12, so no extra PPA:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y python3-venv tmux
@@ -306,13 +252,12 @@ python3 -m venv .venv
 crontab -l                         # confirm
 ```
 
-`run.sh` is the entry point cron calls. It rotates `logs/cron.log` at 10 MB (unbounded, it eventually
-fills the disk and takes the host down), always records how a run *ended* — including failures, which
-used to stop the log mid-file with no explanation — and stamps the same `logs/.last_run` heartbeat
-the Docker healthcheck uses.
+`run.sh` is what cron calls. It rotates `logs/cron.log` at 10 MB, always records how a run *ended*,
+and stamps the same `logs/.last_run` heartbeat the Docker healthcheck uses. For the dashboard, install
+`requirements-web.txt` too and run `python -m web` ([docs/operations.md](docs/operations.md#running-it)).
 
-**Cron runs with a minimal environment**, so if a scheduled run behaves differently from a manual
-one, that's the first suspect. Reproduce it with `env -i ./run.sh`.
+**Cron runs with a minimal environment**, so if a scheduled run behaves differently from a manual one,
+suspect that first. Reproduce it with `env -i ./run.sh`.
 
 ### Watching a run live
 
@@ -325,208 +270,84 @@ tmux new -s ledger                   # then: ./run.sh
 tmux attach -t ledger                # reattach later, from any SSH connection
 ```
 
-`tmux` matters over SSH: a run started in a plain SSH session **dies with the connection**, and a
-scrape killed halfway can leave the run lock behind (it self-expires after 3h). tmux survives the
-disconnect. It's also what §6 uses for the Claude session, so it's one tool rather than two.
+A run started in a plain SSH session **dies with the connection**, and a scrape killed halfway can
+leave the run lock behind (it self-expires after 3h). tmux survives the disconnect.
 
-For Docker none of this applies — the container isn't tied to your session at all, so
+With Docker none of this applies: the container isn't tied to your session, so
 `docker compose logs -f` is the whole story.
 
 ---
 
 ## 5. Monitoring
 
-Three independent signals, in increasing order of how much you have to do:
+Three independent signals:
 
-**Alerts push to you.** Email + Discord fire on logged-out sessions, failed scrapes, failed syncs and
-preflight failures. Confirm they work *from this host* — outbound SMTP on port 587 is a common thing
-for a hosting network or a VM's egress rules to block:
+**Alerts push to you.** Email and Discord fire on logged-out sessions, failed scrapes, failed syncs
+and preflight failures. Confirm they work *from this host* — outbound SMTP on port 587 is often
+blocked by hosting networks:
 
 ```bash
 docker compose run --rm --entrypoint python ledger -m alerts.notifier
 ```
 
-**The healthcheck notices silence.** The failure nobody catches is the scheduler quietly not running:
-no error, no log line, nothing to alert on. `docker ps` reporting `(unhealthy)` is that signal —
-and since 2026-08-30 the healthcheck also sends it as an alert, so you no longer have to be looking.
+**The healthcheck notices silence** — the scheduler quietly not running, which produces no error to
+alert on. It reports `(unhealthy)` and sends an alert:
 
 ```bash
 docker inspect --format '{{.State.Health.Status}}' buying-group-ledger
 cat logs/.last_run
 ```
 
-**The audit checks the data.** This is the only one that looks at the ledger itself, and it writes
-nothing ever — it opens the file through a read-only handle that refuses every write (the
-dashboard's Audit page shows the same findings by row):
+**The audit checks the data.** It opens the ledger through a read-only handle that refuses every
+write (the dashboard's Audit page shows the same findings by row):
 
 ```bash
 docker compose run --rm --entrypoint python ledger -m scripts.audit_ledger
 docker compose run --rm --entrypoint python ledger -m scripts.audit_ledger --stale-days 2
 ```
 
-`--stale-days` catches open orders that stopped being re-scraped, which is the data-side shadow of
-the same "scheduler died" failure.
+`--stale-days` catches open orders that stopped being re-scraped: the data-side shadow of a dead
+scheduler.
 
 ---
 
-## 6. Watching it from a browser on your main PC
+## 6. Cutting over from the old machine
 
-The goal: Claude watches the run **on the server**, you read and steer it **from a browser on your
-main PC**, and you apply any code changes on the main PC as usual.
-
-> **A plain claude.ai/code web session cannot do this.** Cloud sessions run in an Anthropic-managed
-> VM that is isolated from your machine and your network — it clones from GitHub and has no route to
-> a host on your LAN. It would never see `logs/run.log` or the container.
->
-> **Remote Control is the feature that does.** Claude Code runs *locally on the server* — its
-> filesystem, its Docker, its logs — and exposes that same session to claude.ai/code and the Claude
-> mobile app. The conversation stays in sync across the server's terminal, your browser, and your
-> phone, and it reconnects on its own if the network drops.
-
-### Install
-
-```bash
-# Node 18+ is required; 24.04's default is too old for Claude Code
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs tmux
-
-npm install -g @anthropic-ai/claude-code
-
-cd ~/BuyingGroupLedger
-claude            # sign in with /login, and accept the workspace-trust prompt once
-```
-
-Both of those one-time steps matter: Remote Control needs a claude.ai login (not an API key), and it
-must be started from a trusted project directory.
-
-### Start the watcher
-
-Start it inside `tmux`, because Claude Code is a foreground process — without tmux it dies when the
-SSH connection drops, taking the Remote Control session with it.
-
-```bash
-tmux new -s claude
-cd ~/BuyingGroupLedger
-claude --permission-mode plan --remote-control "ledger"
-#   Ctrl-B then D    -> detach from tmux; Claude keeps running on the server
-```
-
-It prints a `claude.ai/code` session URL (and offers a QR code if you want it on your phone).
-
-### Connect from your main PC
-
-Open **[claude.ai/code](https://claude.ai/code)** in any browser and pick the `ledger` session. You
-are now reading and steering the session running on the server. Ask it things like:
-
-> Has the scheduled run fired? Check the container health and the last 100 lines of logs/run.log,
-> and tell me if anything looks wrong.
-
-To get back into it on the server itself: `ssh you@ledger-vm` then `tmux attach -t claude`. The
-browser and the terminal are the same conversation.
-
-`/loop 30m check the container health and logs/run.log, and tell me only if something changed` makes
-it re-check on its own rather than you re-prompting.
-
-### Keeping it advisory: suggestions, not edits
-
-`--permission-mode plan` is the important flag above. In plan mode Claude reads files and runs
-commands to explore, but **does not edit source code** — it proposes. You then apply the change on
-your main PC, where your editor and git remote already are.
-
-Plan mode stops *edits*, though; it does not by itself stop a shell command that spends money. Add a
-host-local deny list as the second layer:
-
-```bash
-mkdir -p ~/BuyingGroupLedger/.claude
-cat > ~/BuyingGroupLedger/.claude/settings.local.json <<'JSON'
-{
-  "permissions": {
-    "deny": [
-      "Edit", "Write", "NotebookEdit",
-      "Bash(python main.py:*)",
-      "Bash(python -m sync_tracking:*)",
-      "Bash(python -m scripts.sort_ledger:*)",
-      "Bash(python -m scripts.backfill_profit_columns:*)"
-    ]
-  }
-}
-JSON
-```
-
-`.claude/settings.local.json` is **gitignored**, so this restricts this host only — your main PC
-keeps full edit rights and never inherits it.
-
-### What the VM boundary actually contains
-
-Running Claude in a dedicated VM is the right instinct, but be clear about what it buys, because the
-gap is where surprises live:
-
-- **It does contain** filesystem and process blast radius. A bad command wrecks a VM you can rebuild,
-  not your daily driver, and rolling back is a snapshot restore.
-- **It does not contain the credentials, or the ledger.** This VM holds `config.json` — live keys to
-  both buying-group accounts, Browser-Use, the proxies and every retailer login, in plaintext — and
-  `data/ledger.sqlite3`, the ledger itself. Anything running here can spend money and write to the
-  ledger regardless of the VM boundary.
-- **It does not contain the network.** By default the VM reaches your LAN (including the Gitea host)
-  and the internet. Restrict egress at the hypervisor or with `ufw` if you want that narrowed.
-
-So treat the VM as limiting *damage to the host*, and the plan mode + deny list above as limiting
-*damage to the accounts*. They're different problems and you want both. Take a snapshot once it's
-working — that's the cheapest rollback you'll ever have.
-
-`CLAUDE.md` in the repo root orients that session automatically — it covers the money-spending
-switches, what must never be run casually, and where to look first.
-
-Two things to tell it that it can't infer:
-
-- **A live run costs real money** and, with `BUYING_GROUP_SYNC_ENABLED=true`, files real insurance and
-  submits real tracking to third parties. Reading logs, running `pytest`, and running `audit_ledger`
-  or `preflight` are all free and safe. `python main.py` is not.
-- **`sync_tracking` defaults to a dry run** and only writes with `--apply`. Keep it that way unless
-  you mean it.
-
-### If Remote Control isn't available
-
-It's in research preview. If the flag doesn't work on your account, the fallback is the same session
-over SSH: `ssh you@ledger-vm` then `tmux attach -t claude`. Same conversation, viewed from a terminal
-instead of a browser.
-
----
-
-## 7. Cutting over from the old machine
-
-Do these in order, or you'll get two schedulers submitting to the same buying-group accounts from
-two ledgers that then disagree:
+Do these in order, or two schedulers submit to the same buying-group accounts from two ledgers that
+then disagree:
 
 1. **Stop any scheduler on the old machine first.** On Windows, check with
    `Get-ScheduledTask -TaskName BuyingGroupLedger`; if it exists, `Disable-ScheduledTask -TaskName
-   BuyingGroupLedger`. Likewise stop any local container: `docker compose down`. The run lock is a
-   file in `logs/`, so it is per-machine and will **not** stop two hosts running at once — and the
-   ledger you copy across is only current if nothing writes the old one after you copy it.
-2. Carry the ledger across (step 1 above: `python -m scripts.backup` there, `--restore` here), then
+   BuyingGroupLedger`. Stop any local container: `docker compose down`. The run lock is a file in
+   `logs/`, so it will **not** stop two hosts running at once, and the ledger you copy is only
+   current if nothing writes the old one afterwards.
+2. Carry the ledger across (step 1: `python -m scripts.backup` there, `--restore` here), then
    snapshot it so you can prove the first run behaved:
    `python -m scripts.audit_ledger --save-snapshot before.json`
 3. Bring the server up and force one run.
 4. `python -m scripts.audit_ledger --compare before.json` — a healthy cutover updates rows and appends
-   only genuinely new orders. Duplicates would show as added rows with keys you recognise.
+   only genuinely new orders. Duplicates show as added rows with keys you recognise.
 
 Nothing needs re-authorising: profiles and proxies are cloud-side, and the ledger travels in the
 backup. The only host-bound things are the MOD IP allowlist (step 2) and the scheduler itself.
 
 ---
 
+
 ## Troubleshooting
 
 | Symptom | Cause |
 |---|---|
-| `exec format error` on start | Wrong-architecture image. Rebuild on the host — don't copy an image built on a different architecture. |
-| `exec /usr/local/bin/entrypoint.sh: no such file` | CRLF line endings. `.gitattributes` forces LF on `*.sh`, `Dockerfile` and YAML; clone rather than copying files over from Windows by hand. |
-| Every retailer alerts "deterministic path failed — NOT recorded" on every run | A deterministic-path import is broken (the dossier's traceback will say `ImportError`). Run preflight — this is exactly what it's for. |
-| One retailer alerts "deterministic path failed — NOT recorded" | The page or API changed shape. Open the dossier the alert names (`logs/failures/…/report.md`): the selector audit says which selector stopped matching, `page_N.html` is the DOM to fix it against. Fix on the main PC, push, redeploy. |
+| `exec format error` on start | Wrong-architecture image. Rebuild on the host; don't copy an image built elsewhere. |
+| `exec /usr/local/bin/entrypoint.sh: no such file` | CRLF line endings. `.gitattributes` forces LF on `*.sh`, `Dockerfile` and YAML; clone rather than copying files from Windows by hand. |
+| Every retailer alerts "scrape failed — not recorded this run" on every run | A deterministic-path import is broken (the dossier's traceback says `ImportError`). Run preflight. |
+| One retailer alerts "scrape failed — not recorded this run" | The page or API changed shape. Open the dossier the alert names (`logs/failures/…/report.md`, or its row on the Activity page): the selector audit says which selector stopped matching, and `page_N.html` is the DOM to fix it against. |
 | Buying Group column is all `Unclassified` | `config.json` has no `warehouses` section, or no jig matched the delivery address. Preflight distinguishes these. |
 | MOD calls rejected with a valid token | This host's IP isn't allowlisted (step 2), or your ISP rotated it. |
 | Container `(unhealthy)` but logs look fine | No run has completed within two intervals. Check the run lock: `cat logs/.run.lock` — it self-expires after 3h. |
 | Runs skipped with "another run appears to be in progress" | A stale lock from a killed run. It clears itself after 3h, or `rm logs/.run.lock`. |
-| Costco alerts "API auth failed — agent NOT run" every run | Dead refresh token AND the automatic re-grab failed (the profile's own Costco session is logged out). Re-login per docs/retailers.md, "Costco". |
+| Costco alerts "API auth failed — not recorded this run" every run | Dead refresh token, and the automatic refresh failed. Log the profile into costco.com again (Tools → Log a Profile In), or `python -m scripts.costco_token --label <profile> --grab`; see [docs/retailers.md](docs/retailers.md), "Costco". |
+| Dashboard answers 400 | You reached it under a host name it doesn't know: add the name to `web.allowed_hosts` (or set `web.public_url`). |
+| Dashboard redirects every page to `/first-password` | It is published beyond loopback with no `web.password`. Enter the setup token from `docker compose logs ledger`. |
 | Alerts never arrive | Outbound SMTP (587) blocked by the host network. Test with `python -m alerts.notifier`. |
 | Wrong dates on rows | The host clock. `timedatectl` — every date in the ledger comes from the host, and `Order Date` is part of the upsert key. |

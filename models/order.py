@@ -242,7 +242,7 @@ FIELDNAMES = [
     "profile_label",
     "order_url",
     "tracking_url",
-    # A link to this ORDER's captured receipt in object storage (receipts/). One document per order,
+    # A link to this ORDER's captured receipt, stored under data/receipts (receipts/). One document per order,
     # so every row of a multi-item / multi-shipment order carries the same link — the receipt covers
     # the whole order, and duplicating the link is what makes it reachable from whichever row you
     # happen to be looking at.

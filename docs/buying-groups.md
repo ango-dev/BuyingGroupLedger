@@ -1,165 +1,134 @@
-# Buying groups — posting tracking, reading payouts
+# Buying Groups: Posting Tracking, Reading Payouts
 
 _Part of the [Buying Group Ledger](../README.md) docs._
 
-`sync_tracking.py` posts each shipped package's tracking number to the right group and reads the payout back into **Insurance**, **Actual Payout** and **Payout Date**. Dry run by default.
+`sync_tracking.py` posts each shipped package's tracking number to its buying group, files BFMR
+insurance, and reads the group's figures back into **Expected Payout**, **Insurance**, **Actual
+Payout**, **Payout Date** and **Status**. Total Profit stays blank until Actual Payout is filled.
+It is a **dry run by default**.
 
-Scraping tells you what you bought. The buying group is who pays you for it — so `sync_tracking.py`
-posts each shipped package's tracking number to the right group, and reads their payout back into the
-**Insurance**, **Actual Payout** and **Payout Date** columns, which is what makes **Total Profit**
-light up (the formula stays blank until Actual Payout is filled).
-
-> ### ⚠️ You still submit BFMR order numbers by hand
+> ### You still submit BFMR order numbers by hand
 >
-> **After placing an order against a BFMR reservation, enter its order number in BFMR yourself, right
-> away.** This tool does not do it, and is not going to.
->
-> That is not an oversight — it is what makes everything below work. BFMR keys on its own
-> `reservation → purchase → shipment` chain, and your order number is what turns a *reservation* into
-> a *purchase*. Until that happens there is nothing for a tracking number to attach to, so
-> `sync_tracking` reports the package as having no purchase rather than guessing which deal you meant.
-> A reservation also expires if its order number arrives late, and BFMR cancels a purchase whose
-> tracking misses the deadline.
->
-> Choosing the reservation automatically would mean matching a deal against a ledger row, and getting
-> it wrong books the **wrong deal** — which cannot be undone here, because this tool never cancels
-> anything at a buying group. You already know which deal you bought at the moment you buy it; typing
-> the number then costs seconds and cannot go wrong.
->
-> MaxOutDeals needs none of this — it keys on the tracking number alone, so posting is fully automatic.
+> **After ordering against a BFMR reservation, enter the order number in BFMR yourself, right
+> away.** Your order number turns a reservation into a purchase; until then a tracking number has
+> nothing to attach to and the sync reports "no purchase". The tool does not pick the reservation
+> for you: a wrong guess books the **wrong deal**, and it never cancels anything at a group. (A
+> reservation also expires if the number arrives late.) MaxOutDeals keys on the tracking number
+> alone and needs none of this.
 
-**A filing carries the tracking number and nothing else.** BFMR's `insurance/file` also accepts
-`address[...]` fields, but those are the **payee** address — where a claim pays out — not the
-shipment's destination, so omitting them lets BFMR use the address on your account, which is already
-the right answer. `name` and `package_value` are omitted for their own reasons: your account supplies
-the name, and BFMR derives the value from the shipment's items, where declaring our own would risk
-over-declaring and paying a bigger premium than the box warrants.
-
-Nothing ever files a **jig** as a postal address, either. A jig is a deliberately misspelled variant
-(`THIRTEEN SAMMPLE DR1VE`) that a group hands out so each order routes distinctly; it is a routing
-token, and the only thing it is matched against is the `warehouses` config that sets the Buying Group
-column.
-
-Two groups are supported today, and they work nothing alike:
-
-| | **BFMR** | **MaxOutDeals** |
+| | **BFMR** | **MaxOutDeals (MOD)** |
 |---|---|---|
-| auth | `API-KEY` + `API-SECRET` headers | bearer token **+ an IP allowlist** |
-| keyed on | its own reservation → purchase → shipment ids | the tracking number |
-| order number | **you enter it, by hand, at order time** | not used |
-| batching | one object per ledger row | one object per package (rows summed) |
-| limits | undocumented | **10/day** payouts, **30/day** tracking |
+| Auth | `API-KEY` + `API-SECRET` headers | bearer token **+ an IP allowlist** |
+| Keyed on | its reservation → purchase → shipment ids | the tracking number |
+| Order number | **you enter it at order time** | not used |
+| Batching | one object per ledger row | one object per package (rows summed) |
+| Limits | undocumented | **30 tracking calls/day**, **10 payout reads/day** |
+| Payout price before settlement | yes (Expected Payout) | no |
+| Return signal | yes | **none** |
+| Insurance | filed by the sync (a premium per shipment) | none, Insurance records `0` |
+
+## Setup
+
+In `config.json` (or Settings › Buying Groups; the setup wizard asks for the keys too):
 
 ```json
 "buying_groups": {
-  "bfmr": {
-    "// ": "both from Developer Tools in your BFMR account settings",
-    "api_key": "...",
-    "api_secret": "...",
-    "// min_insurance_value": "0 = insure every shipment",
-    "min_insurance_value": 0
-  },
-  "mod": {
-    "// ": "MOD also needs the account id + email it wants in the body of every request",
-    "api_key": "...",
-    "user_id": "...",
-    "email": "..."
-  }
+  "sync_enabled": false,
+  "bfmr": { "enabled": true, "api_key": "...", "api_secret": "...", "min_insurance_value": 0 },
+  "mod":  { "enabled": true, "api_key": "...", "user_id": "...", "email": "..." }
 }
 ```
 
-(A key whose name starts with `//` is a comment — the loader strips them, so you can annotate your
-own `config.json` the way `config.example.json` does.)
-
-⚠️ **MaxOutDeals rejects any call from an unregistered IP**, however valid your token. Add the machine
-that runs this under the **firewall tab** in your MOD profile — and again if you move hosts, change
-ISP, or containerize it.
+- BFMR's key and secret are under Developer Tools in its account settings; MOD also wants the
+  account id and email.
+- **MOD rejects any call from an unregistered IP**, however valid the token. Add the host under the
+  **firewall tab** in your MOD profile (again after moving hosts or ISPs); the push alerts if not.
+- **`buying_groups.sync_enabled`** lets the scheduled run do all this unattended. Off by default
+  because it spends real money; turn it on after a dry run and a one-package live test.
+- **Each group has its own switch**, `buying_groups.bfmr.enabled` / `buying_groups.mod.enabled`
+  (`BFMR_ENABLED` / `MAXOUTDEALS_ENABLED`, default on). A group switched off is skipped entirely
+  while the other runs; an explicit `--group` overrides it.
 
 ```bash
-python -m scripts.bg_probe          # read-only recon; answers the open API questions
-python -m sync_tracking             # DRY RUN — shows exactly what it would send. Sends nothing.
-python -m sync_tracking --apply --limit 1     # one package per group, for the first live test
-python -m sync_tracking --void 1Z999...       # undo a BFMR insurance filing
+python -m scripts.bg_probe                     # read-only recon of both APIs
+python -m sync_tracking                        # DRY RUN: prints what it would send
+python -m sync_tracking --apply --limit 1      # one package per group, for a first live test
+python -m sync_tracking --apply --group BFMR   # one group only
+python -m sync_tracking --apply --payouts-only # read payouts and tick what is held; submit nothing
+python -m sync_tracking --void 1Z999AA10000000001 --apply   # cancel a BFMR insurance filing
 ```
 
-**Old orders with no tracking number** (Amazon stops showing them) can be filled from BFMR by order
-number: `python -m scripts.backfill_tracking` (dry run; `--apply` writes), then
-`python -m sync_tracking --apply --payouts-only --group BFMR`. MOD's report carries no retailer order
-number, so MOD rows cannot be joined that way. **`--payouts-only`** reads payouts back and ticks what a
-group already holds without submitting anything — the mode to use when the ledger carries orders from
-buying-group accounts other than the connected ones.
+`--payouts-only` suits a ledger holding orders from group accounts other than the connected ones.
+Old orders with no tracking number can be filled from BFMR by order number with
+`python -m scripts.backfill_tracking` (dry run; `--apply` writes); MOD's report has no order number.
 
-**Routing is the Buying Group column**, which is already derived from the delivery address (see
-"Warehouse / jig config"). A row goes to exactly one group. `Personal` orders never reach the ledger,
-and `Unclassified` rows are **skipped and counted** rather than posted to a guess — an unconfigured
-warehouse is a real warehouse, and sending someone else's package to the wrong group is worse than
-leaving it visible.
+## Routing
 
-**There's no "posted at" column, deliberately.** Whether a number has been submitted is something the
-group knows and the ledger doesn't: MOD ignores duplicates by contract, and BFMR has a status
-endpoint, so each run asks rather than keeping a local copy that drifts the moment a write fails or
-you paste something into their dashboard by hand.
+The **Buying Group** column (set by the [warehouse jigs](configuration.md#warehouse-and-jig-config))
+sends a row to exactly one group. `Gift Card` rows are unrouted on purpose; **`Unclassified` rows
+are skipped**, never posted to a guess. A shipped row whose group is not set up is listed on
+Activity every run and alerted once per group name.
 
-**A payout is split pro-rata** across the rows sharing a tracking number, for the same reason
-order-level shipping is — a box holding two items is two rows, and writing the whole payout to each
-would book it twice.
+## What the Sync Writes
 
-**Status advances to `paid` or `return`.** Those are the two outcomes a retailer can never tell you
-about, so the buying group is the authority on them:
+**Tracking Submitted** is ticked when the group holds the package's number. It is for reading:
+what to send is asked of the group every run (MOD ignores duplicates; BFMR lists what it holds), so
+a failed ledger write cannot strand a package; a paid package is not re-sent. An unticked box on a
+shipped row is worth a look. Only a carrier re-label clears it.
 
-- **BFMR reports both directly** — its tracker carries `paid` and `returned` per package.
-- **MaxOutDeals confirms payment by listing a package in its received-items report**; there is no
-  finer signal. ⚠️ **MOD gives no return signal at all**, so a returned MOD package will keep reading
-  `paid` until you set its Status to `return` **by hand** (a cell edit on the dashboard). That correction is safe: a
-  status only ever moves forward, so later runs won't undo it.
-- Everything earlier in the journey (`shipped`, `delivered`) stays the retailer's to report — if both
-  sources wrote it, they'd overwrite each other every run.
+**Expected Payout** is BFMR's committed price, written as soon as your hand-typed order number links
+the reservation, before shipping. It is prorated by Total Cost across the order's rows; once BFMR
+holds a tracking number for a purchase, the commitment is scoped to that shipment's rows. If BFMR
+changes the price, the cells follow and an alert names old → new. MOD publishes no price (blank,
+never `0`).
 
-**Expected Payout fills early, with BFMR's committed price** (2026-09-11; its own column since
-2026-09-18). BFMR's tracker carries the payout price it has committed to (`payout_price`/
-`total_payout`) from the moment a purchase exists — before shipping, before payment — so the sync
-writes it into **Expected Payout** the moment your hand-typed order number links the reservation,
-prorated by Total Cost across the order's rows. Actual Payout stays blank until the package
-settles, and the dashboard shows the *projected* profit on open BFMR rows from the commitment. Two
-alerts come with it: if a later run finds BFMR **changed** the committed price, the cells are
-updated to the new figure and the alert names old → new; and if the **settled** amount disagrees
-with the commitment, the run that writes the settlement says so (the paid figure still lands
-as-is), and the order stays listed on the dashboard's **Reconciliation** page, which compares the
-two columns as order totals. The settlement — real amount, Payout Date, `paid` status — never
-touches Expected Payout, and the commitment pass never touches a row that is `paid`/`return`,
-carries a Payout Date, or is being settled in the same run. MOD's API publishes no price, so MOD's
-Expected Payout stays blank and MOD is never reconciled; a `0` is still never written — an
-unpriced purchase leaves the cell alone.
+**Actual Payout, Payout Date and `paid`** come from the settlement: BFMR's tracker, or a package
+appearing in MOD's received-items report. A payout per package is **split pro-rata by Total Cost**
+across the rows sharing its tracking number, so a two-item box is not paid twice. The settlement
+never touches Expected Payout; if the two disagree the run says so, and the order stays on the
+dashboard's **Reconciliation** page.
 
-**`Tracking Submitted`** is a checkbox: ticked when the buying group holds that package's tracking
-number. The values are real booleans; the dashboard renders them as a tick. It's for reading, not
-for deciding: what's already been submitted is still re-derived from
-the group on every run, so a failed ledger write can't strand a package. An unticked box next to a
-shipped row is the thing worth noticing. Boxes are never cleared automatically.
+**Status** moves forward only, to `paid` or `return`, the two outcomes a retailer never reports.
+BFMR reports both. **MOD reports no returns**: set a returned MOD row's Status to `return` by hand
+on the dashboard; later runs will not undo it. `shipped` and `delivered` stay the retailer's to
+report.
 
-**Insurance** is filled from the group's own premium line. A package that's been paid out and shows
-no premium records a real `0`; one still in transit is left blank, since the premium may not be
-posted yet. An inferred `0` never overwrites a figure you typed yourself.
+**Insurance** is the group's premium: a paid package with none records `0`, one in transit stays
+blank. A cell typed on the dashboard is never overwritten by the sync.
 
-**BFMR insurance is filed automatically** when enabled. It never declares a package value (BFMR works
-it out from the shipment, so there's no way to over-declare and overpay), never files twice, and only
-covers shipments worth at least `BFMR_MIN_INSURANCE_VALUE`. The **premium** is read back into the
-Insurance column and the **gross** payout into Actual Payout — rather than netting the two — so the
-deduction is visible rather than silently shrinking your payout. MOD never charges a premium, so its
-rows record a real `0`.
+## BFMR Insurance
 
-> **Best Buy sometimes ships several orders in one carton** under a single tracking number. BFMR
-> allows a number once, so the second order is rejected and
-> [asks you to append B/C/D](https://support.bfmr.com/hc/en-us/articles/50968170907547) until it's
-> accepted — their record then reads `529900000009B` where your ledger reads `529900000009`.
->
-> You get an **Action needed** alert naming the manual steps: add the tracking by hand (with
-> the order number on it), **file the insurance by hand**, and raise a support ticket with proof of
-> purchase. The tool won't do any of them for you — until the tracking exists, BFMR has no shipment
-> to insure, and an automatic filing would post against nothing while reporting success.
->
-> There's nothing to edit in the ledger. The next run finds whichever letter you used, ticks
-> Tracking Submitted, and fills in the payout, premium and status as they arrive.
+With `--apply` (or the scheduled sync), BFMR insurance is filed automatically for each shipment
+worth at least `buying_groups.bfmr.min_insurance_value` (0 = every shipment), never twice. A filing
+carries **only the tracking number**: BFMR derives the value from the shipment's items (so nothing
+is over-declared) and uses the name and payee address on your account. The **premium** goes to
+Insurance and the **gross** payout to Actual Payout, so the deduction stays visible.
 
-Once you've done a dry run and a one-package live test, set `BUYING_GROUP_SYNC_ENABLED=true` to let the
-scheduled run do it too — it's off by default because it spends real money unattended.
+## Special Cases
+
+**Best Buy combined cartons.** Best Buy sometimes ships several orders under one tracking number.
+BFMR allows a number once and
+[asks you to append a letter](https://support.bfmr.com/hc/en-us/articles/50968170907547); the sync
+does that itself, trying `B`, `C`, … until BFMR accepts one, confirms it by re-reading the tracker,
+and files insurance under that spelling. The ledger keeps the bare number. Only if no letter works
+do you get an **Action needed** alert: add the number to the purchase in My Tracker by hand and
+raise a BFMR ticket with proof of purchase. A box attaches only to the purchases its quantity can
+hold; one that fits none is an Action needed alert, never dropped.
+
+**The combined-package auto-reply.** BFMR then emails for the carton's serial numbers and the
+Best Buy receipt PDF. `python -m respond_bfmr` (dry run; `--apply` sends) matches each email to the
+ledger, fetches the serials live from Best Buy (a paid browser session, `--apply` only) and replies
+with the receipts from `data/receipts/`. Any gap blocks that reply and raises one alert.
+`buying_groups.bfmr.combined_package_autoreply_enabled` (off by default) lets the scheduled run do
+it; turn it on after a supervised `--apply --limit 1`. It reads and sends as **its own Gmail
+account** (`combined_package_gmail_address` / `_app_password`), never the alerts one, even when it is
+the same mailbox; either blank with the switch on fails preflight.
+
+**Costco TVs.** BFMR takes a Costco TV's order number as its tracking number. With
+`costco_tv_order_number_as_tracking` on (default), a Costco row routed to BFMR whose item matches
+`costco_tv_item_pattern` (default `\bTV\b`) carries its order number as Tracking Number from
+`ordered` on, and keeps it when Costco reports a carrier number; Status still follows Costco.
+
+**Cancelled orders.** When the retailer cancels an order BFMR still holds, the run alerts; it never
+cancels anything at a group, because that would give up the reservation. A partial cancellation
+alerts only while BFMR holds more units than are still coming.

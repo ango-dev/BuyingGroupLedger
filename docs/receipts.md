@@ -1,63 +1,54 @@
-# Receipt capture
+# Receipt Capture
 
-Proof of purchase for every order, rendered to PDF and kept beside the ledger, linked from the
-**Receipt Link** column.
+Proof of purchase for every order, saved as a file beside the ledger and linked from the
+**Receipt Link** column. You need it at tax time and when a buying group asks about a missing
+package, and retailer order pages are not a durable record (limited history; cancelled or reissued
+orders can vanish).
 
-## Why
+## How It Works
 
-Every row in the ledger is a cost you will substantiate at tax time, and a claim you may have to
-prove to a buying group when a package goes missing. Retailer order pages are not a durable record:
-Best Buy and Costco keep limited history, and a cancelled or reissued order can vanish from the page.
+Each run stores every **newly-seen** order's receipt under `receipts.dir` (default `data/receipts`,
+inside every backup) as `<retailer>/<YYYY-MM>/<order id>.<ext>`, and writes the link
+`/receipts/<retailer>/<YYYY-MM>/<order id>.<ext>` into Receipt Link on every row of the order.
 
-So each run renders every **newly-seen** order's receipt to PDF and stores it under
-`receipts.dir` (default `data/receipts`, inside every backup) as
-`<retailer>/<YYYY-MM>/<order id>.<ext>`, and writes the link `/receipts/<retailer>/<YYYY-MM>/<order id>.<ext>`
-into Receipt Link — on every row of the order, since a receipt is per order. The link is
-**relative to the dashboard**: it opens wherever the dashboard is served from (the LAN, your
-WireGuard link, a new host after a restore) and carries no hostname or secret. The BFMR auto-reply
-reads such a link straight off the disk when it attaches the receipt.
+- The link is **relative to the dashboard**, so it works wherever the dashboard is served (LAN, VPN,
+  a new host after a restore) and carries no hostname. The BFMR auto-reply reads the file straight
+  off the disk.
+- The dashboard serves `/receipts/` files of type pdf, png, jpg, jpeg and webp only.
+- From the Settings page the receipts folder can be moved only within `data/`; a path set by hand
+  in `config.json` stays.
+- `receipts.capture_enabled` (`RECEIPT_CAPTURE_ENABLED`) is the switch. Capture costs a paid
+  Browser-Use session: one per profile and retailer, on a run that found an order with no stored
+  receipt. Off, orders record with a blank Receipt Link.
 
-`receipts.capture_enabled` (`RECEIPT_CAPTURE_ENABLED`) is the switch; off = every run records
-orders exactly as before with a blank Receipt Link. There is nothing else to configure.
+The capture opens the order's page in the profile's cloud browser and prints it to PDF (a PNG
+screenshot where printing is unavailable). `receipts/sources.py` says, per retailer, which page to
+use and what marks it final. A pre-shipment invoice ("Not Yet Shipped") is refused, and the
+document must name its own order id, so a stale or look-alike page never becomes the record.
 
-## What a receipt is, per retailer
+> **Receipts are PII**: name, delivery address, card last 4, totals. `data/` is gitignored and
+> never enters the image. Set a dashboard password and keep the dashboard on loopback, your LAN or
+> your VPN; never port-forward it.
 
-The capture opens the order's own page in the profile's cloud browser (the same session the
-scraper uses) and prints it to PDF, or falls back to a PNG screenshot where printing is not
-available. Which page, and what the page must show before it counts as final, is the rule table in
-`receipts/sources.py` — a pre-shipment invoice ("Not Yet Shipped") is refused at capture time so it
-never becomes the permanent record, and the document must name its own order id (a Costco page can
-show the previous order's render; two Amazon Business invoices can be near-identical).
+## By Hand
 
-> ⚠️ **Receipts are PII.** A receipt carries your name, delivery address, card last 4 and totals.
-> `data/` is gitignored and never enters an image; the dashboard has no login, so keep it on
-> loopback, your LAN or your VPN.
+The Orders page's *Add a row* form, the ⤒ button in a Receipt Link cell, and the drop zone on an
+order's page all take a pdf, png, jpg or webp up to 25 MB. The file is stored under the same key the
+capture uses and linked on every row of the order. Deleting an order's rows deletes its receipt
+once nothing links to it.
 
-## By hand
-
-The Orders page's add form takes a photo or PDF, the Receipt Link cell in the table has an
-upload button (⤒), and an order's page has an *Upload receipt* button: the file is stored under the same key the capture uses and the link becomes Receipt Link
-on every row of the order. Accepted: pdf, png, jpg, webp, up to 25 MB.
-
-## Checking what is stored
+## Checking What Is Stored
 
 ```bash
-python -m scripts.receipt_verify                  # every stored receipt: its own order id, not
-                                                  # pre-shipment, a total, a payment method
-python -m scripts.receipt_verify --purge          # delete the failing ones and blank their links,
-                                                  # so the next run captures them again
-python -m scripts.backfill_receipts               # orders on the ledger with no receipt (dry run)
-python -m scripts.backfill_receipts --apply       # capture them (a cloud browser session per profile)
+python -m scripts.receipt_verify              # each stored receipt: its own order id, final, a total, a payment method
+python -m scripts.receipt_verify --purge      # delete the failures and blank their links; the next run recaptures
+python -m scripts.backfill_receipts           # orders with no receipt (dry run)
+python -m scripts.backfill_receipts --apply   # capture them (a cloud browser session per profile)
+python -m scripts.receipt_files               # orphan files, dead links, twin names (dry run; --apply tidies)
 ```
 
-Both are on the dashboard's Tools menu too. `receipt_verify` reads files; `backfill_receipts` spends
-browser sessions and asks first.
+All are on the dashboard's Tools menu. `backfill_receipts --apply` spends browser sessions and asks
+first. The Audit fails a delivered or paid row with no Receipt Link and names this backfill.
 
-Receipts lived in an OCI bucket until 2026-09-18; a one-time migration brought them into
-`receipts.dir` and rewrote the links, and was deleted once it had run.
-
-## Probing a retailer's receipt page
-
-`python -m scripts.receipt_probe` settles what a retailer's receipt page actually gives you
-(printable? what wording marks it final?). Uploads nothing; it is how a new retailer's row in
-`receipts/sources.py` gets written.
+`python -m scripts.receipt_probe` shows what a retailer's receipt page offers (printable? what
+marks it final?); it is how a new retailer's entry in `receipts/sources.py` is written.

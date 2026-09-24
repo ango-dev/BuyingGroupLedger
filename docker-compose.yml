@@ -3,7 +3,7 @@
 # .dockerignore keeps config.json and .state.json out of the build context.
 #
 # Works as-is on a Raspberry Pi (64-bit OS): the image builds for the host's own architecture, and
-# no browser runs locally — Browser-Use Cloud holds it. See "Raspberry Pi" in README.md.
+# no browser runs locally — Browser-Use Cloud holds it. See DEPLOY.md.
 services:
   ledger:
     build: .
@@ -61,12 +61,11 @@ services:
       # files BEFORE the first `up` (DEPLOY.md, "let the dashboard ask"): an empty file reads as
       # "not configured" and the wizard fills it.
       - ./config.json:/app/config.json
-      # The app's own state — currently just Costco's refresh tokens.
+      # The app's own state: Costco's refresh tokens and the dashboard's session secret.
       # MUST be writable — NOT :ro. Costco ROTATES the refresh token on every refresh and
       # CostcoApiClient._save_auth persists the new one alongside the cached id_token. Mounted
-      # read-only, the write raises OSError, Costco falls back to the PAID agent every run, and the
-      # rotated token is lost — which can strand the stored one and force a manual re-grab. Keeping
-      # it a SEPARATE file from config.json is what lets that stay read-only.
+      # read-only, the write fails and the rotated token is lost — which can strand the stored one
+      # and force a manual re-grab.
       - ./.state.json:/app/.state.json
       - ./data:/app/data          # THE LEDGER (data/ledger.sqlite3) and the CSV snapshots
       - ./logs:/app/logs          # run.log, the overlap lock, and the .last_run heartbeat

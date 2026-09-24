@@ -2,7 +2,7 @@
 # SDKs (playwright here is a CLIENT that connects to the remote browser over CDP — no local
 # Chromium, no `playwright install`). Scheduling is handled inside the container by supercronic.
 #
-# Builds on both amd64 and arm64 (Raspberry Pi 4/5 on a 64-bit OS). See "Raspberry Pi" in README.md.
+# Builds on both amd64 and arm64 (Raspberry Pi 4/5 on a 64-bit OS). See DEPLOY.md.
 FROM python:3.12-slim
 
 # --- supercronic (cron designed for containers) ---
@@ -31,8 +31,8 @@ RUN set -eux; \
 
 WORKDIR /app
 
-# requirements-web.txt is the read-only dashboard's stack (FastAPI, Jinja2, uvicorn). It rides in
-# this one image on purpose -- the entrypoint starts it
+# requirements-web.txt is the dashboard's stack (FastAPI, Jinja2, uvicorn). It rides in
+# this one image on purpose (one container, not two) -- the entrypoint starts it
 # beside the scheduler when WEB_ENABLED is true. It is still a separate file so `python -m web` on a
 # desktop stays an opt-in install.
 COPY requirements.txt requirements-web.txt ./

@@ -1,80 +1,71 @@
-# Importing history by hand
+# Importing History
 
 _Part of the [Buying Group Ledger](../README.md) docs._
 
-Entering finished orders by hand, and what the audit will and won't catch afterwards.
+> **Only import FINISHED orders**: `delivered`, `paid`, `return`, `cancelled`. The scrapers follow
+> open orders on their own, so an imported `ordered` or `shipped` row only risks a duplicate beside
+> the scraped one. Terminal rows are never re-read.
 
-> **Only ever hand-import FINISHED orders** — `delivered`, `paid`, `return`, `cancelled`. Never import
-> `ordered` or `shipped` rows. A single run already keeps those current: the scrapers discover open
-> orders and re-check them to delivery on their own, so importing them by hand duplicates work the
-> ledger does for free, and any detail you get slightly wrong (a re-worded item name, a different
-> shipment number) becomes a duplicate row the next run appends beside yours. Terminal rows are the
-> safe class precisely because nothing will ever re-read them — they're history, and no scraper will
-> fight you over them.
+| Way | For |
+|---|---|
+| **Tools › Import** on the dashboard | Most imports: map a CSV's columns, preview, land the complete rows, fix the rest on a staging sheet. See [The web dashboard](operations.md#the-web-dashboard). |
+| `scripts/import_history.py` | A spreadsheet whose profit figures you want proven before anything is written. |
+| *Add a row* on the Orders page | A handful of rows. |
 
+## `scripts/import_history.py`
 
-## Importing a spreadsheet with `scripts/import_history.py`
-
-For more than a handful of rows, use the importer instead of pasting. It is **dry-run by default**:
+Dry run by default:
 
 ```bash
-python -m scripts.import_history old.csv --rate-add "SUB Rate:SUB" --profile profile-alpha
+python -m scripts.import_history old.csv --rate-add "SUB Rate:SUB" --profile profile-1
 python -m scripts.import_history old.csv --apply
 ```
 
-It maps the source headers onto the ledger's columns (aliases plus `--map "Src=Target"`), converts
-dates to ISO (refusing a file whose day/month order it cannot prove — `--date-format mdy|dmy`),
-derives Cost Per Item, splits a cell holding several tracking numbers into one row per box, numbers
-shipments per order, reads placeholders such as `Please fill` / `#VALUE!` as blank, and then does the
-one thing pasting cannot: **it recomputes every source row's own profit figure from the mapped
-inputs and refuses the import if any row disagrees by more than a cent.** That is what proves a
-rate mapping (a sign-up-bonus rate that only applies when a flag column is TRUE, hence `--rate-add
-COL:FLAG`) and an insurance sign before a cell is written. It then previews against the ledger —
-update vs append, orders the scrapers already recorded under other item names (skipped; the scraped
-rows are authoritative), tracking numbers already held under another order — and writes a
-normalised CSV under `data/`. Rows that are not terminal are refused (`--allow-open`); rows with no
-cost are skipped so a later scrape can still fill that order (`--keep-no-cost`); rows with no
-tracking number are accepted with a warning; rows with no order number get a synthetic one
-(`BFMR-IMPORT-<date>`) so a referral bonus still reaches the tax report. `--apply` writes through
-the same upsert every scrape uses and re-sorts; bracket it with `audit_ledger --save-snapshot` /
-`--compare --strict`.
+It maps headers onto the ledger's columns (`--map "Src=Target"` overrides), converts dates to ISO
+(a file whose day/month order it cannot prove needs `--date-format mdy|dmy`), derives Cost Per
+Item, splits a cell of several tracking numbers into one row per box, and reads `Please fill` /
+`#VALUE!` as blank.
 
-## Entering history by hand
+**It recomputes every row's profit and refuses the import if any row disagrees with the source's
+profit column** (auto-detected, or `--source-profit`) by more than a cent. That proves the rate
+mapping (`--rate-add COL:FLAG`: a bonus rate that applies only when a flag column is TRUE) and the
+insurance sign before a cell is written.
 
-For a handful of finished orders, the dashboard's *Add a row* (Orders page) is fine, and in one way
-safer than routing them through `sync_csv_to_ledger`: a hand-added row doesn't go through the
-upsert's merge, so a mistake can't silently overwrite an existing row — a key that already exists is
-refused, and errors just sit there as rows, which the audit names. (The Google Sheet this page used
-to describe pasting into was retired 2026-09-18.)
+The preview shows updates vs appends, orders already scraped under other item names (skipped unless
+`--allow-existing-orders`) and tracking numbers held by another order, and writes a normalised CSV
+under `data/`.
 
-**Dates are `YYYY-MM-DD`, always.** `Order Date` is part of the row's upsert key, so any other
-spelling is a different row.
+| Row | Treatment |
+|---|---|
+| Not terminal | Refused (`--allow-open` overrides). |
+| No cost | Skipped so a later scrape can fill the order (`--keep-no-cost` overrides). |
+| No tracking number | Accepted with a warning. |
+| No order number | Given a synthetic one (`<group>-IMPORT-<date>`), so a referral bonus still reaches the tax report. |
 
-Then, per row:
+`--apply` writes through the same upsert every scrape uses and re-sorts. Bracket it with
+`audit_ledger --save-snapshot` / `--compare --strict`.
+
+## Entering Rows by Hand
+
+*Add a row* on the Orders page refuses a key that already exists, so a mistake cannot overwrite a
+row. **Dates are `YYYY-MM-DD`**: Order Date is part of the key.
 
 | Column | What to put in it |
 |---|---|
-| `Cost Per Item` | `Total Cost ÷ Quantity` — `total_cost_matches_quantity` fails if it doesn't reconcile |
-| `Cashback Rate` | the **total** rate earned, as one number. If your source tracks base and bonus rates in separate columns, add them together |
-| `Insurance` | a **positive** cost. The profit formula subtracts it |
-| `Shipment` | `1`, unless one order has two rows with the **same item name** — then number them by tracking number, `1` and `2`, or they collide on one upsert key |
-| `Shipping` | `0` if your costs are already all-in |
-| `Total Profit` | nothing — it is computed from the row on every read, as is `COGS` |
+| Cost Per Item | Total Cost ÷ Quantity (`total_cost_matches_quantity` warns if it doesn't reconcile) |
+| Cashback Rate | The **total** rate earned, as one number (add base and bonus together) |
+| Insurance | A **positive** cost; the profit formula subtracts it |
+| Shipment | `1`, unless one order has two rows with the **same item name**: number them `1` and `2` by tracking number, or they collide on one key |
+| Shipping | `0` if your costs are already all-in |
+| Card | Type it: Card is derived from Card Last 4 only during a scrape |
+| Total Profit, COGS | Nothing; both are computed from the row |
 
-Leave `Profile`, `Order Link`, `Tracking Link`, `Delivery Address`, `Card Last 4` and `Last Scraped At`
-blank if you don't have them; none of it is read for a terminal row. Fill `Card` and `Cashback Rate`
-directly, since `Card` is normally *derived* from `Card Last 4` and that only happens during a scrape.
+The Audit's `mandatory_by_stage` check expects a finished row to carry its Order Link, Delivery
+Address, Card, Card Last 4, Profile and (from delivered on) a Receipt Link; leave what you don't have
+blank and it will be listed. The next run re-sorts the ledger (`python -m scripts.sort_ledger
+--apply` does it now); then check the Audit page or `python -m scripts.audit_ledger`.
 
-Finish with `python -m scripts.sort_ledger --apply`, then `python -m scripts.audit_ledger`.
-
-**What the audit will and won't catch.** It's a strong net for *mechanical* errors — a date in the
-wrong spelling, duplicate keys, `Cost Per Item` not reconciling, text in numeric columns, embedded
-newlines, blank Order IDs, unknown statuses, non-integer Shipment. All FAIL-level, all named with a
-row number.
-
-It is blind to *semantic* ones. `cashback_rate_sane` only checks that a rate is plausible, so **1%
-where you meant 13.5% passes silently**, as does a negative Insurance. So verify those two by
-arithmetic instead: after entering them, compare the ledger's computed `Total Profit` against the profit your
-old records show, on two or three rows chosen to cover each rate structure you use. If those agree to
-the cent, the rate and sign mapping is right everywhere. It takes two minutes and it's the only check
-that proves the numbers rather than the shapes.
+**What the audit won't catch.** It catches mechanical errors (date spelling, duplicate keys, text in
+number columns, negative amounts, unknown statuses) but not semantic ones: **1% where you meant
+13.5% passes** `cashback_rate_sane`. Compare the computed Total Profit with your old records on two
+or three rows per rate structure; if they agree to the cent, the mapping is right.

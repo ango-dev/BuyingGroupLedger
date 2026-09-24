@@ -2,55 +2,39 @@
 
 _Part of the [Buying Group Ledger](../README.md) docs._
 
-> The source of truth for pending work is `the design notes` in the private repository; this page is the
-> public summary and can lag it.
+**Where things stand.** Every retailer runs on a deterministic, agent-free path (Amazon and Amazon
+Business parse the order pages; Best Buy reads its order API through a cloud browser; Costco reads
+its GraphQL API with a stored token). The buying-group sync posts tracking, files insurance and
+reads payouts back unattended. Receipts are files beside the ledger. The ledger is a SQLite file
+with the web dashboard as its UI, and everything runs in one Docker container (amd64 or a 64-bit
+Raspberry Pi). A failure writes a dossier (page, screenshot, selector audit) and alerts; there is no paid
+fallback.
 
-**Where things stand (2026-09).** Every retailer runs on a deterministic, agent-free path
-(Amazon and Amazon Business parse the order pages; Best Buy reads its order API through a cloud
-browser; Costco reads its GraphQL API with a stored token). The buying-group sync posts tracking,
-files insurance and reads payouts back unattended. Receipts are captured as files beside the ledger
-(served by the dashboard) with a capture-time guard that refuses a page which does not name its
-own order. The ledger is a SQLite file behind a worksheet-faced adapter, with the web dashboard as
-its UI (the Google Sheet was retired 2026-09-18; its story is in `the design notes`). The ledger
-audit is a read-only script with 34 checks. Failures write a dossier — page, screenshot, selector audit —
-instead of running a paid agent (retired 2026-08-29).
+Nothing is queued to build right now.
 
-**Worth building, none urgent**
+## Built, Waiting for a Real Case
 
-- **Best Buy rewards** into the `Rewards Used` column (only Amazon prices rewards today).
+These ride real orders and close when one comes along.
 
-**Built and live-validated; still accumulating evidence**
+- **Carrier re-label.** A changed tracking number on a single-unit row is treated as the carrier
+  re-issuing the label (new number recorded, old one kept as a money-free `superseded` row), not as
+  an undisclosed split.
+- **Package ID matching.** Rows match on the retailer's own package id (Amazon's `shipmentId`,
+  Costco's `packageNumber`, Best Buy's `groupId`) before the tracking number, so a package keeps its
+  row whatever position its card takes. The re-ordered-page and re-label cases have not all been
+  seen live.
+- **Spend caps.** The first card to pass a limit in real use: the blended row and the re-derived
+  rates after later syncs.
+- **Dashboard import and setup.** The first real CSV through Tools › Import, and the setup wizard on
+  a fresh host.
 
-These ride real orders and close on their own schedule rather than being work items.
+## Parked
 
-- **Package ID.** Every row now carries the retailer's own per-package identity (Amazon's
-  `shipmentId`, Costco's `packageNumber`, Best Buy's `groupId`), matched on before the tracking
-  number so a package lands on the same row whatever position its card takes. Live-proven as
-  "fills in and updates in place"; the re-order and re-label cases wait for a real one.
-- **`superseded` rows.** A re-issued tracking number keeps its row as a retired, money-free
-  record instead of being deleted; the sync never re-posts, insures or pays it. Restored the one
-  historical case; the first new one is unobserved.
-- **Loud same-key collisions.** Two lines one parse could not tell apart now end in a failure
-  dossier and an alert rather than a silent merge. Built against three past incidents; no new one yet.
-- **Amazon multi-shipment split.** Shipment `1` must update in place while `2`/`3` append, and
-  the order must stay open until the last box delivers. Validated on Costco and Best Buy; the
-  Amazons share the code path but have not yet had an order split mid-run.
-- **The qty-1 re-label rule.** A changed tracking number on a single-unit row is treated as the
-  carrier re-issuing the label (new number recorded, old one kept as a `superseded` row) rather
-  than as an undisclosed split. Built 2026-09-09, unproven live.
-- **BFMR split shipment.** No purchase has ever had two shipments; the create-vs-update path is
-  still theory.
-- **arm64 / Raspberry Pi.** The container builds and runs on amd64 and a wrong-architecture build
-  fails loudly, but real Pi hardware has never run it.
-
-**Parked**
-
-- **`scripts/import_history.py`** — designed, deferred: a one-off import is faster to paste than
-  to automate; its old-style negative return rows would be netted at import if one ever recurs
-  (see [Importing history](importing-history.md)).
-- **Walmart** as the next retailer, only if volume warrants. **Costco Business Center** accounts,
-  only if one exists. **Costco 2FA**, deferred with a tripwire. **A tracking-API tier**
-  (17TRACK/EasyPost), evaluated and not worth it as a delivery watch.
-- **Auto-creating BFMR purchases from reservations** — order numbers go into BFMR by hand right
-  after ordering, by design.
-- **The healthcheck's unhealthy state notifies nobody**; accepted for now.
+- **Walmart** as a retailer, if volume ever warrants it.
+- **Best Buy rewards** in the Rewards Used column (only Amazon prices rewards today), when a Best Buy
+  order pays with a rewards certificate.
+- **Costco Business Center** accounts, if one exists. **Costco 2FA**, when Costco adds it (the
+  sign-in names it if so).
+- **Auto-creating BFMR purchases from reservations.** Order numbers go into BFMR by hand, by design
+  (see [Buying groups](buying-groups.md)).
+- **A tracking-API tier** (17TRACK, EasyPost): evaluated, not worth it as a delivery watch.

@@ -1,9 +1,9 @@
 {
-  "//": "Copy to config.json and fill in. ENVIRONMENT VARIABLES OVERRIDE EVERY VALUE HERE — the name in each `// <KEY>` note below is the variable that wins over it, from .env or the shell. That is what makes a one-off possible without editing this file: BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking. docs/configuration.md lists all of them in one table. Booleans are true/false in BOTH places; 1/yes/on still parse, but anything unrecognised is false, so a money switch fails closed on a typo.",
-  "//2": "EVERY setting lives here — nothing is environment-only any more, including the container schedule. .env is purely the OVERRIDE layer, and is where dev/one-off values belong: a temporary LOOKBACK_DAYS, or a host-specific RUN_INTERVAL_HOURS, without touching the config everything else shares.",
+  "//": "Copy to config.json and fill in (or use the dashboard's Settings page). An environment variable overrides each value here, from .env or the shell; its name leads each `// <key>` note (e.g. BFMR_MIN_INSURANCE_VALUE=999 python -m sync_tracking). docs/configuration.md lists them all. Booleans are true/false; anything unrecognised is false, so a money switch fails closed on a typo.",
+  "//2": "EVERY setting lives here, including the container schedule. .env is only the override layer, for dev or host-specific values (a temporary LOOKBACK_DAYS, a host's own RUN_INTERVAL_HOURS).",
 
   "browser_use": {
-    "// api_key": "BROWSER_USE_API_KEY — required. The cloud browser every scraper runs in (CDP reads, receipt capture, the Costco token grab) — NOT just the agent.",
+    "// api_key": "BROWSER_USE_API_KEY — required. The cloud browser the scrapers, receipt capture and the Costco token grab run in.",
     "api_key": ""
   },
 
@@ -32,7 +32,7 @@
     "default_cashback_rate": 0,
     "// amazon_promo_cashback_enabled": "AMAZON_PROMO_CASHBACK_ENABLED — add Amazon's per-order 'Earn N% back' promo on top of the card's rate.",
     "amazon_promo_cashback_enabled": true,
-    "// amazon_gift_card_netting_enabled": "AMAZON_GIFT_CARD_NETTING_ENABLED — record the gift-card amount an order was part-paid with (the Gift Card column; the COGS formula subtracts it) and the Amazon rewards spent on it (the Rewards Used column; kept in cost, out of the cashback basis), so no cost or cashback is booked on money the card never spent. false leaves the cell blank and COGS uses the full sticker cost.",
+    "// amazon_gift_card_netting_enabled": "AMAZON_GIFT_CARD_NETTING_ENABLED — record the gift card (Gift Card column, subtracted in COGS) and Amazon rewards (Rewards Used column, out of the cashback basis) an order was part-paid with, so no cashback is booked on money the card never spent. false leaves them blank and COGS uses the full cost.",
     "amazon_gift_card_netting_enabled": true
   },
 
@@ -48,23 +48,23 @@
       "api_secret": "",
       "// min_insurance_value": "BFMR_MIN_INSURANCE_VALUE — only insure shipments worth at least this. BFMR charges ~0.45% with a $2.00 MINIMUM, so below roughly $450 the floor dominates and the effective rate passes 1%. 0 insures everything.",
       "min_insurance_value": 0,
-      "// costco_tv_order_number_as_tracking": "BFMR_COSTCO_TV_ORDER_NUMBER_AS_TRACKING — BFMR's rule for Costco TVs: the ORDER NUMBER is the tracking number. On, a Costco row shipping to BFMR whose item name matches the pattern below carries its order number as Tracking Number as soon as it is ordered, so the next run submits and insures it; the row keeps that number when Costco later reports a carrier number, while its status still follows Costco.",
+      "// costco_tv_order_number_as_tracking": "BFMR_COSTCO_TV_ORDER_NUMBER_AS_TRACKING — BFMR's rule for Costco TVs: the order number is the tracking number. On, a Costco row routed to BFMR whose item name matches the pattern below carries its order number as Tracking Number from ordered on (so the next run submits and insures it), and keeps it when Costco reports a carrier number.",
       "costco_tv_order_number_as_tracking": true,
       "// costco_tv_item_pattern": "BFMR_COSTCO_TV_ITEM_PATTERN — which Costco item names count as a TV for that rule (a regular expression, case-insensitive).",
       "costco_tv_item_pattern": "\\bTV\\b",
-      "// combined_package": "The next five settings drive ONE feature: auto-answering BFMR's 'Combined Best Buy Package' emails (their request for the units' serial numbers + the receipt PDF). THE MAILBOX DEFAULTS TO THE ALERTS GMAIL ACCOUNT above (alerts.gmail_address / gmail_app_password) — requests read and replies sent with those credentials. To give the feature its own account instead, set BOTH combined_package_gmail_* keys below.",
+      "// combined_package": "The next five settings drive ONE feature: auto-answering BFMR's 'Combined Best Buy Package' emails (their request for the units' serial numbers + the receipt PDF). It reads and replies from its OWN Gmail account (combined_package_gmail_* below), never the alerts account.",
       "// combined_package_autoreply_enabled": "BFMR_COMBINED_PACKAGE_AUTOREPLY_ENABLED — SENDS REAL MAIL to BFMR. On, every scheduled run answers their combined-package emails unattended. Leave off until a dry run and a supervised first send have both been done. `python -m respond_bfmr` ignores this.",
       "combined_package_autoreply_enabled": false,
-      "// combined_package_sender_domains": "BFMR_COMBINED_PACKAGE_SENDER_DOMAINS — From-domains that count as BFMR when scanning the alerts inbox for combined-package requests, comma-separated.",
+      "// combined_package_sender_domains": "BFMR_COMBINED_PACKAGE_SENDER_DOMAINS — From-domains that count as BFMR when scanning the auto-reply's inbox, comma-separated.",
       "combined_package_sender_domains": "buyformeretail.com,bfmr.com",
-      "// combined_package_reply_cc": "BFMR_COMBINED_PACKAGE_REPLY_CC — optional Cc on every combined-package reply. Set it to the address BFMR emails if that is NOT the replying account (e.g. requests arrive at your main address and forward to the reply inbox) — otherwise the reply is only visible in the replying account's Sent Mail. Blank = none.",
+      "// combined_package_reply_cc": "BFMR_COMBINED_PACKAGE_REPLY_CC — optional Cc on every reply: the address BFMR writes to, if requests are forwarded to the replying account (otherwise the reply shows only in that account's Sent Mail). Blank = none.",
       "combined_package_reply_cc": "",
       "// combined_package_gmail_address": "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS / _APP_PASSWORD — the Gmail account the auto-reply reads BFMR's requests from and replies as (its own app password). Required when the auto-reply is on; it never uses the alerts account, so enter it here even if it is the same one.",
       "combined_package_gmail_address": "",
       "combined_package_gmail_app_password": ""
     },
     "mod": {
-      "// ": "MaxOutDeals needs a bearer token AND an IP allowlist — add this machine under the firewall tab in your MOD profile, or every call is rejected however valid the token. user_id and email are required in the BODY of every request.",
+      "// ": "MaxOutDeals needs a bearer token AND an IP allowlist: add this machine under the firewall tab in your MOD profile, or every call is rejected. user_id and email go in the body of every request.",
       "// enabled": "MAXOUTDEALS_ENABLED — this group's own switch under sync_enabled. Off, the sync leaves MOD alone while other groups still run. `python -m sync_tracking --group MOD` overrides it.",
       "enabled": true,
       "api_base_url": "https://www.maxoutdeals.com",
@@ -75,13 +75,13 @@
   },
 
   "receipts": {
-    "// capture_enabled": "RECEIPT_CAPTURE_ENABLED — render each newly-seen order's receipt to PDF and keep it under `dir`, linked from Receipt Link. Off = orders record with a blank Receipt Link.",
+    "// capture_enabled": "RECEIPT_CAPTURE_ENABLED — render each newly-seen order's receipt to PDF under `dir`, linked from Receipt Link. Costs money: capture opens a paid Browser-Use session (one per profile and retailer on a run with new orders). Off = a blank Receipt Link.",
     "capture_enabled": true,
-    "// dir": "RECEIPTS_DIR — where the receipt files live, relative to the repo root (in Docker the mounted data/ volume, inside every backup). The dashboard serves them at /receipts/.",
+    "// dir": "RECEIPTS_DIR — where the receipt files live, relative to the repo root (in Docker the mounted data/ volume, inside every backup). The Settings page keeps it within data/. The dashboard serves them at /receipts/.",
     "dir": "data/receipts"
   },
 
-  "// container": "Read by docker/entrypoint.sh on start. These used to be docker-compose-only, because compose interpolates its own file before Python runs — the entrypoint now resolves them from here instead. Irrelevant outside Docker.",
+  "// container": "Read by docker/entrypoint.sh when the container starts. Irrelevant outside Docker.",
   "container": {
     "// run_interval_hours": "RUN_INTERVAL_HOURS — hours between scheduled runs. Each run spends one of MaxOutDeals' 10 daily received-items calls, so preflight warns when the interval implies more than that.",
     "run_interval_hours": 6,
@@ -113,7 +113,7 @@
     "heartbeat_stale_hours": 0,
     "// public_url": "WEB_PUBLIC_URL — the dashboard's address as YOU open it (e.g. http://192.0.2.10:8765 over WireGuard): alerts link a failure dossier to its Activity page through it. Blank = alerts name the path on the host only.",
     "public_url": "",
-    "// allowed_hosts": "WEB_ALLOWED_HOSTS — host NAMES the dashboard answers to, comma-separated (e.g. ledger.local, pi.tailnet.ts.net; .example.com = any subdomain). An IP address, localhost and public_url's host always work; any other name is refused, which stops a web page from reaching the dashboard by re-pointing its own domain at it (DNS rebinding). Read at dashboard start.",
+    "// allowed_hosts": "WEB_ALLOWED_HOSTS — extra host NAMES the dashboard answers to, comma-separated (e.g. ledger.local; .example.com = any subdomain). An IP address, localhost and public_url's host always work; any other name is refused (this stops DNS rebinding). Read at dashboard start.",
     "allowed_hosts": "",
     "// password": "WEB_PASSWORD — the dashboard's sign-in password. Blank = no sign-in at all, so set it BEFORE binding wider than loopback: reachable beyond this machine with no password, the dashboard serves only a page that sets one, using the setup token printed to its log. Changing it signs every device out. Read at dashboard start.",
     "password": "",
@@ -133,7 +133,7 @@
     "path": "data/ledger.sqlite3"
   },
 
-  "// backups": "Scheduled backups: a zip of config.json, .state.json, .env and data/ (the ledger) into backups/, made by the container's own cron (`python -m scripts.backup --scheduled`). The Settings page's Backup & Restore panel shows the schedule and the zips; the oldest are deleted once more than `keep` exist. Read once at container start. Copy backups/ off the Pi too -- one card is one point of failure.",
+  "// backups": "Scheduled backups: a zip of config.json, .state.json, .env and data/ (the ledger) into backups/, made by the container's own cron (`python -m scripts.backup --scheduled`). The Settings page's Backup & Restore panel shows the schedule and the zips; the oldest are deleted once more than `keep` exist. Read once at container start. Copy backups/ off the host too.",
   "backups": {
     "// enabled": "BACKUP_ENABLED — true | false.",
     "enabled": true,
@@ -147,7 +147,7 @@
     "keep": 14
   },
 
-  "// profiles": "One Browser-Use browser identity per entry, each behind its own proxy. `amazon` and `amazon-business` are separate accounts and MUST NOT share a profile — one identity for both is exactly the linking risk the separate profile exists to avoid. `profile_id` is filled in for you by `python -m scripts.create_profile`.",
+  "// profiles": "One Browser-Use browser identity per entry, each behind its own proxy. Amazon and Amazon Business MUST NOT share a profile (one identity for both links the accounts). `profile_id` is filled in by `python -m scripts.create_profile`.",
   "profiles": [
     {
       "label": "profile-1",
@@ -159,7 +159,7 @@
         "password": "REPLACE_WITH_PROXY_PASSWORD"
       },
       "retailers": ["Amazon", "Best Buy"],
-      "// auth": "Username + password, plus a TOTP seed, keyed by retailer. TURN 2-STEP VERIFICATION ON for the account and paste its authenticator secret into `totp_secret` — the deterministic path generates the 6-digit code itself and ticks the 'don't ask on this device' box. Leave `totp_secret` blank only if the account has 2-Step off; a challenge with no seed fails the login rather than falling back to the paid agent, which is never given the seed (a seed is a permanent key, not one 30-second code). Supported for `bestbuy` and `amazon-business`.",
+      "// auth": "Unattended sign-in, keyed by retailer: username + password + a TOTP seed. TURN 2-STEP VERIFICATION ON with an authenticator app and paste its secret into `totp_secret`; the sign-in generates the code itself. A challenge with no seed fails the sign-in with an alert. Amazon, Amazon Business and Best Buy take a seed; Costco takes none.",
       "auth": {
         "bestbuy": { "method": "password", "username": "you@example.com", "password": "", "totp_secret": "" }
       }
@@ -168,8 +168,8 @@
       "label": "profile-2",
       "profile_id": "REPLACE_WITH_BROWSER_USE_PROFILE_ID",
       "retailers": ["Amazon Business", "Costco"],
-      "// auth costco": "Costco sign-in. Its GraphQL data path is browserless and does NOT use this — the browser session is only for minting a refresh token and capturing receipts, and without this block a lapsed browser session needs a human. NO `totp_secret`: Costco has no US 2-step verification, so leave it out entirely (preflight reports OK rather than warning). If Costco ever adds 2FA the sign-in says so by name — see the design notes.",
-      "// auth amazon-business": "Amazon Business self-login. Without this block a lapsed session records NOTHING until you re-run scripts/create_profile by hand. `totp_secret` is the base32 key from Login & Security -> 2-step verification -> Authenticator App -> \"Can't scan the barcode?\" — enrol an AUTHENTICATOR APP rather than SMS/email, because a texted code is one nothing here can receive. Costco needs no auth block: its data path runs on a stored refresh token and opens no browser.",
+      "// auth costco": "Costco sign-in, for minting a refresh token and capturing receipts; its order data needs no browser. Without it a lapsed browser session needs a human. NO `totp_secret`: Costco has no 2-step verification (if it ever adds one, the sign-in says so by name).",
+      "// auth amazon-business": "Amazon Business sign-in. Without it a lapsed session records NOTHING until you re-run scripts/create_profile. `totp_secret` is the base32 key from Login & Security -> 2-step verification -> Authenticator App -> \"Can't scan the barcode?\"; enrol an app, not SMS/email, which nothing here can receive.",
       "auth": {
         "amazon-business": { "method": "password", "username": "you@example.com", "password": "", "totp_secret": "" },
         "costco": { "method": "password", "username": "you@example.com", "password": "" }
@@ -177,7 +177,7 @@
     }
   ],
 
-  "// warehouses": "Which buying group an order belongs to, matched on its DELIVERY ADDRESS. A jig is a deliberately misspelled variant the group hands out ('THIRTEEN SAMMPLE DR1VE') so each order routes distinctly — it is a routing token, never a postal address, and nothing ever files it as one. Name a group literally `Personal` to have those rows dropped before the ledger is written.",
+  "// warehouses": "Which buying group an order belongs to, matched on its DELIVERY ADDRESS. A jig is a deliberately misspelled variant the group hands out ('THIRTEEN SAMMPLE DR1VE') so each order routes distinctly — it is a routing token, never a postal address, and nothing ever files it as one. BFMR, MOD (MaxOutDeals) and Personal are built in; `Personal` rows are dropped before the ledger is written.",
   "warehouses": [
     {
       "buying_group": "BFMR",
@@ -200,7 +200,7 @@
     { "last4": "4321", "name": "Chase Freedom Unlimited", "cashback_rate": 0.015, "retailer_rates": { "Amazon": "5%", "Best Buy": "3%" } },
     { "last4": "8765", "name": "Citi Double Cash", "cashback_rate": "2%" },
     { "// profile": "Scopes a card to one profile, when two accounts each have a card ending in the same 4 digits.", "last4": "2222", "name": "Personal Amex Gold", "cashback_rate": "4%", "profile": "profile-1" },
-    { "// virtual": "A virtual card number (another card's): earns cashback as usual, but the Taxes page does not ask for a sign-up bonus for it.", "last4": "9999", "name": "Citi Double Cash (virtual)", "cashback_rate": "2%", "virtual": true },
+    { "// virtual": "A virtual card number: add `virtual_of` (its card's last 4) and it earns that card's rates and shares its caps. The Taxes page asks no sign-up bonus for it.", "last4": "9999", "name": "Citi Double Cash (virtual)", "cashback_rate": "2%", "virtual": true },
     { "// caps": "Spend caps on the boosted rate: past `spend_limit` of spend in the period (within the cap's retailers, or every retailer when `retailers` is empty) purchases earn `fallback_rate`; the purchase that crosses the line earns the blend. `resets`: calendar-year, never, or an MM-DD. `outside_spend`: a dated log ({date, amount, note}) of spend on the card the ledger never sees; a negative amount takes it back.",
       "last4": "5555", "name": "Amazon Business Prime", "cashback_rate": "1%", "retailer_rates": { "Amazon": "5%", "Amazon Business": "5%" },
       "caps": [ { "retailers": ["Amazon", "Amazon Business"], "spend_limit": 120000, "fallback_rate": "1%", "resets": "calendar-year", "outside_spend": [] } ] }
