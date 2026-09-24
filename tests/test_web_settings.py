@@ -171,6 +171,29 @@ class TestApplyScalars:
         assert config_value("scraping.lookback_days") == 3  # the cache was discarded too
 
 
+    def test_the_served_folders_move_only_within_data(self, config):
+        """the receipts folder is served under /receipts/, so from the page it
+        could be pointed at / and hand out any file. The page moves it (and the ledger) only
+        within data/; a path already set by hand in config.json stays saveable."""
+        form = {s.env: "" for s in settings_form.schema()}
+        for bad in ("/", "..", "../etc", "data/../config", "C:/Windows"):
+            with pytest.raises(settings_form.SettingsError) as info:
+                settings_form.apply_scalars({**form, "RECEIPTS_DIR": bad})
+            assert any(e.startswith("RECEIPTS_DIR:") and "under data/" in e for e in info.value.errors), bad
+        with pytest.raises(settings_form.SettingsError) as info:
+            settings_form.apply_scalars({**form, "LEDGER_DB_PATH": "../ledger.sqlite3"})
+        assert any(e.startswith("LEDGER_DB_PATH:") for e in info.value.errors)
+        changes = settings_form.apply_scalars({**form, "RECEIPTS_DIR": "data/receipts2",
+                                               "LEDGER_DB_PATH": "data/other.sqlite3"})
+        assert changes["receipts.dir"] == "data/receipts2" and changes["database.path"] == "data/other.sqlite3"
+        raw = json.loads(loader.CONFIG_FILE.read_text(encoding="utf-8"))
+        raw.setdefault("receipts", {})["dir"] = "/mnt/receipts"
+        loader.CONFIG_FILE.write_text(json.dumps(raw), encoding="utf-8")
+        loader.reload_config()
+        settings_form.apply_scalars({**form, "RECEIPTS_DIR": "/mnt/receipts"})  # unchanged: no refusal
+        assert config_value("receipts.dir") == "/mnt/receipts"
+
+
 class TestApplySection:
     def test_a_virtual_card_wears_a_badge(self, client):
         settings_form.apply_section("cards", json.dumps([

@@ -2103,6 +2103,22 @@ class TestReceiptFiles:
         assert client.get("/receipts/../config.json").status_code in (404, 400)
         assert client.get("/receipts/bestbuy/..%2F..%2Fconfig.json").status_code in (404, 400)
 
+    def test_only_a_receipts_own_file_types_are_served(self, client, tmp_path, monkeypatch):
+        """the folder is a setting, so whatever else it holds (a config file,
+        a key) must not come out of /receipts/ -- only pdf and the uploadable image types do."""
+        import dataclasses
+
+        from receipts import store
+
+        folder = tmp_path / "receipts"
+        monkeypatch.setattr(store, "settings", dataclasses.replace(
+            store.settings, receipt_capture_enabled=True, receipts_dir=str(folder)))
+        (folder / "costco").mkdir(parents=True)
+        (folder / "config.json").write_text('{"secret": 1}', encoding="utf-8")
+        (folder / "costco" / "1.png").write_bytes(b"\x89PNG")
+        assert client.get("/receipts/config.json").status_code == 404
+        assert client.get("/receipts/costco/1.png").status_code == 200
+
 
 class TestTheNavOrder:
     def test_overview_orders_activity_audit_recon_taxes_tools(self, client):

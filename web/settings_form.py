@@ -549,6 +549,25 @@ def humanise_errors(exc: Exception, where: str) -> list[str]:
     return out or [f"{where}: {exc}"]
 
 
+#: Paths the dashboard serves files from or writes to. Editable from the page only within data/,
+#: or a signed-in page could point /receipts/ at the filesystem root.
+DATA_PATH_ENVS = frozenset({"RECEIPTS_DIR", "LEDGER_DB_PATH"})
+
+
+def inside_data_dir(text) -> bool:
+    """True for a blank value (the default) or a path that resolves under <repo>/data."""
+    text = str(text or "").strip()
+    if not text:
+        return True
+    path = Path(text)
+    full = path if path.is_absolute() else ROOT / path
+    try:
+        full.resolve().relative_to((ROOT / "data").resolve())
+    except ValueError:
+        return False
+    return True
+
+
 def apply_scalars(form: Mapping[str, str], settings: list[Setting] | None = None,
                   skip: set[str] | None = None) -> dict:
     """Write every scalar setting from the form into config.json. Checkboxes: absent = false.
@@ -586,6 +605,11 @@ def apply_scalars(form: Mapping[str, str], settings: list[Setting] | None = None
                 value = _parse(s, str(form.get(s.env, "") or ""))
             except ValueError as exc:
                 errors.append(f"{s.env}: {exc}")
+                continue
+            if s.env in DATA_PATH_ENVS and value != before and not inside_data_dir(value):
+                # A folder the dashboard serves files from (receipts) or writes its ledger to: from
+                # the page it may only move within data/. A path set by hand in config.json stays.
+                errors.append(f"{s.env}: must be a folder under data/ (for example data/receipts)")
                 continue
         if value != (before if before is not None else ("" if not s.kind == "bool" else False)):
             changes[s.path] = value

@@ -85,4 +85,9 @@ def delete_receipt(link: str) -> bool:
 def receipt_file_path(path: str):
     """The stored file behind a `/receipts/<path>` request, or None (the store refuses a path
     that climbs out of its directory). The dashboard's one door onto the receipt files."""
-    return store.path_for_link("/receipts/" + str(path or "").lstrip("/"))
+    target = store.path_for_link("/receipts/" + str(path or "").lstrip("/"))
+    # Only a receipt's own file types are served: the folder is a setting, and whatever it holds
+    # besides receipts (a config file, a key) is not the dashboard's to hand out.
+    if target is None or target.suffix.lstrip(".").lower() not in ALLOWED_EXTENSIONS:
+        return None
+    return target
