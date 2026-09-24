@@ -6,13 +6,15 @@
     python -m web --host 0.0.0.0 --port 8765        # e.g. to reach it over Tailscale
 
 Flags win over config.json and the environment, the same way a command-line value should. Binds to
-127.0.0.1 unless told otherwise; set web.password (WEB_PASSWORD) before binding wider -- without
-one there is no sign-in (web/auth.py).
+127.0.0.1 unless told otherwise; set web.password (WEB_PASSWORD) before binding wider -- bound
+wider without one, the dashboard serves only a page that sets it, using the setup token this
+prints (web/guard.py).
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from config.settings import settings
@@ -50,7 +52,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.reload:
         uvicorn.run("web.app:app", host=args.host, port=args.port, reload=True)
     else:
-        uvicorn.run(create_app(reader, settings=settings), host=args.host, port=args.port)
+        # Where the dashboard is reachable: in the container it binds 0.0.0.0 but the compose file
+        # publishes it on WEB_PUBLISH_HOST (loopback by default), which is the one that counts.
+        exposure = os.environ.get("WEB_PUBLISH_HOST") or args.host
+        uvicorn.run(create_app(reader, settings=settings, exposure_host=exposure), host=args.host, port=args.port)
     return 0
 
 

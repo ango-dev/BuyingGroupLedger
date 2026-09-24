@@ -107,7 +107,9 @@ chmod 600 config.json .state.json
 **Or let the dashboard ask.** Create the two files EMPTY, start the container, and open the
 dashboard: a fresh install lands on the setup wizard at `/setup`, which walks restore-a-backup,
 the password, the keys, profiles, groups, cards, alerts and the schedule, each step saving into
-`config.json` the way the Settings page does (docs/operations.md, "First-time setup").
+`config.json` the way the Settings page does (docs/operations.md, "First-time setup"). If you
+published the dashboard beyond loopback (`WEB_PUBLISH_HOST`) before it has a password, it first
+asks for one on its own page, with the setup token from `docker compose logs ledger`.
 
 ```bash
 touch config.json .state.json && chmod 600 config.json .state.json   # BEFORE the first `up`

@@ -403,6 +403,27 @@ is a signed token (`web/auth.py`), signed with a secret the dashboard keeps in `
 signed in, changing the password signs everyone out. *Sign out* is in the header. The settings are
 read at dashboard start: Save, then Restart dashboard.
 
+**Reachable beyond this machine with no password, it serves only a password page.** The dashboard
+knows where it is reachable: in the container, the compose file's `WEB_PUBLISH_HOST` (loopback by
+default); run by hand, the `--host` it binds. Beyond loopback with `web.password` blank, every page
+redirects to `/first-password`, which sets the password and wants the one-time **setup token** the
+dashboard prints to its log on start (`docker compose logs ledger`, or the terminal that ran
+`python -m web`). Only someone who can read the host's logs has it, so nobody else on the network
+can claim the dashboard first. Setting it signs that browser in and restarts the dashboard.
+
+**Only its own pages may change anything, and only under a name you know** (`web/guard.py`). A
+write (a form post, an htmx save) that the browser says came from another site is refused with a
+403, so a page on some other website cannot submit a form to your dashboard. A request is answered
+only under an IP address, `localhost`, the host of `web.public_url`, or a name in
+**`web.allowed_hosts`** (Settings → Advanced; comma-separated, `.example.com` = any subdomain) --
+anything else is refused with a 400, which stops a web page from reaching the dashboard by
+re-pointing its own domain at your machine (DNS rebinding). Reach it as `ledger.local` or by a
+Tailscale name? List that name there. Behind a reverse proxy, put the proxy's public name in
+`web.public_url` or `web.allowed_hosts`.
+
+**Never port-forward it to the internet.** Dashboard access is access to every credential in
+`config.json` (a backup download holds them all). Reach it over your LAN, Tailscale or WireGuard.
+
 **On the host it runs inside the one container.** `docker/entrypoint.sh` starts it beside the
 scheduler when `web.enabled` is true (the default), restarts it if it ever exits, and
 `docker/healthcheck.sh` probes it — a dead dashboard reports `unhealthy` with a reason that names

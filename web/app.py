@@ -17,6 +17,8 @@ import logging
 import math
 import os
 import re
+import secrets
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -35,6 +37,7 @@ from scripts import backup as backup_module
 
 from web import auth as auth_module
 from web import failures as failures_module
+from web import guard
 from web import importer
 from web import setup_wizard
 from web.ledger_writer import FIRST_YEAR, LAST_YEAR, RunInProgress, safe_href
@@ -146,12 +149,16 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                restarter: Callable[[], None] | None = None,
                container_restarter: Callable[[], None] | None = None,
                in_container: bool | None = None,
-               writer=None, session_secret: bytes | str | None = None) -> FastAPI:
+               writer=None, session_secret: bytes | str | None = None,
+               exposure_host: str | None = None) -> FastAPI:
     """`writer` is the ONE ledger-write path (web/ledger_writer.LedgerCellWriter): cell edits on
     the Orders page. None = the page is view-only (the snapshot backend, or a test).
     `container_restarter` / `in_container` are injection points for the container-restart
     button (the defaults signal PID 1, and detect Docker by /.dockerenv). `session_secret` signs
-    the sign-in cookies (default: the one kept in .state.json, made on first use)."""
+    the sign-in cookies (default: the one kept in .state.json, made on first use).
+    `exposure_host` is the address the dashboard is reachable on -- the compose file's
+    WEB_PUBLISH_HOST in the container, the bind host otherwise (web/__main__.py); beyond loopback
+    with no password, it serves only the first-password page (web/guard.py)."""
     restart = restarter or _exit_soon
     restart_container = container_restarter or _signal_container
     in_container = _in_container() if in_container is None else bool(in_container)
@@ -391,6 +398,108 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
                             headers={"HX-Redirect": f"/login?next={quote(auth_module.safe_next(back), safe='')}"})
         back = path + (f"?{request.url.query}" if request.url.query else "")
         return RedirectResponse(url=f"/login?next={quote(back, safe='')}", status_code=303)
+
+    # ---- the host, the origin and the first password (web/guard.py) ---------------------------------
+    # Added AFTER the sign-in, so each runs BEFORE it: the last middleware added is the outermost.
+    known_hosts = guard.allowed_names(_setting("web_allowed_hosts", ""), str(_setting("web_public_url", "")))
+    if exposure_host is None:
+        exposure_host = os.environ.get("WEB_PUBLISH_HOST") or "127.0.0.1"  # the launchers pass the bind host
+    first_run = {"token": "", "done": False}
+    if not auth_on and not guard.is_loopback(exposure_host):
+        # Reachable from the network with no password: the backups alone hold every credential,
+        # so the dashboard offers nothing but a password page, and that wants this token -- which
+        # only whoever can read this process's log (docker compose logs) has.
+        first_run["token"] = secrets.token_urlsafe(12)
+        notice = (f"The dashboard is reachable beyond this machine ({exposure_host}) and has no password, "
+                  f"so it only offers to set one. Setup token: {first_run['token']}")
+        log.warning(notice)
+        print(f"[web] {notice}", file=sys.stderr, flush=True)
+    FIRST_RUN_OPEN = ("/static/", "/health", "/first-password")
+
+    @app.middleware("http")
+    async def require_first_password(request: Request, call_next):
+        if not first_run["token"] or request.url.path.startswith(FIRST_RUN_OPEN):
+            return await call_next(request)
+        if request.headers.get("HX-Request"):
+            return Response(status_code=401, headers={"HX-Redirect": "/first-password"})
+        return RedirectResponse(url="/first-password", status_code=303)
+
+    @app.middleware("http")
+    async def refuse_cross_site(request: Request, call_next):
+        if guard.cross_site(request.method, request.headers, known_hosts):
+            log.warning("refused a %s %s from another site (Origin %r)", request.method, request.url.path,
+                        request.headers.get("origin"))
+            return PlainTextResponse("Refused: this request came from another site. Use the dashboard's own "
+                                     "page to make the change.", status_code=403)
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def require_known_host(request: Request, call_next):
+        host = request.headers.get("host", "")
+        if request.url.path.startswith("/health") or guard.host_allowed(host, known_hosts):
+            return await call_next(request)
+        name = guard.hostname(host)
+        log.warning("refused a request for the unknown host %r", name)
+        return PlainTextResponse(f"This dashboard does not answer to the name {name!r}. Open it by its IP "
+                                 "address, or add the name to Allowed hosts on the Settings page "
+                                 "(web.allowed_hosts in config.json) and restart the dashboard.",
+                                 status_code=400)
+
+    def first_password_page(request: Request, *, error: str = "", status: int = 200):
+        response = page(request, "first_password.html", error=error, done=first_run["done"],
+                        exposure=exposure_host)
+        response.status_code = status
+        return response
+
+    @app.get("/first-password", response_class=HTMLResponse)
+    def first_password_get(request: Request):
+        if not first_run["token"]:
+            return RedirectResponse(url="/", status_code=303)
+        return first_password_page(request)
+
+    @app.post("/first-password", response_class=HTMLResponse)
+    async def first_password_post(request: Request):
+        if not first_run["token"]:
+            return RedirectResponse(url="/", status_code=303)
+        if first_run["done"]:
+            return first_password_page(request)
+        form = await request.form()
+        typed = str(form.get("token", "") or "").strip()
+        new_password = str(form.get("password", "") or "").strip()
+        if not hmac.compare_digest(typed.encode("utf-8"), first_run["token"].encode("utf-8")):
+            log.warning("first-password page: a wrong setup token from %s", client_address(request))
+            return first_password_page(request, status=403,
+                                       error="That is not the setup token in the dashboard's log.")
+        if not new_password:
+            return first_password_page(request, status=400, error="Password is required.")
+        if new_password != str(form.get("confirm", "") or "").strip():
+            return first_password_page(request, status=400, error="The two passwords differ.")
+        try:
+            changes = settings_form.apply_scalars(
+                {"WEB_PASSWORD": new_password},
+                settings=[s for s in settings_form.schema() if s.env == "WEB_PASSWORD"],
+                skip=settings_form.hidden_envs())
+        except settings_form.SettingsError as exc:
+            return first_password_page(request, status=400, error="; ".join(exc.errors))
+        act("settings", "Dashboard password set on the first-password page", {"changed": sorted(changes)})
+        first_run["done"] = True
+        response = first_password_page(request)
+        sign_in_browser(response, new_password)
+        restart()  # read at start: the next process signs in with it (the loop in the container)
+        return response
+
+    def sign_in_browser(response: Response, new_password: str) -> None:
+        """Sign this browser in for a password just set: the token is signed with the persisted
+        secret over the new password, so it is good after the restart that puts it in force."""
+        secret = session_secret or auth_module.session_secret()
+        if isinstance(secret, str):
+            secret = secret.encode("utf-8")
+        fresh = auth_module.Sessions(secret, new_password,
+                                     session_hours=float(_setting("web_session_hours", 6)),
+                                     remember_days=float(_setting("web_remember_days", 730)),
+                                     clock=lambda: clock().timestamp())
+        token, lifetime = fresh.issue(remember=True)
+        response.set_cookie(auth_module.COOKIE, token, max_age=lifetime, httponly=True, samesite="lax", path="/")
 
     def login_page(request: Request, *, nxt: str = "/", error: str = "", locked: bool = False,
                    retry: float = 0, remember: bool = False, status: int = 200):
@@ -2186,17 +2295,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         act("settings", "Setup: dashboard password set", {"changed": sorted(changes)})
         response = setup_next("password", request)
         if not auth_on:
-            # Sign this browser in for the password just set: the token is signed with the
-            # persisted secret over the new password, so it is good after the restart at Done.
-            secret = session_secret or auth_module.session_secret()
-            if isinstance(secret, str):
-                secret = secret.encode("utf-8")
-            fresh = auth_module.Sessions(secret, password.strip(),
-                                         session_hours=float(_setting("web_session_hours", 6)),
-                                         remember_days=float(_setting("web_remember_days", 730)),
-                                         clock=lambda: clock().timestamp())
-            token, lifetime = fresh.issue(remember=True)
-            response.set_cookie(auth_module.COOKIE, token, max_age=lifetime, httponly=True, samesite="lax", path="/")
+            sign_in_browser(response, password.strip())  # good after the restart at Done
         elif password.strip() != password_now():
             response.headers["location"] = response.headers["location"] + ("&" if "?" in response.headers["location"] else "?") + "signin=1"
         return response
@@ -2744,7 +2843,9 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
 
 
 def _default_app() -> FastAPI:
-    return create_app()
+    from config.settings import settings as live_settings
+
+    return create_app(exposure_host=os.environ.get("WEB_PUBLISH_HOST") or live_settings.web_bind_host)
 
 
 class _LazyApp:

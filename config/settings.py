@@ -116,6 +116,9 @@ ENV_TO_CONFIG = {
     # Where YOU open the dashboard from (e.g. over WireGuard): alerts link a failure dossier to its
     # Activity page through it. Blank = alerts name the local path only.
     "WEB_PUBLIC_URL": "web.public_url",
+    # Host names the dashboard answers to besides an IP address, localhost and public_url's host
+    # (web/guard.py: a name nobody listed is refused, which stops DNS rebinding).
+    "WEB_ALLOWED_HOSTS": "web.allowed_hosts",
     # The dashboard's sign-in (web/auth.py): a password (blank = no sign-in),
     # how long a plain sign-in and a "remember me" one last, and the brake on guessing.
     "WEB_PASSWORD": "web.password",
@@ -423,6 +426,9 @@ class Settings:
     # The dashboard's address as the user reaches it (e.g. http://192.0.2.10:8765 over WireGuard),
     # for the links alerts carry. Blank = no link, just the path on the host.
     web_public_url: str = _get_str("WEB_PUBLIC_URL", "")
+    # Names the dashboard answers to besides an IP address, localhost and public_url's host,
+    # comma-separated (".example.com" = any subdomain). Anything else is refused (web/guard.py).
+    web_allowed_hosts: str = _get_str("WEB_ALLOWED_HOSTS", "")
     # The sign-in (web/auth.py). Blank password = no sign-in. A plain sign-in ends after
     # `web_session_hours`; one with "remember me" ticked after `web_remember_days` (730 = 2
     # years). `web_login_attempts` wrong passwords in a row from one address lock it out for

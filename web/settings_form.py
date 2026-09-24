@@ -111,7 +111,7 @@ def section_blocks(rows: list[dict], section: str, hidden=()) -> list[dict]:
 #: warning; a section left empty by this (Database) disappears from the page.
 ADVANCED_ENVS: frozenset[str] = frozenset({
     "LEDGER_DB_PATH", "WEB_LEDGER_SOURCE", "WEB_SNAPSHOT_PATH", "WEB_LEDGER_CACHE_TTL_SECONDS",
-    "WEB_ENABLED", "WEB_BIND_HOST", "WEB_PORT", "RECEIPTS_DIR", "PREFLIGHT_STRICT",
+    "WEB_ENABLED", "WEB_BIND_HOST", "WEB_ALLOWED_HOSTS", "WEB_PORT", "RECEIPTS_DIR", "PREFLIGHT_STRICT",
     "BFMR_API_BASE_URL", "MAXOUTDEALS_API_BASE_URL",
 })
 
@@ -450,6 +450,17 @@ def _validate_host(text: str) -> str:
     return text
 
 
+def _validate_hosts(text: str) -> str:
+    """A comma-separated list of host names, each optionally led by a dot (any subdomain)."""
+    from web.guard import parse_hosts
+
+    names = parse_hosts(text)
+    for name in names:
+        if not _HOST_SHAPE.match(name.lstrip(".")) or not name.lstrip("."):
+            raise ValueError(f"{name!r} is not a host name (for example ledger.local)")
+    return ", ".join(names)
+
+
 #: Settings with a vocabulary or a floor of their own, checked before anything is written. The
 #: last group used to save as typed and stop the dashboard or the run on the next restart.
 #:
@@ -460,7 +471,7 @@ _VALIDATORS = {"BACKUP_FREQUENCY": _validate_frequency, "BACKUP_TIME": _validate
                "WEB_LEDGER_SOURCE": _validate_ledger_source, "TZ": _validate_timezone,
                "DISCORD_WEBHOOK_URL": _validate_url, "WEB_PUBLIC_URL": _validate_url,
                "GMAIL_ADDRESS": _validate_email, "BFMR_COMBINED_PACKAGE_GMAIL_ADDRESS": _validate_email,
-               "WEB_BIND_HOST": _validate_host}
+               "WEB_BIND_HOST": _validate_host, "WEB_ALLOWED_HOSTS": _validate_hosts}
 
 
 #: Numeric settings with a range of their own: the entrypoint falls back to 6 on an interval

@@ -87,6 +87,7 @@ fails closed on a typo rather than turning itself on.
 | `WEB_TOOL_SESSION_MINUTES` | `web.tool_session_minutes` |
 | `WEB_HEARTBEAT_STALE_HOURS` | `web.heartbeat_stale_hours` |
 | `WEB_PUBLIC_URL` | `web.public_url` |
+| `WEB_ALLOWED_HOSTS` | `web.allowed_hosts` |
 | `WEB_PASSWORD` | `web.password` |
 | `WEB_SESSION_HOURS` | `web.session_hours` |
 | `WEB_REMEMBER_DAYS` | `web.remember_days` |

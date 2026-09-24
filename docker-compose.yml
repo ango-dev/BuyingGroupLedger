@@ -40,11 +40,16 @@ services:
       WEB_SNAPSHOT_PATH: "${WEB_SNAPSHOT_PATH:-}"
       WEB_LEDGER_CACHE_TTL_SECONDS: "${WEB_LEDGER_CACHE_TTL_SECONDS:-}"
       LEDGER_DB_PATH: "${LEDGER_DB_PATH:-}"
+      # Where the dashboard is published (the ports line below). NOT a config.json setting -- it
+      # is compose's own -- so it is passed in with its default: the dashboard reads it to know
+      # whether it is reachable beyond this machine (web/guard.py).
+      WEB_PUBLISH_HOST: "${WEB_PUBLISH_HOST:-127.0.0.1}"
     ports:
-      # The dashboard, published on the host's LOOPBACK by default -- it has no authentication and
-      # shows addresses, card last-4s and receipt links. To reach it from your LAN or over
-      # Tailscale, put WEB_PUBLISH_HOST=0.0.0.0 (or the interface's IP) in .env and re-create the
-      # container (`docker compose up -d`).
+      # The dashboard, published on the host's LOOPBACK by default -- it shows addresses, card
+      # last-4s and receipt links. To reach it from your LAN or over Tailscale, put
+      # WEB_PUBLISH_HOST=0.0.0.0 (or the interface's IP) in .env and re-create the container
+      # (`docker compose up -d`). Published wider with no web.password, it serves only a page that
+      # sets one, using the setup token in `docker compose logs`.
       - "${WEB_PUBLISH_HOST:-127.0.0.1}:${WEB_PUBLISH_PORT:-8765}:8765"
     volumes:
       # THE config file: profiles, warehouses, cards and credentials. WRITABLE since 2026-09-17
