@@ -351,6 +351,23 @@ class TestTaxesPage:
         assert by_amount[1].endswith(",60.00") and by_amount[-1].endswith(",1.00")
         assert 'href="/taxes/expenses.csv?year=2026' in body
 
+    def test_an_unknown_sort_is_dropped_never_echoed_into_the_links(self, client):
+        """The sort column rides back into the pager and Export links, so a crafted `esort` must
+        never reach the page: only a real column's name survives, anything else is no sort."""
+        for i in range(30):
+            client.post("/taxes/expense", params={"year": "2026"}, follow_redirects=False,
+                        data={"date": "2026-01-05", "description": f"item {i}", "amount": "1",
+                              "profile": "alpha", "category": "supplies", "receipt_url": "https://x/r"})
+        payload = '"><script>alert(1)</script>'
+        page = client.get("/taxes", params={"year": "2026", "esort": payload, "edir": "asc"})
+        assert page.status_code == 200
+        assert "<script>alert(1)" not in page.text and "alert(1)" not in page.text
+        assert 'href="/taxes?year=2026&epage=2#s-expenses"' in page.text  # treated as no sort at all
+        csv_text = client.get("/taxes/expenses.csv", params={"year": "2026", "esort": payload}).text
+        assert "alert(1)" not in csv_text
+        sorted_page = client.get("/taxes", params={"year": "2026", "esort": "amount", "edir": "asc"}).text
+        assert 'href="/taxes?year=2026&esort=amount&edir=asc&epage=2#s-expenses"' in sorted_page
+
     def test_the_year_downloads_as_one_organised_zip(self, client, tmp_path):
         """The Schedule C lines, both order bases, the expenses with their uploaded
         receipts, every dated income entry, the notes, and a README that says what is NOT here."""

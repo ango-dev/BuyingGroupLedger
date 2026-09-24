@@ -32,7 +32,7 @@
       posts to data-cell-url and gets the <td> back; the receipt cell's ⤒ uploads a file. No
       per-row buttons. -#}
   <form id="bulk" method="post" action="/taxes/expenses/delete?year={{ year }}" data-confirm="Delete every selected expense? Their uploaded receipts are deleted too.">
-    {%- set esuffix = (('&esort=' ~ esort ~ '&edir=' ~ edir) if esort else '') ~ (('&eper=' ~ eper) if eper != eper_default else '') -%}
+    {%- set esuffix = (('&esort=' ~ (esort | urlencode) ~ '&edir=' ~ (edir | urlencode)) if esort else '') ~ (('&eper=' ~ (eper | urlencode)) if eper != eper_default else '') -%}
     <div class="muted count">{% if epager.total %}{{ epager.start }}–{{ epager.end }} of {% endif %}{{ epager.total }} expense(s) · <span id="sel-count">0</span> selected {% with id='expense-hints', rows=True %}{% include "_table_hints.html" %}{% endwith %}
       <a class="button small export" href="/taxes/expenses.csv?year={{ year }}{{ esuffix | safe }}" title="download the year's expenses as the grid sorts them, every page, as a CSV">Export CSV</a></div>
     <button type="submit" id="delete-selected" class="danger" hidden data-confirm-one="Delete the selected expense? Its uploaded receipt is deleted too." data-confirm-many="Delete the {n} selected expenses? Their uploaded receipts are deleted too.">Delete selected</button>

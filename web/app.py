@@ -920,7 +920,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         except Exception:  # noqa: BLE001
             labels = []
         draft = extra.pop("draft", None)  # a refused add re-renders the form with what was typed
-        esort = str(request.query_params.get("esort") or "").strip()  # the expenses table's header sort
+        esort = _expenses_sort(request)  # the expenses table's header sort
         edir = "asc" if str(request.query_params.get("edir") or "").lower() == "asc" else "desc"
         # The expenses grid is one page at a time, newest date first by
         # default; the size is a preset, remembered in a cookie like the other grids', the page
@@ -960,6 +960,12 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
     def expenses_per_default(request: Request) -> int:
         return EXPENSES_PER_PHONE if is_phone(request) else EXPENSES_PER_DEFAULT
     EXPENSES_PER_COOKIE = "expenses-per"
+
+    def _expenses_sort(request: Request) -> str:
+        """The expenses grid's sort column from the query: a real column's name or nothing. The
+        value goes back into the page's links, so anything else is dropped here, never echoed."""
+        esort = str(request.query_params.get("esort") or "").strip()
+        return esort if esort in tax_inputs.EXPENSE_CELL_FIELDS else ""
 
     def _expenses_per(request: Request) -> int:
         """The expenses page size: the query's preset, else this browser's remembered one, else 10
@@ -1039,7 +1045,7 @@ def create_app(reader: LedgerReader | None = None, *, settings=None,
         from web import export
 
         year = requested_year(request, clock().year)
-        esort = str(request.query_params.get("esort") or "").strip()
+        esort = _expenses_sort(request)
         edir = "asc" if str(request.query_params.get("edir") or "").lower() == "asc" else "desc"
         expenses = tax_inputs.sort_expenses(load_tax_inputs(year).expenses, esort or "date", edir == "desc" if esort else True)
         return Response(export.expenses_csv(expenses), media_type="text/csv; charset=utf-8",
